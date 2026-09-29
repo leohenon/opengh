@@ -1,0 +1,28 @@
+import { describe, expect, test } from "bun:test"
+import { join } from "node:path"
+import { loadRecentRepositories, normalizeRepository, rememberRepository, resolveRepository } from "../src/repository"
+
+describe("repository resolution", () => {
+  test("normalizes repository names and GitHub URLs", () => {
+    expect(normalizeRepository("anomalyco/opentui")).toBe("anomalyco/opentui")
+    expect(normalizeRepository("https://github.com/anomalyco/opentui.git")).toBe("anomalyco/opentui")
+    expect(normalizeRepository("not-a-repository")).toBeUndefined()
+  })
+
+  test("explicit repository wins without inspecting the directory", async () => {
+    expect(await resolveRepository("cli/cli", "/path/that/does/not/exist")).toBe("cli/cli")
+  })
+
+  test("returns no repository outside a GitHub checkout", async () => {
+    expect(await resolveRepository(undefined, "/tmp")).toBeUndefined()
+  })
+
+  test("stores unique recent repositories in newest-first order", async () => {
+    const directory = await Bun.$`mktemp -d`.text()
+    const path = join(directory.trim(), "nested", "recent.json")
+    await rememberRepository("cli/cli", path)
+    await rememberRepository("anomalyco/opentui", path)
+    await rememberRepository("cli/cli", path)
+    expect(await loadRecentRepositories(path)).toEqual(["cli/cli", "anomalyco/opentui"])
+  })
+})
