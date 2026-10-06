@@ -7,6 +7,20 @@ export function ago(iso: string) {
   return hours > 0 ? `${hours}h ago` : "just now"
 }
 
+export function fitText(value: string, width: number) {
+  if (width <= 0) return ""
+  if (Bun.stringWidth(value) <= width) return value
+  if (width <= 3) return ".".repeat(width)
+
+  const target = width - 3
+  let result = ""
+  for (const character of value) {
+    if (Bun.stringWidth(result + character) > target) break
+    result += character
+  }
+  return `${result}...`
+}
+
 export function count(value: number) {
   if (value >= 1000) return `${(value / 1000).toFixed(1).replace(".0", "")}k`
   return String(value)

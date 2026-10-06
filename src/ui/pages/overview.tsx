@@ -1,5 +1,7 @@
 import { SyntaxStyle, TextAttributes, type ScrollBoxRenderable } from "@opentui/core"
-import type { GitHubData } from "../../models"
+import type { Repo } from "../../models"
+import type { ResourceState } from "../../repository-state"
+import { ResourceStateView } from "../components/resource-state"
 import { count } from "../format"
 import { colors } from "../theme"
 
@@ -37,10 +39,13 @@ function createMarkdownStyle() {
 }
 
 export function OverviewScreen(props: {
-  data: GitHubData
+  repo: Repo
+  currentBranch: string
+  readme: ResourceState<string>
+  showScrollbar: boolean
   scrollRef: (value: ScrollBoxRenderable) => void
 }) {
-  const repo = () => props.data.repo
+  const repo = () => props.repo
   const markdownStyle = createMarkdownStyle()
 
   return (
@@ -67,35 +72,40 @@ export function OverviewScreen(props: {
         >
           <text fg={colors.text} attributes={TextAttributes.BOLD}>README</text>
           <box flexGrow={1} />
-          <text fg={colors.blue}> {props.data.currentBranch}</text>
+          <text fg={colors.blue}> {props.currentBranch}</text>
         </box>
-        <scrollbox
-          ref={props.scrollRef}
-          flexGrow={1}
-          minWidth={0}
-          minHeight={0}
-          backgroundColor={colors.canvas}
-          paddingX={2}
-          paddingY={1}
-          scrollY
-        >
-          <markdown
-            content={props.data.readme}
-            syntaxStyle={markdownStyle}
-            fg={colors.text}
-            bg={colors.canvas}
-            conceal
-            internalBlockMode="top-level"
-            tableOptions={{
-              style: "grid",
-              widthMode: "full",
-              wrapMode: "word",
-              cellPaddingX: 1,
-              borderColor: colors.border,
-            }}
-            width="100%"
-          />
-        </scrollbox>
+        <ResourceStateView resource={props.readme} loading="Loading README…">
+          {(readme) => (
+            <scrollbox
+              ref={props.scrollRef}
+              flexGrow={1}
+              minWidth={0}
+              minHeight={0}
+              backgroundColor={colors.canvas}
+              verticalScrollbarOptions={{ visible: props.showScrollbar }}
+              paddingX={2}
+              paddingY={1}
+              scrollY
+            >
+              <markdown
+                content={readme()}
+                syntaxStyle={markdownStyle}
+                fg={colors.text}
+                bg={colors.canvas}
+                conceal
+                internalBlockMode="top-level"
+                tableOptions={{
+                  style: "grid",
+                  widthMode: "full",
+                  wrapMode: "word",
+                  cellPaddingX: 1,
+                  borderColor: colors.border,
+                }}
+                width="100%"
+              />
+            </scrollbox>
+          )}
+        </ResourceStateView>
       </box>
 
       <box width={36} flexShrink={0} minHeight={0} flexDirection="column">

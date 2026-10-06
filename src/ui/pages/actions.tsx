@@ -1,114 +1,103 @@
-import { TextAttributes, type ScrollBoxRenderable } from "@opentui/core"
+import { TextAttributes } from "@opentui/core"
 import { useTerminalDimensions } from "@opentui/solid"
-import { createEffect, For, Show } from "solid-js"
-import type { Run } from "../../models"
-import { ago } from "../format"
+import type { Paginated, WorkflowRunSummary } from "../../models"
+import type { ResourceState } from "../../repository-state"
+import { PageShell } from "../components/page-shell"
+import { ResourceStateView } from "../components/resource-state"
+import { SelectableList } from "../components/selectable-list"
+import { ago, fitText } from "../format"
 import { colors } from "../theme"
 
-function runColor(run: Run) {
+function runColor(run: WorkflowRunSummary) {
   if (run.status !== "completed") return colors.yellow
   return run.conclusion === "success" ? colors.green : colors.red
 }
 
-function runIcon(run: Run) {
+function runIcon(run: WorkflowRunSummary) {
   if (run.status !== "completed") return "◌"
   return run.conclusion === "success" ? "✓" : "×"
 }
 
-function runState(run: Run) {
+function runState(run: WorkflowRunSummary) {
   if (run.status !== "completed") return run.status.replaceAll("_", " ")
   return run.conclusion || "completed"
 }
 
-function ellipsis(value: string, width: number) {
-  if (value.length <= width) return value
-  return `${value.slice(0, Math.max(0, width - 3)).trimEnd()}...`
-}
-
 export function ActionsScreen(props: {
-  runs: Run[]
-  selected: number
+  runs: ResourceState<Paginated<WorkflowRunSummary>>
+  active: boolean
+  interactive: boolean
+  showScrollbar: boolean
+  onEndReached?: () => void
 }) {
   const dimensions = useTerminalDimensions()
-  const titleWidth = () => Math.max(20, Math.min(88, dimensions().width - 56))
-  let list: ScrollBoxRenderable | undefined
-
-  createEffect(() => {
-    list?.scrollChildIntoView(`workflow-run-${props.selected}`)
-  })
+  const workflowWidth = () => Math.max(18, Math.min(30, Math.floor(dimensions().width * 0.18)))
+  const titleWidth = () => Math.max(8, dimensions().width - 41 - workflowWidth() - (props.showScrollbar ? 1 : 0))
 
   return (
-    <box
-      flexGrow={1}
-      minHeight={0}
-      flexDirection="column"
-      backgroundColor={colors.canvas}
-      paddingTop={1}
-      paddingBottom={1}
-      paddingLeft={2}
-      paddingRight={2}
+    <PageShell
+      header={(
+        <box flexDirection="row" alignItems="center">
+          <text fg={colors.text} attributes={TextAttributes.BOLD}>
+            Workflow runs ({props.runs.value?.items.length ?? 0})
+          </text>
+        </box>
+      )}
     >
-      <box height={3} flexShrink={0} flexDirection="row" alignItems="center">
-        <text fg={colors.text} attributes={TextAttributes.BOLD}>Workflow runs ({props.runs.length})</text>
-      </box>
-
-      <box
-        height={3}
-        flexShrink={0}
-        flexDirection="row"
-        alignItems="center"
-        backgroundColor={colors.panel}
-        paddingRight={1}
-      >
-        <text width={2}> </text>
-        <text width={4}> </text>
-        <text width={16} fg={colors.muted}>STATUS</text>
-        <text width={18} fg={colors.muted}> WORKFLOW</text>
-        <text flexGrow={1} minWidth={0} fg={colors.muted}> RUN</text>
-        <text width={10} flexShrink={0} fg={colors.muted}> STARTED</text>
-      </box>
-
-      <scrollbox
-        ref={(value) => (list = value)}
-        flexGrow={1}
-        minHeight={0}
-        backgroundColor={colors.canvas}
-        scrollY
-      >
-        <Show
-          when={props.runs.length > 0}
-          fallback={<box height={3} alignItems="center" paddingLeft={2}><text fg={colors.muted}>No workflow runs</text></box>}
-        >
-          <For each={props.runs}>
-            {(run, index) => {
-              const active = () => props.selected === index()
-              return (
-                <box
-                  id={`workflow-run-${index()}`}
-                  height={3}
-                  flexShrink={0}
-                  flexDirection="row"
-                  alignItems="center"
-                  paddingRight={1}
-                  backgroundColor={active() ? colors.panelHover : colors.canvas}
-                >
-                  <text width={2} fg={colors.blue}>{active() ? "▌" : " "}</text>
-                  <text width={4} fg={runColor(run)}>{runIcon(run)}</text>
-                  <text height={1} width={16} wrapMode="none" truncate fg={runColor(run)}>{runState(run)}</text>
-                  <text height={1} width={18} flexShrink={0} wrapMode="none" truncate fg={colors.muted}> {run.name}</text>
-                  <box height={1} width={titleWidth()} flexShrink={0} overflow="hidden">
-                    <text width="100%" height={1} wrapMode="none" fg={colors.text}>
-                      {ellipsis(run.title, titleWidth())}
-                    </text>
-                  </box>
-                  <box flexGrow={1} />
-                  <text height={1} width={10} flexShrink={0} wrapMode="none" fg={colors.muted}> {ago(run.createdAt)}</text>
+      <ResourceStateView resource={props.runs} loading="Loading workflow runs…">
+        {(runs) => (
+          <SelectableList
+            items={runs().items}
+            itemKey={(run) => run.id}
+            active={props.active && props.interactive}
+            showScrollbar={props.showScrollbar}
+            empty="No workflow runs"
+            onEndReached={props.onEndReached}
+            header={(
+              <>
+                <text width={2}> </text>
+                <text width={4}> </text>
+                <box width={18} flexShrink={0} paddingRight={1} overflow="hidden">
+                  <text fg={colors.muted}>STATUS</text>
                 </box>
-              )
-            }}
-          </For>
-        </Show>
-      </scrollbox>
-    </box>
+                <box width={workflowWidth()} flexShrink={0} paddingLeft={1} paddingRight={1} overflow="hidden">
+                  <text fg={colors.muted}>WORKFLOW</text>
+                </box>
+                <box width={titleWidth()} flexShrink={0} paddingLeft={1} paddingRight={1} overflow="hidden">
+                  <text fg={colors.muted}>RUN</text>
+                </box>
+                <box width={12} flexShrink={0} paddingLeft={1} overflow="hidden">
+                  <text fg={colors.muted}>STARTED</text>
+                </box>
+              </>
+            )}
+          >
+            {(run) => (
+              <>
+                <text width={4} flexShrink={0} fg={runColor(run())}>{runIcon(run())}</text>
+                <box height={1} width={18} flexShrink={0} paddingRight={1} overflow="hidden">
+                  <text width="100%" height={1} wrapMode="none" fg={runColor(run())}>
+                    {fitText(runState(run()), 17)}
+                  </text>
+                </box>
+                <box height={1} width={workflowWidth()} flexShrink={0} paddingLeft={1} paddingRight={1} overflow="hidden">
+                  <text width="100%" height={1} wrapMode="none" fg={colors.muted}>
+                    {fitText(run().name, workflowWidth() - 2)}
+                  </text>
+                </box>
+                <box height={1} width={titleWidth()} flexShrink={0} paddingLeft={1} paddingRight={1} overflow="hidden">
+                  <text width="100%" height={1} wrapMode="none" fg={colors.text}>
+                    {fitText(run().title, titleWidth() - 2)}
+                  </text>
+                </box>
+                <box height={1} width={12} flexShrink={0} paddingLeft={1} overflow="hidden">
+                  <text width="100%" height={1} wrapMode="none" fg={colors.muted}>{ago(run().createdAt)}</text>
+                </box>
+              </>
+            )}
+          </SelectableList>
+        )}
+      </ResourceStateView>
+    </PageShell>
   )
 }

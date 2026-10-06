@@ -1,102 +1,97 @@
-import { TextAttributes, type ScrollBoxRenderable } from "@opentui/core"
-import { createEffect, For } from "solid-js"
-import type { GitHubData } from "../../models"
-import { ago } from "../format"
+import { TextAttributes } from "@opentui/core"
+import { useTerminalDimensions } from "@opentui/solid"
+import type { CommitSummary, Paginated } from "../../models"
+import type { ResourceState } from "../../repository-state"
+import { PageShell } from "../components/page-shell"
+import { ResourceStateView } from "../components/resource-state"
+import { SelectableList } from "../components/selectable-list"
+import { ago, fitText } from "../format"
 import { colors } from "../theme"
 
 export function CommitsScreen(props: {
-  data: GitHubData
-  selected: number
+  commits: ResourceState<Paginated<CommitSummary>>
+  currentBranch: string
+  branchCount: number
+  active: boolean
+  interactive: boolean
+  showScrollbar: boolean
+  onEndReached?: () => void
 }) {
-  let list: ScrollBoxRenderable | undefined
-
-  createEffect(() => {
-    list?.scrollChildIntoView(`commit-${props.selected}`)
-  })
+  const dimensions = useTerminalDimensions()
+  const messageWidth = () => Math.max(8, dimensions().width - 52 - (props.showScrollbar ? 1 : 0))
 
   return (
-    <box
-      flexGrow={1}
-      minHeight={0}
-      flexDirection="column"
-      backgroundColor={colors.canvas}
-      paddingTop={1}
-      paddingBottom={1}
-      paddingLeft={2}
-      paddingRight={2}
-    >
-      <box height={3} flexShrink={0} flexDirection="row" alignItems="center">
-        <box flexDirection="column" flexGrow={1} minWidth={0}>
-          <box height={1} flexDirection="row" gap={1}>
-            <text fg={colors.text} attributes={TextAttributes.BOLD}>Commits ({props.data.commits.length})</text>
-            <text fg={colors.blue}>
-               {props.data.currentBranch} ({props.data.branches.length} {props.data.branches.length === 1 ? "branch" : "branches"})
-            </text>
-          </box>
+    <PageShell
+      header={(
+        <box flexDirection="row" gap={1}>
+          <text fg={colors.text} attributes={TextAttributes.BOLD}>
+            Commits ({props.commits.value?.items.length ?? 0})
+          </text>
+          <text fg={colors.blue}>
+             {props.currentBranch} ({props.branchCount} {props.branchCount === 1 ? "branch" : "branches"})
+          </text>
         </box>
-      </box>
-
-      <box
-        height={3}
-        flexShrink={0}
-        flexDirection="row"
-        alignItems="center"
-        backgroundColor={colors.panel}
-        paddingRight={1}
-      >
-        <text width={2}> </text>
-        <text width={10} flexShrink={0} fg={colors.muted}>COMMIT</text>
-        <text flexGrow={1} flexShrink={1} minWidth={0} fg={colors.muted}>MESSAGE</text>
-        <text width={20} flexShrink={0} fg={colors.muted}>AUTHOR</text>
-        <text width={10} flexShrink={0} fg={colors.muted}>UPDATED</text>
-      </box>
-
-      <scrollbox
-        ref={(value) => (list = value)}
-        flexGrow={1}
-        minHeight={0}
-        backgroundColor={colors.canvas}
-        scrollY
-      >
-        <For each={props.data.commits}>
-          {(commit, index) => {
-            const active = () => props.selected === index()
-            return (
-              <box
-                id={`commit-${index()}`}
-                height={3}
-                flexShrink={0}
-                flexDirection="row"
-                alignItems="center"
-                paddingRight={1}
-                backgroundColor={active() ? colors.panelHover : colors.canvas}
-              >
-                <text width={2} fg={colors.blue}>{active() ? "▌" : " "}</text>
-                <text
-                  width={10}
-                  flexShrink={0}
-                  fg={active() ? colors.blue : colors.muted}
-                  attributes={active() ? TextAttributes.BOLD : TextAttributes.NONE}
-                >
-                  {commit.sha}
-                </text>
-                <box height={1} flexGrow={1} flexShrink={1} minWidth={0} overflow="hidden">
-                  <text width="100%" height={1} wrapMode="none" truncate fg={colors.text}>
-                    {commit.message}
+      )}
+    >
+      <ResourceStateView resource={props.commits} loading="Loading commits…">
+        {(commits) => (
+          <SelectableList
+            items={commits().items}
+            itemKey={(commit) => commit.sha}
+            active={props.active && props.interactive}
+            showScrollbar={props.showScrollbar}
+            resetKey={props.currentBranch}
+            empty="No commits"
+            onEndReached={props.onEndReached}
+            header={(
+              <>
+                <text width={2}> </text>
+                <box width={11} flexShrink={0} paddingRight={1} overflow="hidden">
+                  <text fg={colors.muted}>COMMIT</text>
+                </box>
+                <box width={messageWidth()} flexShrink={0} paddingLeft={1} paddingRight={1} overflow="hidden">
+                  <text fg={colors.muted}>MESSAGE</text>
+                </box>
+                <box width={22} flexShrink={0} paddingLeft={1} paddingRight={1} overflow="hidden">
+                  <text fg={colors.muted}>AUTHOR</text>
+                </box>
+                <box width={12} flexShrink={0} paddingLeft={1} overflow="hidden">
+                  <text fg={colors.muted}>UPDATED</text>
+                </box>
+              </>
+            )}
+          >
+            {(commit, active) => (
+              <>
+                <box height={1} width={11} flexShrink={0} paddingRight={1} overflow="hidden">
+                  <text
+                    width="100%"
+                    height={1}
+                    wrapMode="none"
+                    fg={active() ? colors.blue : colors.muted}
+                    attributes={active() ? TextAttributes.BOLD : TextAttributes.NONE}
+                  >
+                    {commit().sha.slice(0, 7)}
                   </text>
                 </box>
-                <text height={1} width={20} flexShrink={0} wrapMode="none" truncate fg={colors.muted}>
-                  {commit.author}
-                </text>
-                <text height={1} width={10} flexShrink={0} wrapMode="none" fg={colors.muted}>
-                  {ago(commit.date)}
-                </text>
-              </box>
-            )
-          }}
-        </For>
-      </scrollbox>
-
-    </box>
+                <box height={1} width={messageWidth()} flexShrink={0} paddingLeft={1} paddingRight={1} overflow="hidden">
+                  <text width="100%" height={1} wrapMode="none" fg={colors.text}>
+                    {fitText(commit().message, messageWidth() - 2)}
+                  </text>
+                </box>
+                <box height={1} width={22} flexShrink={0} paddingLeft={1} paddingRight={1} overflow="hidden">
+                  <text width="100%" height={1} wrapMode="none" fg={colors.muted}>
+                    {fitText(commit().author, 20)}
+                  </text>
+                </box>
+                <box height={1} width={12} flexShrink={0} paddingLeft={1} overflow="hidden">
+                  <text width="100%" height={1} wrapMode="none" fg={colors.muted}>{ago(commit().date)}</text>
+                </box>
+              </>
+            )}
+          </SelectableList>
+        )}
+      </ResourceStateView>
+    </PageShell>
   )
 }

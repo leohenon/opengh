@@ -23,6 +23,7 @@ function fuzzyScore(value: string, query: string) {
 export function BranchPicker(props: {
   branches: string[]
   current: string
+  showScrollbar: boolean
   onSelect: (branch: string) => void
   onClose: () => void
 }) {
@@ -93,7 +94,13 @@ export function BranchPicker(props: {
           onKeyDown={handleKey}
         />
       </box>
-      <scrollbox ref={(value) => (list = value)} flexGrow={1} minHeight={0} scrollY>
+      <scrollbox
+        ref={(value) => (list = value)}
+        flexGrow={1}
+        minHeight={0}
+        verticalScrollbarOptions={{ visible: props.showScrollbar }}
+        scrollY
+      >
         <Show
           when={branches().length > 0}
           fallback={<box height={2} paddingLeft={1} alignItems="center"><text fg={colors.muted}>No matching branches</text></box>}

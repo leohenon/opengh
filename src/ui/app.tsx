@@ -1,7 +1,10 @@
 import type { ScrollBoxRenderable } from "@opentui/core"
 import { useKeyboard, useRenderer, useTerminalDimensions } from "@opentui/solid"
-import { createEffect, createSignal, Show } from "solid-js"
-import type { GitHubData } from "../models"
+import { createEffect, createMemo, createSignal, Show } from "solid-js"
+import type { Config } from "../config"
+import type { ListState } from "../models"
+import { back, navigate, type NavigationState, type Page } from "../navigation"
+import type { RepositoryData, RepositoryOperations, RepositoryResource, ResourceState } from "../repository-state"
 import { BranchPicker } from "./components/branch-picker"
 import { Header } from "./components/header"
 import { Help } from "./components/help"
@@ -14,127 +17,86 @@ import { tabs } from "./tabs"
 import { colors } from "./theme"
 
 export type AppProps = {
-  data: GitHubData | (() => GitHubData)
-  refreshing?: boolean
-  refreshError?: string
+  data: RepositoryData | (() => RepositoryData)
+  operations: RepositoryOperations | (() => RepositoryOperations)
+  config?: Config
   onQuit?: () => void
   onRefresh?: () => void
+  onRetryResource?: (resource: RepositoryResource) => void
   onBranchChange?: (branch: string) => void
   onLoadMoreCommits?: () => Promise<void>
   onLoadMoreRuns?: () => Promise<void>
-  onLoadMoreIssues?: (state: "open" | "closed") => Promise<void>
-  onLoadMorePulls?: (state: "open" | "closed") => Promise<void>
+  onLoadMoreIssues?: (state: ListState) => Promise<void>
+  onLoadMorePulls?: (state: ListState) => Promise<void>
 }
 
 export function App(props: AppProps) {
   const renderer = useRenderer()
   const dimensions = useTerminalDimensions()
-  const [tab, setTab] = createSignal(0)
-  const [selected, setSelected] = createSignal([0, 0, 0, 0, 0])
-  const [issueState, setIssueState] = createSignal<"open" | "closed">("open")
-  const [pullState, setPullState] = createSignal<"open" | "closed">("open")
+  const [navigation, setNavigation] = createSignal<NavigationState>({ page: "overview" })
+  const [issueState, setIssueState] = createSignal<ListState>("open")
+  const [pullState, setPullState] = createSignal<ListState>("open")
   const [branchPicker, setBranchPicker] = createSignal(false)
-  const [loadingMoreCommits, setLoadingMoreCommits] = createSignal(false)
-  const [loadingMoreRuns, setLoadingMoreRuns] = createSignal(false)
-  const [commitLoadError, setCommitLoadError] = createSignal(false)
-  const [runLoadError, setRunLoadError] = createSignal(false)
-  const [loadingMoreWork, setLoadingMoreWork] = createSignal(false)
-  const [workLoadError, setWorkLoadError] = createSignal(false)
   const [help, setHelp] = createSignal(false)
   let overviewScroll: ScrollBoxRenderable | undefined
+
   const data = () => typeof props.data === "function" ? props.data() : props.data
-  const issues = () => data().issues.filter((issue) => issue.state === issueState())
+  const operations = () => typeof props.operations === "function" ? props.operations() : props.operations
+  const page = () => navigation().page
+  const issues = () => data().issues[issueState()]
+  const pulls = () => data().pulls[pullState()]
   const issueCounts = () => ({
-    open: data().issues.filter((issue) => issue.state === "open").length,
-    closed: data().issues.filter((issue) => issue.state === "closed").length,
+    open: data().issues.open.value?.items.length ?? 0,
+    closed: data().issues.closed.value?.items.length ?? 0,
   })
-  const pulls = () => data().pulls.filter((pull) => pull.state === pullState())
   const pullCounts = () => ({
-    open: data().pulls.filter((pull) => pull.state === "open").length,
-    closed: data().pulls.filter((pull) => pull.state === "closed").length,
+    open: data().pulls.open.value?.items.length ?? 0,
+    closed: data().pulls.closed.value?.items.length ?? 0,
   })
-  const visibleTabs = () => data().runs.length > 0 ? tabs : tabs.slice(0, -1)
-  const statusKind = (): StatusKind | undefined => {
-    if (props.refreshError) return "refresh-error"
-    if (props.refreshing) return "refreshing"
-    if (commitLoadError() || runLoadError() || workLoadError()) return "load-more-error"
-    if (loadingMoreCommits() || loadingMoreRuns() || loadingMoreWork()) return "loading-more"
+  const visibleTabs = () => {
+    const runs = data().runs
+    return runs.status === "ready" && runs.value.items.length === 0
+      ? tabs.filter((tab) => tab.page !== "actions")
+      : tabs
+  }
+  const activeResource = (): ResourceState<unknown> | undefined => {
+    if (page() === "overview") return data().readme
+    if (page() === "commits") return data().commits
+    if (page() === "issues") return issues()
+    if (page() === "pulls") return pulls()
+    if (page() === "actions") return data().runs
     return undefined
   }
+  const retryTarget = (): RepositoryResource | undefined => {
+    if (page() === "overview") return { kind: "readme" }
+    if (page() === "commits") return { kind: "commits" }
+    if (page() === "issues") return { kind: "issues", state: issueState() }
+    if (page() === "pulls") return { kind: "pulls", state: pullState() }
+    if (page() === "actions") return { kind: "runs" }
+    return undefined
+  }
+  const statusKind = (): StatusKind | undefined => {
+    const current = operations()
+    if (current.refresh.status === "error") return "refresh-error"
+    if (current.branch.status === "error") return "branch-error"
+    if (current.refresh.status === "loading") return "refreshing"
+    if (current.branch.status === "loading") return "switching-branch"
+    const resource = activeResource()
+    if (resource?.status === "error") return resource.phase === "pagination" ? "load-more-error" : "resource-error"
+    if (resource?.status === "loading") return resource.phase === "pagination" ? "loading-more" : "loading-resource"
+    return undefined
+  }
+  const status = createMemo(statusKind)
 
   createEffect(() => {
-    if (tab() >= visibleTabs().length) setTab(visibleTabs().length - 1)
+    if (!visibleTabs().some((tab) => tab.page === page())) setNavigation((state) => navigate(state, "pulls"))
   })
 
-  const loadMoreCommits = async () => {
-    if (loadingMoreCommits() || !props.onLoadMoreCommits) return
-    setLoadingMoreCommits(true)
-    setCommitLoadError(false)
-    try {
-      await props.onLoadMoreCommits()
-    } catch {
-      setCommitLoadError(true)
-    } finally {
-      setLoadingMoreCommits(false)
-    }
-  }
-
-  const loadMoreWork = async (kind: "issues" | "pulls", state: "open" | "closed") => {
-    if (loadingMoreWork()) return
-    const loader = kind === "issues" ? props.onLoadMoreIssues : props.onLoadMorePulls
-    if (!loader) return
-    setLoadingMoreWork(true)
-    setWorkLoadError(false)
-    try {
-      await loader(state)
-    } catch {
-      setWorkLoadError(true)
-    } finally {
-      setLoadingMoreWork(false)
-    }
-  }
-
-  const loadMoreRuns = async () => {
-    if (loadingMoreRuns() || !props.onLoadMoreRuns) return
-    setLoadingMoreRuns(true)
-    setRunLoadError(false)
-    try {
-      await props.onLoadMoreRuns()
-    } catch {
-      setRunLoadError(true)
-    } finally {
-      setLoadingMoreRuns(false)
-    }
-  }
-
-  createEffect(() => {
-    if (tab() === 1 && data().commitsPage.hasMore && !loadingMoreCommits() && !commitLoadError()
-      && selected()[1] >= data().commits.length - 3)
-      void loadMoreCommits()
-    if (tab() === 2 && data().issuesPage[issueState()].hasMore && !loadingMoreWork() && !workLoadError()
-      && selected()[2] >= issues().length - 3)
-      void loadMoreWork("issues", issueState())
-    if (tab() === 3 && data().pullsPage[pullState()].hasMore && !loadingMoreWork() && !workLoadError()
-      && selected()[3] >= pulls().length - 3)
-      void loadMoreWork("pulls", pullState())
-    if (tab() === 4 && data().runsPage.hasMore && !loadingMoreRuns() && !runLoadError()
-      && selected()[4] >= data().runs.length - 3)
-      void loadMoreRuns()
-  })
-
-  const lengths = () => [
-    0,
-    data().commits.length,
-    issues().length,
-    pulls().length,
-    data().runs.length,
-  ]
-  const move = (delta: number) => {
-    const max = lengths()[tab()]
-    if (!max) return
-    setSelected((values) => values.map((value, index) =>
-      index === tab() ? Math.max(0, Math.min(max - 1, value + delta)) : value,
-    ))
+  const selectPage = (next: Page) => setNavigation((state) => navigate(state, next))
+  const movePage = (delta: number) => {
+    const available = visibleTabs()
+    const current = Math.max(0, available.findIndex((tab) => tab.page === page()))
+    selectPage(available[(current + delta + available.length) % available.length]!.page)
   }
   const quit = () => props.onQuit ? props.onQuit() : renderer.destroy()
 
@@ -149,88 +111,123 @@ export function App(props: AppProps) {
     if (event.name === "?" || (help() && (event.name === "escape" || event.name === "esc")))
       return setHelp((value) => !value)
     if (help()) return
+    if ((event.name === "escape" || event.name === "esc") && navigation().detail)
+      return setNavigation(back)
     if (event.name >= "1" && event.name <= "5") {
-      const index = Number(event.name) - 1
-      if (index < visibleTabs().length) return setTab(index)
+      const target = visibleTabs()[Number(event.name) - 1]
+      if (target) selectPage(target.page)
       return
     }
-    if (event.name === "left" || event.name === "h")
-      return setTab((value) => (value + visibleTabs().length - 1) % visibleTabs().length)
+    if (event.name === "left" || event.name === "h") return movePage(-1)
+    if (event.name === "right" || event.name === "l") return movePage(1)
     if (event.name === "tab") {
-      if (tab() === 0 || tab() === 1) {
-        setBranchPicker(true)
-      } else if (tab() === 2) {
+      if (page() === "overview" || page() === "commits") {
+        const branches = data().branches
+        if (branches.status === "error") props.onRetryResource?.({ kind: "branches" })
+        if (branches.value) setBranchPicker(true)
+      } else if (page() === "issues") {
         setIssueState((value) => value === "open" ? "closed" : "open")
-        setWorkLoadError(false)
-        setSelected((values) => values.map((value, index) => index === 2 ? 0 : value))
-      } else if (tab() === 3) {
+      } else if (page() === "pulls") {
         setPullState((value) => value === "open" ? "closed" : "open")
-        setWorkLoadError(false)
-        setSelected((values) => values.map((value, index) => index === 3 ? 0 : value))
       }
       return
     }
-    if (event.name === "right" || event.name === "l")
-      return setTab((value) => (value + 1) % visibleTabs().length)
-    if (event.name === "up" || event.name === "k") {
-      if (tab() === 0) return overviewScroll?.scrollBy(-1)
-      return move(-1)
-    }
-    if (event.name === "down" || event.name === "j") {
-      if (tab() === 0) return overviewScroll?.scrollBy(1)
-      return move(1)
-    }
+    if ((event.name === "up" || event.name === "k") && page() === "overview")
+      return overviewScroll?.scrollBy(-1)
+    if ((event.name === "down" || event.name === "j") && page() === "overview")
+      return overviewScroll?.scrollBy(1)
     if (event.name === "r") {
-      setCommitLoadError(false)
-      setRunLoadError(false)
-      setWorkLoadError(false)
+      const resource = activeResource()
+      const target = retryTarget()
+      if (resource?.status === "error" && target) return props.onRetryResource?.(target)
       return props.onRefresh?.()
     }
   })
 
   return (
     <box width={dimensions().width} height={dimensions().height} flexDirection="column" backgroundColor={colors.canvas}>
-      <Header
-        data={data()}
-        tab={tab()}
-        tabs={visibleTabs()}
-      />
+      <Header repo={data().repo} page={page()} tabs={visibleTabs()} />
       <Show when={!help()} fallback={<Help />}>
-        <box visible={tab() === 0} flexGrow={1} minHeight={0}>
-          <OverviewScreen data={data()} scrollRef={(value) => (overviewScroll = value)} />
-        </box>
-        <box visible={tab() === 1} flexGrow={1} minHeight={0}>
-          <CommitsScreen
-            data={data()}
-            selected={selected()[1]}
+        <box visible={page() === "overview"} flexGrow={1} minHeight={0}>
+          <OverviewScreen
+            repo={data().repo}
+            currentBranch={data().currentBranch}
+            readme={data().readme}
+            showScrollbar={props.config?.showScrollbars ?? false}
+            scrollRef={(value) => (overviewScroll = value)}
           />
         </box>
-        <box visible={tab() === 2} flexGrow={1} minHeight={0}>
-          <WorkScreen title="Issues" kind="issue" state={issueState()} counts={issueCounts()} items={issues()} selected={selected()[2]} />
+        <box visible={page() === "commits"} flexGrow={1} minHeight={0}>
+          <CommitsScreen
+            commits={data().commits}
+            currentBranch={data().currentBranch}
+            branchCount={data().branches.value?.length ?? 1}
+            active={page() === "commits"}
+            interactive={!help() && !branchPicker()}
+            showScrollbar={props.config?.showScrollbars ?? false}
+            onEndReached={() => {
+              const commits = data().commits
+              if (commits.status === "ready" && commits.value.hasMore) void props.onLoadMoreCommits?.()
+            }}
+          />
         </box>
-        <box visible={tab() === 3} flexGrow={1} minHeight={0}>
-          <WorkScreen title="Pull requests" kind="pull" state={pullState()} counts={pullCounts()} items={pulls()} selected={selected()[3]} />
+        <box visible={page() === "issues"} flexGrow={1} minHeight={0}>
+          <WorkScreen
+            title="Issues"
+            kind="issue"
+            state={issueState()}
+            counts={issueCounts()}
+            resource={issues()}
+            active={page() === "issues"}
+            interactive={!help() && !branchPicker()}
+            showScrollbar={props.config?.showScrollbars ?? false}
+            onEndReached={() => {
+              const resource = issues()
+              if (resource.status === "ready" && resource.value.hasMore) void props.onLoadMoreIssues?.(issueState())
+            }}
+          />
         </box>
-        <Show when={data().runs.length > 0}>
-          <box visible={tab() === 4} flexGrow={1} minHeight={0}>
+        <box visible={page() === "pulls"} flexGrow={1} minHeight={0}>
+          <WorkScreen
+            title="Pull requests"
+            kind="pull"
+            state={pullState()}
+            counts={pullCounts()}
+            resource={pulls()}
+            active={page() === "pulls"}
+            interactive={!help() && !branchPicker()}
+            showScrollbar={props.config?.showScrollbars ?? false}
+            onEndReached={() => {
+              const resource = pulls()
+              if (resource.status === "ready" && resource.value.hasMore) void props.onLoadMorePulls?.(pullState())
+            }}
+          />
+        </box>
+        <Show when={visibleTabs().some((tab) => tab.page === "actions")}>
+          <box visible={page() === "actions"} flexGrow={1} minHeight={0}>
             <ActionsScreen
               runs={data().runs}
-              selected={selected()[4]}
+              active={page() === "actions"}
+              interactive={!help() && !branchPicker()}
+              showScrollbar={props.config?.showScrollbars ?? false}
+              onEndReached={() => {
+                const runs = data().runs
+                if (runs.status === "ready" && runs.value.hasMore) void props.onLoadMoreRuns?.()
+              }}
             />
           </box>
         </Show>
       </Show>
-      <StatusBar kind={statusKind()} />
-      <Show when={branchPicker()}>
+      <StatusBar kind={status()} />
+      <Show when={branchPicker() && data().branches.value}>
         <BranchPicker
-          branches={data().branches}
+          branches={data().branches.value ?? []}
           current={data().currentBranch}
+          showScrollbar={props.config?.showScrollbars ?? false}
           onClose={() => setBranchPicker(false)}
           onSelect={(branch) => {
-            setCommitLoadError(false)
             props.onBranchChange?.(branch)
             overviewScroll?.scrollTo(0)
-            setSelected((values) => values.map((value, index) => index === 1 ? 0 : value))
             setBranchPicker(false)
           }}
         />

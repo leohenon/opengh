@@ -12,68 +12,59 @@ export type Repo = {
   updatedAt: string
 }
 
-export type Issue = {
+export type ListState = "open" | "closed"
+
+export type IssueSummary = {
   number: number
-  state: "open" | "closed"
+  state: ListState
   title: string
   author: string
-  labels: string[]
-  comments: number
   createdAt: string
-  body: string
 }
 
-export type PullRequest = Issue & {
-  branch: string
-  draft: boolean
-}
+export type PullRequestSummary = IssueSummary
 
-export type Run = {
+export type WorkflowRunSummary = {
   id: number
   name: string
   title: string
-  branch: string
-  event: string
   status: string
   conclusion: string
   createdAt: string
 }
 
-export type ListState = "open" | "closed"
-
-export type PageInfo = {
-  page: number
-  hasMore: boolean
-}
-
-export type Commit = {
+export type CommitSummary = {
   sha: string
   message: string
   author: string
   date: string
 }
 
-export type GitHubData = {
-  repo: Repo
-  readme: string
-  issues: Issue[]
-  pulls: PullRequest[]
-  runs: Run[]
-  branches: string[]
-  currentBranch: string
-  commits: Commit[]
-  commitsPage: PageInfo
-  runsPage: PageInfo
-  issuesPage: Record<ListState, PageInfo>
-  pullsPage: Record<ListState, PageInfo>
+export type IssueDetail = IssueSummary & {
+  body: string
+  labels: string[]
+  comments: number
 }
 
-export type RepositoryState =
-  | { status: "loading"; repository: string }
-  | {
-      status: "ready"
-      data: GitHubData
-      refreshing: boolean
-      refreshError?: string
-    }
-  | { status: "error"; repository: string; message: string }
+export type PullRequestDetail = PullRequestSummary & {
+  body: string
+  labels: string[]
+  comments: number
+  headBranch: string
+  draft: boolean
+}
+
+export type CommitDetail = CommitSummary & {
+  fullMessage: string
+}
+
+export type WorkflowRunDetail = WorkflowRunSummary & {
+  branch: string
+  event: string
+}
+
+export type Paginated<T> = {
+  items: T[]
+  page: number
+  hasMore: boolean
+}
