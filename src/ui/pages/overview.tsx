@@ -1,8 +1,10 @@
 import { SyntaxStyle, TextAttributes, type ScrollBoxRenderable } from "@opentui/core"
+import { createMemo } from "solid-js"
 import type { Repo } from "../../models"
 import type { ResourceState } from "../../repository-state"
 import { ResourceStateView } from "../components/resource-state"
 import { count } from "../format"
+import { normalizeGitHubMarkdown } from "../github-markdown"
 import { colors } from "../theme"
 
 function createMarkdownStyle() {
@@ -46,6 +48,7 @@ export function OverviewScreen(props: {
   scrollRef: (value: ScrollBoxRenderable) => void
 }) {
   const repo = () => props.repo
+  const formattedReadme = createMemo(() => normalizeGitHubMarkdown(props.readme.value ?? ""))
   const markdownStyle = createMarkdownStyle()
 
   return (
@@ -75,7 +78,7 @@ export function OverviewScreen(props: {
           <text fg={colors.blue}> {props.currentBranch}</text>
         </box>
         <ResourceStateView resource={props.readme} loading="Loading README…">
-          {(readme) => (
+          {(_source) => (
             <scrollbox
               ref={props.scrollRef}
               flexGrow={1}
@@ -88,7 +91,7 @@ export function OverviewScreen(props: {
               scrollY
             >
               <markdown
-                content={readme()}
+                content={formattedReadme()}
                 syntaxStyle={markdownStyle}
                 fg={colors.text}
                 bg={colors.canvas}
