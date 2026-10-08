@@ -22,7 +22,13 @@ export function PageShell(props: { header: JSX.Element; children: JSX.Element })
       >
         {props.header}
       </box>
-      <box height={1} flexShrink={0} backgroundColor={colors.canvas} />
+      <box
+        height={1}
+        flexShrink={0}
+        border={["bottom"]}
+        borderColor={colors.border}
+        backgroundColor={colors.canvas}
+      />
       <box flexGrow={1} minHeight={0} flexDirection="column" overflow="hidden">
         {props.children}
       </box>

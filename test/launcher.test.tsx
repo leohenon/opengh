@@ -20,9 +20,12 @@ describe("repository launcher", () => {
     })
     active.push(view)
     await view.flush()
+    expect(view.captureCharFrame()).toContain("cli/cli")
+    expect(view.captureCharFrame()).not.toContain("Loading…")
+    await Bun.sleep(210)
+    await view.flush()
     const frame = view.captureCharFrame()
-    expect(frame).toContain("cli/cli")
-    expect(frame).toContain("Loading repository data")
+    expect(frame).toContain("Loading…")
     expect(frame).not.toContain("anomalyco/opentui")
   })
 
@@ -49,7 +52,37 @@ describe("repository launcher", () => {
     active.push(view)
     await view.flush()
     expect(view.captureCharFrame()).toContain("Open a GitHub repository")
+    expect(view.captureCharFrame()).toContain("owner/repository or GitHub URL")
+    expect(view.captureCharFrame()).not.toContain("Recent repositories")
+    expect(view.captureCharFrame()).not.toContain("No recently opened repositories")
     await view.mockInput.typeText("cli/cli")
+    view.mockInput.pressEnter()
+    await view.flush()
+    expect(opened).toBe("cli/cli")
+  })
+
+  test("shows at most five recent repositories", async () => {
+    const recent = Array.from({ length: 6 }, (_, index) => `owner/repository-${index + 1}`)
+    const view = await testRender(
+      () => <RepositoryPicker recent={recent} onOpen={() => {}} />,
+      { width: 80, height: 24, useThread: false },
+    )
+    active.push(view)
+    await view.flush()
+    const frame = view.captureCharFrame()
+    expect(frame).toContain("repository-5")
+    expect(frame).not.toContain("repository-6")
+  })
+
+  test("opens a selected recent repository with arrow keys", async () => {
+    let opened = ""
+    const view = await testRender(
+      () => <RepositoryPicker recent={["anomalyco/opentui", "cli/cli"]} onOpen={(repository) => opened = repository} />,
+      { width: 80, height: 24, useThread: false },
+    )
+    active.push(view)
+    await view.flush()
+    view.mockInput.pressArrow("down")
     view.mockInput.pressEnter()
     await view.flush()
     expect(opened).toBe("cli/cli")
@@ -66,5 +99,18 @@ describe("repository launcher", () => {
     view.mockInput.pressKey("1")
     await view.flush()
     expect(opened).toBe("anomalyco/opentui")
+  })
+
+  test("shows validation errors directly beneath the input", async () => {
+    const view = await testRender(
+      () => <RepositoryPicker recent={[]} onOpen={() => {}} />,
+      { width: 80, height: 24, useThread: false },
+    )
+    active.push(view)
+    await view.flush()
+    await view.mockInput.typeText("invalid")
+    view.mockInput.pressEnter()
+    await view.flush()
+    expect(view.captureCharFrame()).toContain("× Enter a repository as owner/name")
   })
 })

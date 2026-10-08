@@ -1,35 +1,33 @@
 import { TextAttributes } from "@opentui/core"
-import { useTerminalDimensions } from "@opentui/solid"
 import type { CommitSummary, Paginated } from "../../models"
 import type { ResourceState } from "../../repository-state"
 import { PageShell } from "../components/page-shell"
 import { ResourceStateView } from "../components/resource-state"
 import { SelectableList } from "../components/selectable-list"
-import { ago, fitText } from "../format"
+import { ago } from "../format"
 import { colors } from "../theme"
 
 export function CommitsScreen(props: {
   commits: ResourceState<Paginated<CommitSummary>>
   currentBranch: string
-  branchCount: number
   active: boolean
   interactive: boolean
   showScrollbar: boolean
   onEndReached?: () => void
 }) {
-  const dimensions = useTerminalDimensions()
-  const messageWidth = () => Math.max(8, dimensions().width - 52 - (props.showScrollbar ? 1 : 0))
+  const commitCount = () => props.commits.value?.items.length ?? 0
 
   return (
     <PageShell
       header={(
-        <box flexDirection="row" gap={1}>
+        <box flexGrow={1} minWidth={0} flexDirection="row" alignItems="center" gap={2}>
           <text fg={colors.text} attributes={TextAttributes.BOLD}>
-            Commits ({props.commits.value?.items.length ?? 0})
+            {commitCount()} {commitCount() === 1 ? "commit" : "commits"}
           </text>
-          <text fg={colors.blue}>
-             {props.currentBranch} ({props.branchCount} {props.branchCount === 1 ? "branch" : "branches"})
-          </text>
+          <box flexShrink={0} flexDirection="row">
+            <text fg={colors.blue} attributes={TextAttributes.BOLD}> {props.currentBranch}</text>
+            <text fg={colors.muted}> ▾</text>
+          </box>
         </box>
       )}
     >
@@ -43,49 +41,25 @@ export function CommitsScreen(props: {
             resetKey={props.currentBranch}
             empty="No commits"
             onEndReached={props.onEndReached}
-            header={(
-              <>
-                <text width={2}> </text>
-                <box width={11} flexShrink={0} paddingRight={1} overflow="hidden">
-                  <text fg={colors.muted}>COMMIT</text>
-                </box>
-                <box width={messageWidth()} flexShrink={0} paddingLeft={1} paddingRight={1} overflow="hidden">
-                  <text fg={colors.muted}>MESSAGE</text>
-                </box>
-                <box width={22} flexShrink={0} paddingLeft={1} paddingRight={1} overflow="hidden">
-                  <text fg={colors.muted}>AUTHOR</text>
-                </box>
-                <box width={12} flexShrink={0} paddingLeft={1} overflow="hidden">
-                  <text fg={colors.muted}>UPDATED</text>
-                </box>
-              </>
-            )}
           >
             {(commit, active) => (
               <>
-                <box height={1} width={11} flexShrink={0} paddingRight={1} overflow="hidden">
+                <box height={2} flexGrow={1} minWidth={0} flexDirection="column" overflow="hidden">
                   <text
                     width="100%"
                     height={1}
                     wrapMode="none"
-                    fg={active() ? colors.blue : colors.muted}
+                    fg={colors.text}
                     attributes={active() ? TextAttributes.BOLD : TextAttributes.NONE}
                   >
-                    {commit().sha.slice(0, 7)}
+                    {commit().message}
                   </text>
-                </box>
-                <box height={1} width={messageWidth()} flexShrink={0} paddingLeft={1} paddingRight={1} overflow="hidden">
-                  <text width="100%" height={1} wrapMode="none" fg={colors.text}>
-                    {fitText(commit().message, messageWidth() - 2)}
-                  </text>
-                </box>
-                <box height={1} width={22} flexShrink={0} paddingLeft={1} paddingRight={1} overflow="hidden">
                   <text width="100%" height={1} wrapMode="none" fg={colors.muted}>
-                    {fitText(commit().author, 20)}
+                    {commit().author} committed {ago(commit().date)}
                   </text>
                 </box>
-                <box height={1} width={12} flexShrink={0} paddingLeft={1} overflow="hidden">
-                  <text width="100%" height={1} wrapMode="none" fg={colors.muted}>{ago(commit().date)}</text>
+                <box height={2} width={10} flexShrink={0} alignItems="center" justifyContent="flex-end" overflow="hidden">
+                  <text fg={colors.blue}>{commit().sha.slice(0, 7)}</text>
                 </box>
               </>
             )}

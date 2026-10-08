@@ -9,6 +9,7 @@ import type {
 import { GitHubApiError, githubTransport, type GitHubTransport } from "./transport"
 
 const PAGE_SIZE = 30
+const BRANCH_PAGE_SIZE = 100
 
 type Page<T> = { items: T[]; hasMore: boolean }
 
@@ -115,9 +116,48 @@ export function createGitHubClient(transport: GitHubTransport) {
     }
   }
 
-  const branches = async (repository: string, fallbackBranch: string) => {
-    const items = await transport.json<BranchResponse[]>(`repos/${repository}/branches?per_page=100`)
-    return items.length ? items.map((branch) => branch.name) : [fallbackBranch]
+  const optionalDocument = async (repository: string, branch: string, paths: string[]) => {
+    for (const file of paths) {
+      const encodedPath = file.split("/").map(encodeURIComponent).join("/")
+      const path = `repos/${repository}/contents/${encodedPath}?ref=${encodeURIComponent(branch)}`
+      try {
+        return await transport.text(path, "application/vnd.github.raw+json")
+      } catch (error) {
+        if (error instanceof GitHubApiError && error.status === 404) continue
+        throw error
+      }
+    }
+    return undefined
+  }
+
+  const contributing = (repository: string, branch: string) => optionalDocument(repository, branch, [
+    "CONTRIBUTING.md",
+    ".github/CONTRIBUTING.md",
+    "docs/CONTRIBUTING.md",
+  ])
+  const security = (repository: string, branch: string) => optionalDocument(repository, branch, [
+    "SECURITY.md",
+    ".github/SECURITY.md",
+    "docs/SECURITY.md",
+  ])
+  const license = async (repository: string, branch: string) => {
+    const path = `repos/${repository}/license?ref=${encodeURIComponent(branch)}`
+    try {
+      return await transport.text(path, "application/vnd.github.raw+json")
+    } catch (error) {
+      if (!(error instanceof GitHubApiError) || error.status !== 404) throw error
+      return optionalDocument(repository, branch, ["LICENSE", "LICENSE.md", "LICENSE.txt", "COPYING"])
+    }
+  }
+
+  const branches = async (repository: string, fallbackBranch: string, page = 1): Promise<Page<string>> => {
+    const items = await transport.json<BranchResponse[]>(
+      `repos/${repository}/branches?per_page=${BRANCH_PAGE_SIZE}&page=${page}`,
+    )
+    return {
+      items: items.length || page > 1 ? items.map((branch) => branch.name) : [fallbackBranch],
+      hasMore: items.length === BRANCH_PAGE_SIZE,
+    }
   }
 
   const commits = async (repository: string, branch: string, page = 1): Promise<Page<CommitSummary>> => {
@@ -160,13 +200,16 @@ export function createGitHubClient(transport: GitHubTransport) {
     return { items, hasMore: page * PAGE_SIZE < (response.total_count ?? items.length) }
   }
 
-  return { metadata, readme, branches, commits, issues, pulls, runs }
+  return { metadata, readme, contributing, security, license, branches, commits, issues, pulls, runs }
 }
 
 const client = createGitHubClient(githubTransport)
 
 export const loadGitHubMetadata = client.metadata
 export const loadGitHubReadme = client.readme
+export const loadGitHubContributing = client.contributing
+export const loadGitHubSecurity = client.security
+export const loadGitHubLicense = client.license
 export const loadGitHubBranches = client.branches
 export const loadGitHubCommits = client.commits
 export const loadGitHubIssues = client.issues

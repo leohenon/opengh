@@ -18,7 +18,10 @@ function loaders(overrides: Partial<RepositoryLoaders> = {}): RepositoryLoaders 
   return {
     metadata: async () => structuredClone(githubDataFixture.repo),
     readme: async () => githubDataFixture.readme.value!,
-    branches: async () => structuredClone(githubDataFixture.branches.value!),
+    contributing: async () => githubDataFixture.contributing.value,
+    security: async () => githubDataFixture.security.value,
+    license: async () => githubDataFixture.license.value,
+    branches: async () => ({ items: structuredClone(githubDataFixture.branches.value!.items), hasMore: false }),
     commits: async () => ({ items: structuredClone(githubDataFixture.commits.value!.items), hasMore: false }),
     issues: async (_repository, state) => ({ items: structuredClone(githubDataFixture.issues[state].value!.items), hasMore: false }),
     pulls: async (_repository, state) => ({ items: structuredClone(githubDataFixture.pulls[state].value!.items), hasMore: false }),
@@ -140,6 +143,79 @@ describe("repository session", () => {
     expect(state.data.runs.status).toBe("error")
     expect(state.data.runs.value).toEqual(oldRuns)
     expect(state.data.commits.status).toBe("ready")
+  })
+
+  test("retries an initial branch failure from page one", async () => {
+    const pages: number[] = []
+    const session = createRepositorySession(loaders({
+      branches: async (_repository, _fallback, page = 1) => {
+        pages.push(page)
+        if (pages.length === 1) throw new Error("Branches unavailable")
+        return { items: ["main"], hasMore: false }
+      },
+    }))
+
+    await session.load("anomalyco/opentui")
+    const failed = ready(session).data.branches
+    expect(failed.status).toBe("error")
+    if (failed.status !== "error") throw new Error("Expected initial branch error")
+    expect(failed.phase).toBe("load")
+
+    await session.retryResource({ kind: "branches" })
+    expect(pages).toEqual([1, 1])
+    expect(ready(session).data.branches.value).toEqual({ items: ["main"], page: 1, hasMore: false })
+  })
+
+  test("paginates branches with deduplication and blocks duplicate requests", async () => {
+    let calls = 0
+    const pending = deferred<{ items: string[]; hasMore: boolean }>()
+    const session = createRepositorySession(loaders({
+      branches: async (_repository, _fallback, page) => {
+        calls++
+        return page === 2 ? pending.promise : { items: ["main", "shared"], hasMore: true }
+      },
+    }))
+
+    await session.load("anomalyco/opentui")
+    const pagination = session.loadMoreBranches()
+    void session.loadMoreBranches()
+    const loading = ready(session).data.branches
+    expect(calls).toBe(2)
+    expect(loading.status).toBe("loading")
+    expect(loading.value?.items).toEqual(["main", "shared"])
+
+    pending.resolve({ items: ["shared", "next", "next"], hasMore: false })
+    await pagination
+
+    const branches = ready(session).data.branches
+    expect(branches.status).toBe("ready")
+    expect(branches.value).toEqual({ items: ["main", "shared", "next"], page: 2, hasMore: false })
+  })
+
+  test("retries failed branch pagination without discarding loaded branches", async () => {
+    let secondPageCalls = 0
+    const session = createRepositorySession(loaders({
+      branches: async (_repository, _fallback, page) => {
+        if (page !== 2) return { items: ["main"], hasMore: true }
+        secondPageCalls++
+        if (secondPageCalls === 1) throw new Error("Branches unavailable")
+        return { items: ["next"], hasMore: false }
+      },
+    }))
+
+    await session.load("anomalyco/opentui")
+    await session.loadMoreBranches()
+    const failed = ready(session).data.branches
+    expect(failed.status).toBe("error")
+    if (failed.status !== "error") throw new Error("Expected branch pagination error")
+    expect(failed.phase).toBe("pagination")
+    expect(failed.value?.items).toEqual(["main"])
+
+    await session.retryResource({ kind: "branches" })
+    const branches = ready(session).data.branches
+    expect(secondPageCalls).toBe(2)
+    expect(branches.status).toBe("ready")
+    expect(branches.value).toEqual({ items: ["main", "next"], page: 2, hasMore: false })
   })
 
   test("paginates with full-SHA deduplication and blocks duplicates", async () => {
@@ -280,6 +356,23 @@ describe("repository session", () => {
     metadata.resolve(structuredClone(githubDataFixture.repo))
     await refresh
     expect(issueCalls).toBe(2)
+  })
+
+  test("reloads optional documents without letting their failures block branch switching", async () => {
+    const session = createRepositorySession(loaders({
+      contributing: async (_repository, branch) => branch === "next" ? "next contributing" : "main contributing",
+      security: async (_repository, branch) => {
+        if (branch === "next") throw new Error("Security unavailable")
+        return "main security"
+      },
+    }))
+
+    await session.load("anomalyco/opentui")
+    await session.switchBranch("next")
+    const state = ready(session)
+    expect(state.data.currentBranch).toBe("next")
+    expect(state.data.contributing.value).toBe("next contributing")
+    expect(state.data.security.status).toBe("error")
   })
 
   test("keeps branch switching atomic", async () => {

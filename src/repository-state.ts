@@ -10,6 +10,8 @@ import type {
 
 export type ResourcePhase = "load" | "pagination"
 
+export type RepositoryDocumentKind = "readme" | "contributing" | "security" | "license"
+
 export type ResourceState<T> =
   | { status: "loading"; phase: ResourcePhase; value?: T }
   | { status: "ready"; value: T }
@@ -24,7 +26,10 @@ export type RepositoryData = {
   repo: Repo
   currentBranch: string
   readme: ResourceState<string>
-  branches: ResourceState<string[]>
+  contributing: ResourceState<string | undefined>
+  security: ResourceState<string | undefined>
+  license: ResourceState<string | undefined>
+  branches: ResourceState<Paginated<string>>
   commits: ResourceState<Paginated<CommitSummary>>
   issues: Record<ListState, ResourceState<Paginated<IssueSummary>>>
   pulls: Record<ListState, ResourceState<Paginated<PullRequestSummary>>>
@@ -38,6 +43,9 @@ export type RepositoryOperations = {
 
 export type RepositoryResource =
   | { kind: "readme" }
+  | { kind: "contributing" }
+  | { kind: "security" }
+  | { kind: "license" }
   | { kind: "branches" }
   | { kind: "commits" }
   | { kind: "runs" }

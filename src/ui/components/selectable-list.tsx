@@ -12,7 +12,6 @@ export function SelectableList<T>(props: {
   active: boolean
   showScrollbar?: boolean
   resetKey?: string | number
-  header: JSX.Element
   empty: string
   rowHeight?: number
   endThreshold?: number
@@ -28,7 +27,7 @@ export function SelectableList<T>(props: {
   let list: ScrollBoxRenderable | undefined
 
   const rowHeight = () => props.rowHeight ?? 3
-  const listHeight = () => Math.floor(Math.max(0, containerHeight() - 3) / rowHeight()) * rowHeight()
+  const listHeight = () => Math.floor(Math.max(0, containerHeight()) / rowHeight()) * rowHeight()
   const updateContainerHeight = () => {
     const height = container?.height ?? 0
     setContainerHeight((current) => current === height ? current : height)
@@ -107,16 +106,6 @@ export function SelectableList<T>(props: {
       overflow="hidden"
       backgroundColor={colors.canvas}
     >
-      <box
-        height={3}
-        flexShrink={0}
-        flexDirection="row"
-        alignItems="center"
-        backgroundColor={colors.panel}
-        paddingRight={1}
-      >
-        {props.header}
-      </box>
       <scrollbox
         ref={(value) => (list = value)}
         height={listHeight()}
@@ -138,7 +127,7 @@ export function SelectableList<T>(props: {
                   height={rowHeight()}
                   flexShrink={0}
                   flexDirection="row"
-                  alignItems="center"
+                  alignItems="flex-start"
                   paddingRight={1}
                   backgroundColor={active() ? colors.panelHover : colors.canvas}
                 >

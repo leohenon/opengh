@@ -20,7 +20,6 @@ describe("SelectableList", () => {
           items={items}
           itemKey={(item) => item.id}
           active
-          header={<text>HEADER</text>}
           empty="empty"
         >
           {(item) => <text>{item().label}</text>}
@@ -30,7 +29,7 @@ describe("SelectableList", () => {
     active.push(view)
     await view.flush()
 
-    expect(visibleRows(view.captureCharFrame())).toHaveLength(4)
+    expect(visibleRows(view.captureCharFrame())).toHaveLength(5)
 
     for (let index = 0; index < 4; index++) {
       view.mockInput.pressKey("j")
@@ -38,7 +37,7 @@ describe("SelectableList", () => {
     }
 
     const frame = view.captureCharFrame()
-    expect(visibleRows(frame)).toHaveLength(4)
+    expect(visibleRows(frame)).toHaveLength(5)
     expect(frame).toContain("row 4")
     expect(frame.split("▌").length - 1).toBe(1)
 

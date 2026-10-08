@@ -77,12 +77,49 @@ describe("GitHub client", () => {
     expect(forbidden.readme("owner/repo", "main")).rejects.toThrow("Forbidden")
   })
 
-  test("falls back to the default branch only for an empty response", async () => {
-    const path = "repos/owner/repo/branches?per_page=100"
-    const client = createGitHubClient(transport({ [path]: [] }))
-    expect(await client.branches("owner/repo", "main")).toEqual(["main"])
+  test("finds optional repository documents and treats 404 as missing", async () => {
+    const requests: string[] = []
+    const client = createGitHubClient({
+      async json<T>() {
+        return undefined as T
+      },
+      async text(path: string) {
+        requests.push(path)
+        if (path.includes(".github/CONTRIBUTING.md")) return "# Contributing"
+        throw new GitHubApiError(path, "Not Found", 404)
+      },
+    })
 
-    const failing = createGitHubClient(transport({ [path]: new Error("Unavailable") }))
+    expect(await client.contributing("owner/repo", "main")).toBe("# Contributing")
+    expect(requests).toEqual([
+      "repos/owner/repo/contents/CONTRIBUTING.md?ref=main",
+      "repos/owner/repo/contents/.github/CONTRIBUTING.md?ref=main",
+    ])
+
+    requests.length = 0
+    expect(await client.security("owner/repo", "main")).toBeUndefined()
+    expect(requests).toHaveLength(3)
+  })
+
+  test("paginates branches and falls back only for an empty first page", async () => {
+    const firstPath = "repos/owner/repo/branches?per_page=100&page=1"
+    const secondPath = "repos/owner/repo/branches?per_page=100&page=2"
+    const fullPage = Array.from({ length: 100 }, (_, index) => ({ name: `branch-${index}` }))
+    const client = createGitHubClient(transport({
+      [firstPath]: fullPage,
+      [secondPath]: [],
+    }))
+
+    expect(await client.branches("owner/repo", "main")).toEqual({
+      items: fullPage.map((branch) => branch.name),
+      hasMore: true,
+    })
+    expect(await client.branches("owner/repo", "main", 2)).toEqual({ items: [], hasMore: false })
+
+    const empty = createGitHubClient(transport({ [firstPath]: [] }))
+    expect(await empty.branches("owner/repo", "main")).toEqual({ items: ["main"], hasMore: false })
+
+    const failing = createGitHubClient(transport({ [firstPath]: new Error("Unavailable") }))
     expect(failing.branches("owner/repo", "main")).rejects.toThrow("Unavailable")
   })
 })

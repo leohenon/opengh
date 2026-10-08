@@ -29,6 +29,12 @@ function firstDescendant(element: Element, tagName: string): Element | undefined
   return undefined
 }
 
+function isBadgeImage(element: Element, label: string) {
+  const source = property(element, "src")
+  return /(?:img\.shields\.io|badge\.fury\.io|badgen\.net|codecov\.io|coveralls\.io|\/badge(?:\.svg|\/))/i.test(source)
+    || /\b(?:build status|coverage|npm version|package version|downloads? badge)\b/i.test(label)
+}
+
 function safeTarget(value: string) {
   const target = value.trim()
   if (!target || /[\u0000-\u001f\u007f]/.test(target)) return ""
@@ -85,6 +91,10 @@ function terminalMedia() {
         const image = firstDescendant(element, "img")
         if (image) {
           const label = property(image, "alt") || property(image, "title") || "image"
+          if (/\blogo\b/i.test(label) || isBadgeImage(image, label)) {
+            parent.children[index] = { type: "text", value: "" }
+            return SKIP
+          }
           const link = replacement(label, href || property(image, "src"))
           parent.children[index] = parent.type === "element" && presentationGroups.has(parent)
             ? { type: "element", tagName: "p", properties: {}, children: [link] }
@@ -100,6 +110,10 @@ function terminalMedia() {
 
       if (tag === "img") {
         const label = property(element, "alt") || property(element, "title") || "image"
+        if (/\blogo\b/i.test(label) || isBadgeImage(element, label)) {
+          parent.children[index] = { type: "text", value: "" }
+          return
+        }
         const pictureSource = parent.type === "element" && parent.tagName === "picture"
           ? firstDescendant(parent, "source")
           : undefined

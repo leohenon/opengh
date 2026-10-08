@@ -1,5 +1,6 @@
 import { Show } from "solid-js"
 import { colors } from "../theme"
+import { LoadingText } from "./loading-text"
 
 export type StatusKind =
   | "refreshing"
@@ -11,19 +12,27 @@ export type StatusKind =
   | "branch-error"
   | "load-more-error"
 
-const messages: Record<StatusKind, { text: string; color: string }> = {
-  refreshing: { text: "◌ Refreshing repository…", color: colors.muted },
-  "switching-branch": { text: "◌ Switching branch…", color: colors.muted },
-  "loading-resource": { text: "◌ Loading…", color: colors.muted },
-  "loading-more": { text: "◌ Loading more…", color: colors.muted },
-  "refresh-error": { text: "× Refresh failed", color: colors.red },
-  "resource-error": { text: "× Could not load · press r to retry", color: colors.red },
-  "branch-error": { text: "× Could not switch branch", color: colors.red },
-  "load-more-error": { text: "× Could not load more · press r to retry", color: colors.red },
+const loadingMessages: Partial<Record<StatusKind, string>> = {
+  refreshing: "Refreshing…",
+  "switching-branch": "Switching branch…",
+  "loading-resource": "Loading…",
+  "loading-more": "Loading more…",
 }
 
-export function StatusBar(props: { kind?: StatusKind }) {
-  const message = () => props.kind ? messages[props.kind] : undefined
+const errorMessages: Partial<Record<StatusKind, string>> = {
+  "refresh-error": "× Refresh failed",
+  "resource-error": "× Could not load · press r to retry",
+  "branch-error": "× Could not switch branch",
+  "load-more-error": "× Could not load more · press r to retry",
+}
+
+export function StatusBar(props: { kind?: StatusKind; detail?: string }) {
+  const loadingMessage = () => {
+    if (!props.kind) return undefined
+    if (props.kind === "loading-resource" && props.detail) return `Loading ${props.detail}…`
+    return loadingMessages[props.kind]
+  }
+  const errorMessage = () => props.kind ? errorMessages[props.kind] : undefined
 
   return (
     <box
@@ -31,10 +40,13 @@ export function StatusBar(props: { kind?: StatusKind }) {
       flexShrink={0}
       paddingLeft={2}
       paddingRight={2}
-      backgroundColor={message() ? colors.panel : colors.canvas}
+      backgroundColor={errorMessage() ? colors.panel : colors.canvas}
     >
-      <Show when={message()}>
-        {(current) => <text fg={current().color}>{current().text}</text>}
+      <Show when={loadingMessage()}>
+        {(message) => <LoadingText text={message()} />}
+      </Show>
+      <Show when={errorMessage()}>
+        {(message) => <text fg={colors.red}>{message()}</text>}
       </Show>
     </box>
   )

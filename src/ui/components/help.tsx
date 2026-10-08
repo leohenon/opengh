@@ -1,34 +1,54 @@
-import { TextAttributes } from "@opentui/core"
-import { colors } from "../theme"
+import { TextAttributes } from "@opentui/core";
+import type { JSX } from "solid-js";
+import { colors } from "../theme";
+import { Popup } from "./popup";
 
-export function Help() {
+function Shortcut(props: { keys: string; children: JSX.Element }) {
   return (
-    <box flexGrow={1} alignItems="center" justifyContent="center">
-      <box
-        width={54}
-        border
-        borderStyle="rounded"
-        borderColor={colors.blue}
-        backgroundColor={colors.panel}
-        flexDirection="column"
-        padding={2}
-        gap={1}
-        title=" Keyboard shortcuts "
-      >
-        <text fg={colors.text} attributes={TextAttributes.BOLD}>
-          Navigation
-        </text>
-        <text fg={colors.muted}>1–4/5 / h l / ← → switch tabs</text>
-        <text fg={colors.muted}>j k / ↑ ↓ move selection</text>
-        <text fg={colors.muted}>g / G jump to top / bottom</text>
-        <text fg={colors.muted}>u / d move half a page</text>
-        <text fg={colors.muted}>Tab branch / open-closed view</text>
-        <text fg={colors.muted}>r refresh live data</text>
-        <text fg={colors.muted}>? toggle this help</text>
-        <text fg={colors.muted}>q / Ctrl-C quit</text>
-        <text fg={colors.blue}>Press ? or Esc to return</text>
-      </box>
+    <box height={1} flexShrink={0} flexDirection="row">
+      <text width={20} fg={colors.text}>
+        {props.keys}
+      </text>
+      <text fg={colors.muted}>{props.children}</text>
     </box>
   );
 }
 
+export function Help() {
+  return (
+    <Popup width={64} height={15} zIndex={200}>
+      <box
+        flexGrow={1}
+        minHeight={0}
+        flexDirection="column"
+        paddingLeft={4}
+        paddingRight={4}
+        paddingBottom={1}
+      >
+        <box
+          height={1}
+          flexShrink={0}
+          flexDirection="row"
+          justifyContent="space-between"
+        >
+          <text fg={colors.text} attributes={TextAttributes.BOLD}>
+            Help
+          </text>
+          <text fg={colors.muted}>esc</text>
+        </box>
+
+        <box height={1} flexShrink={0} />
+        <Shortcut keys="1–5, h/l, ←/→">switch tabs</Shortcut>
+        <Shortcut keys="j/k, ↑/↓">move / scroll</Shortcut>
+        <Shortcut keys="u/d">half-page up / down</Shortcut>
+        <Shortcut keys="g/G">jump to top / bottom</Shortcut>
+        <Shortcut keys="Tab / ⇧Tab">cycle view options</Shortcut>
+
+        <box height={1} flexShrink={0} />
+        <Shortcut keys="r">refresh</Shortcut>
+        <Shortcut keys="?">toggle help</Shortcut>
+        <Shortcut keys="q / Ctrl-C">quit</Shortcut>
+      </box>
+    </Popup>
+  );
+}

@@ -2,11 +2,14 @@ import { createSignal, type Accessor, type Setter } from "solid-js"
 import {
   loadGitHubBranches,
   loadGitHubCommits,
+  loadGitHubContributing,
   loadGitHubIssues,
+  loadGitHubLicense,
   loadGitHubMetadata,
   loadGitHubPulls,
   loadGitHubReadme,
   loadGitHubRuns,
+  loadGitHubSecurity,
 } from "./github/client"
 import type {
   CommitSummary,
@@ -20,6 +23,7 @@ import type {
 import type {
   OperationState,
   RepositoryData,
+  RepositoryDocumentKind,
   RepositoryResource,
   RepositoryState,
   ResourcePhase,
@@ -27,11 +31,15 @@ import type {
 } from "./repository-state"
 
 type Page<T> = { items: T[]; hasMore: boolean }
+type OptionalDocumentKind = Exclude<RepositoryDocumentKind, "readme">
 
 export type RepositoryLoaders = {
   metadata(repository: string): Promise<Repo>
   readme(repository: string, branch: string): Promise<string>
-  branches(repository: string, fallbackBranch: string): Promise<string[]>
+  contributing(repository: string, branch: string): Promise<string | undefined>
+  security(repository: string, branch: string): Promise<string | undefined>
+  license(repository: string, branch: string): Promise<string | undefined>
+  branches(repository: string, fallbackBranch: string, page?: number): Promise<Page<string>>
   commits(repository: string, branch: string, page?: number): Promise<Page<CommitSummary>>
   issues(repository: string, state: ListState, page?: number): Promise<Page<IssueSummary>>
   pulls(repository: string, state: ListState, page?: number): Promise<Page<PullRequestSummary>>
@@ -44,6 +52,7 @@ export type RepositorySession = {
   refresh(): Promise<void>
   retryResource(resource: RepositoryResource): Promise<void>
   switchBranch(branch: string): Promise<void>
+  loadMoreBranches(): Promise<void>
   loadMoreCommits(): Promise<void>
   loadMoreRuns(): Promise<void>
   loadMoreIssues(state: ListState): Promise<void>
@@ -53,6 +62,9 @@ export type RepositorySession = {
 const defaultLoaders: RepositoryLoaders = {
   metadata: loadGitHubMetadata,
   readme: loadGitHubReadme,
+  contributing: loadGitHubContributing,
+  security: loadGitHubSecurity,
+  license: loadGitHubLicense,
   branches: loadGitHubBranches,
   commits: loadGitHubCommits,
   issues: loadGitHubIssues,
@@ -87,8 +99,19 @@ const failedResource = <T>(error: unknown, value?: T, phase: ResourcePhase = "lo
   ? { status: "error", phase, message: messageFrom(error) }
   : { status: "error", phase, message: messageFrom(error), value }
 
+async function loadOptionalDocument(load: () => Promise<string | undefined>): Promise<ResourceState<string | undefined>> {
+  try {
+    return { status: "ready", value: await load() }
+  } catch (error) {
+    return failedResource(error)
+  }
+}
+
 function hasLoadingResource(data: RepositoryData) {
   return data.readme.status === "loading"
+    || data.contributing.status === "loading"
+    || data.security.status === "loading"
+    || data.license.status === "loading"
     || data.branches.status === "loading"
     || data.commits.status === "loading"
     || data.runs.status === "loading"
@@ -103,6 +126,9 @@ function initialData(repo: Repo): RepositoryData {
     repo,
     currentBranch: repo.defaultBranch,
     readme: loadingResource(),
+    contributing: loadingResource(),
+    security: loadingResource(),
+    license: loadingResource(),
     branches: loadingResource(),
     commits: loadingResource(),
     issues: { open: loadingResource(), closed: loadingResource() },
@@ -143,9 +169,32 @@ export function createRepositorySession(loaders: RepositoryLoaders = defaultLoad
     }
   }
 
-  const fetchBranches = async (repository: string, fallbackBranch: string, request: number) => {
+  const fetchOptionalDocument = async (
+    kind: OptionalDocumentKind,
+    repository: string,
+    branch: string,
+    request: number,
+  ) => {
     try {
-      const value = await loaders.branches(repository, fallbackBranch)
+      const value = await loaders[kind](repository, branch)
+      const resource: ResourceState<string | undefined> = { status: "ready", value }
+      updateReady(setState, request, generation, repository, (current) => current.data.currentBranch === branch
+        ? { ...current, data: { ...current.data, [kind]: resource } }
+        : current)
+    } catch (error) {
+      updateReady(setState, request, generation, repository, (current) => current.data.currentBranch === branch
+        ? { ...current, data: { ...current.data, [kind]: failedResource(error, current.data[kind].value) } }
+        : current)
+    }
+  }
+
+  const fetchBranches = async (repository: string, fallbackBranch: string, request: number, pageCount = 1) => {
+    try {
+      const value = await loadPageSet(
+        pageCount,
+        (page) => loaders.branches(repository, fallbackBranch, page),
+        (branch) => branch,
+      )
       updateReady(setState, request, generation, repository, (current) => ({
         ...current,
         data: { ...current.data, branches: { status: "ready", value } },
@@ -243,7 +292,10 @@ export function createRepositorySession(loaders: RepositoryLoaders = defaultLoad
   ) => {
     await Promise.all([
       fetchReadme(repository, branch, request),
-      fetchBranches(repository, fallbackBranch, request),
+      fetchOptionalDocument("contributing", repository, branch, request),
+      fetchOptionalDocument("security", repository, branch, request),
+      fetchOptionalDocument("license", repository, branch, request),
+      fetchBranches(repository, fallbackBranch, request, previous?.branches.value?.page),
       fetchCommits(repository, branch, request, previous?.commits.value?.page),
       fetchIssues(repository, "open", request, previous?.issues.open.value?.page),
       fetchIssues(repository, "closed", request, previous?.issues.closed.value?.page),
@@ -295,6 +347,9 @@ export function createRepositorySession(loaders: RepositoryLoaders = defaultLoad
               ...latest.data,
               repo,
               readme: loadingResource(latest.data.readme.value),
+              contributing: loadingResource(latest.data.contributing.value),
+              security: loadingResource(latest.data.security.value),
+              license: loadingResource(latest.data.license.value),
               branches: loadingResource(latest.data.branches.value),
               commits: loadingResource(latest.data.commits.value),
               issues: {
@@ -329,6 +384,8 @@ export function createRepositorySession(loaders: RepositoryLoaders = defaultLoad
     const request = repositoryGeneration
     const branch = current.data.currentBranch
 
+    if (resource.kind === "branches" && current.data.branches.status === "error"
+      && current.data.branches.phase === "pagination") return loadMoreBranches()
     if (resource.kind === "commits" && current.data.commits.status === "error"
       && current.data.commits.phase === "pagination") return loadMoreCommits()
     if (resource.kind === "runs" && current.data.runs.status === "error"
@@ -348,9 +405,14 @@ export function createRepositorySession(loaders: RepositoryLoaders = defaultLoad
       setState({ ...current, data: { ...current.data, readme: loadingResource(current.data.readme.value) } })
       return fetchReadme(repository, branch, request)
     }
+    if (resource.kind === "contributing" || resource.kind === "security" || resource.kind === "license") {
+      const kind = resource.kind
+      setState({ ...current, data: { ...current.data, [kind]: loadingResource(current.data[kind].value) } })
+      return fetchOptionalDocument(kind, repository, branch, request)
+    }
     if (resource.kind === "branches") {
       setState({ ...current, data: { ...current.data, branches: loadingResource(current.data.branches.value) } })
-      return fetchBranches(repository, current.data.repo.defaultBranch, request)
+      return fetchBranches(repository, current.data.repo.defaultBranch, request, current.data.branches.value?.page)
     }
     if (resource.kind === "commits") {
       setState({ ...current, data: { ...current.data, commits: loadingResource(current.data.commits.value) } })
@@ -384,16 +446,21 @@ export function createRepositorySession(loaders: RepositoryLoaders = defaultLoad
     const current = state()
     if (current.status !== "ready" || current.data.currentBranch === branch
       || current.operations.branch.status === "loading" || current.operations.refresh.status === "loading"
-      || current.data.commits.status === "loading") return
+      || current.data.commits.status === "loading" || current.data.readme.status === "loading"
+      || current.data.contributing.status === "loading" || current.data.security.status === "loading"
+      || current.data.license.status === "loading") return
 
     const request = ++branchGeneration
     const repositoryRequest = repositoryGeneration
     const repository = current.repository
     setState({ ...current, operations: { ...current.operations, branch: loading() } })
     try {
-      const [commits, readme] = await Promise.all([
+      const [commits, readme, contributing, security, license] = await Promise.all([
         loaders.commits(repository, branch),
         loaders.readme(repository, branch),
+        loadOptionalDocument(() => loaders.contributing(repository, branch)),
+        loadOptionalDocument(() => loaders.security(repository, branch)),
+        loadOptionalDocument(() => loaders.license(repository, branch)),
       ])
       setState((latest) => {
         if (repositoryRequest !== repositoryGeneration || request !== branchGeneration
@@ -404,6 +471,9 @@ export function createRepositorySession(loaders: RepositoryLoaders = defaultLoad
             ...latest.data,
             currentBranch: branch,
             readme: { status: "ready", value: readme },
+            contributing,
+            security,
+            license,
             commits: { status: "ready", value: page(commits) },
           },
           operations: { ...latest.operations, branch: idle() },
@@ -418,6 +488,46 @@ export function createRepositorySession(loaders: RepositoryLoaders = defaultLoad
           operations: { ...latest.operations, branch: { status: "error", message: messageFrom(error) } },
         }
       })
+    }
+  }
+
+  const loadMoreBranches = async () => {
+    const current = state()
+    const value = current.status === "ready" ? current.data.branches.value : undefined
+    if (current.status !== "ready" || !value?.hasMore || current.data.branches.status === "loading"
+      || current.operations.refresh.status === "loading") return
+
+    const repository = current.repository
+    const request = repositoryGeneration
+    const nextPage = value.page + 1
+    setState({ ...current, data: { ...current.data, branches: loadingResource(value, "pagination") } })
+    try {
+      const result = await loaders.branches(repository, current.data.repo.defaultBranch, nextPage)
+      updateReady(setState, request, generation, repository, (latest) => {
+        const latestValue = latest.data.branches.value
+        if (!latestValue || latestValue.page !== nextPage - 1) return latest
+        const existing = new Set(latestValue.items)
+        const branches = result.items.filter((branch) => {
+          if (existing.has(branch)) return false
+          existing.add(branch)
+          return true
+        })
+        return {
+          ...latest,
+          data: {
+            ...latest.data,
+            branches: {
+              status: "ready",
+              value: page({ items: [...latestValue.items, ...branches], hasMore: result.hasMore }, nextPage),
+            },
+          },
+        }
+      })
+    } catch (error) {
+      updateReady(setState, request, generation, repository, (latest) => ({
+        ...latest,
+        data: { ...latest.data, branches: failedResource(error, latest.data.branches.value, "pagination") },
+      }))
     }
   }
 
@@ -587,6 +697,7 @@ export function createRepositorySession(loaders: RepositoryLoaders = defaultLoad
     refresh,
     retryResource,
     switchBranch,
+    loadMoreBranches,
     loadMoreCommits,
     loadMoreRuns,
     loadMoreIssues,

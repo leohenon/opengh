@@ -92,6 +92,7 @@ function Root() {
               onRefresh={() => void session.refresh()}
               onRetryResource={(resource) => void session.retryResource(resource)}
               onBranchChange={(branch) => void session.switchBranch(branch)}
+              onLoadMoreBranches={session.loadMoreBranches}
               onLoadMoreCommits={session.loadMoreCommits}
               onLoadMoreRuns={session.loadMoreRuns}
               onLoadMoreIssues={session.loadMoreIssues}

@@ -41,6 +41,18 @@ export const githubDataFixture: RepositoryData = {
     status: "ready",
     value: "# OpenTUI\n\nA TypeScript library for building rich terminal user interfaces.",
   },
+  contributing: {
+    status: "ready",
+    value: "# Contributing\n\nThanks for helping improve OpenTUI.",
+  },
+  security: {
+    status: "ready",
+    value: "# Security Policy\n\nPlease report vulnerabilities privately.",
+  },
+  license: {
+    status: "ready",
+    value: "MIT License\n\nCopyright OpenTUI contributors.",
+  },
   issues: {
     open: { status: "ready", value: { items: issues.open, page: 1, hasMore: false } },
     closed: { status: "ready", value: { items: issues.closed, page: 1, hasMore: false } },
@@ -62,7 +74,7 @@ export const githubDataFixture: RepositoryData = {
       hasMore: false,
     },
   },
-  branches: { status: "ready", value: ["main", "next"] },
+  branches: { status: "ready", value: { items: ["main", "next"], page: 1, hasMore: false } },
   currentBranch: "main",
   commits: {
     status: "ready",

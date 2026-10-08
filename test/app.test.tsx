@@ -58,17 +58,24 @@ describe("openGH TUI", () => {
     );
     active.push(view);
     await view.flush();
-    const frame = view.captureCharFrame();
-    expect(frame).toContain("anomalyco/opentui");
-    expect(frame).toContain("About");
-    expect(frame).toContain("Loading README");
+    const initialFrame = view.captureCharFrame();
+    expect(initialFrame).toContain("anomalyco/opentui");
+    expect(initialFrame).toContain("README.md");
+    expect(initialFrame).toContain("About");
+    expect(initialFrame).not.toContain("Loading…");
+
+    await Bun.sleep(210);
+    await view.flush();
+    const loadingFrame = view.captureCharFrame();
+    expect(loadingFrame).toContain("Loading…");
+    expect(loadingFrame.match(/Loading…/g)).toHaveLength(1);
   });
 
   test("switches screens and moves the selection", async () => {
     const { view } = await setup();
     view.mockInput.pressKey("2");
     await view.flush();
-    expect(view.captureCharFrame()).toContain("Commits (4)");
+    expect(view.captureCharFrame()).toContain("4 commits");
     expect(view.captureCharFrame()).toContain("7ca91d2");
     expect(view.captureCharFrame()).not.toContain("7ca91d200000");
 
@@ -76,7 +83,7 @@ describe("openGH TUI", () => {
     await view.flush();
     expect(view.captureCharFrame()).toContain("Open (4)");
     expect(view.captureCharFrame()).toContain("Closed (1)");
-    expect(view.captureCharFrame()).toContain("OPENED");
+    expect(view.captureCharFrame()).toContain("#412 ·");
     expect(view.captureCharFrame()).toContain("ScrollBox loses focus");
 
     view.mockInput.pressKey("j");
@@ -88,10 +95,11 @@ describe("openGH TUI", () => {
     view.mockInput.pressKey("4");
     await view.flush();
     expect(view.captureCharFrame()).toContain("Pull requests");
+    expect(view.captureCharFrame()).toContain("#421 ·");
 
     view.mockInput.pressKey("5");
     await view.flush();
-    expect(view.captureCharFrame()).toContain("Workflow runs (4)");
+    expect(view.captureCharFrame()).toContain("4 workflow runs");
   });
 
   test("hides Actions only after an empty result resolves", async () => {
@@ -203,13 +211,13 @@ describe("openGH TUI", () => {
     view.mockInput.pressKey("j");
     await view.flush();
     expect(commitLoads).toBe(1);
-    expect(view.captureCharFrame()).toContain("Commits (5)");
+    expect(view.captureCharFrame()).toContain("5 commits");
 
     view.mockInput.pressKey("5");
     view.mockInput.pressKey("j");
     await view.flush();
     expect(runLoads).toBe(1);
-    expect(view.captureCharFrame()).toContain("Workflow runs (5)");
+    expect(view.captureCharFrame()).toContain("5 workflow runs");
   });
 
   test("keeps the selected row visible when the status bar changes", async () => {
@@ -243,12 +251,13 @@ describe("openGH TUI", () => {
     expect(selectedRow).toBeGreaterThan(-1);
 
     setOperations((value) => ({ ...value, refresh: { status: "loading" } }));
+    await Bun.sleep(210);
     await view.flush();
     const frame = view.captureCharFrame();
     expect(
       frame.split("\n").findIndex((row) => row.includes("commit row 12")),
     ).toBe(selectedRow);
-    expect(frame).toContain("Refreshing");
+    expect(frame).toContain("Refreshing…");
   });
 
   test("keeps one stable list while moving through paginated updates", async () => {
@@ -308,16 +317,184 @@ describe("openGH TUI", () => {
 
     const frame = view.captureCharFrame()
     expect(loads).toBe(2)
-    expect(frame.split("\n").filter((row) => row.includes("Issues  Open")).length).toBe(1)
+    expect(frame.split("\n").filter((row) => row.includes("Open (")).length).toBe(1)
     expect(frame.split("▌").length - 1).toBe(1)
     expect(frame).toContain("issue row 24")
   })
 
-  test("opens the branch picker and toggles work states", async () => {
-    const { view, branch } = await setup();
+  test("shows only repository documents that exist", async () => {
+    const data = {
+      ...githubDataFixture,
+      security: { status: "ready" as const, value: undefined },
+    };
+    const view = await testRender(
+      () => <App data={data} operations={repositoryOperationsFixture} onQuit={() => {}} />,
+      { width: 120, height: 32, useThread: false },
+    );
+    active.push(view);
+    await view.flush();
+
+    const frame = view.captureCharFrame();
+    expect(frame).toContain("README.md");
+    expect(frame).toContain("CONTRIBUTING.md");
+    expect(frame).not.toContain("SECURITY.md");
+    expect(frame).toContain("LICENSE");
+  });
+
+  test("uses a plain README heading when no other documents exist", async () => {
+    const data = {
+      ...githubDataFixture,
+      contributing: { status: "ready" as const, value: undefined },
+      security: { status: "ready" as const, value: undefined },
+      license: { status: "ready" as const, value: undefined },
+    };
+    const view = await testRender(
+      () => <App data={data} operations={repositoryOperationsFixture} onQuit={() => {}} />,
+      { width: 76, height: 24, useThread: false },
+    );
+    active.push(view);
+    await view.flush();
+
+    const frame = view.captureCharFrame();
+    expect(frame).toContain("README.md");
+    expect(frame).not.toContain("CONTRIBUTING.md");
+    expect(frame).not.toContain("SECURITY.md");
+    expect(frame).not.toContain("‹ README.md ›");
+  });
+
+  test("cycles overview documents in both directions", async () => {
+    const data = {
+      ...githubDataFixture,
+      contributing: {
+        status: "error" as const,
+        phase: "load" as const,
+        message: "Contributing unavailable",
+        value: githubDataFixture.contributing.value,
+      },
+      license: {
+        status: "error" as const,
+        phase: "load" as const,
+        message: "License unavailable",
+        value: githubDataFixture.license.value,
+      },
+    };
+    let retry = "";
+    const view = await testRender(
+      () => (
+        <App
+          data={data}
+          operations={repositoryOperationsFixture}
+          onRetryResource={(resource) => (retry = resource.kind)}
+        />
+      ),
+      { width: 120, height: 32, useThread: false },
+    );
+    active.push(view);
+    await view.flush();
+
+    view.mockInput.pressTab();
+    view.mockInput.pressKey("r");
+    await view.flush();
+    expect(retry).toBe("contributing");
+
+    retry = "";
+    view.mockInput.pressTab({ shift: true });
+    view.mockInput.pressTab({ shift: true });
+    view.mockInput.pressKey("r");
+    await view.flush();
+    expect(retry).toBe("license");
+  });
+
+  test("defaults to closed work when open is empty and closed has items", async () => {
+    const data = {
+      ...githubDataFixture,
+      issues: {
+        open: { status: "ready" as const, value: { items: [], page: 1, hasMore: false } },
+        closed: githubDataFixture.issues.closed,
+      },
+      pulls: {
+        open: { status: "ready" as const, value: { items: [], page: 1, hasMore: false } },
+        closed: githubDataFixture.pulls.closed,
+      },
+    };
+    const view = await testRender(
+      () => <App data={data} operations={repositoryOperationsFixture} onQuit={() => {}} />,
+      { width: 120, height: 32, useThread: false },
+    );
+    active.push(view);
+    await view.flush();
+
+    view.mockInput.pressKey("3");
+    await view.flush();
+    expect(view.captureCharFrame()).toContain("Fix terminal redraw after returning from background");
+    expect(view.captureCharFrame()).not.toContain("No open issues");
+
     view.mockInput.pressTab();
     await view.flush();
-    expect(view.captureCharFrame()).toContain("Switch branch");
+    expect(view.captureCharFrame()).toContain("No open issues");
+
+    view.mockInput.pressKey("4");
+    await view.flush();
+    expect(view.captureCharFrame()).toContain("fix: preserve selection after refresh");
+  });
+
+  test("shows branch counts only inside the branch picker", async () => {
+    const data = structuredClone(githubDataFixture)
+    data.branches.value = {
+      items: ["main", ...Array.from({ length: 99 }, (_, index) => `branch-${index}`)],
+      page: 1,
+      hasMore: true,
+    }
+    const [current, setCurrent] = createSignal(data)
+    const view = await testRender(
+      () => <App data={current} operations={repositoryOperationsFixture} onQuit={() => {}} />,
+      { width: 120, height: 32, useThread: false },
+    )
+    active.push(view)
+    await view.flush()
+    view.mockInput.pressKey("2")
+    await view.flush()
+
+    const commits = view.captureCharFrame()
+    expect(commits).toContain(" main ▾")
+    expect(commits).not.toContain("100+")
+    expect(commits).not.toContain("100 loaded")
+
+    view.mockInput.pressTab()
+    await view.flush()
+    expect(view.captureCharFrame()).toContain("Switch branch (100 loaded)")
+
+    setCurrent((value) => ({
+      ...value,
+      branches: {
+        status: "ready",
+        value: {
+          items: [...value.branches.value!.items, ...Array.from({ length: 100 }, (_, index) => `next-${index}`)],
+          page: 2,
+          hasMore: true,
+        },
+      },
+    }))
+    await view.flush()
+    expect(view.captureCharFrame()).toContain("Switch branch (200 loaded)")
+
+    setCurrent((value) => ({
+      ...value,
+      branches: { status: "ready", value: { ...value.branches.value!, hasMore: false } },
+    }))
+    await view.flush()
+    expect(view.captureCharFrame()).toContain("Switch branch (200 branches)")
+  })
+
+  test("opens the branch picker and toggles work states", async () => {
+    const { view, branch } = await setup();
+    view.mockInput.pressKey("2");
+    view.mockInput.pressTab();
+    await view.flush();
+    const branchFrame = view.captureCharFrame();
+    expect(branchFrame).toContain("Switch branch");
+    const currentBranchRow = branchFrame.split("\n").find((row) => row.includes("✓ current"));
+    expect(currentBranchRow).toContain("›");
     await view.mockInput.typeText("nxt");
     view.mockInput.pressEnter();
     await view.flush();
@@ -336,6 +513,31 @@ describe("openGH TUI", () => {
     expect(view.captureCharFrame()).toContain(
       "preserve selection after refresh",
     );
+  });
+
+  test("keeps help and branch overlays mutually exclusive", async () => {
+    const { view: branchView } = await setup();
+    branchView.mockInput.pressKey("2");
+    branchView.mockInput.pressTab();
+    await branchView.flush();
+    expect(branchView.captureCharFrame()).toContain("Switch branch");
+
+    branchView.mockInput.pressKey("?");
+    await branchView.flush();
+    expect(branchView.captureCharFrame()).toContain("Switch branch");
+    expect(branchView.captureCharFrame()).not.toContain("half-page up / down");
+
+    const { view: helpView } = await setup();
+    helpView.mockInput.pressKey("2");
+    helpView.mockInput.pressKey("?");
+    helpView.mockInput.pressTab();
+    await helpView.flush();
+    expect(helpView.captureCharFrame()).toContain("half-page up / down");
+    expect(helpView.captureCharFrame()).not.toContain("Switch branch");
+
+    helpView.mockInput.pressKey("?");
+    await helpView.flush();
+    expect(helpView.captureCharFrame()).not.toContain("half-page up / down");
   });
 
   test("retries the active failed resource", async () => {
@@ -376,13 +578,56 @@ describe("openGH TUI", () => {
     const { view, quit, refresh } = await setup();
     view.mockInput.pressKey("?");
     await view.flush();
-    expect(view.captureCharFrame()).toContain("Keyboard shortcuts");
+    const help = view.captureCharFrame();
+    expect(help).toContain("Help");
+    expect(help).toContain("u/d");
+    expect(help).toContain("half-page up / down");
+    expect(help).toContain("Tab / ⇧Tab");
+    expect(help).toContain("cycle view options");
+    expect(help).not.toContain("Navigation");
+    expect(help).not.toContain("Current view");
+    expect(help).not.toContain("Application");
+    expect(help).toContain("q / Ctrl-C");
+    expect(help).toContain("quit");
+    expect(help).toContain("README.md");
     view.mockInput.pressKey("?");
     view.mockInput.pressKey("r");
     view.mockInput.pressKey("q");
     await view.flush();
     expect(refresh()).toBe(1);
     expect(quit()).toBe(1);
+  });
+
+  test("formats About metadata compactly", async () => {
+    const data = {
+      ...githubDataFixture,
+      repo: {
+        ...githubDataFixture.repo,
+        description: "Qdrant — High-performance vector search. Also available at https://cloud.example.com/path/",
+        language: "Rust",
+        stars: 35_000,
+        forks: 2_700,
+        watchers: 166,
+        license: "Apache-2.0",
+      },
+    };
+    const view = await testRender(
+      () => <App data={data} operations={repositoryOperationsFixture} onQuit={() => {}} />,
+      { width: 120, height: 32, useThread: false },
+    );
+    active.push(view);
+    await view.flush();
+
+    const frame = view.captureCharFrame();
+    expect(frame).toContain("cloud.example.com/path");
+    expect(frame).not.toContain("https://cloud.example.com");
+    expect(frame).toContain("Language");
+    expect(frame).not.toContain("REPOSITORY");
+    expect(frame).toContain("★ 35k stars");
+    expect(frame).toContain("⑂ 2.7k forks");
+    expect(frame).toContain("◉ 166 watching");
+    expect(frame).toContain("License");
+    expect(frame).toContain("Apache-2.0");
   });
 
   test("adapts to a narrow terminal", async () => {
@@ -399,5 +644,11 @@ describe("openGH TUI", () => {
     active.push(view);
     await view.flush();
     expect(view.captureCharFrame()).toContain("About");
+    expect(view.captureCharFrame()).toContain("‹ README.md ›");
+    expect(view.captureCharFrame()).not.toContain("CONTRIBUTING.md");
+
+    view.mockInput.pressTab();
+    await view.flush();
+    expect(view.captureCharFrame()).toContain("‹ CONTRIBUTING.md ›");
   });
 });

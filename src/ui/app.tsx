@@ -4,17 +4,25 @@ import { createEffect, createMemo, createSignal, Show } from "solid-js"
 import type { Config } from "../config"
 import type { ListState } from "../models"
 import { back, navigate, type NavigationState, type Page } from "../navigation"
-import type { RepositoryData, RepositoryOperations, RepositoryResource, ResourceState } from "../repository-state"
+import type {
+  RepositoryData,
+  RepositoryDocumentKind,
+  RepositoryOperations,
+  RepositoryResource,
+  ResourceState,
+} from "../repository-state"
 import { BranchPicker } from "./components/branch-picker"
 import { Header } from "./components/header"
 import { Help } from "./components/help"
 import { StatusBar, type StatusKind } from "./components/status-bar"
 import { ActionsScreen } from "./pages/actions"
 import { CommitsScreen } from "./pages/commits"
-import { OverviewScreen } from "./pages/overview"
+import { OverviewScreen, type OverviewDocument } from "./pages/overview"
 import { WorkScreen } from "./pages/work"
 import { tabs } from "./tabs"
 import { colors } from "./theme"
+
+type Overlay = "help" | "branch-picker"
 
 export type AppProps = {
   data: RepositoryData | (() => RepositoryData)
@@ -24,6 +32,7 @@ export type AppProps = {
   onRefresh?: () => void
   onRetryResource?: (resource: RepositoryResource) => void
   onBranchChange?: (branch: string) => void
+  onLoadMoreBranches?: () => Promise<void>
   onLoadMoreCommits?: () => Promise<void>
   onLoadMoreRuns?: () => Promise<void>
   onLoadMoreIssues?: (state: ListState) => Promise<void>
@@ -36,9 +45,12 @@ export function App(props: AppProps) {
   const [navigation, setNavigation] = createSignal<NavigationState>({ page: "overview" })
   const [issueState, setIssueState] = createSignal<ListState>("open")
   const [pullState, setPullState] = createSignal<ListState>("open")
-  const [branchPicker, setBranchPicker] = createSignal(false)
-  const [help, setHelp] = createSignal(false)
+  const [overviewDocument, setOverviewDocument] = createSignal<RepositoryDocumentKind>("readme")
+  const [overlay, setOverlay] = createSignal<Overlay>()
   let overviewScroll: ScrollBoxRenderable | undefined
+  let defaultStateRepository: string | undefined
+  let issueDefaultResolved = false
+  let pullDefaultResolved = false
 
   const data = () => typeof props.data === "function" ? props.data() : props.data
   const operations = () => typeof props.operations === "function" ? props.operations() : props.operations
@@ -59,8 +71,24 @@ export function App(props: AppProps) {
       ? tabs.filter((tab) => tab.page !== "actions")
       : tabs
   }
+  const documentResource = (kind: RepositoryDocumentKind) => data()[kind]
+  const overviewDocuments = (): OverviewDocument[] => {
+    const current = data()
+    return [
+      { kind: "readme", label: "README.md", resource: current.readme },
+      ...(current.contributing.value === undefined
+        ? []
+        : [{ kind: "contributing" as const, label: "CONTRIBUTING.md", resource: current.contributing }]),
+      ...(current.security.value === undefined
+        ? []
+        : [{ kind: "security" as const, label: "SECURITY.md", resource: current.security }]),
+      ...(current.license.value === undefined
+        ? []
+        : [{ kind: "license" as const, label: "LICENSE", resource: current.license }]),
+    ]
+  }
   const activeResource = (): ResourceState<unknown> | undefined => {
-    if (page() === "overview") return data().readme
+    if (page() === "overview") return documentResource(overviewDocument())
     if (page() === "commits") return data().commits
     if (page() === "issues") return issues()
     if (page() === "pulls") return pulls()
@@ -68,7 +96,7 @@ export function App(props: AppProps) {
     return undefined
   }
   const retryTarget = (): RepositoryResource | undefined => {
-    if (page() === "overview") return { kind: "readme" }
+    if (page() === "overview") return { kind: overviewDocument() }
     if (page() === "commits") return { kind: "commits" }
     if (page() === "issues") return { kind: "issues", state: issueState() }
     if (page() === "pulls") return { kind: "pulls", state: pullState() }
@@ -83,13 +111,56 @@ export function App(props: AppProps) {
     if (current.branch.status === "loading") return "switching-branch"
     const resource = activeResource()
     if (resource?.status === "error") return resource.phase === "pagination" ? "load-more-error" : "resource-error"
-    if (resource?.status === "loading") return resource.phase === "pagination" ? "loading-more" : "loading-resource"
+    if (resource?.status === "loading") {
+      if (resource.phase === "pagination") return "loading-more"
+      return resource.value === undefined ? undefined : "loading-resource"
+    }
+    return undefined
+  }
+  const statusDetail = () => {
+    if (page() === "overview")
+      return overviewDocuments().find((document) => document.kind === overviewDocument())?.label ?? "document"
+    if (page() === "commits") return "commits"
+    if (page() === "issues") return `${issueState()} issues`
+    if (page() === "pulls") return `${pullState()} pull requests`
+    if (page() === "actions") return "workflow runs"
     return undefined
   }
   const status = createMemo(statusKind)
 
   createEffect(() => {
+    const current = data()
+    const repository = current.repo.nameWithOwner
+    if (defaultStateRepository !== repository) {
+      defaultStateRepository = repository
+      issueDefaultResolved = false
+      pullDefaultResolved = false
+      setIssueState("open")
+      setPullState("open")
+    }
+
+    if (!issueDefaultResolved && current.issues.open.status === "ready" && current.issues.closed.status === "ready") {
+      issueDefaultResolved = true
+      if (current.issues.open.value.items.length === 0 && current.issues.closed.value.items.length > 0)
+        setIssueState("closed")
+    }
+
+    if (!pullDefaultResolved && current.pulls.open.status === "ready" && current.pulls.closed.status === "ready") {
+      pullDefaultResolved = true
+      if (current.pulls.open.value.items.length === 0 && current.pulls.closed.value.items.length > 0)
+        setPullState("closed")
+    }
+  })
+
+  createEffect(() => {
     if (!visibleTabs().some((tab) => tab.page === page())) setNavigation((state) => navigate(state, "pulls"))
+  })
+
+  createEffect(() => {
+    if (!overviewDocuments().some((document) => document.kind === overviewDocument())) {
+      setOverviewDocument("readme")
+      overviewScroll?.scrollTo(0)
+    }
   })
 
   const selectPage = (next: Page) => setNavigation((state) => navigate(state, next))
@@ -98,20 +169,28 @@ export function App(props: AppProps) {
     const current = Math.max(0, available.findIndex((tab) => tab.page === page()))
     selectPage(available[(current + delta + available.length) % available.length]!.page)
   }
+  const moveOverviewDocument = (delta: number) => {
+    const available = overviewDocuments()
+    const current = Math.max(0, available.findIndex((document) => document.kind === overviewDocument()))
+    setOverviewDocument(available[(current + delta + available.length) % available.length]!.kind)
+    overviewScroll?.scrollTo(0)
+  }
   const quit = () => props.onQuit ? props.onQuit() : renderer.destroy()
 
   useKeyboard((event) => {
     if (event.ctrl && event.name === "c") return quit()
-    if (branchPicker()) {
-      if (event.name === "escape" || event.name === "esc" || event.raw === "\u001b" || event.sequence === "\u001b")
-        setBranchPicker(false)
+    const escape = event.name === "escape" || event.name === "esc" || event.raw === "\u001b" || event.sequence === "\u001b"
+    if (overlay() === "branch-picker") {
+      if (escape) setOverlay()
       return
     }
     if (event.name === "q") return quit()
-    if (event.name === "?" || (help() && (event.name === "escape" || event.name === "esc")))
-      return setHelp((value) => !value)
-    if (help()) return
-    if ((event.name === "escape" || event.name === "esc") && navigation().detail)
+    if (overlay() === "help") {
+      if (event.name === "?" || escape) setOverlay()
+      return
+    }
+    if (event.name === "?") return setOverlay("help")
+    if (escape && navigation().detail)
       return setNavigation(back)
     if (event.name >= "1" && event.name <= "5") {
       const target = visibleTabs()[Number(event.name) - 1]
@@ -121,10 +200,12 @@ export function App(props: AppProps) {
     if (event.name === "left" || event.name === "h") return movePage(-1)
     if (event.name === "right" || event.name === "l") return movePage(1)
     if (event.name === "tab") {
-      if (page() === "overview" || page() === "commits") {
+      if (page() === "overview") {
+        moveOverviewDocument(event.shift ? -1 : 1)
+      } else if (page() === "commits") {
         const branches = data().branches
-        if (branches.status === "error") props.onRetryResource?.({ kind: "branches" })
-        if (branches.value) setBranchPicker(true)
+        if (branches.status === "error" && branches.phase === "load") props.onRetryResource?.({ kind: "branches" })
+        if (branches.value) setOverlay("branch-picker")
       } else if (page() === "issues") {
         setIssueState((value) => value === "open" ? "closed" : "open")
       } else if (page() === "pulls") {
@@ -156,12 +237,11 @@ export function App(props: AppProps) {
   return (
     <box width={dimensions().width} height={dimensions().height} flexDirection="column" backgroundColor={colors.canvas}>
       <Header repo={data().repo} page={page()} tabs={visibleTabs()} />
-      <Show when={!help()} fallback={<Help />}>
-        <box visible={page() === "overview"} flexGrow={1} minHeight={0}>
+      <box visible={page() === "overview"} flexGrow={1} minHeight={0}>
           <OverviewScreen
             repo={data().repo}
-            currentBranch={data().currentBranch}
-            readme={data().readme}
+            documents={overviewDocuments()}
+            currentDocument={overviewDocument()}
             showScrollbar={props.config?.showScrollbars ?? false}
             scrollRef={(value) => (overviewScroll = value)}
           />
@@ -170,9 +250,8 @@ export function App(props: AppProps) {
           <CommitsScreen
             commits={data().commits}
             currentBranch={data().currentBranch}
-            branchCount={data().branches.value?.length ?? 1}
             active={page() === "commits"}
-            interactive={!help() && !branchPicker()}
+            interactive={overlay() === undefined}
             showScrollbar={props.config?.showScrollbars ?? false}
             onEndReached={() => {
               const commits = data().commits
@@ -188,7 +267,7 @@ export function App(props: AppProps) {
             counts={issueCounts()}
             resource={issues()}
             active={page() === "issues"}
-            interactive={!help() && !branchPicker()}
+            interactive={overlay() === undefined}
             showScrollbar={props.config?.showScrollbars ?? false}
             onEndReached={() => {
               const resource = issues()
@@ -204,7 +283,7 @@ export function App(props: AppProps) {
             counts={pullCounts()}
             resource={pulls()}
             active={page() === "pulls"}
-            interactive={!help() && !branchPicker()}
+            interactive={overlay() === undefined}
             showScrollbar={props.config?.showScrollbars ?? false}
             onEndReached={() => {
               const resource = pulls()
@@ -217,7 +296,7 @@ export function App(props: AppProps) {
             <ActionsScreen
               runs={data().runs}
               active={page() === "actions"}
-              interactive={!help() && !branchPicker()}
+              interactive={overlay() === undefined}
               showScrollbar={props.config?.showScrollbars ?? false}
               onEndReached={() => {
                 const runs = data().runs
@@ -226,18 +305,20 @@ export function App(props: AppProps) {
             />
           </box>
         </Show>
-      </Show>
-      <StatusBar kind={status()} />
-      <Show when={branchPicker() && data().branches.value}>
+      <StatusBar kind={status()} detail={statusDetail()} />
+      <Show when={overlay() === "help"}><Help /></Show>
+      <Show when={overlay() === "branch-picker" && data().branches.value}>
         <BranchPicker
-          branches={data().branches.value ?? []}
+          branches={data().branches}
           current={data().currentBranch}
           showScrollbar={props.config?.showScrollbars ?? false}
-          onClose={() => setBranchPicker(false)}
+          onLoadMore={props.onLoadMoreBranches ?? (() => Promise.resolve())}
+          onRetry={() => props.onRetryResource?.({ kind: "branches" })}
+          onClose={() => setOverlay()}
           onSelect={(branch) => {
             props.onBranchChange?.(branch)
             overviewScroll?.scrollTo(0)
-            setBranchPicker(false)
+            setOverlay()
           }}
         />
       </Show>

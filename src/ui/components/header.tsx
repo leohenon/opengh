@@ -10,7 +10,7 @@ export function Header(props: {
   tabs: ReadonlyArray<{ page: Page; label: string }>
 }) {
   return (
-    <box flexDirection="column" flexShrink={0} backgroundColor={colors.panel}>
+    <box flexDirection="column" flexShrink={0} backgroundColor={colors.header}>
       <box
         height={3}
         flexDirection="row"
@@ -19,23 +19,33 @@ export function Header(props: {
         paddingRight={2}
         gap={1}
       >
-        <text fg={colors.blue} attributes={TextAttributes.BOLD}>
-          {props.repo.nameWithOwner}
-        </text>
+        <box flexDirection="row">
+          <text fg={colors.muted}>
+            {props.repo.nameWithOwner.split("/")[0]}/
+          </text>
+          <text fg={colors.blue} attributes={TextAttributes.BOLD}>
+            {props.repo.nameWithOwner.split("/").slice(1).join("/")}
+          </text>
+        </box>
         <box flexGrow={1} />
       </box>
       <box height={2} flexDirection="row" paddingLeft={2} gap={3}>
         <For each={props.tabs}>
-          {(tab, index) => (
-            <text
-              fg={props.page === tab.page ? colors.text : colors.muted}
-              attributes={props.page === tab.page
-                ? TextAttributes.BOLD | TextAttributes.UNDERLINE
-                : TextAttributes.NONE}
-            >
-              {index() + 1} {tab.label}
-            </text>
-          )}
+          {(tab, index) => {
+            const active = () => props.page === tab.page
+            const label = () => `${index() + 1} ${tab.label}`
+            return (
+              <box height={2} flexDirection="column">
+                <text
+                  fg={active() ? colors.text : colors.muted}
+                  attributes={active() ? TextAttributes.BOLD : TextAttributes.NONE}
+                >
+                  {label()}
+                </text>
+                <text fg={colors.salmon}>{active() ? "─".repeat(label().length) : " ".repeat(label().length)}</text>
+              </box>
+            )
+          }}
         </For>
       </box>
     </box>
