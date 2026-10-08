@@ -54,11 +54,16 @@ export function SelectableList<T>(props: {
     const current = indexOfSelection()
     selectIndex((current < 0 ? 0 : current) + delta)
   }
+  const halfPage = () => Math.max(1, Math.floor(listHeight() / rowHeight() / 2))
 
   useKeyboard((event) => {
     if (!props.active) return
     if (event.name === "up" || event.name === "k") move(-1)
     else if (event.name === "down" || event.name === "j") move(1)
+    else if (event.name === "u") move(-halfPage())
+    else if (event.name === "d") move(halfPage())
+    else if (event.name === "G" || (event.name === "g" && event.shift)) selectIndex(props.items.length - 1)
+    else if (event.name === "g") selectIndex(0)
   })
 
   createEffect(() => {

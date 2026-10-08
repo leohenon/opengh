@@ -20,6 +20,8 @@ export function Help() {
         </text>
         <text fg={colors.muted}>1–4/5 / h l / ← → switch tabs</text>
         <text fg={colors.muted}>j k / ↑ ↓ move selection</text>
+        <text fg={colors.muted}>g / G jump to top / bottom</text>
+        <text fg={colors.muted}>u / d move half a page</text>
         <text fg={colors.muted}>Tab branch / open-closed view</text>
         <text fg={colors.muted}>r refresh live data</text>
         <text fg={colors.muted}>? toggle this help</text>

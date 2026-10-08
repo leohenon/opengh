@@ -15,7 +15,7 @@ describe("SelectableList", () => {
   test("renders only complete rows for its measured viewport", async () => {
     const items = Array.from({ length: 8 }, (_, id) => ({ id, label: `row ${id}` }))
     const view = await testRender(() => (
-      <box width={50} height={11}>
+      <box width={50} height={17}>
         <SelectableList
           items={items}
           itemKey={(item) => item.id}
@@ -26,11 +26,11 @@ describe("SelectableList", () => {
           {(item) => <text>{item().label}</text>}
         </SelectableList>
       </box>
-    ), { width: 50, height: 11, useThread: false })
+    ), { width: 50, height: 17, useThread: false })
     active.push(view)
     await view.flush()
 
-    expect(visibleRows(view.captureCharFrame())).toHaveLength(2)
+    expect(visibleRows(view.captureCharFrame())).toHaveLength(4)
 
     for (let index = 0; index < 4; index++) {
       view.mockInput.pressKey("j")
@@ -38,8 +38,24 @@ describe("SelectableList", () => {
     }
 
     const frame = view.captureCharFrame()
-    expect(visibleRows(frame)).toHaveLength(2)
+    expect(visibleRows(frame)).toHaveLength(4)
     expect(frame).toContain("row 4")
     expect(frame.split("▌").length - 1).toBe(1)
+
+    view.mockInput.pressKey("g", { shift: true })
+    await view.flush()
+    expect(view.captureCharFrame()).toContain("row 7")
+
+    view.mockInput.pressKey("g")
+    await view.flush()
+    expect(view.captureCharFrame()).toContain("row 0")
+
+    view.mockInput.pressKey("d")
+    await view.flush()
+    expect(view.captureCharFrame().split("\n").find((row) => row.includes("row 2"))).toContain("▌")
+
+    view.mockInput.pressKey("u")
+    await view.flush()
+    expect(view.captureCharFrame().split("\n").find((row) => row.includes("row 0"))).toContain("▌")
   })
 })

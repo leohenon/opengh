@@ -132,6 +132,15 @@ export function App(props: AppProps) {
       }
       return
     }
+    if (page() === "overview" && (event.name === "G" || (event.name === "g" && event.shift))) {
+      if (overviewScroll) overviewScroll.scrollTo(Math.max(0, overviewScroll.scrollHeight - overviewScroll.viewport.height))
+      return
+    }
+    if (page() === "overview" && event.name === "g") return overviewScroll?.scrollTo(0)
+    if (page() === "overview" && event.name === "u")
+      return overviewScroll?.scrollBy(-Math.max(1, Math.floor((overviewScroll.viewport.height ?? 1) / 2)))
+    if (page() === "overview" && event.name === "d")
+      return overviewScroll?.scrollBy(Math.max(1, Math.floor((overviewScroll.viewport.height ?? 1) / 2)))
     if ((event.name === "up" || event.name === "k") && page() === "overview")
       return overviewScroll?.scrollBy(-1)
     if ((event.name === "down" || event.name === "j") && page() === "overview")
