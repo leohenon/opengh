@@ -1,4 +1,4 @@
-import { render } from "@opentui/solid"
+import { render, useKeyboard, useRenderer } from "@opentui/solid"
 import { createSignal, Match, onMount, Show, Switch } from "solid-js"
 import { defaultConfig, loadConfig } from "./config"
 import { loadRecentRepositories, rememberRepository, resolveRepository } from "./github/repository"
@@ -12,7 +12,7 @@ import {
   ResolvingRepository,
 } from "./ui/launcher"
 
-const explicitRepository = process.argv[2] && !process.argv[2].startsWith("-")
+const repositoryArgument = process.argv[2] && !process.argv[2].startsWith("-")
   ? process.argv[2]
   : undefined
 
@@ -22,11 +22,21 @@ type LoadingState = Extract<RepositoryState, { status: "loading" }>
 type ErrorState = Extract<RepositoryState, { status: "error" }>
 
 function Root() {
+  const renderer = useRenderer()
   const [view, setView] = createSignal<View>("resolving")
   const [recent, setRecent] = createSignal<string[]>([])
   const [pickerError, setPickerError] = createSignal("")
   const [config, setConfig] = createSignal(defaultConfig)
   const session = createRepositorySession()
+
+  const quit = () => {
+    renderer.destroy()
+    process.exit(0)
+  }
+
+  useKeyboard((event) => {
+    if (event.ctrl && event.name === "c") quit()
+  })
 
   const open = (repository: string) => {
     setView("repository")
@@ -36,14 +46,15 @@ function Root() {
 
   onMount(() => {
     void Promise.all([
-      resolveRepository(explicitRepository, process.cwd()),
+      resolveRepository(repositoryArgument, process.cwd()),
       loadRecentRepositories(),
       loadConfig(),
     ]).then(([resolved, repositories, loadedConfig]) => {
       setRecent(repositories)
       setConfig(loadedConfig)
       if (resolved) return open(resolved)
-      if (explicitRepository) setPickerError(`Could not parse “${explicitRepository}” as owner/repository`)
+      if (repositoryArgument === ".") setPickerError("Could not resolve a GitHub repository from the current directory")
+      else if (repositoryArgument) setPickerError(`Could not parse “${repositoryArgument}” as owner/repository`)
       setView("picker")
     })
   })
@@ -52,7 +63,7 @@ function Root() {
     <Show
       when={view() === "repository"}
       fallback={
-        <Show when={view() === "resolving"} fallback={<RepositoryPicker recent={recent()} error={pickerError()} onOpen={open} />}>
+        <Show when={view() === "resolving"} fallback={<RepositoryPicker recent={recent()} error={pickerError()} onOpen={open} onQuit={quit} />}>
           <ResolvingRepository />
         </Show>
       }
@@ -67,6 +78,7 @@ function Root() {
               repository={current().repository}
               message={current().message}
               onRetry={() => void session.load(current().repository)}
+              onQuit={quit}
             />
           )}
         </Match>
@@ -76,6 +88,7 @@ function Root() {
               data={() => current().data}
               operations={() => current().operations}
               config={config()}
+              onQuit={quit}
               onRefresh={() => void session.refresh()}
               onRetryResource={(resource) => void session.retryResource(resource)}
               onBranchChange={(branch) => void session.switchBranch(branch)}

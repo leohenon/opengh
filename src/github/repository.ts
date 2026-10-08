@@ -36,11 +36,13 @@ export async function repositoryFromDirectory(
 }
 
 export async function resolveRepository(
-  explicit: string | undefined,
+  argument: string | undefined,
   cwd: string,
+  fromDirectory = repositoryFromDirectory,
 ) {
-  if (explicit) return normalizeRepository(explicit);
-  return repositoryFromDirectory(cwd);
+  if (!argument) return undefined;
+  if (argument === ".") return fromDirectory(cwd);
+  return normalizeRepository(argument);
 }
 
 export function recentRepositoriesPath() {

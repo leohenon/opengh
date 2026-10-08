@@ -3,6 +3,9 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
+  "bin": {
+    "opengh": "bin/opengh.ts"
+  },
   "scripts": {
     "dev": "bun --watch src/index.tsx",
     "start": "bun src/index.tsx",

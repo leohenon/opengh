@@ -64,14 +64,15 @@ export function RepositoryLoadError(props: {
   repository: string;
   message: string;
   onRetry: () => void;
+  onQuit?: () => void;
 }) {
   const dimensions = useTerminalDimensions();
   const renderer = useRenderer();
+  const quit = () => props.onQuit ? props.onQuit() : renderer.destroy();
 
   useKeyboard((event) => {
     if (event.name === "r") return props.onRetry();
-    if ((event.ctrl && event.name === "c") || event.name === "q")
-      renderer.destroy();
+    if ((event.ctrl && event.name === "c") || event.name === "q") quit();
   });
 
   return (
@@ -110,9 +111,11 @@ export function RepositoryPicker(props: {
   recent: string[];
   error?: string;
   onOpen: (repository: string) => void;
+  onQuit?: () => void;
 }) {
   const dimensions = useTerminalDimensions();
   const renderer = useRenderer();
+  const quit = () => props.onQuit ? props.onQuit() : renderer.destroy();
   const [value, setValue] = createSignal("");
   const [error, setError] = createSignal(props.error ?? "");
 
@@ -124,9 +127,9 @@ export function RepositoryPicker(props: {
   };
 
   useKeyboard((event) => {
-    if (event.ctrl && event.name === "c") return renderer.destroy();
+    if (event.ctrl && event.name === "c") return quit();
     if ((event.name === "escape" || event.name === "esc") && !value())
-      return renderer.destroy();
+      return quit();
     const index = Number(event.name) - 1;
     if (!value() && index >= 0 && index < props.recent.length)
       open(props.recent[index]);

@@ -13,8 +13,24 @@ describe("repository resolution", () => {
     expect(await resolveRepository("cli/cli", "/path/that/does/not/exist")).toBe("cli/cli")
   })
 
-  test("returns no repository outside a GitHub checkout", async () => {
-    expect(await resolveRepository(undefined, "/tmp")).toBeUndefined()
+  test("no argument opens the repository picker without inspecting the directory", async () => {
+    let inspectedDirectory = false
+    const resolved = await resolveRepository(undefined, "/repo", async () => {
+      inspectedDirectory = true
+      return "cli/cli"
+    })
+
+    expect(resolved).toBeUndefined()
+    expect(inspectedDirectory).toBe(false)
+  })
+
+  test("a dot resolves the repository from the current directory", async () => {
+    const resolved = await resolveRepository(".", "/repo", async (cwd) => {
+      expect(cwd).toBe("/repo")
+      return "cli/cli"
+    })
+
+    expect(resolved).toBe("cli/cli")
   })
 
   test("stores unique recent repositories in newest-first order", async () => {
