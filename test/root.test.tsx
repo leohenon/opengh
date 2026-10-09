@@ -55,7 +55,10 @@ describe("application root", () => {
     const picker = view.captureCharFrame()
     expect(picker).toContain("Open a GitHub repository")
     expect(picker).toContain("cli / cli")
-    expect(picker).toContain("Could not resolve a GitHub repository")
+    expect(picker).toContain("No GitHub repository found")
+
+    view.mockInput.pressCtrlC()
+    expect(view.renderer.isDestroyed).toBe(true)
   })
 
   test("continues startup with defaults when config loading fails", async () => {

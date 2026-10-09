@@ -16,6 +16,7 @@ import { Header } from "./components/header"
 import { Help } from "./components/help"
 import { Settings } from "./components/settings"
 import { StatusBar, type StatusKind } from "./components/status-bar"
+import { Toast } from "./components/toast"
 import { ActionsScreen } from "./pages/actions"
 import { CommitsScreen } from "./pages/commits"
 import { OverviewScreen, type OverviewDocument } from "./pages/overview"
@@ -24,6 +25,7 @@ import { tabs } from "./tabs"
 import { colors } from "./theme"
 
 type Overlay = "help" | "branch-picker" | "settings"
+type ToastState = { id: number; title: string; message: string; duration?: number }
 
 export type AppProps = {
   data: RepositoryData | (() => RepositoryData)
@@ -49,6 +51,8 @@ export function App(props: AppProps) {
   const [pullState, setPullState] = createSignal<ListState>("open")
   const [overviewDocument, setOverviewDocument] = createSignal<RepositoryDocumentKind>("readme")
   const [overlay, setOverlay] = createSignal<Overlay>()
+  const [toast, setToast] = createSignal<ToastState>()
+  let toastId = 0
   let overviewScroll: ScrollBoxRenderable | undefined
   let defaultStateRepository: string | undefined
   let issueDefaultResolved = false
@@ -107,19 +111,90 @@ export function App(props: AppProps) {
   }
   const statusKind = (): StatusKind | undefined => {
     const current = operations()
-    if (current.refresh.status === "error") return "refresh-error"
-    if (current.branch.status === "error") return "branch-error"
     if (current.refresh.status === "loading") return "refreshing"
     if (current.branch.status === "loading") return "switching-branch"
     const resource = activeResource()
-    if (resource?.status === "error") return resource.phase === "pagination" ? "load-more-error" : "resource-error"
     if (resource?.status === "loading") {
       if (resource.phase === "pagination") return "loading-more"
       return resource.value === undefined ? undefined : "loading-resource"
     }
     return undefined
   }
+  const statusDetail = () => {
+    if (page() === "overview")
+      return overviewDocuments().find((document) => document.kind === overviewDocument())?.label ?? "document"
+    if (page() === "commits") return "commits"
+    if (page() === "issues") return `${issueState()} issues`
+    if (page() === "pulls") return `${pullState()} pull requests`
+    if (page() === "actions") return "workflow runs"
+    return undefined
+  }
   const status = createMemo(statusKind)
+  const paginationSource = () => {
+    if (page() === "commits") return "pagination:commits"
+    if (page() === "issues") return `pagination:issues:${issueState()}`
+    if (page() === "pulls") return `pagination:pulls:${pullState()}`
+    if (page() === "actions") return "pagination:runs"
+    return undefined
+  }
+  const activeResourceSource = () => {
+    if (page() === "overview") return `resource:overview:${overviewDocument()}`
+    if (page() === "commits") return "resource:commits"
+    if (page() === "issues") return `resource:issues:${issueState()}`
+    if (page() === "pulls") return `resource:pulls:${pullState()}`
+    if (page() === "actions") return "resource:runs"
+    return undefined
+  }
+  const shownFailures = new Map<string, string>()
+
+  createEffect(() => {
+    const current = data()
+    const currentOperations = operations()
+    const failures = new Map<string, string>()
+    if (currentOperations.refresh.status === "error") failures.set("refresh", currentOperations.refresh.message)
+    if (currentOperations.branch.status === "error") failures.set("branch", currentOperations.branch.message)
+
+    const paginationResources: Array<[string, ResourceState<unknown>]> = [
+      ["pagination:commits", current.commits],
+      ["pagination:runs", current.runs],
+      ["pagination:issues:open", current.issues.open],
+      ["pagination:issues:closed", current.issues.closed],
+      ["pagination:pulls:open", current.pulls.open],
+      ["pagination:pulls:closed", current.pulls.closed],
+    ]
+    for (const [source, resource] of paginationResources) {
+      if (resource.status === "error" && resource.phase === "pagination") failures.set(source, resource.message)
+    }
+    const active = activeResource()
+    const resourceSource = activeResourceSource()
+    if (resourceSource && active?.status === "error" && active.phase === "load" && active.value !== undefined)
+      failures.set(resourceSource, active.message)
+    for (const [source, message] of shownFailures) {
+      if (failures.get(source) !== message) shownFailures.delete(source)
+    }
+
+    let source: string | undefined
+    let title: string | undefined
+    if (failures.has("refresh")) {
+      source = "refresh"
+      title = "Refresh failed"
+    } else if (failures.has("branch")) {
+      source = "branch"
+      title = "Branch switch failed"
+    } else {
+      source = activeResourceSource()
+      if (source && failures.has(source)) title = `Refresh failed — ${statusDetail()}`
+      else {
+        source = paginationSource()
+        if (source && failures.has(source)) title = `Load more failed — ${statusDetail()}`
+      }
+    }
+
+    if (!source || !title || shownFailures.has(source)) return
+    const message = failures.get(source) ?? "Unknown error"
+    shownFailures.set(source, message)
+    setToast({ id: ++toastId, title, message })
+  })
 
   createEffect(() => {
     const current = data()
@@ -300,7 +375,17 @@ export function App(props: AppProps) {
             />
           </box>
         </Show>
-      <StatusBar kind={status()} />
+      <StatusBar kind={status()} detail={statusDetail()} />
+      <Show when={toast()} keyed>
+        {(current) => (
+          <Toast
+            title={current.title}
+            message={current.message}
+            duration={current.duration}
+            onDismiss={() => setToast((value) => value?.id === current.id ? undefined : value)}
+          />
+        )}
+      </Show>
       <Show when={overlay() === "help"}><Help /></Show>
       <Show when={overlay() === "settings"}>
         <Settings

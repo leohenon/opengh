@@ -17,7 +17,7 @@ export function ResourceStateView<T>(props: {
             fallback={<LoadingText text="Loading…" />}
           >
             <text fg={colors.red}>
-              × {props.resource.status === "error" ? props.resource.message : "Could not load"} · press r to retry
+              × {props.resource.status === "error" ? props.resource.message : "Load failed"} · r to retry
             </text>
           </Show>
         </box>

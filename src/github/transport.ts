@@ -15,6 +15,8 @@ export type GitHubTransport = {
   text(path: string, accept?: string): Promise<string>
 }
 
+const REQUEST_TIMEOUT_MS = 20_000
+
 function httpStatus(message: string) {
   const match = message.match(/HTTP\s+(\d{3})/i)
   return match ? Number(match[1]) : undefined
@@ -24,16 +26,27 @@ async function request(path: string, accept?: string) {
   const args = ["gh", "api", path]
   if (accept) args.push("-H", `Accept: ${accept}`)
   const process = Bun.spawn(args, { stdout: "pipe", stderr: "pipe" })
-  const [output, error, code] = await Promise.all([
-    new Response(process.stdout).text(),
-    new Response(process.stderr).text(),
-    process.exited,
-  ])
-  if (code !== 0) {
-    const message = error.trim() || `gh api failed (${code})`
-    throw new GitHubApiError(path, message, httpStatus(message))
+  let timedOut = false
+  const timeout = setTimeout(() => {
+    timedOut = true
+    process.kill()
+  }, REQUEST_TIMEOUT_MS)
+
+  try {
+    const [output, error, code] = await Promise.all([
+      new Response(process.stdout).text(),
+      new Response(process.stderr).text(),
+      process.exited,
+    ])
+    if (timedOut) throw new GitHubApiError(path, "Request timed out")
+    if (code !== 0) {
+      const message = error.trim() || `gh api failed (${code})`
+      throw new GitHubApiError(path, message, httpStatus(message))
+    }
+    return output
+  } finally {
+    clearTimeout(timeout)
   }
-  return output
 }
 
 export const githubTransport: GitHubTransport = {

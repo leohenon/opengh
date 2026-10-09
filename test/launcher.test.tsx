@@ -29,18 +29,34 @@ describe("repository launcher", () => {
     expect(frame).not.toContain("anomalyco/opentui")
   })
 
-  test("shows load failures and retries", async () => {
+  test("shows the borderless load failure and preserves retry and quit", async () => {
     let retries = 0
+    let quits = 0
     const view = await testRender(
-      () => <RepositoryLoadError repository="cli/cli" message="API unavailable" onRetry={() => retries++} />,
+      () => (
+        <RepositoryLoadError
+          repository="cli/cli"
+          message="API unavailable"
+          onRetry={() => retries++}
+          onQuit={() => quits++}
+        />
+      ),
       { width: 80, height: 24, useThread: false },
     )
     active.push(view)
     await view.flush()
-    expect(view.captureCharFrame()).toContain("API unavailable")
+    const frame = view.captureCharFrame()
+    expect(frame).toContain("Repository unavailable")
+    expect(frame).toContain("cli/cli")
+    expect(frame).toContain("API unavailable")
+    expect(frame).toContain("r retry · q quit")
+    expect(frame).not.toContain("╭")
+
     view.mockInput.pressKey("r")
+    view.mockInput.pressKey("q")
     await view.flush()
     expect(retries).toBe(1)
+    expect(quits).toBe(1)
   })
 
   test("opens a repository entered by the user", async () => {
@@ -88,6 +104,7 @@ describe("repository launcher", () => {
     expect(opened).toBe("cli/cli")
   })
 
+
   test("opens a recent repository by number", async () => {
     let opened = ""
     const view = await testRender(
@@ -111,6 +128,6 @@ describe("repository launcher", () => {
     await view.mockInput.typeText("invalid")
     view.mockInput.pressEnter()
     await view.flush()
-    expect(view.captureCharFrame()).toContain("× Enter a repository as owner/name")
+    expect(view.captureCharFrame()).toContain("× Enter owner/repository or a GitHub URL")
   })
 })

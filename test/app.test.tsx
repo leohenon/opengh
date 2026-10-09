@@ -715,10 +715,38 @@ describe("openGH TUI", () => {
     active.push(view);
     await view.flush();
     view.mockInput.pressKey("3");
+    await view.flush();
+    expect(view.captureCharFrame()).toContain("Issues unavailable");
+    expect(view.captureCharFrame()).not.toContain("Refresh failed — open issues");
     view.mockInput.pressKey("r");
     await view.flush();
     expect(retry).toBe("issues");
     expect(refresh).toBe(0);
+  });
+
+  test("toasts retained resource failures while keeping stale rows visible", async () => {
+    const data = {
+      ...githubDataFixture,
+      commits: {
+        status: "error" as const,
+        phase: "load" as const,
+        message: "Commits unavailable",
+        value: githubDataFixture.commits.value,
+      },
+    };
+    const view = await testRender(
+      () => <App data={data} operations={repositoryOperationsFixture} onQuit={() => {}} />,
+      { width: 120, height: 32, useThread: false },
+    );
+    active.push(view);
+    await view.flush();
+    view.mockInput.pressKey("2");
+    await view.flush();
+
+    const frame = view.captureCharFrame();
+    expect(frame).toContain("fix: avoid duplicate key events");
+    expect(frame).toContain("Refresh failed — commits: Commits");
+    expect(frame).toContain("unavailable");
   });
 
   test("opens help and invokes global actions", async () => {
@@ -744,6 +772,21 @@ describe("openGH TUI", () => {
     await view.flush();
     expect(refresh()).toBe(1);
     expect(quit()).toBe(1);
+  });
+
+  test("shows transient operation failures as toasts", async () => {
+    const [operations, setOperations] = createSignal(structuredClone(repositoryOperationsFixture));
+    const view = await testRender(
+      () => <App data={githubDataFixture} operations={operations} onQuit={() => {}} />,
+      { width: 120, height: 32, useThread: false },
+    );
+    active.push(view);
+    await view.flush();
+
+    setOperations((value) => ({ ...value, refresh: { status: "error", message: "API unavailable" } }));
+    await view.flush();
+    expect(view.captureCharFrame()).toContain("Refresh failed");
+    expect(view.captureCharFrame()).toContain("API unavailable");
   });
 
   test("formats About metadata compactly", async () => {
