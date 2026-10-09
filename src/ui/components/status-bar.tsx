@@ -26,12 +26,8 @@ const errorMessages: Partial<Record<StatusKind, string>> = {
   "load-more-error": "× Could not load more · press r to retry",
 }
 
-export function StatusBar(props: { kind?: StatusKind; detail?: string }) {
-  const loadingMessage = () => {
-    if (!props.kind) return undefined
-    if (props.kind === "loading-resource" && props.detail) return `Loading ${props.detail}…`
-    return loadingMessages[props.kind]
-  }
+export function StatusBar(props: { kind?: StatusKind }) {
+  const loadingMessage = () => props.kind ? loadingMessages[props.kind] : undefined
   const errorMessage = () => props.kind ? errorMessages[props.kind] : undefined
 
   return (

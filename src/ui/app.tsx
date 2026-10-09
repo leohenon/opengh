@@ -1,7 +1,7 @@
 import type { ScrollBoxRenderable } from "@opentui/core"
 import { useKeyboard, useRenderer, useTerminalDimensions } from "@opentui/solid"
 import { createEffect, createMemo, createSignal, Show } from "solid-js"
-import type { Config } from "../config"
+import { defaultConfig, type Config } from "../config"
 import type { ListState } from "../models"
 import { back, navigate, type NavigationState, type Page } from "../navigation"
 import type {
@@ -14,6 +14,7 @@ import type {
 import { BranchPicker } from "./components/branch-picker"
 import { Header } from "./components/header"
 import { Help } from "./components/help"
+import { Settings } from "./components/settings"
 import { StatusBar, type StatusKind } from "./components/status-bar"
 import { ActionsScreen } from "./pages/actions"
 import { CommitsScreen } from "./pages/commits"
@@ -22,12 +23,13 @@ import { WorkScreen } from "./pages/work"
 import { tabs } from "./tabs"
 import { colors } from "./theme"
 
-type Overlay = "help" | "branch-picker"
+type Overlay = "help" | "branch-picker" | "settings"
 
 export type AppProps = {
   data: RepositoryData | (() => RepositoryData)
   operations: RepositoryOperations | (() => RepositoryOperations)
   config?: Config
+  onConfigChange?: (config: Config) => Promise<void>
   onQuit?: () => void
   onRefresh?: () => void
   onRetryResource?: (resource: RepositoryResource) => void
@@ -117,15 +119,6 @@ export function App(props: AppProps) {
     }
     return undefined
   }
-  const statusDetail = () => {
-    if (page() === "overview")
-      return overviewDocuments().find((document) => document.kind === overviewDocument())?.label ?? "document"
-    if (page() === "commits") return "commits"
-    if (page() === "issues") return `${issueState()} issues`
-    if (page() === "pulls") return `${pullState()} pull requests`
-    if (page() === "actions") return "workflow runs"
-    return undefined
-  }
   const status = createMemo(statusKind)
 
   createEffect(() => {
@@ -184,12 +177,14 @@ export function App(props: AppProps) {
       if (escape) setOverlay()
       return
     }
+    if (overlay() === "settings") return
     if (event.name === "q") return quit()
     if (overlay() === "help") {
       if (event.name === "?" || escape) setOverlay()
       return
     }
     if (event.name === "?") return setOverlay("help")
+    if (event.name === "," || event.sequence === ",") return setOverlay("settings")
     if (escape && navigation().detail)
       return setNavigation(back)
     if (event.name >= "1" && event.name <= "5") {
@@ -305,8 +300,15 @@ export function App(props: AppProps) {
             />
           </box>
         </Show>
-      <StatusBar kind={status()} detail={statusDetail()} />
+      <StatusBar kind={status()} />
       <Show when={overlay() === "help"}><Help /></Show>
+      <Show when={overlay() === "settings"}>
+        <Settings
+          config={props.config ?? defaultConfig}
+          onChange={(config) => props.onConfigChange?.(config) ?? Promise.resolve()}
+          onClose={() => setOverlay()}
+        />
+      </Show>
       <Show when={overlay() === "branch-picker" && data().branches.value}>
         <BranchPicker
           branches={data().branches}

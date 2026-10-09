@@ -5,7 +5,6 @@ import { LoadingText } from "./loading-text"
 
 export function ResourceStateView<T>(props: {
   resource: ResourceState<T>
-  loading?: string
   children: (value: Accessor<T>) => JSX.Element
 }) {
   return (
@@ -15,7 +14,7 @@ export function ResourceStateView<T>(props: {
         <box flexGrow={1} minHeight={0} alignItems="center" justifyContent="center">
           <Show
             when={props.resource.status === "error"}
-            fallback={<LoadingText text={props.loading ?? "Loading…"} />}
+            fallback={<LoadingText text="Loading…" />}
           >
             <text fg={colors.red}>
               × {props.resource.status === "error" ? props.resource.message : "Could not load"} · press r to retry

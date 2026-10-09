@@ -2,6 +2,9 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { testRender } from "@opentui/solid";
 import { createSignal } from "solid-js";
 import { App } from "../src/app";
+import type { Config } from "../src/config";
+import { resolveTheme } from "../src/theme";
+import { colors, ThemeProvider } from "../src/ui/theme";
 import {
   githubDataFixture,
   repositoryOperationsFixture,
@@ -515,6 +518,150 @@ describe("openGH TUI", () => {
     );
   });
 
+  test("opens settings and applies saved changes immediately", async () => {
+    const [config, setConfig] = createSignal<Config>({ showScrollbars: false, theme: "github" });
+    let saves = 0;
+    const view = await testRender(
+      () => (
+        <App
+          data={githubDataFixture}
+          operations={repositoryOperationsFixture}
+          config={config()}
+          onConfigChange={async (next) => {
+            saves++;
+            setConfig(next);
+          }}
+        />
+      ),
+      { width: 120, height: 32, useThread: false },
+    );
+    active.push(view);
+    await view.flush();
+
+    view.mockInput.pressKey(",");
+    await view.flush();
+    const settings = view.captureCharFrame();
+    expect(settings).toContain("Settings");
+    expect(settings).toContain("Theme");
+    expect(settings).toContain("github");
+    expect(settings).toContain("Scrollbars");
+    expect(settings).toContain("‹ off ›");
+    expect(settings).toContain("Choose the color theme");
+    expect(settings).not.toContain("change · enter toggle");
+
+    view.mockInput.pressArrow("down");
+    await view.flush();
+    expect(view.captureCharFrame()).toContain("Show vertical scrollbars");
+    view.mockInput.pressArrow("right");
+    await Bun.sleep(0);
+    await view.flush();
+    expect(saves).toBe(1);
+    expect(config()).toEqual({ showScrollbars: true, theme: "github" });
+    expect(view.captureCharFrame()).toContain("‹ on ›");
+
+    view.mockInput.pressEscape();
+    await Bun.sleep(30);
+    await view.flush();
+    expect(view.captureCharFrame()).not.toContain("Show vertical scrollbars");
+  });
+
+  test("previews and saves a theme from settings", async () => {
+    const [config, setConfig] = createSignal<Config>({ showScrollbars: false, theme: "github" });
+    const view = await testRender(
+      () => (
+        <ThemeProvider name={config().theme}>
+          <App
+            data={githubDataFixture}
+            operations={repositoryOperationsFixture}
+            config={config()}
+            onConfigChange={async (next) => { setConfig(next) }}
+          />
+        </ThemeProvider>
+      ),
+      { width: 120, height: 32, useThread: false },
+    );
+    active.push(view);
+    await view.flush();
+    const githubText = JSON.stringify(view.captureSpans().lines.flatMap((line) => line.spans)
+      .find((span) => span.text.includes("anomalyco"))?.fg)
+
+    view.mockInput.pressKey(",");
+    await view.flush();
+    view.mockInput.pressEnter();
+    await view.flush();
+    expect(view.captureCharFrame()).toContain("Themes");
+    expect(view.captureCharFrame()).toContain("Search themes");
+    await view.mockInput.typeText("nord");
+    await view.flush();
+    expect(view.captureCharFrame()).toContain("nord");
+    expect(colors.canvas).toBe(resolveTheme("nord").background);
+    const nordText = JSON.stringify(view.captureSpans().lines.flatMap((line) => line.spans)
+      .find((span) => span.text.includes("anomalyco"))?.fg)
+    expect(nordText).not.toBe(githubText)
+
+    view.mockInput.pressEnter();
+    await Bun.sleep(0);
+    await view.flush();
+    expect(config().theme).toBe("nord");
+    expect(colors.canvas).toBe(resolveTheme("nord").background);
+    expect(view.captureCharFrame()).toContain("‹ nord ›");
+  });
+
+  test("restores the configured theme when preview is cancelled", async () => {
+    const config: Config = { showScrollbars: false, theme: "github" };
+    const view = await testRender(
+      () => (
+        <ThemeProvider name={config.theme}>
+          <App data={githubDataFixture} operations={repositoryOperationsFixture} config={config} />
+        </ThemeProvider>
+      ),
+      { width: 120, height: 32, useThread: false },
+    );
+    active.push(view);
+    await view.flush();
+
+    view.mockInput.pressKey(",");
+    await view.flush();
+    view.mockInput.pressArrow("right");
+    await view.flush();
+    await view.mockInput.typeText("dracula");
+    await view.flush();
+    expect(colors.canvas).toBe(resolveTheme("dracula").background);
+
+    view.mockInput.pressEscape();
+    await Bun.sleep(30);
+    await view.flush();
+    expect(colors.canvas).toBe(resolveTheme("github").background);
+    expect(view.captureCharFrame()).toContain("‹ github ›");
+  });
+
+  test("keeps settings open and reports persistence failures", async () => {
+    const view = await testRender(
+      () => (
+        <App
+          data={githubDataFixture}
+          operations={repositoryOperationsFixture}
+          config={{ showScrollbars: false, theme: "github" }}
+          onConfigChange={async () => { throw new Error("Config directory is read-only") }}
+        />
+      ),
+      { width: 120, height: 32, useThread: false },
+    );
+    active.push(view);
+    await view.flush();
+
+    view.mockInput.pressKey(",");
+    view.mockInput.pressArrow("down");
+    view.mockInput.pressEnter();
+    await Bun.sleep(0);
+    await view.flush();
+
+    const settings = view.captureCharFrame();
+    expect(settings).toContain("Settings");
+    expect(settings).toContain("Config directory is read-only");
+    expect(settings).toContain("‹ off ›");
+  });
+
   test("keeps help and branch overlays mutually exclusive", async () => {
     const { view: branchView } = await setup();
     branchView.mockInput.pressKey("2");
@@ -584,6 +731,7 @@ describe("openGH TUI", () => {
     expect(help).toContain("half-page up / down");
     expect(help).toContain("Tab / ⇧Tab");
     expect(help).toContain("cycle view options");
+    expect(help).toContain("settings");
     expect(help).not.toContain("Navigation");
     expect(help).not.toContain("Current view");
     expect(help).not.toContain("Application");

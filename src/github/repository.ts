@@ -1,4 +1,5 @@
 import { normalizeRepository } from "../repository-name";
+import { configDirectory } from "../paths";
 import { mkdir } from "node:fs/promises";
 import { dirname, join } from "node:path";
 
@@ -46,9 +47,7 @@ export async function resolveRepository(
 }
 
 export function recentRepositoriesPath() {
-  const config =
-    process.env.XDG_CONFIG_HOME || join(process.env.HOME || ".", ".config");
-  return join(config, "opengh", "recent.json");
+  return join(configDirectory(), "recent.json");
 }
 
 export async function loadRecentRepositories(

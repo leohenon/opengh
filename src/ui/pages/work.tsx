@@ -23,13 +23,13 @@ export function WorkScreen(props: {
       header={(
         <box flexDirection="row" alignItems="center" gap={2}>
           <text
-            fg={props.state === "open" ? colors.green : colors.muted}
+            fg={props.state === "open" ? colors.openState : colors.muted}
             attributes={props.state === "open" ? TextAttributes.BOLD : TextAttributes.NONE}
           >
             Open ({props.counts.open})
           </text>
           <text
-            fg={props.state === "closed" ? colors.purple : colors.muted}
+            fg={props.state === "closed" ? colors.closedState : colors.muted}
             attributes={props.state === "closed" ? TextAttributes.BOLD : TextAttributes.NONE}
           >
             Closed ({props.counts.closed})
@@ -37,7 +37,7 @@ export function WorkScreen(props: {
         </box>
       )}
     >
-      <ResourceStateView resource={props.resource} loading={`Loading ${props.title.toLowerCase()}…`}>
+      <ResourceStateView resource={props.resource}>
         {(page) => (
           <SelectableList
             items={page().items}
@@ -51,7 +51,7 @@ export function WorkScreen(props: {
             {(entry, active) => (
               <>
                 <box height={2} width={3} flexShrink={0} alignItems="flex-start">
-                  <text fg={props.state === "closed" ? colors.purple : colors.green}>
+                  <text fg={props.state === "closed" ? colors.closedState : colors.openState}>
                     {props.kind === "issue" ? (props.state === "closed" ? "✓" : "●") : "⑂"}
                   </text>
                 </box>

@@ -16,7 +16,7 @@ function Shortcut(props: { keys: string; children: JSX.Element }) {
 
 export function Help() {
   return (
-    <Popup width={64} height={15} zIndex={200}>
+    <Popup width={64} height={16} zIndex={200}>
       <box
         flexGrow={1}
         minHeight={0}
@@ -46,6 +46,7 @@ export function Help() {
 
         <box height={1} flexShrink={0} />
         <Shortcut keys="r">refresh</Shortcut>
+        <Shortcut keys=",">settings</Shortcut>
         <Shortcut keys="?">toggle help</Shortcut>
         <Shortcut keys="q / Ctrl-C">quit</Shortcut>
       </box>

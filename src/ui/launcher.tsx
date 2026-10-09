@@ -8,18 +8,7 @@ import { createSignal, For, Show } from "solid-js";
 import { normalizeRepository } from "../repository-name";
 import { LoadingText } from "./components/loading-text";
 import { Popup } from "./components/popup";
-
-const colors = {
-  canvas: "#0d1117",
-  panel: "#161b22",
-  panelHover: "#21262d",
-  border: "#30363d",
-  text: "#e6edf3",
-  muted: "#8b949e",
-  blue: "#58a6ff",
-  red: "#f85149",
-  green: "#3fb950",
-};
+import { colors } from "./theme";
 
 export function ResolvingRepository() {
   const dimensions = useTerminalDimensions();
@@ -36,7 +25,7 @@ export function ResolvingRepository() {
           ◉ openGH
         </text>
         <LoadingText
-          text="Finding the repository for this directory…"
+          text="Finding repository…"
           color={colors.muted}
         />
       </box>

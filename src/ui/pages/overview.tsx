@@ -1,12 +1,12 @@
 import { SyntaxStyle, TextAttributes, type ScrollBoxRenderable } from "@opentui/core"
-import { useTerminalDimensions } from "@opentui/solid"
-import { createMemo, For, Show } from "solid-js"
+import { useRenderer, useTerminalDimensions } from "@opentui/solid"
+import { createMemo, For, onCleanup, Show } from "solid-js"
 import type { Repo } from "../../models"
 import type { RepositoryDocumentKind, ResourceState } from "../../repository-state"
 import { ResourceStateView } from "../components/resource-state"
 import { count } from "../format"
 import { normalizeGitHubMarkdown } from "../github-markdown"
-import { colors } from "../theme"
+import { colors, theme } from "../theme"
 
 function extractAboutContent(value: string) {
   const urls: string[] = []
@@ -28,35 +28,53 @@ function displayUrl(value: string) {
 
 function createMarkdownStyle() {
   return SyntaxStyle.fromStyles({
-    default: { fg: colors.text },
+    default: { fg: theme.markdownText },
     conceal: { fg: colors.muted },
-    "markup.heading": { fg: colors.text, bold: true },
-    "markup.heading.1": { fg: colors.text, bold: true },
-    "markup.heading.2": { fg: colors.text, bold: true },
-    "markup.heading.3": { fg: colors.text, bold: true },
-    "markup.bold": { fg: colors.text, bold: true },
-    "markup.strong": { fg: colors.text, bold: true },
-    "markup.italic": { fg: colors.text, italic: true },
-    "markup.raw": { fg: colors.green, bg: colors.panel },
-    "markup.raw.block": { fg: colors.green, bg: colors.panel },
-    "markup.raw.inline": { fg: colors.text, bg: colors.panel },
-    "markup.link": { fg: colors.blue },
-    "markup.link.label": { fg: colors.blue, underline: true },
+    "markup.heading": { fg: theme.markdownHeading, bold: true },
+    "markup.heading.1": { fg: theme.markdownHeading, bold: true },
+    "markup.heading.2": { fg: theme.markdownHeading, bold: true },
+    "markup.heading.3": { fg: theme.markdownHeading, bold: true },
+    "markup.bold": { fg: theme.markdownStrong, bold: true },
+    "markup.strong": { fg: theme.markdownStrong, bold: true },
+    "markup.italic": { fg: theme.markdownEmph, italic: true },
+    "markup.raw": { fg: theme.markdownCode, bg: colors.panel },
+    "markup.raw.block": { fg: theme.markdownCodeBlock, bg: colors.panel },
+    "markup.raw.inline": { fg: theme.markdownText, bg: colors.panel },
+    "markup.link": { fg: theme.markdownLink },
+    "markup.link.label": { fg: theme.markdownLinkText, underline: true },
     "markup.link.url": { fg: colors.muted },
-    "markup.list": { fg: colors.blue },
-    "markup.quote": { fg: colors.muted, italic: true },
-    comment: { fg: colors.muted, italic: true },
-    keyword: { fg: colors.purple },
-    string: { fg: colors.green },
-    number: { fg: colors.yellow },
-    function: { fg: colors.blue },
-    variable: { fg: colors.text },
-    property: { fg: colors.blue },
-    type: { fg: colors.yellow },
-    constant: { fg: colors.yellow },
-    operator: { fg: colors.muted },
-    punctuation: { fg: colors.muted },
+    "markup.list": { fg: theme.markdownListItem },
+    "markup.quote": { fg: theme.markdownBlockQuote, italic: true },
+    comment: { fg: theme.syntaxComment, italic: true },
+    keyword: { fg: theme.syntaxKeyword },
+    string: { fg: theme.syntaxString },
+    number: { fg: theme.syntaxNumber },
+    function: { fg: theme.syntaxFunction },
+    variable: { fg: theme.syntaxVariable },
+    property: { fg: theme.syntaxFunction },
+    type: { fg: theme.syntaxType },
+    constant: { fg: theme.syntaxNumber },
+    operator: { fg: theme.syntaxOperator },
+    punctuation: { fg: theme.syntaxPunctuation },
   })
+}
+
+function createReactiveMarkdownStyle() {
+  const renderer = useRenderer()
+  let current: SyntaxStyle | undefined
+  const release = (style: SyntaxStyle) => {
+    void renderer.idle().catch(() => {}).finally(() => style.destroy())
+  }
+  const style = createMemo(() => {
+    const previous = current
+    current = createMarkdownStyle()
+    if (previous) release(previous)
+    return current
+  })
+  onCleanup(() => {
+    if (current) release(current)
+  })
+  return style
 }
 
 export type OverviewDocument = {
@@ -82,7 +100,7 @@ export function OverviewScreen(props: {
     + Math.max(0, props.documents.length - 1) * 2
   const compactDocuments = () => hasDocumentTabs()
     && documentLabelsWidth() > Math.max(1, dimensions().width - 40)
-  const markdownStyle = createMarkdownStyle()
+  const markdownStyle = createReactiveMarkdownStyle()
 
   return (
     <box
@@ -159,7 +177,7 @@ export function OverviewScreen(props: {
           </Show>
           <box flexGrow={1} height={1} border={["bottom"]} borderColor={colors.border} />
         </box>
-        <ResourceStateView resource={document().resource} loading="Loading…">
+        <ResourceStateView resource={document().resource}>
           {(_source) => (
             <scrollbox
               ref={props.scrollRef}
@@ -174,7 +192,7 @@ export function OverviewScreen(props: {
             >
               <markdown
                 content={formattedDocument()}
-                syntaxStyle={markdownStyle}
+                syntaxStyle={markdownStyle()}
                 fg={colors.text}
                 bg={colors.canvas}
                 conceal
