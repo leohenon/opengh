@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "skills": {
+    "opentui": {
+      "source": "anomalyco/opentui",
+      "sourceType": "github",
+      "skillPath": "packages/web/src/content/SKILL.md",
+      "computedHash": "3a040ec4aae79da820e4bbf342bc6ab409966bd59ff6591c7e7e3d0f5a2b27d8"
+    },
+    "solid-js-best-practices": {
+      "source": "richardcarls/solid-js-best-practices",
+      "sourceType": "github",
+      "skillPath": "SKILL.md",
+      "computedHash": "de51587bd2edb9f9ebf5724c93b2d5db0cb6f1645c45a57d73cc5c62a201e66a"
+    }
+  }
+}
