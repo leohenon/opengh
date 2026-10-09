@@ -1,9 +1,11 @@
 import { TextAttributes } from "@opentui/core";
 import type { JSX } from "solid-js";
-import { colors } from "../theme";
+import { useTheme } from "../theme";
 import { Popup } from "./popup";
 
 function Shortcut(props: { keys: string; children: JSX.Element }) {
+  const { colors } = useTheme();
+
   return (
     <box height={1} flexShrink={0} flexDirection="row">
       <text width={20} fg={colors.text}>
@@ -15,6 +17,8 @@ function Shortcut(props: { keys: string; children: JSX.Element }) {
 }
 
 export function Help() {
+  const { colors } = useTheme();
+
   return (
     <Popup width={64} height={16} zIndex={200}>
       <box

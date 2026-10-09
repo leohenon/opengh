@@ -1,6 +1,6 @@
 import { useTerminalDimensions } from "@opentui/solid"
 import { onCleanup, onMount } from "solid-js"
-import { colors } from "../theme"
+import { useTheme } from "../theme"
 
 export function Toast(props: {
   title: string
@@ -9,6 +9,7 @@ export function Toast(props: {
   onDismiss: () => void
 }) {
   const dimensions = useTerminalDimensions()
+  const { colors } = useTheme()
   const contentWidth = () => props.title.length + props.message.length + 8
   const width = () => Math.max(1, Math.min(48, dimensions().width - 4, Math.max(28, contentWidth())))
 

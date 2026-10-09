@@ -25,7 +25,6 @@ export type RootServices = {
   loadConfig(): Promise<Config>
   saveConfig(config: Config): Promise<void>
   createRepositorySession(): RepositorySession
-  exit(code: number): void
 }
 
 const defaultServices: RootServices = {
@@ -35,7 +34,6 @@ const defaultServices: RootServices = {
   loadConfig,
   saveConfig,
   createRepositorySession,
-  exit: (code) => process.exit(code),
 }
 
 export function Root(props: {
@@ -50,14 +48,19 @@ export function Root(props: {
   const [pickerError, setPickerError] = createSignal("")
   const [config, setConfig] = createSignal(defaultConfig)
   const session = services.createRepositorySession()
+  let quitting = false
 
   const quit = () => {
+    if (quitting) return
+    quitting = true
     renderer.destroy()
-    services.exit(0)
   }
 
   useKeyboard((event) => {
-    if (event.ctrl && event.name === "c") quit()
+    if (event.ctrl && event.name === "c") {
+      event.stopPropagation()
+      quit()
+    }
   })
 
   const updateConfig = async (next: Config) => {

@@ -3,10 +3,11 @@ import { useRenderer, useTerminalDimensions } from "@opentui/solid"
 import { createMemo, For, onCleanup, Show } from "solid-js"
 import type { Repo } from "../../models"
 import type { RepositoryDocumentKind, ResourceState } from "../../repository-state"
+import type { AppColors, ResolvedTheme } from "../../theme"
 import { ResourceStateView } from "../components/resource-state"
 import { count } from "../format"
 import { normalizeGitHubMarkdown } from "../github-markdown"
-import { colors, theme } from "../theme"
+import { useTheme } from "../theme"
 
 function extractAboutContent(value: string) {
   const urls: string[] = []
@@ -26,7 +27,7 @@ function displayUrl(value: string) {
   return value.replace(/^https?:\/\//, "").replace(/\/$/, "")
 }
 
-function createMarkdownStyle() {
+function createMarkdownStyle(colors: AppColors, theme: ResolvedTheme) {
   return SyntaxStyle.fromStyles({
     default: { fg: theme.markdownText },
     conceal: { fg: colors.muted },
@@ -59,15 +60,18 @@ function createMarkdownStyle() {
   })
 }
 
-function createReactiveMarkdownStyle() {
+function createReactiveMarkdownStyle(colors: AppColors, theme: ResolvedTheme) {
   const renderer = useRenderer()
   let current: SyntaxStyle | undefined
   const release = (style: SyntaxStyle) => {
-    void renderer.idle().catch(() => {}).finally(() => style.destroy())
+    queueMicrotask(() => {
+      if (!renderer.isDestroyed) renderer.requestRender()
+      void renderer.idle().catch(() => {}).finally(() => style.destroy())
+    })
   }
   const style = createMemo(() => {
     const previous = current
-    current = createMarkdownStyle()
+    current = createMarkdownStyle(colors, theme)
     if (previous) release(previous)
     return current
   })
@@ -91,16 +95,18 @@ export function OverviewScreen(props: {
   scrollRef: (value: ScrollBoxRenderable) => void
 }) {
   const dimensions = useTerminalDimensions()
+  const { colors, theme } = useTheme()
   const repo = () => props.repo
   const about = createMemo(() => extractAboutContent(repo().description))
   const document = () => props.documents.find((item) => item.kind === props.currentDocument) ?? props.documents[0]!
-  const formattedDocument = createMemo(() => normalizeGitHubMarkdown(document().resource.value ?? ""))
+  const documentResource = createMemo(() => document().resource)
+  const formattedDocument = createMemo(() => normalizeGitHubMarkdown(documentResource().value ?? ""))
   const hasDocumentTabs = () => props.documents.length > 1
   const documentLabelsWidth = () => props.documents.reduce((width, item) => width + item.label.length, 0)
     + Math.max(0, props.documents.length - 1) * 2
   const compactDocuments = () => hasDocumentTabs()
     && documentLabelsWidth() > Math.max(1, dimensions().width - 40)
-  const markdownStyle = createReactiveMarkdownStyle()
+  const markdownStyle = createReactiveMarkdownStyle(colors, theme)
 
   return (
     <box
@@ -196,7 +202,6 @@ export function OverviewScreen(props: {
                 fg={colors.text}
                 bg={colors.canvas}
                 conceal
-                internalBlockMode="top-level"
                 tableOptions={{
                   style: "grid",
                   widthMode: "full",
@@ -211,55 +216,57 @@ export function OverviewScreen(props: {
         </ResourceStateView>
       </box>
 
-      <box width={32} flexShrink={0} minHeight={0} flexDirection="column">
-        <box
-          height={1}
-          flexShrink={0}
-          flexDirection="row"
-          alignItems="center"
-          paddingLeft={2}
-          paddingRight={2}
-        >
-          <text fg={colors.text} attributes={TextAttributes.BOLD}>About</text>
-        </box>
-        <box height={1} flexShrink={0} border={["bottom"]} borderColor={colors.border} />
-        <box
-          flexGrow={1}
-          minHeight={0}
-          flexDirection="column"
-          paddingTop={1}
-          paddingBottom={1}
-          paddingLeft={2}
-          paddingRight={2}
-        >
-          <text flexShrink={0} fg={colors.text} wrapMode="word">{about().description}</text>
-          <Show when={about().urls.length > 0}>
+      <Show when={dimensions().width >= 72}>
+        <box width={32} flexShrink={0} minHeight={0} flexDirection="column">
+          <box
+            height={1}
+            flexShrink={0}
+            flexDirection="row"
+            alignItems="center"
+            paddingLeft={2}
+            paddingRight={2}
+          >
+            <text fg={colors.text} attributes={TextAttributes.BOLD}>About</text>
+          </box>
+          <box height={1} flexShrink={0} border={["bottom"]} borderColor={colors.border} />
+          <box
+            flexGrow={1}
+            minHeight={0}
+            flexDirection="column"
+            paddingTop={1}
+            paddingBottom={1}
+            paddingLeft={2}
+            paddingRight={2}
+          >
+            <text flexShrink={0} fg={colors.text} wrapMode="word">{about().description}</text>
+            <Show when={about().urls.length > 0}>
+              <box height={1} flexShrink={0} />
+              <For each={about().urls}>
+                {(url) => <text height={1} flexShrink={0} fg={colors.blue}>{displayUrl(url)}</text>}
+              </For>
+            </Show>
             <box height={1} flexShrink={0} />
-            <For each={about().urls}>
-              {(url) => <text height={1} flexShrink={0} fg={colors.blue}>{displayUrl(url)}</text>}
-            </For>
-          </Show>
-          <box height={1} flexShrink={0} />
-          <text height={1} flexShrink={0} fg={colors.muted}>Language</text>
-          <text height={1} flexShrink={0} fg={colors.blue}>{repo().language}</text>
-          <box height={1} flexShrink={0} />
-          <box height={1} flexShrink={0} flexDirection="row">
-            <text width={2} fg={colors.muted}>★</text>
-            <text fg={colors.text}>{count(repo().stars)} stars</text>
+            <text height={1} flexShrink={0} fg={colors.muted}>Language</text>
+            <text height={1} flexShrink={0} fg={colors.blue}>{repo().language}</text>
+            <box height={1} flexShrink={0} />
+            <box height={1} flexShrink={0} flexDirection="row">
+              <text width={2} fg={colors.muted}>★</text>
+              <text fg={colors.text}>{count(repo().stars)} stars</text>
+            </box>
+            <box height={1} flexShrink={0} flexDirection="row">
+              <text width={2} fg={colors.muted}>⑂</text>
+              <text fg={colors.text}>{count(repo().forks)} forks</text>
+            </box>
+            <box height={1} flexShrink={0} flexDirection="row">
+              <text width={2} fg={colors.muted}>◉</text>
+              <text fg={colors.text}>{count(repo().watchers)} watching</text>
+            </box>
+            <box height={1} flexShrink={0} />
+            <text height={1} flexShrink={0} fg={colors.muted}>License</text>
+            <text height={1} flexShrink={0} fg={colors.text}>{repo().license}</text>
           </box>
-          <box height={1} flexShrink={0} flexDirection="row">
-            <text width={2} fg={colors.muted}>⑂</text>
-            <text fg={colors.text}>{count(repo().forks)} forks</text>
-          </box>
-          <box height={1} flexShrink={0} flexDirection="row">
-            <text width={2} fg={colors.muted}>◉</text>
-            <text fg={colors.text}>{count(repo().watchers)} watching</text>
-          </box>
-          <box height={1} flexShrink={0} />
-          <text height={1} flexShrink={0} fg={colors.muted}>License</text>
-          <text height={1} flexShrink={0} fg={colors.text}>{repo().license}</text>
         </box>
-      </box>
+      </Show>
     </box>
   )
 }

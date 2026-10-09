@@ -2,13 +2,15 @@ import { TextAttributes } from "@opentui/core"
 import { For } from "solid-js"
 import type { Repo } from "../../models"
 import type { Page } from "../../navigation"
-import { colors } from "../theme"
+import { useTheme } from "../theme"
 
 export function Header(props: {
   repo: Repo
   page: Page
   tabs: ReadonlyArray<{ page: Page; label: string }>
 }) {
+  const { colors } = useTheme()
+
   return (
     <box flexDirection="column" flexShrink={0} backgroundColor={colors.header}>
       <box

@@ -5,7 +5,7 @@ import { PageShell } from "../components/page-shell"
 import { ResourceStateView } from "../components/resource-state"
 import { SelectableList } from "../components/selectable-list"
 import { ago } from "../format"
-import { colors } from "../theme"
+import { useTheme } from "../theme"
 
 export function WorkScreen(props: {
   title: string
@@ -18,6 +18,8 @@ export function WorkScreen(props: {
   showScrollbar: boolean
   onEndReached?: () => void
 }) {
+  const { colors } = useTheme()
+
   return (
     <PageShell
       header={(

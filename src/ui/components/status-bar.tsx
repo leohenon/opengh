@@ -1,5 +1,5 @@
 import { Show } from "solid-js"
-import { colors } from "../theme"
+import { useTheme } from "../theme"
 import { LoadingText } from "./loading-text"
 
 export type StatusKind =
@@ -16,6 +16,7 @@ const loadingMessages: Record<StatusKind, string> = {
 }
 
 export function StatusBar(props: { kind?: StatusKind; detail?: string }) {
+  const { colors } = useTheme()
   const loadingMessage = () => {
     if (!props.kind) return undefined
     if (props.kind === "loading-resource" && props.detail) return `Loading ${props.detail}…`

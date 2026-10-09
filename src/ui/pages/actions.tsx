@@ -5,12 +5,7 @@ import { PageShell } from "../components/page-shell"
 import { ResourceStateView } from "../components/resource-state"
 import { SelectableList } from "../components/selectable-list"
 import { ago } from "../format"
-import { colors } from "../theme"
-
-function runColor(run: WorkflowRunSummary) {
-  if (run.status !== "completed") return colors.yellow
-  return run.conclusion === "success" ? colors.green : colors.red
-}
+import { useTheme } from "../theme"
 
 function runIcon(run: WorkflowRunSummary) {
   if (run.status !== "completed") return "◌"
@@ -29,7 +24,12 @@ export function ActionsScreen(props: {
   showScrollbar: boolean
   onEndReached?: () => void
 }) {
+  const { colors } = useTheme()
   const runCount = () => props.runs.value?.items.length ?? 0
+  const runColor = (run: WorkflowRunSummary) => {
+    if (run.status !== "completed") return colors.yellow
+    return run.conclusion === "success" ? colors.green : colors.red
+  }
 
   return (
     <PageShell

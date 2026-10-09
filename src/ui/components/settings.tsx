@@ -2,7 +2,7 @@ import { TextAttributes } from "@opentui/core"
 import { useKeyboard, useTerminalDimensions } from "@opentui/solid"
 import { createSignal, Show } from "solid-js"
 import type { Config } from "../../config"
-import { colors, useTheme } from "../theme"
+import { useTheme } from "../theme"
 import { Popup } from "./popup"
 import { ThemePicker } from "./theme-picker"
 
@@ -15,6 +15,7 @@ export function Settings(props: {
 }) {
   const dimensions = useTerminalDimensions()
   const theme = useTheme()
+  const { colors } = theme
   const [screen, setScreen] = createSignal<"settings" | "themes">("settings")
   const [selected, setSelected] = createSignal<Setting>("theme")
   const [saving, setSaving] = createSignal(false)

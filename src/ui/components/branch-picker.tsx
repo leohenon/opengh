@@ -2,7 +2,7 @@ import { TextAttributes } from "@opentui/core"
 import { createMemo, createSignal } from "solid-js"
 import type { Paginated } from "../../models"
 import type { ResourceState } from "../../repository-state"
-import { colors } from "../theme"
+import { useTheme } from "../theme"
 import { SearchablePicker } from "./searchable-picker"
 
 function fuzzyScore(value: string, query: string) {
@@ -35,6 +35,7 @@ export function BranchPicker(props: {
   onRetry: () => void
   onClose: () => void
 }) {
+  const { colors } = useTheme()
   const [query, setQuery] = createSignal("")
   const source = createMemo(() => {
     const loaded = props.branches.value?.items ?? []

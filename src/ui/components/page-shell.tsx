@@ -1,7 +1,9 @@
 import type { JSX } from "solid-js"
-import { colors } from "../theme"
+import { useTheme } from "../theme"
 
 export function PageShell(props: { header: JSX.Element; children: JSX.Element }) {
+  const { colors } = useTheme()
+
   return (
     <box
       flexGrow={1}

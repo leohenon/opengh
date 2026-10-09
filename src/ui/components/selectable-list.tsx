@@ -2,7 +2,7 @@ import type { BoxRenderable, ScrollBoxRenderable } from "@opentui/core"
 import { useKeyboard, useTerminalDimensions } from "@opentui/solid"
 import { createEffect, createSignal, Index, Show, type Accessor, type JSX } from "solid-js"
 import { scrollRowIntoView } from "../scroll-selection"
-import { colors } from "../theme"
+import { useTheme } from "../theme"
 
 type ItemKey = string | number
 
@@ -19,6 +19,7 @@ export function SelectableList<T>(props: {
   children: (item: Accessor<T>, active: Accessor<boolean>) => JSX.Element
 }) {
   const dimensions = useTerminalDimensions()
+  const { colors } = useTheme()
   const [selectedKey, setSelectedKey] = createSignal<ItemKey>()
   const [containerHeight, setContainerHeight] = createSignal(0)
   let selectedIndex = 0

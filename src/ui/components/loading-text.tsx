@@ -1,9 +1,10 @@
 import { createSignal, onCleanup, onMount, Show } from "solid-js"
-import { colors } from "../theme"
+import { useTheme } from "../theme"
 
 const frames = ["◐", "◓", "◑", "◒"] as const
 
 export function LoadingText(props: { text: string; color?: string; delay?: number }) {
+  const { colors } = useTheme()
   const [visible, setVisible] = createSignal(false)
   const [frame, setFrame] = createSignal(0)
   let delayTimer: ReturnType<typeof setTimeout> | undefined

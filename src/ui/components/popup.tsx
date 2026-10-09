@@ -1,7 +1,7 @@
 import { RGBA } from "@opentui/core"
 import { useTerminalDimensions } from "@opentui/solid"
 import type { JSX } from "solid-js"
-import { colors } from "../theme"
+import { useTheme } from "../theme"
 
 export function Popup(props: {
   width?: number
@@ -11,6 +11,7 @@ export function Popup(props: {
   children: JSX.Element
 }) {
   const dimensions = useTerminalDimensions()
+  const { colors } = useTheme()
   const width = () => Math.max(1, Math.min(props.width ?? 64, dimensions().width - 2))
   const height = () => Math.max(1, Math.min(props.height, dimensions().height - 2))
   const top = () => props.placement === "center"

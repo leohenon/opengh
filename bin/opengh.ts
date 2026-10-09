@@ -16,4 +16,4 @@ const child = Bun.spawn([
   stderr: "inherit",
 })
 
-process.exit(await child.exited)
+process.exitCode = await child.exited

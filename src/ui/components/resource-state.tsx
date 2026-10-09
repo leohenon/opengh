@@ -1,15 +1,20 @@
 import { Show, type Accessor, type JSX } from "solid-js"
 import type { ResourceState } from "../../repository-state"
-import { colors } from "../theme"
+import { useTheme } from "../theme"
 import { LoadingText } from "./loading-text"
 
 export function ResourceStateView<T>(props: {
   resource: ResourceState<T>
   children: (value: Accessor<T>) => JSX.Element
 }) {
+  const { colors } = useTheme()
+  const value = () => props.resource.value === undefined
+    ? undefined
+    : { current: props.resource.value as T }
+
   return (
     <Show
-      when={props.resource.value}
+      when={value()}
       fallback={(
         <box flexGrow={1} minHeight={0} alignItems="center" justifyContent="center">
           <Show
@@ -23,7 +28,7 @@ export function ResourceStateView<T>(props: {
         </box>
       )}
     >
-      {(value) => props.children(value)}
+      {(current) => props.children(() => current().current)}
     </Show>
   )
 }

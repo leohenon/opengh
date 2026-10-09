@@ -1,7 +1,7 @@
 import { TextAttributes, type KeyEvent, type ScrollBoxRenderable } from "@opentui/core"
 import { createEffect, createMemo, createSignal, For, Show } from "solid-js"
 import { themeNames, type ThemeName } from "../../theme"
-import { colors } from "../theme"
+import { useTheme } from "../theme"
 
 function fuzzyScore(value: string, query: string) {
   const target = value.toLowerCase()
@@ -25,6 +25,7 @@ export function ThemePicker(props: {
   onCancel: () => void
   onSelect: (theme: ThemeName) => Promise<void>
 }) {
+  const { colors } = useTheme()
   const [query, setQuery] = createSignal("")
   const [selected, setSelected] = createSignal<ThemeName>(props.current)
   const [saving, setSaving] = createSignal(false)

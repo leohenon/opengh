@@ -9,10 +9,11 @@ import { normalizeRepository } from "../repository-name";
 import { LoadingText } from "./components/loading-text";
 import { Popup } from "./components/popup";
 import { SearchablePicker } from "./components/searchable-picker";
-import { colors } from "./theme";
+import { useTheme } from "./theme";
 
 export function ResolvingRepository() {
   const dimensions = useTerminalDimensions();
+  const { colors } = useTheme();
   return (
     <box
       width={dimensions().width}
@@ -36,6 +37,7 @@ export function ResolvingRepository() {
 
 export function LoadingRepository(props: { repository: string }) {
   const dimensions = useTerminalDimensions();
+  const { colors } = useTheme();
   return (
     <box
       width={dimensions().width}
@@ -62,11 +64,12 @@ export function RepositoryLoadError(props: {
 }) {
   const dimensions = useTerminalDimensions();
   const renderer = useRenderer();
+  const { colors } = useTheme();
   const quit = () => props.onQuit ? props.onQuit() : renderer.destroy();
 
   useKeyboard((event) => {
     if (event.name === "r") return props.onRetry();
-    if ((event.ctrl && event.name === "c") || event.name === "q") quit();
+    if (event.name === "q") quit();
   });
 
   return (
@@ -98,6 +101,7 @@ export function RepositoryPicker(props: {
   onQuit?: () => void;
 }) {
   const renderer = useRenderer();
+  const { colors } = useTheme();
   const quit = () => props.onQuit ? props.onQuit() : renderer.destroy();
   const [error, setError] = createSignal(props.error ?? "");
   const recent = () => props.recent.slice(0, 5);
@@ -108,10 +112,6 @@ export function RepositoryPicker(props: {
     setError("");
     props.onOpen(repository);
   };
-
-  useKeyboard((event) => {
-    if (event.ctrl && event.name === "c") quit();
-  });
 
   const height = () => Math.min(20, 7 + recent().length + (error() ? 1 : 0));
 

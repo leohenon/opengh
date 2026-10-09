@@ -4,7 +4,7 @@ import { createSignal } from "solid-js";
 import { App } from "../src/app";
 import type { Config } from "../src/config";
 import { resolveTheme } from "../src/theme";
-import { colors, ThemeProvider } from "../src/ui/theme";
+import { ThemeProvider, useTheme } from "../src/ui/theme";
 import {
   githubDataFixture,
   repositoryOperationsFixture,
@@ -72,6 +72,22 @@ describe("openGH TUI", () => {
     const loadingFrame = view.captureCharFrame();
     expect(loadingFrame).toContain("Loading…");
     expect(loadingFrame.match(/Loading…/g)).toHaveLength(1);
+  });
+
+  test("renders an empty README as loaded content", async () => {
+    const data = {
+      ...githubDataFixture,
+      readme: { status: "ready" as const, value: "" },
+    };
+    const view = await testRender(
+      () => <App data={data} operations={repositoryOperationsFixture} onQuit={() => {}} />,
+      { width: 120, height: 32, useThread: false },
+    );
+    active.push(view);
+
+    await Bun.sleep(210);
+    await view.flush();
+    expect(view.captureCharFrame()).not.toContain("Loading…");
   });
 
   test("switches screens and moves the selection", async () => {
@@ -567,15 +583,23 @@ describe("openGH TUI", () => {
 
   test("previews and saves a theme from settings", async () => {
     const [config, setConfig] = createSignal<Config>({ showScrollbars: false, theme: "github" });
+    let canvas = () => "";
+    const ThemedApp = () => {
+      const current = useTheme();
+      canvas = () => current.colors.canvas;
+      return (
+        <App
+          data={githubDataFixture}
+          operations={repositoryOperationsFixture}
+          config={config()}
+          onConfigChange={async (next) => { setConfig(next) }}
+        />
+      );
+    };
     const view = await testRender(
       () => (
         <ThemeProvider name={config().theme}>
-          <App
-            data={githubDataFixture}
-            operations={repositoryOperationsFixture}
-            config={config()}
-            onConfigChange={async (next) => { setConfig(next) }}
-          />
+          <ThemedApp />
         </ThemeProvider>
       ),
       { width: 120, height: 32, useThread: false },
@@ -594,7 +618,7 @@ describe("openGH TUI", () => {
     await view.mockInput.typeText("nord");
     await view.flush();
     expect(view.captureCharFrame()).toContain("nord");
-    expect(colors.canvas).toBe(resolveTheme("nord").background);
+    expect(canvas()).toBe(resolveTheme("nord").background);
     const nordText = JSON.stringify(view.captureSpans().lines.flatMap((line) => line.spans)
       .find((span) => span.text.includes("anomalyco"))?.fg)
     expect(nordText).not.toBe(githubText)
@@ -603,16 +627,22 @@ describe("openGH TUI", () => {
     await Bun.sleep(0);
     await view.flush();
     expect(config().theme).toBe("nord");
-    expect(colors.canvas).toBe(resolveTheme("nord").background);
+    expect(canvas()).toBe(resolveTheme("nord").background);
     expect(view.captureCharFrame()).toContain("‹ nord ›");
   });
 
   test("restores the configured theme when preview is cancelled", async () => {
     const config: Config = { showScrollbars: false, theme: "github" };
+    let canvas = () => "";
+    const ThemedApp = () => {
+      const current = useTheme();
+      canvas = () => current.colors.canvas;
+      return <App data={githubDataFixture} operations={repositoryOperationsFixture} config={config} />;
+    };
     const view = await testRender(
       () => (
         <ThemeProvider name={config.theme}>
-          <App data={githubDataFixture} operations={repositoryOperationsFixture} config={config} />
+          <ThemedApp />
         </ThemeProvider>
       ),
       { width: 120, height: 32, useThread: false },
@@ -626,12 +656,12 @@ describe("openGH TUI", () => {
     await view.flush();
     await view.mockInput.typeText("dracula");
     await view.flush();
-    expect(colors.canvas).toBe(resolveTheme("dracula").background);
+    expect(canvas()).toBe(resolveTheme("dracula").background);
 
     view.mockInput.pressEscape();
     await Bun.sleep(30);
     await view.flush();
-    expect(colors.canvas).toBe(resolveTheme("github").background);
+    expect(canvas()).toBe(resolveTheme("github").background);
     expect(view.captureCharFrame()).toContain("‹ github ›");
   });
 
@@ -840,6 +870,11 @@ describe("openGH TUI", () => {
 
     view.mockInput.pressTab();
     await view.flush();
+    expect(view.captureCharFrame()).toContain("‹ CONTRIBUTING.md ›");
+
+    view.resize(60, 24);
+    await view.flush();
+    expect(view.captureCharFrame()).not.toContain("About");
     expect(view.captureCharFrame()).toContain("‹ CONTRIBUTING.md ›");
   });
 });

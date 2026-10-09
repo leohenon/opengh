@@ -5,7 +5,7 @@ import { PageShell } from "../components/page-shell"
 import { ResourceStateView } from "../components/resource-state"
 import { SelectableList } from "../components/selectable-list"
 import { ago } from "../format"
-import { colors } from "../theme"
+import { useTheme } from "../theme"
 
 export function CommitsScreen(props: {
   commits: ResourceState<Paginated<CommitSummary>>
@@ -15,6 +15,7 @@ export function CommitsScreen(props: {
   showScrollbar: boolean
   onEndReached?: () => void
 }) {
+  const { colors } = useTheme()
   const commitCount = () => props.commits.value?.items.length ?? 0
 
   return (

@@ -22,7 +22,7 @@ import { CommitsScreen } from "./pages/commits"
 import { OverviewScreen, type OverviewDocument } from "./pages/overview"
 import { WorkScreen } from "./pages/work"
 import { tabs } from "./tabs"
-import { colors } from "./theme"
+import { useTheme } from "./theme"
 
 type Overlay = "help" | "branch-picker" | "settings"
 type ToastState = { id: number; title: string; message: string; duration?: number }
@@ -45,6 +45,7 @@ export type AppProps = {
 
 export function App(props: AppProps) {
   const renderer = useRenderer()
+  const { colors } = useTheme()
   const dimensions = useTerminalDimensions()
   const [navigation, setNavigation] = createSignal<NavigationState>({ page: "overview" })
   const [issueState, setIssueState] = createSignal<ListState>("open")
@@ -246,7 +247,6 @@ export function App(props: AppProps) {
   const quit = () => props.onQuit ? props.onQuit() : renderer.destroy()
 
   useKeyboard((event) => {
-    if (event.ctrl && event.name === "c") return quit()
     const escape = event.name === "escape" || event.name === "esc" || event.raw === "\u001b" || event.sequence === "\u001b"
     if (overlay() === "branch-picker") {
       if (escape) setOverlay()

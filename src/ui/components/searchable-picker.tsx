@@ -1,6 +1,6 @@
 import { TextAttributes, type KeyEvent, type ScrollBoxRenderable } from "@opentui/core"
 import { createEffect, createMemo, createSignal, Index, Show, type JSX } from "solid-js"
-import { colors } from "../theme"
+import { useTheme } from "../theme"
 import { Popup } from "./popup"
 
 type Match = number | undefined
@@ -27,6 +27,7 @@ export function SearchablePicker<T>(props: {
   onClose: () => void
   children: (item: T, active: () => boolean, index: () => number) => JSX.Element
 }) {
+  const { colors } = useTheme()
   const [query, setQuery] = createSignal("")
   const [selectedKey, setSelectedKey] = createSignal<string | number>()
   const [listReady, setListReady] = createSignal(false)

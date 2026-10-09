@@ -4,7 +4,6 @@ import {
   createEffect,
   createMemo,
   createSignal,
-  onCleanup,
   useContext,
   type ParentProps,
 } from "solid-js"
@@ -33,21 +32,11 @@ function reactiveProxy<T extends object>(value: () => T): T {
 }
 
 const githubTheme = resolveTheme("github")
-const [activeTheme, setActiveTheme] = createSignal(githubTheme)
-const activeColors = createMemo(() => appColors(activeTheme()))
-export const colors = reactiveProxy(activeColors)
-export const theme = reactiveProxy(activeTheme)
-
-const [standaloneName, setStandaloneName] = createSignal<ThemeName>("github")
 const standalone: ThemeContextValue = {
-  colors,
-  theme,
-  selected: standaloneName,
-  preview: (name) => {
-    const selected = name ?? "github"
-    setStandaloneName(selected)
-    setActiveTheme(resolveTheme(selected))
-  },
+  colors: appColors(githubTheme),
+  theme: githubTheme,
+  selected: () => "github",
+  preview: () => {},
 }
 
 const ThemeContext = createContext<ThemeContextValue>(standalone)
@@ -57,10 +46,11 @@ export function ThemeProvider(props: ParentProps<{ name: string }>) {
   const [preview, setPreview] = createSignal<ThemeName>()
   const selected = createMemo<ThemeName>(() => preview() ?? (isThemeName(props.name) ? props.name : "github"))
   const resolved = createMemo(() => resolveTheme(selected()))
+  const resolvedColors = createMemo(() => appColors(resolved()))
+  const colors = reactiveProxy(resolvedColors)
+  const theme = reactiveProxy(resolved)
 
-  createEffect(() => setActiveTheme(resolved()))
   createEffect(() => renderer.setBackgroundColor(colors.canvas))
-  onCleanup(() => setActiveTheme(githubTheme))
 
   const value: ThemeContextValue = {
     colors,
