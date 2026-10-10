@@ -1,4 +1,5 @@
 import type {
+  CommitDetail,
   CommitSummary,
   IssueSummary,
   ListState,
@@ -15,6 +16,7 @@ type Page<T> = { items: T[]; hasMore: boolean }
 
 type RepositoryResponse = {
   full_name: string
+  html_url: string
   description: string | null
   visibility?: string | null
   default_branch: string
@@ -47,6 +49,21 @@ type CommitResponse = {
     message: string
     author: { name: string | null; date: string } | null
   }
+}
+
+type CommitDetailResponse = CommitResponse & {
+  committer: UserResponse
+  commit: {
+    committer?: { name: string | null; date: string } | null
+  }
+  stats: { additions: number; deletions: number }
+  files: {
+    filename: string
+    previous_filename?: string
+    status: string
+    additions: number
+    deletions: number
+  }[]
 }
 
 type BranchResponse = { name: string }
@@ -94,6 +111,7 @@ export function createGitHubClient(transport: GitHubTransport) {
     const repo = await transport.json<RepositoryResponse>(`repos/${repository}`)
     return {
       nameWithOwner: repo.full_name,
+      url: repo.html_url,
       description: repo.description ?? "No description provided.",
       visibility: repo.visibility?.toUpperCase() ?? "PUBLIC",
       defaultBranch: repo.default_branch,
@@ -169,6 +187,36 @@ export function createGitHubClient(transport: GitHubTransport) {
     return { items: items.map(commitSummary), hasMore: items.length === PAGE_SIZE }
   }
 
+  const commit = async (repository: string, sha: string, page = 1): Promise<CommitDetail> => {
+    const item = await transport.json<CommitDetailResponse>(
+      `repos/${repository}/commits/${encodeURIComponent(sha)}?per_page=100&page=${page}`,
+    )
+    return {
+      ...commitSummary(item),
+      fullMessage: item.commit.message,
+      ...(item.commit.committer ? {
+        committer: {
+          name: item.committer?.login ?? item.commit.committer.name ?? "ghost",
+          date: item.commit.committer.date,
+        },
+      } : {}),
+      additions: item.stats.additions,
+      deletions: item.stats.deletions,
+      files: {
+        items: item.files.map((file) => ({
+          path: file.filename,
+          ...(file.previous_filename !== undefined ? { previousPath: file.previous_filename } : {}),
+          status: file.status,
+          additions: file.additions,
+          deletions: file.deletions,
+        })),
+        page,
+        hasMore: item.files.length === 100 && page * 100 < 3000,
+      },
+      filesTruncated: item.files.length === 100 && page * 100 >= 3000,
+    }
+  }
+
   const issues = async (repository: string, state: ListState, page = 1): Promise<Page<IssueSummary>> => {
     const items = await transport.json<IssueResponse[]>(
       `repos/${repository}/issues?state=${state}&per_page=${PAGE_SIZE}&page=${page}`,
@@ -201,7 +249,7 @@ export function createGitHubClient(transport: GitHubTransport) {
     return { items, hasMore: page * PAGE_SIZE < (response.total_count ?? items.length) }
   }
 
-  return { metadata, readme, contributing, security, license, branches, commits, issues, pulls, runs }
+  return { metadata, readme, contributing, security, license, branches, commits, commit, issues, pulls, runs }
 }
 
 const client = createGitHubClient(githubTransport)
@@ -213,6 +261,7 @@ export const loadGitHubSecurity = client.security
 export const loadGitHubLicense = client.license
 export const loadGitHubBranches = client.branches
 export const loadGitHubCommits = client.commits
+export const loadGitHubCommit = client.commit
 export const loadGitHubIssues = client.issues
 export const loadGitHubPulls = client.pulls
 export const loadGitHubRuns = client.runs

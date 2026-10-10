@@ -23,6 +23,7 @@ describe("GitHub client", () => {
     const client = createGitHubClient(transport({
       "repos/owner/repo": {
         full_name: "owner/repo",
+        html_url: "https://github.com/owner/repo",
         description: null,
         default_branch: "main",
         stargazers_count: 2,
@@ -36,6 +37,7 @@ describe("GitHub client", () => {
     }))
     const repo = await client.metadata("owner/repo")
     expect(repo.nameWithOwner).toBe("owner/repo")
+    expect(repo.url).toBe("https://github.com/owner/repo")
     expect(repo.description).toBe("No description provided.")
     expect(repo.language).toBe("Unknown")
   })
@@ -53,6 +55,84 @@ describe("GitHub client", () => {
     const result = await client.commits("owner/repo", "main")
     expect(result.items[0]?.sha).toBe(sha)
     expect(result.items[0]?.message).toBe("title")
+  })
+
+  test("maps commit details and respects the file pagination cap", async () => {
+    const sha = "b".repeat(40)
+    const date = "2026-01-01T00:00:00Z"
+    const fullMessage = "Rename file\n\nKeep the full body.\n"
+    const file = {
+      filename: "new.ts",
+      previous_filename: "old.ts",
+      status: "renamed",
+      additions: 3,
+      deletions: 2,
+      patch: "@@ -1 +1 @@\n-old\n+new",
+    }
+    const response = {
+      sha,
+      author: null,
+      committer: null,
+      commit: {
+        message: fullMessage,
+        author: { name: "Local Author", date },
+        committer: { name: "Local Committer", date },
+      },
+      stats: { additions: 300, deletions: 200 },
+      files: Array.from({ length: 100 }, (_, index) => ({
+        ...file, filename: `new-${index}.ts`, previous_filename: `old-${index}.ts`,
+      })),
+    }
+    const path = "repos/owner/repo/commits/topic%2Fdetail?per_page=100&page="
+    const client = createGitHubClient(transport({
+      [`${path}1`]: response,
+      [`${path}2`]: {
+        ...response,
+        commit: { ...response.commit, author: null, committer: null },
+        files: [file],
+      },
+      [`${path}29`]: response,
+      [`${path}30`]: response,
+    }))
+
+    const detail = await client.commit("owner/repo", "topic/detail")
+    expect(detail).toEqual({
+      sha,
+      message: "Rename file",
+      fullMessage,
+      author: "Local Author",
+      date,
+      committer: { name: "Local Committer", date },
+      additions: 300,
+      deletions: 200,
+      files: {
+        items: Array.from({ length: 100 }, (_, index) => ({
+          path: `new-${index}.ts`,
+          previousPath: `old-${index}.ts`,
+          status: "renamed",
+          additions: 3,
+          deletions: 2,
+        })),
+        page: 1,
+        hasMore: true,
+      },
+      filesTruncated: false,
+    })
+    const shortPage = await client.commit("owner/repo", "topic/detail", 2)
+    expect(shortPage.author).toBe("ghost")
+    expect(shortPage.date).toBe("")
+    expect(shortPage).not.toHaveProperty("committer")
+    expect(shortPage.files.page).toBe(2)
+    expect(shortPage.files.items).toHaveLength(1)
+    expect(shortPage.files.hasMore).toBe(false)
+    expect(shortPage.filesTruncated).toBe(false)
+
+    for (const page of [29, 30]) {
+      const result = await client.commit("owner/repo", "topic/detail", page)
+      expect(result.files.page).toBe(page)
+      expect(result.files.hasMore).toBe(page < 30)
+      expect(result.filesTruncated).toBe(page === 30)
+    }
   })
 
   test("excludes pull requests from issue results", async () => {

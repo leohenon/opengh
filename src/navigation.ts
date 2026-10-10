@@ -1,6 +1,6 @@
 export type Page = "overview" | "commits" | "issues" | "pulls" | "actions"
 
-// Reserved for the next feature: detail routes identify entities, never selected row positions.
+// Detail routes identify entities, never selected row positions.
 export type DetailTarget =
   | { kind: "commit"; sha: string }
   | { kind: "issue"; number: number }
@@ -9,7 +9,7 @@ export type DetailTarget =
 
 export type NavigationState = {
   page: Page
-  detail?: DetailTarget
+  details?: Partial<Record<Page, DetailTarget>>
 }
 
 const detailPage: Record<DetailTarget["kind"], Page> = {
@@ -19,14 +19,18 @@ const detailPage: Record<DetailTarget["kind"], Page> = {
   run: "actions",
 }
 
-export function navigate(_state: NavigationState, page: Page): NavigationState {
-  return { page }
+export function navigate(state: NavigationState, page: Page): NavigationState {
+  return { ...state, page }
 }
 
-export function openDetail(_state: NavigationState, detail: DetailTarget): NavigationState {
-  return { page: detailPage[detail.kind], detail }
+export function openDetail(state: NavigationState, detail: DetailTarget): NavigationState {
+  const page = detailPage[detail.kind]
+  return { page, details: { ...state.details, [page]: detail } }
 }
 
 export function back(state: NavigationState): NavigationState {
-  return state.detail ? { page: state.page } : state
+  if (!state.details?.[state.page]) return state
+  const details = { ...state.details }
+  delete details[state.page]
+  return Object.keys(details).length ? { ...state, details } : { page: state.page }
 }

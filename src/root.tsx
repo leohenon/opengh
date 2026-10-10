@@ -2,6 +2,7 @@ import { useKeyboard, useRenderer } from "@opentui/solid"
 import { createSignal, Match, onMount, Show, Switch } from "solid-js"
 import { defaultConfig, loadConfig, saveConfig, type Config } from "./config"
 import { loadRecentRepositories, rememberRepository, resolveRepository } from "./github/repository"
+import { openGitHub } from "./github/browser"
 import { createRepositorySession, type RepositorySession } from "./repository-session"
 import type { RepositoryState } from "./repository-state"
 import { App } from "./ui/app"
@@ -26,6 +27,7 @@ export type RootServices = {
   loadConfig(): Promise<Config>
   saveConfig(config: Config): Promise<void>
   createRepositorySession(): RepositorySession
+  openGitHub(repository: string, sha?: string): Promise<void>
 }
 
 const defaultServices: RootServices = {
@@ -35,6 +37,7 @@ const defaultServices: RootServices = {
   loadConfig,
   saveConfig,
   createRepositorySession,
+  openGitHub,
 }
 
 export function Root(props: {
@@ -146,6 +149,11 @@ export function Root(props: {
               onBranchChange={(branch) => void session.switchBranch(branch)}
               onLoadMoreBranches={session.loadMoreBranches}
               onLoadMoreCommits={session.loadMoreCommits}
+              commitDetail={session.commitDetail()}
+              onLoadCommit={session.loadCommit}
+              onLoadMoreCommitFiles={session.loadMoreCommitFiles}
+              onCloseCommit={session.clearCommit}
+              onOpenInBrowser={(sha) => services.openGitHub(current().repository, sha)}
               onLoadMoreRuns={session.loadMoreRuns}
               onLoadMoreIssues={session.loadMoreIssues}
               onLoadMorePulls={session.loadMorePulls}

@@ -16,6 +16,9 @@ export function SelectableList<T>(props: {
   rowHeight?: number
   endThreshold?: number
   onEndReached?: () => void
+  onActivate?: (item: T) => void
+  onOpenInBrowser?: (item: T) => void
+  onCopy?: (item: T) => void
   children: (item: Accessor<T>, active: Accessor<boolean>) => JSX.Element
 }) {
   const { colors } = useTheme()
@@ -57,7 +60,17 @@ export function SelectableList<T>(props: {
 
   useKeyboard((event) => {
     if (!props.active) return
-    if (event.name === "up" || event.name === "k") move(-1)
+    const activate = event.name === "return" || event.name === "enter" ? props.onActivate
+      : event.ctrl || event.meta ? undefined
+      : event.name === "o" ? props.onOpenInBrowser
+      : event.name === "y" ? props.onCopy : undefined
+    if (activate) {
+      const item = props.items[indexOfSelection()]
+      if (item) {
+        event.stopPropagation()
+        activate(item)
+      }
+    } else if (event.name === "up" || event.name === "k") move(-1)
     else if (event.name === "down" || event.name === "j") move(1)
     else if (event.name === "u") move(-halfPage())
     else if (event.name === "d") move(halfPage())

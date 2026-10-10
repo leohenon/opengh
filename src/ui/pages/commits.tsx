@@ -14,6 +14,9 @@ export function CommitsScreen(props: {
   interactive: boolean
   showScrollbar: boolean
   onEndReached?: () => void
+  onOpenCommit?: (commit: CommitSummary) => void
+  onOpenCommitInBrowser?: (commit: CommitSummary) => void
+  onCopyCommitSha?: (commit: CommitSummary) => void
 }) {
   const { colors } = useTheme()
   const commitCount = () => props.commits.value?.items.length ?? 0
@@ -42,6 +45,9 @@ export function CommitsScreen(props: {
             resetKey={props.currentBranch}
             empty="No commits"
             onEndReached={props.onEndReached}
+            onActivate={props.onOpenCommit}
+            onOpenInBrowser={props.onOpenCommitInBrowser}
+            onCopy={props.onCopyCommitSha}
           >
             {(commit, active) => (
               <>

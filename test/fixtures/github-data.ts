@@ -1,3 +1,4 @@
+import type { CommitDetail } from "../../src/models"
 import type { RepositoryData, RepositoryOperations } from "../../src/repository-state"
 
 const issues = {
@@ -26,6 +27,7 @@ const pulls = {
 export const githubDataFixture: RepositoryData = {
   repo: {
     nameWithOwner: "anomalyco/opentui",
+    url: "https://github.com/anomalyco/opentui",
     description: "A TypeScript library for building rich terminal user interfaces",
     visibility: "PUBLIC",
     defaultBranch: "main",
@@ -89,6 +91,23 @@ export const githubDataFixture: RepositoryData = {
       hasMore: false,
     },
   },
+}
+
+export const commitDetailFixture: CommitDetail = {
+  ...githubDataFixture.commits.value!.items[0]!,
+  fullMessage: "fix: avoid duplicate key events\n\nKeep one owner for keyboard input so a single key press fires once.",
+  committer: { name: "web-flow", date: "2026-04-14T06:45:00Z" },
+  additions: 18,
+  deletions: 7,
+  files: {
+    items: [
+      { path: "src/input.ts", status: "modified", additions: 12, deletions: 5 },
+      { path: "test/input.test.ts", previousPath: "test/keys.test.ts", status: "renamed", additions: 6, deletions: 2 },
+    ],
+    page: 1,
+    hasMore: false,
+  },
+  filesTruncated: false,
 }
 
 export const repositoryOperationsFixture: RepositoryOperations = {

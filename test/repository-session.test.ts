@@ -1,8 +1,8 @@
 import { describe, expect, test } from "bun:test"
-import type { CommitSummary } from "../src/models"
+import type { CommitDetail, CommitSummary } from "../src/models"
 import type { RepositoryLoaders } from "../src/repository-session"
 import { createRepositorySession } from "../src/repository-session"
-import { githubDataFixture } from "./fixtures/github-data"
+import { commitDetailFixture, githubDataFixture } from "./fixtures/github-data"
 
 function deferred<T>() {
   let resolve!: (value: T) => void
@@ -23,6 +23,7 @@ function loaders(overrides: Partial<RepositoryLoaders> = {}): RepositoryLoaders 
     license: async () => githubDataFixture.license.value,
     branches: async () => ({ items: structuredClone(githubDataFixture.branches.value!.items), hasMore: false }),
     commits: async () => ({ items: structuredClone(githubDataFixture.commits.value!.items), hasMore: false }),
+    commit: async () => structuredClone(commitDetailFixture),
     issues: async (_repository, state) => ({ items: structuredClone(githubDataFixture.issues[state].value!.items), hasMore: false }),
     pulls: async (_repository, state) => ({ items: structuredClone(githubDataFixture.pulls[state].value!.items), hasMore: false }),
     runs: async () => ({ items: structuredClone(githubDataFixture.runs.value!.items), hasMore: false }),
@@ -37,6 +38,75 @@ function ready(session: ReturnType<typeof createRepositorySession>) {
 }
 
 describe("repository session", () => {
+  test("loads commit details on demand and ignores obsolete responses", async () => {
+    const pending = new Map<string, ReturnType<typeof deferred<CommitDetail>>>()
+    const session = createRepositorySession(loaders({
+      commit: async (_repository, sha) => {
+        const request = deferred<CommitDetail>()
+        pending.set(sha, request)
+        return request.promise
+      },
+    }))
+    await session.load("anomalyco/opentui")
+    expect(pending.size).toBe(0)
+
+    const first = session.loadCommit("first")
+    const second = session.loadCommit("second")
+    pending.get("second")!.resolve({ ...commitDetailFixture, sha: "second" })
+    await second
+    pending.get("first")!.reject(new Error("Obsolete failure"))
+    await first
+    expect(session.commitDetail()?.resource.value?.sha).toBe("second")
+    expect(session.commitDetail()?.resource.status).toBe("ready")
+
+    const closed = session.loadCommit("closed")
+    session.clearCommit()
+    pending.get("closed")!.resolve({ ...commitDetailFixture, sha: "closed" })
+    await closed
+    expect(session.commitDetail()).toBeUndefined()
+
+    const switched = session.loadCommit("switched")
+    await session.load("owner/another-repo")
+    pending.get("switched")!.resolve({ ...commitDetailFixture, sha: "switched" })
+    await switched
+    expect(session.commitDetail()).toBeUndefined()
+  })
+
+  test("retains commit files on pagination failure and retries the same page", async () => {
+    const requests: number[] = []
+    let fail = true
+    const session = createRepositorySession(loaders({
+      commit: async (_repository, _sha, page = 1) => {
+        requests.push(page)
+        if (page === 2 && fail) throw new Error("Files unavailable")
+        return {
+          ...commitDetailFixture,
+          files: {
+            page,
+            hasMore: page === 1,
+            items: page === 1 ? [commitDetailFixture.files.items[0]!] : [commitDetailFixture.files.items[1]!],
+          },
+        }
+      },
+    }))
+    await session.load("anomalyco/opentui")
+    await session.loadCommit(commitDetailFixture.sha)
+    await session.loadMoreCommitFiles()
+    expect(session.commitDetail()?.resource).toMatchObject({
+      status: "error", phase: "pagination", message: "Files unavailable",
+    })
+    expect(session.commitDetail()?.resource.value?.files.items).toHaveLength(1)
+    fail = false
+    await session.loadMoreCommitFiles()
+    expect(requests).toEqual([1, 2, 2])
+    expect(session.commitDetail()?.resource.value?.files.items).toEqual(commitDetailFixture.files.items)
+    expect(session.commitDetail()?.resource.value?.files.hasMore).toBe(false)
+
+    await session.loadCommit(commitDetailFixture.sha)
+    expect(requests).toEqual([1, 2, 2, 1, 2])
+    expect(session.commitDetail()?.resource.value?.files.items).toEqual(commitDetailFixture.files.items)
+  })
+
   test("renders metadata before child resources settle", async () => {
     const pending = deferred<{ items: CommitSummary[]; hasMore: boolean }>()
     let metadataCalls = 0

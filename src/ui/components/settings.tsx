@@ -6,9 +6,9 @@ import { useTheme } from "../theme"
 import { Popup } from "./popup"
 import { ThemePicker } from "./theme-picker"
 
-type Setting = "theme" | "scrollbars" | "about-sidebar"
+type Setting = "theme" | "scrollbars" | "about-sidebar" | "status-bar-hints"
 
-const settingOrder: Setting[] = ["theme", "scrollbars", "about-sidebar"]
+const settingOrder: Setting[] = ["theme", "scrollbars", "about-sidebar", "status-bar-hints"]
 const sidebarValues = ["auto", "show", "hide"] as const
 
 export function Settings(props: {
@@ -26,7 +26,7 @@ export function Settings(props: {
   const [saving, setSaving] = createSignal(false)
   const busy = () => saving() || props.saving === true
   const [error, setError] = createSignal("")
-  const popupHeight = 20
+  const popupHeight = 23
   const split = () => dimensions().width >= 110
   const scrollbarValue = () => props.config.showScrollbars ? "on" : "off"
 
@@ -35,12 +35,12 @@ export function Settings(props: {
     setSelected(settingOrder[Math.max(0, Math.min(settingOrder.length - 1, current + delta))]!)
   }
 
-  const toggleScrollbars = async () => {
+  const toggleBoolean = async (key: "showScrollbars" | "showStatusBarHints") => {
     if (busy()) return
     setSaving(true)
     setError("")
     try {
-      await props.onChange({ ...props.config, showScrollbars: !props.config.showScrollbars })
+      await props.onChange({ ...props.config, [key]: !props.config[key] })
     } catch (error) {
       setError(error instanceof Error ? error.message : "Settings save failed")
     } finally {
@@ -87,7 +87,9 @@ export function Settings(props: {
       return openThemes()
     }
     if (selected() === "scrollbars" && (event.name === "left" || event.name === "right" || enter))
-      return void toggleScrollbars()
+      return void toggleBoolean("showScrollbars")
+    if (selected() === "status-bar-hints" && (event.name === "left" || event.name === "right" || enter))
+      return void toggleBoolean("showStatusBarHints")
     if (selected() === "about-sidebar" && (event.name === "left" || event.name === "right" || enter))
       void changeSidebar(event.name === "left" ? -1 : 1)
   })
@@ -122,6 +124,10 @@ export function Settings(props: {
     if (selected() === "scrollbars") return {
       title: "Scrollbars",
       description: "Show vertical scrollbars beside repository documents and lists.",
+    }
+    if (selected() === "status-bar-hints") return {
+      title: "Status bar hints",
+      description: "Show keyboard shortcuts in the status bar on every page. Loading messages stay visible when hints are off.",
     }
     return {
       title: "About sidebar",
@@ -169,6 +175,7 @@ export function Settings(props: {
             {settingRow("theme", "Theme", "Interface color theme", props.config.theme)}
             {settingRow("scrollbars", "Scrollbars", "Lists and documents", scrollbarValue())}
             {settingRow("about-sidebar", "About sidebar", "Repository metadata", props.config.aboutSidebar)}
+            {settingRow("status-bar-hints", "Status bar hints", "Keyboard shortcuts", props.config.showStatusBarHints ? "on" : "off")}
             <box flexGrow={1} minHeight={0} />
             <Show when={props.loadError || error()}>
               {(message) => <text fg={colors.red} wrapMode="word">{message()}</text>}

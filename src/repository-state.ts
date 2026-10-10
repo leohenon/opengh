@@ -1,4 +1,5 @@
 import type {
+  CommitDetail,
   CommitSummary,
   IssueSummary,
   ListState,
@@ -16,6 +17,11 @@ export type ResourceState<T> =
   | { status: "loading"; phase: ResourcePhase; value?: T }
   | { status: "ready"; value: T }
   | { status: "error"; phase: ResourcePhase; message: string; value?: T }
+
+export type CommitDetailState = {
+  sha: string
+  resource: ResourceState<CommitDetail>
+}
 
 export type OperationState =
   | { status: "idle" }

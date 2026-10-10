@@ -27,6 +27,10 @@ function readySession() {
   const idle = async () => {}
   return {
     state,
+    commitDetail: () => undefined,
+    loadCommit: idle,
+    loadMoreCommitFiles: idle,
+    clearCommit: () => {},
     load: idle,
     refresh: idle,
     retryResource: idle,
@@ -135,7 +139,7 @@ describe("application root", () => {
             resolveRepository: async () => "cli/cli",
             loadRecentRepositories: async () => [],
             rememberRepository: idle,
-            loadConfig: async () => ({ showScrollbars: false, theme: "github", aboutSidebar: "auto" }),
+            loadConfig: async () => ({ showScrollbars: false, theme: "github", aboutSidebar: "auto", showStatusBarHints: true }),
             saveConfig: async (config) => {
               saved.push(config)
               await writes[saved.length - 1]!.promise
@@ -156,7 +160,7 @@ describe("application root", () => {
     await Bun.sleep(0)
     await view.flush()
 
-    expect(saved).toEqual([{ showScrollbars: true, theme: "github", aboutSidebar: "auto" }])
+    expect(saved).toEqual([{ showScrollbars: true, theme: "github", aboutSidebar: "auto", showStatusBarHints: true }])
     expect(view.captureCharFrame()).toContain("‹ off ›")
     expect(view.captureCharFrame()).toContain("Saving…")
 
@@ -184,7 +188,7 @@ describe("application root", () => {
     await view.flush()
     expect(view.captureCharFrame()).toContain("Themes")
     expect(view.captureCharFrame()).toContain("Saving…")
-    expect(saved[1]).toEqual({ showScrollbars: true, theme: "nord", aboutSidebar: "auto" })
+    expect(saved[1]).toEqual({ showScrollbars: true, theme: "nord", aboutSidebar: "auto", showStatusBarHints: true })
 
     writes[1]!.resolve()
     await view.flush()

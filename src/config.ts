@@ -9,12 +9,14 @@ export type Config = {
   showScrollbars: boolean
   theme: ThemeName
   aboutSidebar: AboutSidebar
+  showStatusBarHints: boolean
 }
 
 export const defaultConfig: Config = {
   showScrollbars: false,
   theme: "github",
   aboutSidebar: "auto",
+  showStatusBarHints: true,
 }
 
 export class ConfigFileError extends Error {
@@ -50,6 +52,9 @@ function normalizeConfig(value: unknown): Config {
     aboutSidebar: input.aboutSidebar === "auto" || input.aboutSidebar === "show" || input.aboutSidebar === "hide"
       ? input.aboutSidebar
       : defaultConfig.aboutSidebar,
+    showStatusBarHints: typeof input.showStatusBarHints === "boolean"
+      ? input.showStatusBarHints
+      : defaultConfig.showStatusBarHints,
   }
 }
 

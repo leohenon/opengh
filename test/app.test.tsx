@@ -2,10 +2,11 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { testRender } from "@opentui/solid";
 import { createSignal } from "solid-js";
 import { App } from "../src/ui/app";
-import type { Config } from "../src/config";
+import { defaultConfig, type Config } from "../src/config";
 import { resolveTheme } from "../src/theme";
 import { ThemeProvider, useTheme } from "../src/ui/theme";
 import {
+  commitDetailFixture,
   githubDataFixture,
   repositoryOperationsFixture,
 } from "./fixtures/github-data";
@@ -47,6 +48,59 @@ async function setup() {
 }
 
 describe("openGH TUI", () => {
+  test("status bar hints can be disabled on every page without disabling shortcuts or loading feedback", async () => {
+    const [config, setConfig] = createSignal({ ...defaultConfig });
+    const [operations, setOperations] = createSignal(repositoryOperationsFixture);
+    let copied = "";
+    const view = await testRender(
+      () => (
+        <App
+          data={githubDataFixture}
+          operations={operations}
+          config={config()}
+          onConfigChange={async (next) => { setConfig(next); }}
+          commitDetail={{ sha: commitDetailFixture.sha, resource: { status: "ready", value: commitDetailFixture } }}
+        />
+      ),
+      { width: 120, height: 32, useThread: false },
+    );
+    active.push(view);
+    view.renderer.copyToClipboardOSC52 = (value) => { copied = value; return true; };
+    const statusLine = () => view.captureCharFrame().split("\n")[31]!.trim();
+    await view.flush();
+    expect(statusLine()).toBe("o GitHub · y URL");
+
+    view.mockInput.pressKey(",");
+    for (let i = 0; i < 3; i++) view.mockInput.pressKey("j");
+    view.mockInput.pressEnter();
+    await view.flush();
+    expect(view.captureCharFrame()).toContain("Status bar hints");
+    expect(config().showStatusBarHints).toBe(false);
+    view.mockInput.pressEscape();
+    await Bun.sleep(30);
+    for (const key of ["1", "2", "3", "4", "5"]) {
+      view.mockInput.pressKey(key);
+      await view.flush();
+      expect(statusLine()).toBe("");
+    }
+
+    view.mockInput.pressKey("2");
+    view.mockInput.pressEnter();
+    view.mockInput.pressKey("y");
+    await view.flush();
+    expect(copied).toBe(commitDetailFixture.sha);
+    expect(statusLine()).toBe("");
+    setOperations((value) => ({ ...value, refresh: { status: "loading" } }));
+    await Bun.sleep(210);
+    await view.flush();
+    expect(statusLine()).toContain("Refreshing…");
+
+    setOperations(repositoryOperationsFixture);
+    setConfig({ ...defaultConfig });
+    await view.flush();
+    expect(statusLine()).toBe("esc back · o GitHub · y SHA");
+  });
+
   test("renders repository metadata while the README loads", async () => {
     const data = {
       ...githubDataFixture,
@@ -594,7 +648,7 @@ describe("openGH TUI", () => {
   });
 
   test("opens settings and applies saved changes immediately", async () => {
-    const [config, setConfig] = createSignal<Config>({ showScrollbars: false, theme: "github", aboutSidebar: "auto" });
+    const [config, setConfig] = createSignal<Config>({ showScrollbars: false, theme: "github", aboutSidebar: "auto", showStatusBarHints: true });
     let saves = 0;
     const view = await testRender(
       () => (
@@ -631,7 +685,7 @@ describe("openGH TUI", () => {
     await Bun.sleep(0);
     await view.flush();
     expect(saves).toBe(1);
-    expect(config()).toEqual({ showScrollbars: true, theme: "github", aboutSidebar: "auto" });
+    expect(config()).toEqual({ showScrollbars: true, theme: "github", aboutSidebar: "auto", showStatusBarHints: true });
     expect(view.captureCharFrame()).toContain("‹ on ›");
 
     view.mockInput.pressArrow("down");
@@ -651,7 +705,7 @@ describe("openGH TUI", () => {
   });
 
   test("previews and saves a theme from settings", async () => {
-    const [config, setConfig] = createSignal<Config>({ showScrollbars: false, theme: "github", aboutSidebar: "auto" });
+    const [config, setConfig] = createSignal<Config>({ showScrollbars: false, theme: "github", aboutSidebar: "auto", showStatusBarHints: true });
     let canvas = () => "";
     const ThemedApp = () => {
       const current = useTheme();
@@ -701,7 +755,7 @@ describe("openGH TUI", () => {
   });
 
   test("restores the configured theme when preview is cancelled", async () => {
-    const config: Config = { showScrollbars: false, theme: "github", aboutSidebar: "auto" };
+    const config: Config = { showScrollbars: false, theme: "github", aboutSidebar: "auto", showStatusBarHints: true };
     let canvas = () => "";
     const ThemedApp = () => {
       const current = useTheme();
@@ -740,7 +794,7 @@ describe("openGH TUI", () => {
         <App
           data={githubDataFixture}
           operations={repositoryOperationsFixture}
-          config={{ showScrollbars: false, theme: "github", aboutSidebar: "auto" }}
+          config={{ showScrollbars: false, theme: "github", aboutSidebar: "auto", showStatusBarHints: true }}
           onConfigChange={async () => { throw new Error("Config directory is read-only") }}
         />
       ),
@@ -856,13 +910,13 @@ describe("openGH TUI", () => {
     expect(help).toContain("Help");
     expect(help).toContain("u/d");
     expect(help).toContain("half-page up / down");
-    expect(help).toContain("Tab / ⇧Tab");
+    expect(help).toContain("Tab");
     expect(help).toContain("cycle view options");
     expect(help).toContain("settings");
     expect(help).not.toContain("Navigation");
     expect(help).not.toContain("Current view");
     expect(help).not.toContain("Application");
-    expect(help).toContain("q / Ctrl-C");
+    expect(help).toContain("q / C-c");
     expect(help).toContain("quit");
     expect(help).toContain("README.md");
     view.mockInput.pressKey("?");
@@ -948,6 +1002,7 @@ describe("openGH TUI", () => {
       showScrollbars: false,
       theme: "github",
       aboutSidebar: "show",
+      showStatusBarHints: true,
     });
     const view = await testRender(
       () => <App data={githubDataFixture} operations={repositoryOperationsFixture} config={config()} />,

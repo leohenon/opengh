@@ -1,10 +1,11 @@
 import type { ScrollBoxRenderable } from "@opentui/core"
 import { useKeyboard, useRenderer, useTerminalDimensions } from "@opentui/solid"
-import { createEffect, createMemo, createSignal, Show } from "solid-js"
+import { createEffect, createMemo, createSignal, onCleanup, Show } from "solid-js"
 import { defaultConfig, type Config } from "../config"
-import type { ListState } from "../models"
-import { back, navigate, type NavigationState, type Page } from "../navigation"
+import type { CommitDetail, ListState } from "../models"
+import { back, navigate, openDetail, type NavigationState, type Page } from "../navigation"
 import type {
+  CommitDetailState,
   RepositoryData,
   RepositoryDocumentKind,
   RepositoryOperations,
@@ -19,13 +20,14 @@ import { StatusBar, type StatusKind } from "./components/status-bar"
 import { Toast } from "./components/toast"
 import { ActionsScreen } from "./pages/actions"
 import { CommitsScreen } from "./pages/commits"
+import { CommitScreen } from "./pages/commit"
 import { OverviewScreen, type OverviewDocument } from "./pages/overview"
 import { WorkScreen } from "./pages/work"
 import { tabs } from "./tabs"
 import { useTheme } from "./theme"
 
 type Overlay = "help" | "branch-picker" | "settings"
-type ToastState = { id: number; title: string; message: string; duration?: number }
+type ToastState = { id: number; title: string; message: string; duration?: number; tone?: "error" | "success" }
 
 export type AppProps = {
   data: RepositoryData | (() => RepositoryData)
@@ -41,6 +43,11 @@ export type AppProps = {
   onBranchChange?: (branch: string) => void
   onLoadMoreBranches?: () => Promise<void>
   onLoadMoreCommits?: () => Promise<void>
+  commitDetail?: CommitDetailState
+  onLoadCommit?: (sha: string) => Promise<void>
+  onLoadMoreCommitFiles?: () => Promise<void>
+  onCloseCommit?: () => void
+  onOpenInBrowser?: (sha?: string) => Promise<void>
   onLoadMoreRuns?: () => Promise<void>
   onLoadMoreIssues?: (state: ListState) => Promise<void>
   onLoadMorePulls?: (state: ListState) => Promise<void>
@@ -66,6 +73,14 @@ export function App(props: AppProps) {
   const data = () => typeof props.data === "function" ? props.data() : props.data
   const operations = () => typeof props.operations === "function" ? props.operations() : props.operations
   const page = () => navigation().page
+  const commitSha = createMemo(() => {
+    const detail = navigation().details?.commits
+    return detail?.kind === "commit" ? detail.sha : undefined
+  })
+  const activeCommitSha = () => page() === "commits" ? commitSha() : undefined
+  const commitResource = createMemo<ResourceState<CommitDetail>>(() => props.commitDetail && props.commitDetail.sha === commitSha()
+    ? props.commitDetail.resource
+    : { status: "loading", phase: "load" })
   const issues = () => data().issues[issueState()]
   const pulls = () => data().pulls[pullState()]
   const issueCounts = () => ({
@@ -99,6 +114,7 @@ export function App(props: AppProps) {
     ]
   }
   const activeResource = (): ResourceState<unknown> | undefined => {
+    if (activeCommitSha()) return commitResource()
     if (page() === "overview") return documentResource(overviewDocument())
     if (page() === "commits") return data().commits
     if (page() === "issues") return issues()
@@ -126,6 +142,7 @@ export function App(props: AppProps) {
     return undefined
   }
   const statusDetail = () => {
+    if (activeCommitSha()) return "commit"
     if (page() === "overview")
       return overviewDocuments().find((document) => document.kind === overviewDocument())?.label ?? "document"
     if (page() === "commits") return "commits"
@@ -136,6 +153,7 @@ export function App(props: AppProps) {
   }
   const status = createMemo(statusKind)
   const paginationSource = () => {
+    if (activeCommitSha()) return `pagination:commit:${commitSha()}`
     if (page() === "commits") return "pagination:commits"
     if (page() === "issues") return `pagination:issues:${issueState()}`
     if (page() === "pulls") return `pagination:pulls:${pullState()}`
@@ -143,6 +161,7 @@ export function App(props: AppProps) {
     return undefined
   }
   const activeResourceSource = () => {
+    if (activeCommitSha()) return `resource:commit:${commitSha()}`
     if (page() === "overview") return `resource:overview:${overviewDocument()}`
     if (page() === "commits") return "resource:commits"
     if (page() === "issues") return `resource:issues:${issueState()}`
@@ -167,6 +186,7 @@ export function App(props: AppProps) {
       ["pagination:pulls:open", current.pulls.open],
       ["pagination:pulls:closed", current.pulls.closed],
     ]
+    if (commitSha()) paginationResources.push([`pagination:commit:${commitSha()}`, commitResource()])
     for (const [source, resource] of paginationResources) {
       if (resource.status === "error" && resource.phase === "pagination") failures.set(source, resource.message)
     }
@@ -237,6 +257,13 @@ export function App(props: AppProps) {
     }
   })
 
+  onCleanup(() => props.onCloseCommit?.())
+
+  const closeDetail = () => {
+    const detail = navigation().details?.[page()]
+    setNavigation(back)
+    if (detail?.kind === "commit") props.onCloseCommit?.()
+  }
   const selectPage = (next: Page) => setNavigation((state) => navigate(state, next))
   const movePage = (delta: number) => {
     const available = visibleTabs()
@@ -250,6 +277,40 @@ export function App(props: AppProps) {
     overviewScroll?.scrollTo(0)
   }
   const quit = () => props.onQuit ? props.onQuit() : renderer.destroy()
+  let openingBrowser = false
+  const openInBrowser = async (sha?: string) => {
+    if (openingBrowser || !props.onOpenInBrowser) return
+    openingBrowser = true
+    const origin = navigation()
+    const label = sha?.slice(0, 7) ?? data().repo.nameWithOwner
+    try {
+      await props.onOpenInBrowser(sha)
+      if (!renderer.isDestroyed && navigation() === origin)
+        setToast({ id: ++toastId, title: "Opened on GitHub", message: label, duration: 2000, tone: "success" })
+    } catch (error) {
+      if (!renderer.isDestroyed && navigation() === origin)
+        setToast({ id: ++toastId, title: "Could not open GitHub", message: error instanceof Error ? error.message : "Unknown error" })
+    } finally {
+      openingBrowser = false
+    }
+  }
+  const copyToClipboard = (value: string, label: "SHA" | "URL") => {
+    try {
+      if (!renderer.copyToClipboardOSC52(value)) throw new Error(`Terminal clipboard is unavailable. Enable OSC 52 or copy the ${label} manually.`)
+      setToast({ id: ++toastId, title: `${label} sent to clipboard`, message: value, duration: 2000, tone: "success" })
+    } catch (error) {
+      setToast({ id: ++toastId, title: `Could not copy ${label}`, message: error instanceof Error ? error.message : "Unknown error" })
+    }
+  }
+  const shortcutHint = () => {
+    if (!config().showStatusBarHints) return undefined
+    if (activeCommitSha()) return "esc back · o GitHub · y SHA"
+      + (dimensions().width >= 60 && commitResource().value?.files.hasMore ? " · enter more files" : "")
+    if (page() === "commits") return "enter open · o GitHub · y SHA"
+      + (dimensions().width >= 50 ? " · tab branch" : "")
+    if (page() === "overview") return "o GitHub · y URL"
+    return undefined
+  }
 
   // Global handlers run before focused inputs; overlay checks must precede page shortcuts.
   // Hidden tabs remain mounted, so their lists must also gate interaction explicitly.
@@ -267,8 +328,10 @@ export function App(props: AppProps) {
     }
     if (event.name === "?") return setOverlay("help")
     if (event.name === "," || event.sequence === ",") return setOverlay("settings")
-    if (escape && navigation().detail)
-      return setNavigation(back)
+    if (escape && navigation().details?.[page()]) {
+      event.stopPropagation()
+      return closeDetail()
+    }
     if (event.name >= "1" && event.name <= "5") {
       const target = visibleTabs()[Number(event.name) - 1]
       if (target) selectPage(target.page)
@@ -276,6 +339,23 @@ export function App(props: AppProps) {
     }
     if (event.name === "left" || event.name === "h") return movePage(-1)
     if (event.name === "right" || event.name === "l") return movePage(1)
+    const sha = activeCommitSha()
+    if (sha) {
+      if (event.ctrl || event.meta) return
+      if (event.name === "o") void openInBrowser(sha)
+      else if (event.name === "y") copyToClipboard(sha, "SHA")
+      else if (event.name === "return" || event.name === "enter") void props.onLoadMoreCommitFiles?.()
+      else if (event.name === "r") {
+        const resource = commitResource()
+        if (resource.status === "error" && resource.phase === "pagination") void props.onLoadMoreCommitFiles?.()
+        else void props.onLoadCommit?.(sha)
+      }
+      return
+    }
+    if (page() === "overview" && !event.ctrl && !event.meta) {
+      if (event.name === "o") return void openInBrowser()
+      if (event.name === "y") return copyToClipboard(data().repo.url, "URL")
+    }
     if (event.name === "tab") {
       if (page() === "overview") {
         moveOverviewDocument(event.shift ? -1 : 1)
@@ -324,13 +404,19 @@ export function App(props: AppProps) {
             scrollRef={(value) => (overviewScroll = value)}
           />
         </box>
-        <box visible={page() === "commits"} flexGrow={1} minHeight={0}>
+        <box visible={page() === "commits" && !commitSha()} flexGrow={1} minHeight={0}>
           <CommitsScreen
             commits={data().commits}
             currentBranch={data().currentBranch}
-            active={page() === "commits"}
+            active={page() === "commits" && !commitSha()}
             interactive={overlay() === undefined}
             showScrollbar={config().showScrollbars}
+            onOpenCommit={(commit) => {
+              setNavigation((state) => openDetail(state, { kind: "commit", sha: commit.sha }))
+              void props.onLoadCommit?.(commit.sha)
+            }}
+            onOpenCommitInBrowser={(commit) => void openInBrowser(commit.sha)}
+            onCopyCommitSha={(commit) => copyToClipboard(commit.sha, "SHA")}
             onEndReached={() => {
               const commits = data().commits
               if (commits.status === "ready" && commits.value.hasMore) void props.onLoadMoreCommits?.()
@@ -381,13 +467,26 @@ export function App(props: AppProps) {
             />
           </box>
         </Show>
-      <StatusBar kind={status()} detail={statusDetail()} />
+      <Show when={commitSha()} keyed>
+        {(sha) => (
+          <box visible={page() === "commits"} flexGrow={1} minHeight={0}>
+            <CommitScreen
+              sha={sha}
+              resource={commitResource()}
+              interactive={page() === "commits" && overlay() === undefined}
+              showScrollbar={config().showScrollbars}
+            />
+          </box>
+        )}
+      </Show>
+      <StatusBar kind={status()} detail={statusDetail()} hint={shortcutHint()} />
       <Show when={toast()} keyed>
         {(current) => (
           <Toast
             title={current.title}
             message={current.message}
             duration={current.duration}
+            tone={current.tone}
             onDismiss={() => setToast((value) => value?.id === current.id ? undefined : value)}
           />
         )}

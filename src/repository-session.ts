@@ -1,6 +1,7 @@
 import { createSignal, type Accessor, type Setter } from "solid-js"
 import {
   loadGitHubBranches,
+  loadGitHubCommit,
   loadGitHubCommits,
   loadGitHubContributing,
   loadGitHubIssues,
@@ -12,6 +13,7 @@ import {
   loadGitHubSecurity,
 } from "./github/client"
 import type {
+  CommitDetail,
   CommitSummary,
   IssueSummary,
   ListState,
@@ -21,6 +23,7 @@ import type {
   WorkflowRunSummary,
 } from "./models"
 import type {
+  CommitDetailState,
   OperationState,
   RepositoryData,
   RepositoryDocumentKind,
@@ -41,6 +44,7 @@ export type RepositoryLoaders = {
   license(repository: string, branch: string): Promise<string | undefined>
   branches(repository: string, fallbackBranch: string, page?: number): Promise<Page<string>>
   commits(repository: string, branch: string, page?: number): Promise<Page<CommitSummary>>
+  commit(repository: string, sha: string, page?: number): Promise<CommitDetail>
   issues(repository: string, state: ListState, page?: number): Promise<Page<IssueSummary>>
   pulls(repository: string, state: ListState, page?: number): Promise<Page<PullRequestSummary>>
   runs(repository: string, page?: number): Promise<Page<WorkflowRunSummary>>
@@ -48,6 +52,10 @@ export type RepositoryLoaders = {
 
 export type RepositorySession = {
   state: Accessor<RepositoryState>
+  commitDetail: Accessor<CommitDetailState | undefined>
+  loadCommit(sha: string): Promise<void>
+  loadMoreCommitFiles(): Promise<void>
+  clearCommit(): void
   load(repository: string): Promise<void>
   refresh(): Promise<void>
   retryResource(resource: RepositoryResource): Promise<void>
@@ -68,6 +76,7 @@ const defaultLoaders: RepositoryLoaders = {
   license: loadGitHubLicense,
   branches: loadGitHubBranches,
   commits: loadGitHubCommits,
+  commit: loadGitHubCommit,
   issues: loadGitHubIssues,
   pulls: loadGitHubPulls,
   runs: loadGitHubRuns,
@@ -155,6 +164,8 @@ function updateReady(
 // Generations reject obsolete repository/branch results; reloads retain usable data.
 export function createRepositorySession(loaders: RepositoryLoaders = defaultLoaders): RepositorySession {
   const [state, setState] = createSignal<RepositoryState>({ status: "loading", repository: "" })
+  const [commitDetail, setCommitDetail] = createSignal<CommitDetailState>()
+  let commitGeneration = 0
   let repositoryGeneration = 0
   let branchGeneration = 0
   const generation = () => repositoryGeneration
@@ -308,7 +319,71 @@ export function createRepositorySession(loaders: RepositoryLoaders = defaultLoad
     ])
   }
 
+  const clearCommit = () => {
+    ++commitGeneration
+    setCommitDetail(undefined)
+  }
+
+  const loadCommit = async (sha: string) => {
+    const current = state()
+    const previous = commitDetail()
+    if (current.status !== "ready" || (previous?.sha === sha && previous.resource.status === "loading")) return
+    const repository = current.repository
+    const request = ++commitGeneration
+    const value = previous?.sha === sha ? previous.resource.value : undefined
+    setCommitDetail({ sha, resource: loadingResource(value) })
+    try {
+      const pages = await Promise.all(Array.from({ length: value?.files.page ?? 1 }, (_, index) =>
+        loaders.commit(repository, sha, index + 1)))
+      if (request !== commitGeneration) return
+      const first = pages[0]!
+      const last = pages.at(-1)!
+      setCommitDetail({
+        sha,
+        resource: {
+          status: "ready",
+          value: {
+            ...first,
+            files: { ...last.files, items: pages.flatMap((page) => page.files.items) },
+            filesTruncated: last.filesTruncated,
+          },
+        },
+      })
+    } catch (error) {
+      if (request === commitGeneration) setCommitDetail({ sha, resource: failedResource(error, value) })
+    }
+  }
+
+  const loadMoreCommitFiles = async () => {
+    const current = state()
+    const detail = commitDetail()
+    const value = detail?.resource.value
+    if (current.status !== "ready" || !detail || !value?.files.hasMore || detail.resource.status === "loading") return
+    const { sha } = detail
+    const request = commitGeneration
+    setCommitDetail({ sha, resource: loadingResource(value, "pagination") })
+    try {
+      const next = await loaders.commit(current.repository, sha, value.files.page + 1)
+      if (request !== commitGeneration) return
+      const existing = new Set(value.files.items.map((file) => file.path))
+      setCommitDetail({
+        sha,
+        resource: {
+          status: "ready",
+          value: {
+            ...value,
+            files: { ...next.files, items: [...value.files.items, ...next.files.items.filter((file) => !existing.has(file.path))] },
+            filesTruncated: next.filesTruncated,
+          },
+        },
+      })
+    } catch (error) {
+      if (request === commitGeneration) setCommitDetail({ sha, resource: failedResource(error, value, "pagination") })
+    }
+  }
+
   const load = async (repository: string) => {
+    clearCommit()
     const request = ++repositoryGeneration
     ++branchGeneration
     setState({ status: "loading", repository })
@@ -701,6 +776,10 @@ export function createRepositorySession(loaders: RepositoryLoaders = defaultLoad
 
   return {
     state,
+    commitDetail,
+    loadCommit,
+    loadMoreCommitFiles,
+    clearCommit,
     load,
     refresh,
     retryResource,
