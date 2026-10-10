@@ -40,29 +40,6 @@ export type CommitSummary = {
   date: string
 }
 
-export type IssueDetail = IssueSummary & {
-  body: string
-  labels: string[]
-  comments: number
-}
-
-export type PullRequestDetail = PullRequestSummary & {
-  body: string
-  labels: string[]
-  comments: number
-  headBranch: string
-  draft: boolean
-}
-
-export type CommitDetail = CommitSummary & {
-  fullMessage: string
-}
-
-export type WorkflowRunDetail = WorkflowRunSummary & {
-  branch: string
-  event: string
-}
-
 export type Paginated<T> = {
   items: T[]
   page: number

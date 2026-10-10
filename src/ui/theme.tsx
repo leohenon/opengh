@@ -1,4 +1,5 @@
 import { useRenderer } from "@opentui/solid"
+import { defaultConfig } from "../config"
 import {
   createContext,
   createEffect,
@@ -31,11 +32,11 @@ function reactiveProxy<T extends object>(value: () => T): T {
   })
 }
 
-const githubTheme = resolveTheme("github")
+const defaultTheme = resolveTheme(defaultConfig.theme)
 const standalone: ThemeContextValue = {
-  colors: appColors(githubTheme),
-  theme: githubTheme,
-  selected: () => "github",
+  colors: appColors(defaultTheme),
+  theme: defaultTheme,
+  selected: () => defaultConfig.theme,
   preview: () => {},
 }
 
@@ -44,7 +45,7 @@ const ThemeContext = createContext<ThemeContextValue>(standalone)
 export function ThemeProvider(props: ParentProps<{ name: string }>) {
   const renderer = useRenderer()
   const [preview, setPreview] = createSignal<ThemeName>()
-  const selected = createMemo<ThemeName>(() => preview() ?? (isThemeName(props.name) ? props.name : "github"))
+  const selected = createMemo<ThemeName>(() => preview() ?? (isThemeName(props.name) ? props.name : defaultConfig.theme))
   const resolved = createMemo(() => resolveTheme(selected()))
   const resolvedColors = createMemo(() => appColors(resolved()))
   const colors = reactiveProxy(resolvedColors)

@@ -51,6 +51,7 @@ export type RepositorySession = {
   load(repository: string): Promise<void>
   refresh(): Promise<void>
   retryResource(resource: RepositoryResource): Promise<void>
+  canSwitchBranch(): boolean
   switchBranch(branch: string): Promise<void>
   loadMoreBranches(): Promise<void>
   loadMoreCommits(): Promise<void>
@@ -150,6 +151,8 @@ function updateReady(
   })
 }
 
+// Owns repository data and async coordination; pages only receive state and callbacks.
+// Generations reject obsolete repository/branch results; reloads retain usable data.
 export function createRepositorySession(loaders: RepositoryLoaders = defaultLoaders): RepositorySession {
   const [state, setState] = createSignal<RepositoryState>({ status: "loading", repository: "" })
   let repositoryGeneration = 0
@@ -442,13 +445,18 @@ export function createRepositorySession(loaders: RepositoryLoaders = defaultLoad
     return fetchPulls(repository, resource.state, request, current.data.pulls[resource.state].value?.page)
   }
 
+  const canSwitchBranch = () => {
+    const current = state()
+    return current.status === "ready"
+      && current.operations.branch.status !== "loading" && current.operations.refresh.status !== "loading"
+      && current.data.commits.status !== "loading" && current.data.readme.status !== "loading"
+      && current.data.contributing.status !== "loading" && current.data.security.status !== "loading"
+      && current.data.license.status !== "loading"
+  }
+
   const switchBranch = async (branch: string) => {
     const current = state()
-    if (current.status !== "ready" || current.data.currentBranch === branch
-      || current.operations.branch.status === "loading" || current.operations.refresh.status === "loading"
-      || current.data.commits.status === "loading" || current.data.readme.status === "loading"
-      || current.data.contributing.status === "loading" || current.data.security.status === "loading"
-      || current.data.license.status === "loading") return
+    if (current.status !== "ready" || current.data.currentBranch === branch || !canSwitchBranch()) return
 
     const request = ++branchGeneration
     const repositoryRequest = repositoryGeneration
@@ -696,6 +704,7 @@ export function createRepositorySession(loaders: RepositoryLoaders = defaultLoad
     load,
     refresh,
     retryResource,
+    canSwitchBranch,
     switchBranch,
     loadMoreBranches,
     loadMoreCommits,

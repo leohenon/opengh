@@ -13,6 +13,8 @@ const sidebarValues = ["auto", "show", "hide"] as const
 
 export function Settings(props: {
   config: Config
+  saving?: boolean
+  loadError?: string
   onChange: (config: Config) => Promise<void>
   onClose: () => void
 }) {
@@ -22,6 +24,7 @@ export function Settings(props: {
   const [screen, setScreen] = createSignal<"settings" | "themes">("settings")
   const [selected, setSelected] = createSignal<Setting>("theme")
   const [saving, setSaving] = createSignal(false)
+  const busy = () => saving() || props.saving === true
   const [error, setError] = createSignal("")
   const popupHeight = 20
   const split = () => dimensions().width >= 110
@@ -33,7 +36,7 @@ export function Settings(props: {
   }
 
   const toggleScrollbars = async () => {
-    if (saving()) return
+    if (busy()) return
     setSaving(true)
     setError("")
     try {
@@ -46,7 +49,7 @@ export function Settings(props: {
   }
 
   const changeSidebar = async (direction: number) => {
-    if (saving()) return
+    if (busy()) return
     const current = sidebarValues.indexOf(props.config.aboutSidebar)
     const next = sidebarValues[(current + direction + sidebarValues.length) % sidebarValues.length]!
     setSaving(true)
@@ -67,6 +70,11 @@ export function Settings(props: {
 
   useKeyboard((event) => {
     if (screen() === "themes") return
+    if (busy()) {
+      event.preventDefault()
+      event.stopPropagation()
+      return
+    }
     const enter = event.name === "return" || event.name === "enter"
       || event.raw === "\r" || event.raw === "\n" || event.sequence === "\r" || event.sequence === "\n"
     if (event.name === "escape" || event.name === "esc" || event.raw === "\u001b" || event.sequence === "\u001b")
@@ -128,6 +136,7 @@ export function Settings(props: {
         fallback={(
           <ThemePicker
             current={props.config.theme}
+            saving={busy()}
             onPreview={theme.preview}
             onCancel={() => {
               theme.preview()
@@ -152,7 +161,7 @@ export function Settings(props: {
           >
             <box height={1} flexShrink={0} flexDirection="row" justifyContent="space-between">
               <text fg={colors.text} attributes={TextAttributes.BOLD}>Settings</text>
-              <Show when={!split()}><text fg={colors.muted}>esc</text></Show>
+              <Show when={!split()}><text fg={colors.muted}>{busy() ? "Saving…" : "esc"}</text></Show>
             </box>
             <box height={1} flexShrink={0} />
             <text fg={colors.muted}>Appearance</text>
@@ -161,7 +170,7 @@ export function Settings(props: {
             {settingRow("scrollbars", "Scrollbars", "Lists and documents", scrollbarValue())}
             {settingRow("about-sidebar", "About sidebar", "Repository metadata", props.config.aboutSidebar)}
             <box flexGrow={1} minHeight={0} />
-            <Show when={error()}>
+            <Show when={props.loadError || error()}>
               {(message) => <text fg={colors.red} wrapMode="word">{message()}</text>}
             </Show>
           </box>
@@ -180,7 +189,7 @@ export function Settings(props: {
             >
               <box height={1} flexShrink={0} flexDirection="row" justifyContent="space-between">
                 <text fg={colors.blue} attributes={TextAttributes.BOLD}>{detail().title}</text>
-                <text fg={colors.muted}>esc</text>
+                <text fg={colors.muted}>{busy() ? "Saving…" : "esc"}</text>
               </box>
               <box height={1} flexShrink={0} />
               <text fg={colors.text} wrapMode="word">{detail().description}</text>

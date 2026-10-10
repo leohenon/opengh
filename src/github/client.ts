@@ -88,6 +88,7 @@ function commitSummary(item: CommitResponse): CommitSummary {
   }
 }
 
+// Map endpoints into domain models here; transport owns execution/errors, the session owns async state.
 export function createGitHubClient(transport: GitHubTransport) {
   const metadata = async (repository: string): Promise<Repo> => {
     const repo = await transport.json<RepositoryResponse>(`repos/${repository}`)

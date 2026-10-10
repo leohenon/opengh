@@ -29,6 +29,7 @@ type PickerRow = BranchRow | LoadRow
 export function BranchPicker(props: {
   branches: ResourceState<Paginated<string>>
   current: string
+  canSwitch?: boolean
   showScrollbar: boolean
   onSelect: (branch: string) => void
   onLoadMore: () => Promise<void>
@@ -73,7 +74,10 @@ export function BranchPicker(props: {
   ])
 
   const select = (row: PickerRow) => {
-    if (row.kind === "branch") return props.onSelect(row.branch)
+    if (row.kind === "branch") {
+      if (props.canSwitch !== false) props.onSelect(row.branch)
+      return
+    }
     if (row.action === "load-more") void props.onLoadMore()
     if (row.action === "retry") props.onRetry()
   }
@@ -89,6 +93,7 @@ export function BranchPicker(props: {
       height={22}
       showScrollbar={props.showScrollbar}
       empty="No matching branches"
+      error={props.canSwitch === false ? "Repository is busy — wait before switching branches" : undefined}
       onQueryChange={setQuery}
       onSelect={select}
       onClose={props.onClose}

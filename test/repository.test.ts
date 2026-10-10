@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import { join } from "node:path"
-import { loadRecentRepositories, normalizeRepository, rememberRepository, resolveRepository } from "../src/repository"
+import { loadRecentRepositories, rememberRepository, resolveRepository } from "../src/github/repository"
+import { normalizeRepository } from "../src/repository-name"
 
 describe("repository resolution", () => {
   test("normalizes repository names and GitHub URLs", () => {

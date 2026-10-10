@@ -15,7 +15,7 @@ describe("SelectableList", () => {
   test("renders only complete rows for its measured viewport", async () => {
     const items = Array.from({ length: 8 }, (_, id) => ({ id, label: `row ${id}` }))
     const view = await testRender(() => (
-      <box width={50} height={17}>
+      <box width="100%" height="100%">
         <SelectableList
           items={items}
           itemKey={(item) => item.id}
@@ -45,6 +45,12 @@ describe("SelectableList", () => {
     await view.flush()
     expect(view.captureCharFrame()).toContain("row 7")
 
+    view.renderer.resize(50, 8)
+    await view.flush()
+    expect(view.captureCharFrame().split("\n").find((row) => row.includes("row 7"))).toContain("▌")
+
+    view.renderer.resize(50, 17)
+    await view.flush()
     view.mockInput.pressKey("g")
     await view.flush()
     expect(view.captureCharFrame()).toContain("row 0")

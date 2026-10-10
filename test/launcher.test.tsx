@@ -4,7 +4,7 @@ import {
   LoadingRepository,
   RepositoryLoadError,
   RepositoryPicker,
-} from "../src/launcher"
+} from "../src/ui/launcher"
 
 const active: Array<{ renderer: { destroy(): void; isDestroyed: boolean } }> = []
 afterEach(() => {

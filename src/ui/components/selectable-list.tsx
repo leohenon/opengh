@@ -1,6 +1,6 @@
 import type { BoxRenderable, ScrollBoxRenderable } from "@opentui/core"
-import { useKeyboard, useTerminalDimensions } from "@opentui/solid"
-import { createEffect, createSignal, Index, Show, type Accessor, type JSX } from "solid-js"
+import { useKeyboard } from "@opentui/solid"
+import { createEffect, createSignal, Index, onCleanup, Show, type Accessor, type JSX } from "solid-js"
 import { scrollRowIntoView } from "../scroll-selection"
 import { useTheme } from "../theme"
 
@@ -18,7 +18,6 @@ export function SelectableList<T>(props: {
   onEndReached?: () => void
   children: (item: Accessor<T>, active: Accessor<boolean>) => JSX.Element
 }) {
-  const dimensions = useTerminalDimensions()
   const { colors } = useTheme()
   const [selectedKey, setSelectedKey] = createSignal<ItemKey>()
   const [containerHeight, setContainerHeight] = createSignal(0)
@@ -80,17 +79,17 @@ export function SelectableList<T>(props: {
     else selectIndex(Math.min(selectedIndex, Math.max(0, items.length - 1)))
   })
 
-  createEffect(() => {
-    dimensions().height
-    const height = listHeight()
+  const revealSelection = () => {
     const index = indexOfSelection()
-    if (props.active && height > 0 && index >= 0) scrollRowIntoView(list, index, rowHeight())
-  })
+    if (props.active && list && index >= 0) scrollRowIntoView(list, index, rowHeight())
+  }
+  createEffect(revealSelection)
+  onCleanup(() => list?.viewport.off("resize", revealSelection))
 
   createEffect(() => {
     const index = indexOfSelection()
     const threshold = props.endThreshold ?? 3
-    if (props.active && props.items.length > 0 && index >= props.items.length - threshold)
+    if (props.active && (props.items.length === 0 || index >= props.items.length - threshold))
       props.onEndReached?.()
   })
 
@@ -108,7 +107,11 @@ export function SelectableList<T>(props: {
       backgroundColor={colors.canvas}
     >
       <scrollbox
-        ref={(value) => (list = value)}
+        ref={(value) => {
+          list = value
+          // Resize events run after ScrollBox updates its viewport and scrollbar bounds.
+          list.viewport.on("resize", revealSelection)
+        }}
         height={listHeight()}
         flexShrink={0}
         minHeight={0}

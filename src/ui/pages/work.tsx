@@ -8,7 +8,6 @@ import { ago } from "../format"
 import { useTheme } from "../theme"
 
 export function WorkScreen(props: {
-  title: string
   kind: "issue" | "pull"
   state: ListState
   counts: { open: number; closed: number }
@@ -47,7 +46,7 @@ export function WorkScreen(props: {
             active={props.active && props.interactive}
             showScrollbar={props.showScrollbar}
             resetKey={props.state}
-            empty={`No ${props.state} ${props.kind === "issue" ? "issues" : "pull requests"}`}
+            empty={`No ${props.state} ${props.kind === "issue" ? "issues" : "pull requests"}${page().hasMore ? " loaded yet" : ""}`}
             onEndReached={props.onEndReached}
           >
             {(entry, active) => (

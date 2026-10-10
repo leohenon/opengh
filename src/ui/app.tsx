@@ -31,10 +31,13 @@ export type AppProps = {
   data: RepositoryData | (() => RepositoryData)
   operations: RepositoryOperations | (() => RepositoryOperations)
   config?: Config
+  configSaving?: boolean
+  configError?: string
   onConfigChange?: (config: Config) => Promise<void>
   onQuit?: () => void
   onRefresh?: () => void
   onRetryResource?: (resource: RepositoryResource) => void
+  canSwitchBranch?: boolean
   onBranchChange?: (branch: string) => void
   onLoadMoreBranches?: () => Promise<void>
   onLoadMoreCommits?: () => Promise<void>
@@ -59,6 +62,7 @@ export function App(props: AppProps) {
   let issueDefaultResolved = false
   let pullDefaultResolved = false
 
+  const config = () => props.config ?? defaultConfig
   const data = () => typeof props.data === "function" ? props.data() : props.data
   const operations = () => typeof props.operations === "function" ? props.operations() : props.operations
   const page = () => navigation().page
@@ -208,7 +212,8 @@ export function App(props: AppProps) {
       setPullState("open")
     }
 
-    if (!issueDefaultResolved && current.issues.open.status === "ready" && current.issues.closed.status === "ready") {
+    if (!issueDefaultResolved && current.issues.open.status === "ready" && current.issues.closed.status === "ready"
+      && (current.issues.open.value.items.length > 0 || !current.issues.open.value.hasMore)) {
       issueDefaultResolved = true
       if (current.issues.open.value.items.length === 0 && current.issues.closed.value.items.length > 0)
         setIssueState("closed")
@@ -246,6 +251,8 @@ export function App(props: AppProps) {
   }
   const quit = () => props.onQuit ? props.onQuit() : renderer.destroy()
 
+  // Global handlers run before focused inputs; overlay checks must precede page shortcuts.
+  // Hidden tabs remain mounted, so their lists must also gate interaction explicitly.
   useKeyboard((event) => {
     const escape = event.name === "escape" || event.name === "esc" || event.raw === "\u001b" || event.sequence === "\u001b"
     if (overlay() === "branch-picker") {
@@ -312,8 +319,8 @@ export function App(props: AppProps) {
             repo={data().repo}
             documents={overviewDocuments()}
             currentDocument={overviewDocument()}
-            showScrollbar={props.config?.showScrollbars ?? false}
-            aboutSidebar={props.config?.aboutSidebar ?? "auto"}
+            showScrollbar={config().showScrollbars}
+            aboutSidebar={config().aboutSidebar}
             scrollRef={(value) => (overviewScroll = value)}
           />
         </box>
@@ -323,7 +330,7 @@ export function App(props: AppProps) {
             currentBranch={data().currentBranch}
             active={page() === "commits"}
             interactive={overlay() === undefined}
-            showScrollbar={props.config?.showScrollbars ?? false}
+            showScrollbar={config().showScrollbars}
             onEndReached={() => {
               const commits = data().commits
               if (commits.status === "ready" && commits.value.hasMore) void props.onLoadMoreCommits?.()
@@ -332,14 +339,13 @@ export function App(props: AppProps) {
         </box>
         <box visible={page() === "issues"} flexGrow={1} minHeight={0}>
           <WorkScreen
-            title="Issues"
             kind="issue"
             state={issueState()}
             counts={issueCounts()}
             resource={issues()}
             active={page() === "issues"}
             interactive={overlay() === undefined}
-            showScrollbar={props.config?.showScrollbars ?? false}
+            showScrollbar={config().showScrollbars}
             onEndReached={() => {
               const resource = issues()
               if (resource.status === "ready" && resource.value.hasMore) void props.onLoadMoreIssues?.(issueState())
@@ -348,14 +354,13 @@ export function App(props: AppProps) {
         </box>
         <box visible={page() === "pulls"} flexGrow={1} minHeight={0}>
           <WorkScreen
-            title="Pull requests"
             kind="pull"
             state={pullState()}
             counts={pullCounts()}
             resource={pulls()}
             active={page() === "pulls"}
             interactive={overlay() === undefined}
-            showScrollbar={props.config?.showScrollbars ?? false}
+            showScrollbar={config().showScrollbars}
             onEndReached={() => {
               const resource = pulls()
               if (resource.status === "ready" && resource.value.hasMore) void props.onLoadMorePulls?.(pullState())
@@ -368,7 +373,7 @@ export function App(props: AppProps) {
               runs={data().runs}
               active={page() === "actions"}
               interactive={overlay() === undefined}
-              showScrollbar={props.config?.showScrollbars ?? false}
+              showScrollbar={config().showScrollbars}
               onEndReached={() => {
                 const runs = data().runs
                 if (runs.status === "ready" && runs.value.hasMore) void props.onLoadMoreRuns?.()
@@ -390,7 +395,9 @@ export function App(props: AppProps) {
       <Show when={overlay() === "help"}><Help /></Show>
       <Show when={overlay() === "settings"}>
         <Settings
-          config={props.config ?? defaultConfig}
+          config={config()}
+          saving={props.configSaving}
+          loadError={props.configError}
           onChange={(config) => props.onConfigChange?.(config) ?? Promise.resolve()}
           onClose={() => setOverlay()}
         />
@@ -399,7 +406,8 @@ export function App(props: AppProps) {
         <BranchPicker
           branches={data().branches}
           current={data().currentBranch}
-          showScrollbar={props.config?.showScrollbars ?? false}
+          canSwitch={props.canSwitchBranch}
+          showScrollbar={config().showScrollbars}
           onLoadMore={props.onLoadMoreBranches ?? (() => Promise.resolve())}
           onRetry={() => props.onRetryResource?.({ kind: "branches" })}
           onClose={() => setOverlay()}

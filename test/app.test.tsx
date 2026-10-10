@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { testRender } from "@opentui/solid";
 import { createSignal } from "solid-js";
-import { App } from "../src/app";
+import { App } from "../src/ui/app";
 import type { Config } from "../src/config";
 import { resolveTheme } from "../src/theme";
 import { ThemeProvider, useTheme } from "../src/ui/theme";
@@ -21,6 +21,7 @@ async function setup() {
   let quit = 0;
   let refresh = 0;
   let branch = "";
+  const [canSwitchBranch, setCanSwitchBranch] = createSignal(true);
   const view = await testRender(
     () => (
       <App
@@ -28,6 +29,7 @@ async function setup() {
         operations={repositoryOperationsFixture}
         onQuit={() => quit++}
         onRefresh={() => refresh++}
+        canSwitchBranch={canSwitchBranch()}
         onBranchChange={(value) => (branch = value)}
       />
     ),
@@ -40,6 +42,7 @@ async function setup() {
     quit: () => quit,
     refresh: () => refresh,
     branch: () => branch,
+    setCanSwitchBranch,
   };
 }
 
@@ -424,6 +427,54 @@ describe("openGH TUI", () => {
     expect(retry).toBe("license");
   });
 
+  test("continues through PR-only issue pages without defaulting to closed issues", async () => {
+    const initial = structuredClone(githubDataFixture)
+    // Filtering a full API page of pull requests leaves no issues, but more pages remain.
+    initial.issues.open = { status: "ready", value: { items: [], page: 1, hasMore: true } }
+    const [data, setData] = createSignal(initial)
+    let loads = 0
+    const view = await testRender(() => (
+      <App
+        data={data}
+        operations={repositoryOperationsFixture}
+        onLoadMoreIssues={async (state) => {
+          expect(state).toBe("open")
+          loads++
+          const previous = data().issues.open.value!
+          setData((current) => ({
+            ...current,
+            issues: { ...current.issues, open: { status: "loading", phase: "pagination", value: previous } },
+          }))
+          await Promise.resolve()
+          setData((current) => ({
+            ...current,
+            issues: {
+              ...current.issues,
+              open: {
+                status: "ready",
+                value: {
+                  items: loads === 1 ? [] : githubDataFixture.issues.open.value!.items,
+                  page: previous.page + 1,
+                  hasMore: loads === 1,
+                },
+              },
+            },
+          }))
+        }}
+      />
+    ), { width: 120, height: 32, useThread: false })
+    active.push(view)
+    await view.flush()
+    expect(loads).toBe(0)
+
+    view.mockInput.pressKey("3")
+    await view.flush()
+    expect(loads).toBe(2)
+    expect(data().issues.open.value?.page).toBe(3)
+    expect(view.captureCharFrame()).toContain("ScrollBox loses focus after terminal resize")
+    expect(view.captureCharFrame()).not.toContain("Fix terminal redraw after returning from background")
+  })
+
   test("defaults to closed work when open is empty and closed has items", async () => {
     const data = {
       ...githubDataFixture,
@@ -506,7 +557,7 @@ describe("openGH TUI", () => {
   })
 
   test("opens the branch picker and toggles work states", async () => {
-    const { view, branch } = await setup();
+    const { view, branch, setCanSwitchBranch } = await setup();
     view.mockInput.pressKey("2");
     view.mockInput.pressTab();
     await view.flush();
@@ -515,6 +566,14 @@ describe("openGH TUI", () => {
     const currentBranchRow = branchFrame.split("\n").find((row) => row.includes("✓ current"));
     expect(currentBranchRow).toContain("›");
     await view.mockInput.typeText("nxt");
+    setCanSwitchBranch(false);
+    view.mockInput.pressEnter();
+    await view.flush();
+    expect(branch()).toBe("");
+    expect(view.captureCharFrame()).toContain("Repository is busy");
+    expect(view.captureCharFrame()).toContain("Switch branch");
+
+    setCanSwitchBranch(true);
     view.mockInput.pressEnter();
     await view.flush();
     expect(branch()).toBe("next");

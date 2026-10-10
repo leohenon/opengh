@@ -1,5 +1,6 @@
 export type Page = "overview" | "commits" | "issues" | "pulls" | "actions"
 
+// Reserved for the next feature: detail routes identify entities, never selected row positions.
 export type DetailTarget =
   | { kind: "commit"; sha: string }
   | { kind: "issue"; number: number }

@@ -1,4 +1,4 @@
-import { mkdir } from "node:fs/promises"
+import { chmod, lstat, mkdir, realpath, rename, rm, stat, writeFile } from "node:fs/promises"
 import { dirname, join } from "node:path"
 import { configDirectory } from "./paths"
 import { isThemeName, type ThemeName } from "./theme"
@@ -36,6 +36,7 @@ export function configPath() {
   return join(configDirectory(), "config.json")
 }
 
+// Files may omit fields; consumers receive resolved defaults. Unknown fields are not preserved on save.
 function normalizeConfig(value: unknown): Config {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     throw new TypeError("Config must be a JSON object")
@@ -53,21 +54,33 @@ function normalizeConfig(value: unknown): Config {
 }
 
 export async function loadConfig(path = configPath()): Promise<Config> {
-  const file = Bun.file(path)
-  if (!await file.exists()) return { ...defaultConfig }
-
   try {
-    return normalizeConfig(await file.json())
+    return normalizeConfig(await Bun.file(path).json())
   } catch (error) {
+    if (error instanceof Error && "code" in error && error.code === "ENOENT") return { ...defaultConfig }
     throw new ConfigFileError("load", path, error)
   }
 }
 
 export async function saveConfig(config: Config, path = configPath()): Promise<void> {
+  let temporary: string | undefined
   try {
-    await mkdir(dirname(path), { recursive: true })
-    await Bun.write(path, JSON.stringify(config, null, 2) + "\n")
+    const entry = await lstat(path).catch((error) => {
+      if (error instanceof Error && "code" in error && error.code === "ENOENT") return undefined
+      throw error
+    })
+    // Replace the target, never the link; dangling links fail without being overwritten.
+    const destination = entry?.isSymbolicLink() ? await realpath(path) : path
+    const existing = entry?.isSymbolicLink() ? await stat(destination) : entry
+    const mode = existing ? existing.mode & 0o777 : undefined
+    await mkdir(dirname(destination), { recursive: true })
+    temporary = `${destination}.${crypto.randomUUID()}.tmp`
+    await writeFile(temporary, JSON.stringify(config, null, 2) + "\n", { flag: "wx", mode })
+    // Restore any permission bits masked by umask before replacing the existing file.
+    if (mode !== undefined) await chmod(temporary, mode)
+    await rename(temporary, destination)
   } catch (error) {
+    if (temporary) await rm(temporary, { force: true }).catch(() => {})
     throw new ConfigFileError("save", path, error)
   }
 }

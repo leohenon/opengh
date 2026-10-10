@@ -326,12 +326,15 @@ describe("repository session", () => {
     }))
 
     await session.load("anomalyco/opentui")
+    expect(session.canSwitchBranch()).toBe(true)
     const pagination = session.loadMoreCommits()
+    expect(session.canSwitchBranch()).toBe(false)
     await session.switchBranch("next")
     expect(branchLoads).toBe(0)
     pending.resolve({ items: [], hasMore: false })
     await pagination
     expect(ready(session).data.commits.status).toBe("ready")
+    expect(session.canSwitchBranch()).toBe(true)
   })
 
   test("does not retry resources during refresh", async () => {

@@ -21,6 +21,7 @@ function fuzzyScore(value: string, query: string) {
 
 export function ThemePicker(props: {
   current: ThemeName
+  saving?: boolean
   onPreview: (theme: ThemeName) => void
   onCancel: () => void
   onSelect: (theme: ThemeName) => Promise<void>
@@ -29,6 +30,7 @@ export function ThemePicker(props: {
   const [query, setQuery] = createSignal("")
   const [selected, setSelected] = createSignal<ThemeName>(props.current)
   const [saving, setSaving] = createSignal(false)
+  const busy = () => saving() || props.saving === true
   const [error, setError] = createSignal("")
   let list: ScrollBoxRenderable | undefined
 
@@ -58,7 +60,7 @@ export function ThemePicker(props: {
   })
 
   const choose = async () => {
-    if (saving() || !themes().some((entry) => entry.theme === selected())) return
+    if (busy() || !themes().some((entry) => entry.theme === selected())) return
     setSaving(true)
     setError("")
     try {
@@ -72,6 +74,11 @@ export function ThemePicker(props: {
   }
 
   const handleKey = (event: KeyEvent) => {
+    if (busy()) {
+      event.preventDefault()
+      event.stopPropagation()
+      return
+    }
     if (event.name === "escape" || event.name === "esc" || event.raw === "\u001b" || event.sequence === "\u001b")
       return props.onCancel()
     if (event.name === "up") return move(-1)
@@ -83,12 +90,12 @@ export function ThemePicker(props: {
     <box flexGrow={1} minHeight={0} flexDirection="column" paddingLeft={4} paddingRight={4} paddingBottom={1}>
       <box height={1} flexShrink={0} flexDirection="row" justifyContent="space-between">
         <text fg={colors.text} attributes={TextAttributes.BOLD}>Themes</text>
-        <text fg={colors.muted}>esc</text>
+        <text fg={colors.muted}>{busy() ? "Saving…" : "esc"}</text>
       </box>
       <box height={2} flexShrink={0} paddingTop={1}>
         <input
           width="100%"
-          focused
+          focused={!busy()}
           value={query()}
           placeholder="Search themes"
           placeholderColor={colors.muted}

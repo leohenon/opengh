@@ -6,6 +6,7 @@ import { createRepositorySession, type RepositorySession } from "./repository-se
 import type { RepositoryState } from "./repository-state"
 import { App } from "./ui/app"
 import { ThemeProvider } from "./ui/theme"
+import { Toast } from "./ui/components/toast"
 import {
   LoadingRepository,
   RepositoryLoadError,
@@ -47,6 +48,9 @@ export function Root(props: {
   const [recent, setRecent] = createSignal<string[]>([])
   const [pickerError, setPickerError] = createSignal("")
   const [config, setConfig] = createSignal(defaultConfig)
+  const [configSaving, setConfigSaving] = createSignal(false)
+  const [configError, setConfigError] = createSignal("")
+  const [configWarningDismissed, setConfigWarningDismissed] = createSignal(false)
   const session = services.createRepositorySession()
   let quitting = false
 
@@ -63,9 +67,17 @@ export function Root(props: {
     }
   })
 
+  // Root owns committed preferences and the cross-dialog save lock; theme previews stay in the UI.
   const updateConfig = async (next: Config) => {
-    await services.saveConfig(next)
-    setConfig(next)
+    if (configSaving()) throw new Error("A settings save is already in progress")
+    if (configError()) throw new Error(configError())
+    setConfigSaving(true)
+    try {
+      await services.saveConfig(next)
+      setConfig(next)
+    } finally {
+      setConfigSaving(false)
+    }
   }
 
   const open = (repository: string) => {
@@ -78,7 +90,11 @@ export function Root(props: {
     void Promise.all([
       services.resolveRepository(props.repositoryArgument, props.cwd),
       services.loadRecentRepositories(),
-      services.loadConfig().catch(() => ({ ...defaultConfig })),
+      services.loadConfig().catch((error) => {
+        const message = error instanceof Error ? error.message : "Could not load config"
+        setConfigError(`${message}. Fix or move the config file and restart before saving settings.`)
+        return { ...defaultConfig }
+      }),
     ]).then(([resolved, repositories, loadedConfig]) => {
       if (renderer.isDestroyed) return
       setRecent(repositories)
@@ -120,10 +136,13 @@ export function Root(props: {
               data={() => current().data}
               operations={() => current().operations}
               config={config()}
+              configSaving={configSaving()}
+              configError={configError()}
               onConfigChange={updateConfig}
               onQuit={quit}
               onRefresh={() => void session.refresh()}
               onRetryResource={(resource) => void session.retryResource(resource)}
+              canSwitchBranch={session.canSwitchBranch()}
               onBranchChange={(branch) => void session.switchBranch(branch)}
               onLoadMoreBranches={session.loadMoreBranches}
               onLoadMoreCommits={session.loadMoreCommits}
@@ -134,6 +153,13 @@ export function Root(props: {
           )}
         </Match>
         </Switch>
+      </Show>
+      <Show when={view() !== "resolving" && configError() && !configWarningDismissed()}>
+        <Toast
+          title="Using default settings"
+          message={configError()}
+          onDismiss={() => setConfigWarningDismissed(true)}
+        />
       </Show>
     </ThemeProvider>
   )
