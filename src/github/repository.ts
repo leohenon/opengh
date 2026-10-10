@@ -1,4 +1,5 @@
 import { normalizeRepository } from "../repository-name";
+import { spawnGitHub } from "./process";
 import { configDirectory } from "../paths";
 import { mkdir } from "node:fs/promises";
 import { dirname, join } from "node:path";
@@ -9,9 +10,8 @@ export async function repositoryFromDirectory(
   cwd: string,
 ): Promise<string | undefined> {
   try {
-    const child = Bun.spawn(
+    const child = spawnGitHub(
       [
-        "gh",
         "repo",
         "view",
         "--json",
@@ -19,11 +19,7 @@ export async function repositoryFromDirectory(
         "--jq",
         ".nameWithOwner",
       ],
-      {
-        cwd,
-        stdout: "pipe",
-        stderr: "pipe",
-      },
+      cwd,
     );
     const [output, exitCode] = await Promise.all([
       new Response(child.stdout).text(),

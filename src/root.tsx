@@ -80,6 +80,7 @@ export function Root(props: {
       services.loadRecentRepositories(),
       services.loadConfig().catch(() => ({ ...defaultConfig })),
     ]).then(([resolved, repositories, loadedConfig]) => {
+      if (renderer.isDestroyed) return
       setRecent(repositories)
       setConfig(loadedConfig)
       if (resolved) return open(resolved)

@@ -1,3 +1,5 @@
+import { spawnGitHub } from "./process"
+
 export class GitHubApiError extends Error {
   readonly path: string
   readonly status?: number
@@ -23,9 +25,9 @@ function httpStatus(message: string) {
 }
 
 async function request(path: string, accept?: string) {
-  const args = ["gh", "api", path]
+  const args = ["api", path]
   if (accept) args.push("-H", `Accept: ${accept}`)
-  const process = Bun.spawn(args, { stdout: "pipe", stderr: "pipe" })
+  const process = spawnGitHub(args)
   let timedOut = false
   const timeout = setTimeout(() => {
     timedOut = true
