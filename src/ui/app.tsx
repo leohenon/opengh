@@ -313,6 +313,7 @@ export function App(props: AppProps) {
             documents={overviewDocuments()}
             currentDocument={overviewDocument()}
             showScrollbar={props.config?.showScrollbars ?? false}
+            aboutSidebar={props.config?.aboutSidebar ?? "auto"}
             scrollRef={(value) => (overviewScroll = value)}
           />
         </box>

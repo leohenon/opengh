@@ -1,6 +1,7 @@
 import { SyntaxStyle, TextAttributes, type ScrollBoxRenderable } from "@opentui/core"
 import { useRenderer, useTerminalDimensions } from "@opentui/solid"
 import { createMemo, For, onCleanup, Show } from "solid-js"
+import type { AboutSidebar } from "../../config"
 import type { Repo } from "../../models"
 import type { RepositoryDocumentKind, ResourceState } from "../../repository-state"
 import type { AppColors, ResolvedTheme } from "../../theme"
@@ -92,6 +93,7 @@ export function OverviewScreen(props: {
   documents: readonly OverviewDocument[]
   currentDocument: RepositoryDocumentKind
   showScrollbar: boolean
+  aboutSidebar: AboutSidebar
   scrollRef: (value: ScrollBoxRenderable) => void
 }) {
   const dimensions = useTerminalDimensions()
@@ -102,10 +104,12 @@ export function OverviewScreen(props: {
   const documentResource = createMemo(() => document().resource)
   const formattedDocument = createMemo(() => normalizeGitHubMarkdown(documentResource().value ?? ""))
   const hasDocumentTabs = () => props.documents.length > 1
+  const showAboutSidebar = () => props.aboutSidebar === "show"
+    || props.aboutSidebar === "auto" && dimensions().width >= 100
   const documentLabelsWidth = () => props.documents.reduce((width, item) => width + item.label.length, 0)
     + Math.max(0, props.documents.length - 1) * 2
   const compactDocuments = () => hasDocumentTabs()
-    && documentLabelsWidth() > Math.max(1, dimensions().width - 40)
+    && documentLabelsWidth() > Math.max(1, dimensions().width - (showAboutSidebar() ? 40 : 8))
   const markdownStyle = createReactiveMarkdownStyle(colors, theme)
 
   return (
@@ -216,7 +220,7 @@ export function OverviewScreen(props: {
         </ResourceStateView>
       </box>
 
-      <Show when={dimensions().width >= 72}>
+      <Show when={showAboutSidebar()}>
         <box width={32} flexShrink={0} minHeight={0} flexDirection="column">
           <box
             height={1}

@@ -3,14 +3,18 @@ import { dirname, join } from "node:path"
 import { configDirectory } from "./paths"
 import { isThemeName, type ThemeName } from "./theme"
 
+export type AboutSidebar = "auto" | "show" | "hide"
+
 export type Config = {
   showScrollbars: boolean
   theme: ThemeName
+  aboutSidebar: AboutSidebar
 }
 
 export const defaultConfig: Config = {
   showScrollbars: false,
   theme: "github",
+  aboutSidebar: "auto",
 }
 
 export class ConfigFileError extends Error {
@@ -42,6 +46,9 @@ function normalizeConfig(value: unknown): Config {
       ? input.showScrollbars
       : defaultConfig.showScrollbars,
     theme: isThemeName(input.theme) ? input.theme : defaultConfig.theme,
+    aboutSidebar: input.aboutSidebar === "auto" || input.aboutSidebar === "show" || input.aboutSidebar === "hide"
+      ? input.aboutSidebar
+      : defaultConfig.aboutSidebar,
   }
 }
 

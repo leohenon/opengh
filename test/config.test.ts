@@ -4,18 +4,18 @@ import { ConfigFileError, loadConfig, saveConfig } from "../src/config"
 
 describe("config", () => {
   test("uses defaults when the config file does not exist", async () => {
-    expect(await loadConfig("/path/that/does/not/exist.json")).toEqual({ showScrollbars: false, theme: "github" })
+    expect(await loadConfig("/path/that/does/not/exist.json")).toEqual({ showScrollbars: false, theme: "github", aboutSidebar: "auto" })
   })
 
   test("loads valid fields and defaults invalid fields", async () => {
     const directory = (await Bun.$`mktemp -d`.text()).trim()
     const enabledPath = join(directory, "enabled.json")
     const invalidPath = join(directory, "invalid.json")
-    await Bun.write(enabledPath, JSON.stringify({ showScrollbars: true, theme: "nord", unknown: "ignored" }))
-    await Bun.write(invalidPath, JSON.stringify({ showScrollbars: "yes", theme: "unknown" }))
+    await Bun.write(enabledPath, JSON.stringify({ showScrollbars: true, theme: "nord", aboutSidebar: "hide", unknown: "ignored" }))
+    await Bun.write(invalidPath, JSON.stringify({ showScrollbars: "yes", theme: "unknown", aboutSidebar: "sometimes" }))
 
-    expect(await loadConfig(enabledPath)).toEqual({ showScrollbars: true, theme: "nord" })
-    expect(await loadConfig(invalidPath)).toEqual({ showScrollbars: false, theme: "github" })
+    expect(await loadConfig(enabledPath)).toEqual({ showScrollbars: true, theme: "nord", aboutSidebar: "hide" })
+    expect(await loadConfig(invalidPath)).toEqual({ showScrollbars: false, theme: "github", aboutSidebar: "auto" })
   })
 
   test("reports malformed config files", async () => {
@@ -34,10 +34,10 @@ describe("config", () => {
     const directory = (await Bun.$`mktemp -d`.text()).trim()
     const path = join(directory, "nested", "config.json")
 
-    await saveConfig({ showScrollbars: true, theme: "dracula" }, path)
+    await saveConfig({ showScrollbars: true, theme: "dracula", aboutSidebar: "show" }, path)
 
-    expect(await loadConfig(path)).toEqual({ showScrollbars: true, theme: "dracula" })
-    expect(await Bun.file(path).text()).toBe('{\n  "showScrollbars": true,\n  "theme": "dracula"\n}\n')
+    expect(await loadConfig(path)).toEqual({ showScrollbars: true, theme: "dracula", aboutSidebar: "show" })
+    expect(await Bun.file(path).text()).toBe('{\n  "showScrollbars": true,\n  "theme": "dracula",\n  "aboutSidebar": "show"\n}\n')
   })
 
   test("reports config write failures", async () => {
@@ -46,7 +46,7 @@ describe("config", () => {
     const path = join(parent, "config.json")
     await Bun.write(parent, "file")
 
-    const save = saveConfig({ showScrollbars: false, theme: "github" }, path)
+    const save = saveConfig({ showScrollbars: false, theme: "github", aboutSidebar: "auto" }, path)
     await expect(save).rejects.toBeInstanceOf(ConfigFileError)
     await expect(save).rejects.toMatchObject({ operation: "save", path })
   })

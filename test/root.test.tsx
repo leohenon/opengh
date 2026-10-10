@@ -100,7 +100,7 @@ describe("application root", () => {
             resolveRepository: async () => "cli/cli",
             loadRecentRepositories: async () => [],
             rememberRepository: idle,
-            loadConfig: async () => ({ showScrollbars: false, theme: "github" }),
+            loadConfig: async () => ({ showScrollbars: false, theme: "github", aboutSidebar: "auto" }),
             saveConfig: async (config) => { saved = config },
             createRepositorySession: () => ({
               state,
@@ -129,7 +129,7 @@ describe("application root", () => {
     await Bun.sleep(0)
     await view.flush()
 
-    expect(saved).toEqual({ showScrollbars: true, theme: "github" })
+    expect(saved).toEqual({ showScrollbars: true, theme: "github", aboutSidebar: "auto" })
     expect(view.captureCharFrame()).toContain("‹ on ›")
   })
 })

@@ -535,7 +535,7 @@ describe("openGH TUI", () => {
   });
 
   test("opens settings and applies saved changes immediately", async () => {
-    const [config, setConfig] = createSignal<Config>({ showScrollbars: false, theme: "github" });
+    const [config, setConfig] = createSignal<Config>({ showScrollbars: false, theme: "github", aboutSidebar: "auto" });
     let saves = 0;
     const view = await testRender(
       () => (
@@ -572,8 +572,18 @@ describe("openGH TUI", () => {
     await Bun.sleep(0);
     await view.flush();
     expect(saves).toBe(1);
-    expect(config()).toEqual({ showScrollbars: true, theme: "github" });
+    expect(config()).toEqual({ showScrollbars: true, theme: "github", aboutSidebar: "auto" });
     expect(view.captureCharFrame()).toContain("‹ on ›");
+
+    view.mockInput.pressArrow("down");
+    await view.flush();
+    expect(view.captureCharFrame()).toContain("Auto hides the sidebar")
+    view.mockInput.pressArrow("right");
+    await Bun.sleep(0);
+    await view.flush();
+    expect(saves).toBe(2);
+    expect(config().aboutSidebar).toBe("show");
+    expect(view.captureCharFrame()).toContain("‹ show ›");
 
     view.mockInput.pressEscape();
     await Bun.sleep(30);
@@ -582,7 +592,7 @@ describe("openGH TUI", () => {
   });
 
   test("previews and saves a theme from settings", async () => {
-    const [config, setConfig] = createSignal<Config>({ showScrollbars: false, theme: "github" });
+    const [config, setConfig] = createSignal<Config>({ showScrollbars: false, theme: "github", aboutSidebar: "auto" });
     let canvas = () => "";
     const ThemedApp = () => {
       const current = useTheme();
@@ -632,7 +642,7 @@ describe("openGH TUI", () => {
   });
 
   test("restores the configured theme when preview is cancelled", async () => {
-    const config: Config = { showScrollbars: false, theme: "github" };
+    const config: Config = { showScrollbars: false, theme: "github", aboutSidebar: "auto" };
     let canvas = () => "";
     const ThemedApp = () => {
       const current = useTheme();
@@ -671,7 +681,7 @@ describe("openGH TUI", () => {
         <App
           data={githubDataFixture}
           operations={repositoryOperationsFixture}
-          config={{ showScrollbars: false, theme: "github" }}
+          config={{ showScrollbars: false, theme: "github", aboutSidebar: "auto" }}
           onConfigChange={async () => { throw new Error("Config directory is read-only") }}
         />
       ),
@@ -864,17 +874,33 @@ describe("openGH TUI", () => {
     );
     active.push(view);
     await view.flush();
-    expect(view.captureCharFrame()).toContain("About");
-    expect(view.captureCharFrame()).toContain("‹ README.md ›");
-    expect(view.captureCharFrame()).not.toContain("CONTRIBUTING.md");
+    expect(view.captureCharFrame()).not.toContain("About");
+    expect(view.captureCharFrame()).toContain("README.md");
+    expect(view.captureCharFrame()).toContain("CONTRIBUTING.md");
 
-    view.mockInput.pressTab();
-    await view.flush();
-    expect(view.captureCharFrame()).toContain("‹ CONTRIBUTING.md ›");
-
-    view.resize(60, 24);
+    view.resize(50, 24);
     await view.flush();
     expect(view.captureCharFrame()).not.toContain("About");
-    expect(view.captureCharFrame()).toContain("‹ CONTRIBUTING.md ›");
+    expect(view.captureCharFrame()).toContain("‹ README.md ›");
+  });
+
+  test("respects explicit About sidebar visibility", async () => {
+    const [config, setConfig] = createSignal<Config>({
+      showScrollbars: false,
+      theme: "github",
+      aboutSidebar: "show",
+    });
+    const view = await testRender(
+      () => <App data={githubDataFixture} operations={repositoryOperationsFixture} config={config()} />,
+      { width: 76, height: 24, useThread: false },
+    );
+    active.push(view);
+    await view.flush();
+    expect(view.captureCharFrame()).toContain("About");
+
+    view.resize(120, 24);
+    setConfig((current) => ({ ...current, aboutSidebar: "hide" }));
+    await view.flush();
+    expect(view.captureCharFrame()).not.toContain("About");
   });
 });

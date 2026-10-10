@@ -6,7 +6,10 @@ import { useTheme } from "../theme"
 import { Popup } from "./popup"
 import { ThemePicker } from "./theme-picker"
 
-type Setting = "theme" | "scrollbars"
+type Setting = "theme" | "scrollbars" | "about-sidebar"
+
+const settingOrder: Setting[] = ["theme", "scrollbars", "about-sidebar"]
+const sidebarValues = ["auto", "show", "hide"] as const
 
 export function Settings(props: {
   config: Config
@@ -24,6 +27,11 @@ export function Settings(props: {
   const split = () => dimensions().width >= 110
   const scrollbarValue = () => props.config.showScrollbars ? "on" : "off"
 
+  const moveSetting = (delta: number) => {
+    const current = settingOrder.indexOf(selected())
+    setSelected(settingOrder[Math.max(0, Math.min(settingOrder.length - 1, current + delta))]!)
+  }
+
   const toggleScrollbars = async () => {
     if (saving()) return
     setSaving(true)
@@ -32,6 +40,21 @@ export function Settings(props: {
       await props.onChange({ ...props.config, showScrollbars: !props.config.showScrollbars })
     } catch (error) {
       setError(error instanceof Error ? error.message : "Settings save failed")
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const changeSidebar = async (direction: number) => {
+    if (saving()) return
+    const current = sidebarValues.indexOf(props.config.aboutSidebar)
+    const next = sidebarValues[(current + direction + sidebarValues.length) % sidebarValues.length]!
+    setSaving(true)
+    setError("")
+    try {
+      await props.onChange({ ...props.config, aboutSidebar: next })
+    } catch (error) {
+      setError(error instanceof Error ? error.message : "Could not save settings")
     } finally {
       setSaving(false)
     }
@@ -48,15 +71,17 @@ export function Settings(props: {
       || event.raw === "\r" || event.raw === "\n" || event.sequence === "\r" || event.sequence === "\n"
     if (event.name === "escape" || event.name === "esc" || event.raw === "\u001b" || event.sequence === "\u001b")
       return props.onClose()
-    if (event.name === "up" || event.name === "k") return setSelected("theme")
-    if (event.name === "down" || event.name === "j") return setSelected("scrollbars")
+    if (event.name === "up" || event.name === "k") return moveSetting(-1)
+    if (event.name === "down" || event.name === "j") return moveSetting(1)
     if (selected() === "theme" && (event.name === "left" || event.name === "right" || enter)) {
       event.preventDefault()
       event.stopPropagation()
       return openThemes()
     }
     if (selected() === "scrollbars" && (event.name === "left" || event.name === "right" || enter))
-      void toggleScrollbars()
+      return void toggleScrollbars()
+    if (selected() === "about-sidebar" && (event.name === "left" || event.name === "right" || enter))
+      void changeSidebar(event.name === "left" ? -1 : 1)
   })
 
   const settingRow = (setting: Setting, title: string, description: string, value: string) => {
@@ -81,15 +106,20 @@ export function Settings(props: {
     )
   }
 
-  const detail = () => selected() === "theme"
-    ? {
-        title: "Theme",
-        description: "Choose the color theme used throughout openGH. Moving through the theme list previews each theme.",
-      }
-    : {
-        title: "Scrollbars",
-        description: "Show vertical scrollbars beside repository documents and lists.",
-      }
+  const detail = () => {
+    if (selected() === "theme") return {
+      title: "Theme",
+      description: "Choose the color theme used throughout openGH. Moving through the theme list previews each theme.",
+    }
+    if (selected() === "scrollbars") return {
+      title: "Scrollbars",
+      description: "Show vertical scrollbars beside repository documents and lists.",
+    }
+    return {
+      title: "About sidebar",
+      description: "Control repository metadata visibility. Auto hides the sidebar when the terminal is narrower than 100 columns.",
+    }
+  }
 
   return (
     <Popup width={100} height={popupHeight} zIndex={200} placement="center">
@@ -129,6 +159,7 @@ export function Settings(props: {
             <box height={1} flexShrink={0} />
             {settingRow("theme", "Theme", "Interface color theme", props.config.theme)}
             {settingRow("scrollbars", "Scrollbars", "Lists and documents", scrollbarValue())}
+            {settingRow("about-sidebar", "About sidebar", "Repository metadata", props.config.aboutSidebar)}
             <box flexGrow={1} minHeight={0} />
             <Show when={error()}>
               {(message) => <text fg={colors.red} wrapMode="word">{message()}</text>}
