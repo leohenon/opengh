@@ -1,6 +1,7 @@
 import { useKeyboard, useRenderer } from "@opentui/solid"
 import { createSignal, Match, onMount, Show, Switch } from "solid-js"
 import { defaultConfig, loadConfig, saveConfig, type Config } from "./config"
+import { copyToHostClipboard } from "./clipboard"
 import { loadRecentRepositories, rememberRepository, resolveRepository } from "./github/repository"
 import { openGitHub } from "./github/browser"
 import { createRepositorySession, type RepositorySession } from "./repository-session"
@@ -28,6 +29,7 @@ export type RootServices = {
   saveConfig(config: Config): Promise<void>
   createRepositorySession(): RepositorySession
   openGitHub(repository: string, sha?: string): Promise<void>
+  copyToHostClipboard(value: string): Promise<boolean>
 }
 
 const defaultServices: RootServices = {
@@ -38,6 +40,7 @@ const defaultServices: RootServices = {
   saveConfig,
   createRepositorySession,
   openGitHub,
+  copyToHostClipboard,
 }
 
 export function Root(props: {
@@ -154,6 +157,7 @@ export function Root(props: {
               onLoadMoreCommitFiles={session.loadMoreCommitFiles}
               onCloseCommit={session.clearCommit}
               onOpenInBrowser={(sha) => services.openGitHub(current().repository, sha)}
+              onCopyToClipboard={services.copyToHostClipboard}
               onLoadMoreRuns={session.loadMoreRuns}
               onLoadMoreIssues={session.loadMoreIssues}
               onLoadMorePulls={session.loadMorePulls}

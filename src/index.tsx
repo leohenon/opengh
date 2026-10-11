@@ -2,6 +2,7 @@ import { createCliRenderer } from "@opentui/core"
 import { render } from "@opentui/solid"
 import { Root } from "./root"
 import { stopGitHubProcesses } from "./github/process"
+import { stopClipboardProcesses } from "./clipboard"
 import { saveConfig } from "./config"
 import { rememberRepository } from "./github/repository"
 
@@ -28,6 +29,7 @@ const renderer = await createCliRenderer({
     // Unlike the destroy event, this runs after terminal restoration and native cleanup.
     void Promise.allSettled([
       stopGitHubProcesses(),
+      stopClipboardProcesses(),
       ...pendingSaves,
     ]).then(() => process.exit(process.exitCode ?? 0))
   },

@@ -6,7 +6,7 @@ export function Toast(props: {
   title: string
   message: string
   duration?: number
-  tone?: "error" | "success"
+  tone?: "error" | "success" | "info"
   onDismiss: () => void
 }) {
   const dimensions = useTerminalDimensions()
@@ -30,7 +30,7 @@ export function Toast(props: {
       flexDirection="row"
       backgroundColor={colors.panel}
     >
-      <box width={1} flexShrink={0} backgroundColor={props.tone === "success" ? colors.green : colors.red} />
+      <box width={1} flexShrink={0} backgroundColor={props.tone === "success" ? colors.green : props.tone === "info" ? colors.blue : colors.red} />
       <box
         flexGrow={1}
         minWidth={0}

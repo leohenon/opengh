@@ -4,6 +4,7 @@ import { createSignal } from "solid-js";
 import { App } from "../src/ui/app";
 import { defaultConfig, type Config } from "../src/config";
 import { resolveTheme } from "../src/theme";
+import type { ResourceState } from "../src/repository-state";
 import { ThemeProvider, useTheme } from "../src/ui/theme";
 import {
   commitDetailFixture,
@@ -17,6 +18,18 @@ afterEach(() => {
   for (const setup of active.splice(0))
     if (!setup.renderer.isDestroyed) setup.renderer.destroy();
 });
+
+function withDocumentResources(resources: Record<string, ResourceState<string>>) {
+  return {
+    ...githubDataFixture,
+    documents: {
+      status: "ready" as const,
+      value: githubDataFixture.documents.value!.map((document) => ({
+        ...document, resource: resources[document.path] ?? document.resource,
+      })),
+    },
+  };
+}
 
 async function setup() {
   let quit = 0;
@@ -68,7 +81,10 @@ describe("openGH TUI", () => {
     view.renderer.copyToClipboardOSC52 = (value) => { copied = value; return true; };
     const statusLine = () => view.captureCharFrame().split("\n")[31]!.trim();
     await view.flush();
-    expect(statusLine()).toBe("o GitHub · y URL");
+    expect(statusLine()).toBe("");
+    setConfig({ ...defaultConfig, showStatusBarHints: true });
+    await view.flush();
+    expect(statusLine()).toBe("o GitHub · y URL · ? help");
 
     view.mockInput.pressKey(",");
     for (let i = 0; i < 3; i++) view.mockInput.pressKey("j");
@@ -96,16 +112,13 @@ describe("openGH TUI", () => {
     expect(statusLine()).toContain("Refreshing…");
 
     setOperations(repositoryOperationsFixture);
-    setConfig({ ...defaultConfig });
+    setConfig({ ...defaultConfig, showStatusBarHints: true });
     await view.flush();
-    expect(statusLine()).toBe("esc back · o GitHub · y SHA");
+    expect(statusLine()).toBe("esc back · o GitHub · y SHA · ? help");
   });
 
   test("renders repository metadata while the README loads", async () => {
-    const data = {
-      ...githubDataFixture,
-      readme: { status: "loading" as const, phase: "load" as const },
-    };
+    const data = withDocumentResources({ "README.md": { status: "loading", phase: "load" } });
     const view = await testRender(
       () => (
         <App
@@ -120,7 +133,7 @@ describe("openGH TUI", () => {
     await view.flush();
     const initialFrame = view.captureCharFrame();
     expect(initialFrame).toContain("anomalyco/opentui");
-    expect(initialFrame).toContain("README.md");
+    expect(initialFrame).toContain("README");
     expect(initialFrame).toContain("About");
     expect(initialFrame).not.toContain("Loading…");
 
@@ -132,10 +145,7 @@ describe("openGH TUI", () => {
   });
 
   test("renders an empty README as loaded content", async () => {
-    const data = {
-      ...githubDataFixture,
-      readme: { status: "ready" as const, value: "" },
-    };
+    const data = withDocumentResources({ "README.md": { status: "ready", value: "" } });
     const view = await testRender(
       () => <App data={data} operations={repositoryOperationsFixture} onQuit={() => {}} />,
       { width: 120, height: 32, useThread: false },
@@ -401,7 +411,7 @@ describe("openGH TUI", () => {
   test("shows only repository documents that exist", async () => {
     const data = {
       ...githubDataFixture,
-      security: { status: "ready" as const, value: undefined },
+      documents: { status: "ready" as const, value: githubDataFixture.documents.value!.filter((document) => document.path !== "SECURITY.md") },
     };
     const view = await testRender(
       () => <App data={data} operations={repositoryOperationsFixture} onQuit={() => {}} />,
@@ -411,18 +421,17 @@ describe("openGH TUI", () => {
     await view.flush();
 
     const frame = view.captureCharFrame();
-    expect(frame).toContain("README.md");
-    expect(frame).toContain("CONTRIBUTING.md");
-    expect(frame).not.toContain("SECURITY.md");
-    expect(frame).toContain("LICENSE");
+    expect(frame).toContain("README");
+    expect(frame).toContain("Code of conduct");
+    expect(frame).toContain("Contributing");
+    expect(frame).not.toContain("Security");
+    expect(frame).toContain("MIT license");
   });
 
   test("uses a plain README heading when no other documents exist", async () => {
     const data = {
       ...githubDataFixture,
-      contributing: { status: "ready" as const, value: undefined },
-      security: { status: "ready" as const, value: undefined },
-      license: { status: "ready" as const, value: undefined },
+      documents: { status: "ready" as const, value: githubDataFixture.documents.value!.filter((document) => document.path === "README.md") },
     };
     const view = await testRender(
       () => <App data={data} operations={repositoryOperationsFixture} onQuit={() => {}} />,
@@ -432,35 +441,30 @@ describe("openGH TUI", () => {
     await view.flush();
 
     const frame = view.captureCharFrame();
-    expect(frame).toContain("README.md");
-    expect(frame).not.toContain("CONTRIBUTING.md");
-    expect(frame).not.toContain("SECURITY.md");
-    expect(frame).not.toContain("‹ README.md ›");
+    expect(frame).toContain("README");
+    expect(frame).not.toContain("Contributing");
+    expect(frame).not.toContain("Security");
+    expect(frame).not.toContain("‹ README ›");
   });
 
   test("cycles overview documents in both directions", async () => {
-    const data = {
-      ...githubDataFixture,
-      contributing: {
-        status: "error" as const,
-        phase: "load" as const,
-        message: "Contributing unavailable",
-        value: githubDataFixture.contributing.value,
+    const data = withDocumentResources({
+      "CONTRIBUTING.md": {
+        status: "error", phase: "load", message: "Contributing unavailable",
+        value: githubDataFixture.documents.value!.find((document) => document.path === "CONTRIBUTING.md")!.resource.value,
       },
-      license: {
-        status: "error" as const,
-        phase: "load" as const,
-        message: "License unavailable",
-        value: githubDataFixture.license.value,
+      "LICENSE": {
+        status: "error", phase: "load", message: "License unavailable",
+        value: githubDataFixture.documents.value!.find((document) => document.path === "LICENSE")!.resource.value,
       },
-    };
+    });
     let retry = "";
     const view = await testRender(
       () => (
         <App
           data={data}
           operations={repositoryOperationsFixture}
-          onRetryResource={(resource) => (retry = resource.kind)}
+          onRetryResource={(resource) => (retry = resource.kind === "document" ? resource.id : resource.kind)}
         />
       ),
       { width: 120, height: 32, useThread: false },
@@ -469,16 +473,20 @@ describe("openGH TUI", () => {
     await view.flush();
 
     view.mockInput.pressTab();
+    await view.flush();
+    await Bun.sleep(30); // Markdown parsing completes asynchronously after rendering starts.
+    await view.flush();
+    expect(view.captureCharFrame()).toContain("Be respectful and welcoming.");
+    view.mockInput.pressTab();
     view.mockInput.pressKey("r");
     await view.flush();
-    expect(retry).toBe("contributing");
+    expect(retry).toBe("anomalyco/opentui:CONTRIBUTING.md");
 
     retry = "";
-    view.mockInput.pressTab({ shift: true });
-    view.mockInput.pressTab({ shift: true });
+    for (let i = 0; i < 4; i++) view.mockInput.pressTab({ shift: true });
     view.mockInput.pressKey("r");
     await view.flush();
-    expect(retry).toBe("license");
+    expect(retry).toBe("anomalyco/opentui:LICENSE");
   });
 
   test("continues through PR-only issue pages without defaulting to closed issues", async () => {
@@ -902,6 +910,58 @@ describe("openGH TUI", () => {
     expect(frame).toContain("unavailable");
   });
 
+  test("Help shows only shortcuts for the active page and commit detail", async () => {
+    const [detail, setDetail] = createSignal({
+      sha: commitDetailFixture.sha,
+      resource: { status: "ready" as const, value: commitDetailFixture },
+    });
+    const view = await testRender(() => (
+      <App data={githubDataFixture} operations={repositoryOperationsFixture} commitDetail={detail()} />
+    ), { width: 100, height: 28, useThread: false });
+    active.push(view);
+    await view.flush();
+    const cases = [
+      ["1", "copy repo URL"],
+      ["2", "choose branch"],
+      ["3", "toggle open/closed"],
+      ["4", "toggle open/closed"],
+      ["5", "refresh / retry"],
+    ];
+    for (const [key, shortcut] of cases) {
+      view.mockInput.pressKey(key!);
+      view.mockInput.pressKey("?");
+      await view.flush();
+      const frame = view.captureCharFrame();
+      expect(frame).toContain("Help");
+      expect(frame).not.toContain("Help ·");
+      expect(frame).toContain(shortcut!);
+      expect(frame).toContain("half-page up / down");
+      expect(frame).toContain("q / C-c");
+      if (key !== "1") expect(frame).not.toContain("copy repo URL");
+      if (key !== "2") expect(frame).not.toContain("choose branch");
+      if (key === "3" || key === "4" || key === "5") expect(frame).not.toContain("copy commit SHA");
+      view.mockInput.pressKey("?");
+    }
+    view.mockInput.pressKey("2");
+    view.mockInput.pressEnter();
+    view.mockInput.pressKey("?");
+    await view.flush();
+    expect(view.captureCharFrame()).toContain("Help");
+    expect(view.captureCharFrame()).toContain("back to commits");
+    expect(view.captureCharFrame()).not.toContain("choose branch");
+    expect(view.captureCharFrame()).not.toContain("load more files");
+    setDetail({ sha: commitDetailFixture.sha, resource: { status: "ready", value: {
+      ...commitDetailFixture, files: { ...commitDetailFixture.files, hasMore: true },
+    } } });
+    await view.flush();
+    expect(view.captureCharFrame()).toContain("load more files");
+    view.mockInput.pressEscape();
+    await Bun.sleep(30);
+    await view.flush();
+    expect(view.captureCharFrame()).not.toContain("back to commits");
+    expect(view.captureCharFrame()).toContain("Commit 7ca91d2");
+  });
+
   test("opens help and invokes global actions", async () => {
     const { view, quit, refresh } = await setup();
     view.mockInput.pressKey("?");
@@ -911,14 +971,14 @@ describe("openGH TUI", () => {
     expect(help).toContain("u/d");
     expect(help).toContain("half-page up / down");
     expect(help).toContain("Tab");
-    expect(help).toContain("cycle view options");
+    expect(help).toContain("switch documents");
     expect(help).toContain("settings");
     expect(help).not.toContain("Navigation");
     expect(help).not.toContain("Current view");
     expect(help).not.toContain("Application");
     expect(help).toContain("q / C-c");
     expect(help).toContain("quit");
-    expect(help).toContain("README.md");
+    expect(help).toContain("README");
     view.mockInput.pressKey("?");
     view.mockInput.pressKey("r");
     view.mockInput.pressKey("q");
@@ -988,13 +1048,13 @@ describe("openGH TUI", () => {
     active.push(view);
     await view.flush();
     expect(view.captureCharFrame()).not.toContain("About");
-    expect(view.captureCharFrame()).toContain("README.md");
-    expect(view.captureCharFrame()).toContain("CONTRIBUTING.md");
+    expect(view.captureCharFrame()).toContain("README");
+    expect(view.captureCharFrame()).toContain("Contributing");
 
     view.resize(50, 24);
     await view.flush();
     expect(view.captureCharFrame()).not.toContain("About");
-    expect(view.captureCharFrame()).toContain("‹ README.md ›");
+    expect(view.captureCharFrame()).toContain("‹ README ›");
   });
 
   test("respects explicit About sidebar visibility", async () => {

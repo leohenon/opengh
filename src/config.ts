@@ -16,7 +16,7 @@ export const defaultConfig: Config = {
   showScrollbars: false,
   theme: "github",
   aboutSidebar: "auto",
-  showStatusBarHints: true,
+  showStatusBarHints: false,
 }
 
 export class ConfigFileError extends Error {

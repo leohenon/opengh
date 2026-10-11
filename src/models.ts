@@ -13,6 +13,14 @@ export type Repo = {
   updatedAt: string
 }
 
+export type RepositoryDocument = {
+  id: string
+  label: string
+  repository: string
+  ref: string
+  path: string
+}
+
 export type ListState = "open" | "closed"
 
 export type IssueSummary = {

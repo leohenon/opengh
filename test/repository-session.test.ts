@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import type { CommitDetail, CommitSummary } from "../src/models"
+import type { CommitDetail, CommitSummary, RepositoryDocument } from "../src/models"
 import type { RepositoryLoaders } from "../src/repository-session"
 import { createRepositorySession } from "../src/repository-session"
 import { commitDetailFixture, githubDataFixture } from "./fixtures/github-data"
@@ -17,10 +17,10 @@ function deferred<T>() {
 function loaders(overrides: Partial<RepositoryLoaders> = {}): RepositoryLoaders {
   return {
     metadata: async () => structuredClone(githubDataFixture.repo),
-    readme: async () => githubDataFixture.readme.value!,
-    contributing: async () => githubDataFixture.contributing.value,
-    security: async () => githubDataFixture.security.value,
-    license: async () => githubDataFixture.license.value,
+    documents: async (repo, branch) => githubDataFixture.documents.value!.map(({ resource, ...source }) => ({
+      ...source, id: `${repo.nameWithOwner}:${source.path}`, repository: repo.nameWithOwner, ref: branch,
+    })),
+    document: async (source) => githubDataFixture.documents.value!.find((document) => document.path === source.path)!.resource.value!,
     branches: async () => ({ items: structuredClone(githubDataFixture.branches.value!.items), hasMore: false }),
     commits: async () => ({ items: structuredClone(githubDataFixture.commits.value!.items), hasMore: false }),
     commit: async () => structuredClone(commitDetailFixture),
@@ -125,7 +125,7 @@ describe("repository session", () => {
     const state = ready(session)
     expect(state.data.repo.nameWithOwner).toBe("anomalyco/opentui")
     expect(state.data.commits.status).toBe("loading")
-    expect(state.data.readme.status).toBe("ready")
+    expect(state.data.documents.value?.[0]?.label).toBe("README")
     await session.refresh()
     expect(metadataCalls).toBe(1)
 
@@ -134,8 +134,16 @@ describe("repository session", () => {
     expect(ready(session).data.commits.status).toBe("ready")
   })
 
-  test("keeps resource failures independent", async () => {
+  test("keeps resource and document failures independent and retries only the failed file", async () => {
+    const defaults = loaders()
+    let failDocument = true
+    const documentCalls: string[] = []
     const session = createRepositorySession(loaders({
+      document: async (source) => {
+        documentCalls.push(source.path)
+        if (failDocument && source.path === "CODE_OF_CONDUCT.md") throw new Error("Code of conduct unavailable")
+        return defaults.document(source)
+      },
       issues: async (_repository, state) => {
         if (state === "open") throw new Error("Open issues unavailable")
         return { items: [], hasMore: false }
@@ -148,6 +156,14 @@ describe("repository session", () => {
     expect(state.data.issues.closed.status).toBe("ready")
     expect(state.data.commits.status).toBe("ready")
     expect(state.data.pulls.open.status).toBe("ready")
+    expect(state.data.documents.value?.[0]?.resource.status).toBe("ready")
+    const failed = state.data.documents.value!.find((document) => document.path === "CODE_OF_CONDUCT.md")!
+    expect(failed.resource.status).toBe("error")
+    failDocument = false
+    documentCalls.length = 0
+    await session.retryResource({ kind: "document", id: failed.id })
+    expect(documentCalls).toEqual(["CODE_OF_CONDUCT.md"])
+    expect(ready(session).data.documents.value?.find((document) => document.id === failed.id)?.resource.status).toBe("ready")
   })
 
   test("retries only the selected resource", async () => {
@@ -173,9 +189,15 @@ describe("repository session", () => {
   })
 
   test("ignores older repository resources", async () => {
+    const defaults = loaders()
+    const firstDocuments = deferred<RepositoryDocument[]>()
+    const documentCalls: string[] = []
     const firstCommits = deferred<{ items: CommitSummary[]; hasMore: boolean }>()
     const session = createRepositorySession(loaders({
       metadata: async (repository) => ({ ...githubDataFixture.repo, nameWithOwner: repository }),
+      documents: async (repo, branch) => repo.nameWithOwner === "first/repository"
+        ? firstDocuments.promise : defaults.documents(repo, branch),
+      document: async (source) => { documentCalls.push(source.repository); return defaults.document(source) },
       commits: async (repository) => repository === "first/repository"
         ? firstCommits.promise
         : { items: [], hasMore: false },
@@ -184,6 +206,7 @@ describe("repository session", () => {
     const first = session.load("first/repository")
     await Promise.resolve()
     await session.load("second/repository")
+    firstDocuments.resolve(await defaults.documents({ ...githubDataFixture.repo, nameWithOwner: "first/repository" }, "main"))
     firstCommits.resolve({
       items: [{ sha: "stale", message: "stale", author: "ghost", date: "" }],
       hasMore: false,
@@ -193,6 +216,8 @@ describe("repository session", () => {
     const state = ready(session)
     expect(state.repository).toBe("second/repository")
     expect(state.data.commits.value?.items).toEqual([])
+    expect(documentCalls.every((repository) => repository === "second/repository")).toBe(true)
+    expect(state.data.documents.value?.[0]?.repository).toBe("second/repository")
   })
 
   test("refresh retains stale values when one resource fails", async () => {
@@ -431,12 +456,13 @@ describe("repository session", () => {
     expect(issueCalls).toBe(2)
   })
 
-  test("reloads optional documents without letting their failures block branch switching", async () => {
+  test("reloads documents without letting their content failures block branch switching", async () => {
+    const defaults = loaders()
     const session = createRepositorySession(loaders({
-      contributing: async (_repository, branch) => branch === "next" ? "next contributing" : "main contributing",
-      security: async (_repository, branch) => {
-        if (branch === "next") throw new Error("Security unavailable")
-        return "main security"
+      document: async (source) => {
+        if (source.path === "CONTRIBUTING.md") return `${source.ref} contributing`
+        if (source.path === "SECURITY.md" && source.ref === "next") throw new Error("Security unavailable")
+        return defaults.document(source)
       },
     }))
 
@@ -444,15 +470,16 @@ describe("repository session", () => {
     await session.switchBranch("next")
     const state = ready(session)
     expect(state.data.currentBranch).toBe("next")
-    expect(state.data.contributing.value).toBe("next contributing")
-    expect(state.data.security.status).toBe("error")
+    expect(state.data.documents.value?.find((document) => document.path === "CONTRIBUTING.md")?.resource.value).toBe("next contributing")
+    expect(state.data.documents.value?.find((document) => document.path === "SECURITY.md")?.resource.status).toBe("error")
   })
 
-  test("keeps branch switching atomic", async () => {
+  test("keeps branch switching atomic when document discovery fails", async () => {
+    const defaults = loaders()
     const session = createRepositorySession(loaders({
-      readme: async (_repository, branch) => {
-        if (branch === "next") throw new Error("README unavailable")
-        return "main readme"
+      documents: async (repo, branch) => {
+        if (branch === "next") throw new Error("Documents unavailable")
+        return defaults.documents(repo, branch)
       },
     }))
 

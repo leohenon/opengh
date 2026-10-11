@@ -7,7 +7,8 @@ import type {
   Repo,
   WorkflowRunSummary,
 } from "../models"
-import { GitHubApiError, githubTransport, type GitHubTransport } from "./transport"
+import { createGitHubDocuments } from "./documents"
+import { githubTransport, type GitHubTransport } from "./transport"
 
 const PAGE_SIZE = 30
 const BRANCH_PAGE_SIZE = 100
@@ -107,6 +108,7 @@ function commitSummary(item: CommitResponse): CommitSummary {
 
 // Map endpoints into domain models here; transport owns execution/errors, the session owns async state.
 export function createGitHubClient(transport: GitHubTransport) {
+  const { documents, document } = createGitHubDocuments(transport)
   const metadata = async (repository: string): Promise<Repo> => {
     const repo = await transport.json<RepositoryResponse>(`repos/${repository}`)
     return {
@@ -122,50 +124,6 @@ export function createGitHubClient(transport: GitHubTransport) {
       language: repo.language ?? "Unknown",
       license: repo.license?.spdx_id ?? "None",
       updatedAt: repo.updated_at,
-    }
-  }
-
-  const readme = async (repository: string, branch: string) => {
-    const path = `repos/${repository}/readme?ref=${encodeURIComponent(branch)}`
-    try {
-      return await transport.text(path, "application/vnd.github.raw+json")
-    } catch (error) {
-      if (error instanceof GitHubApiError && error.status === 404) return "No README found."
-      throw error
-    }
-  }
-
-  const optionalDocument = async (repository: string, branch: string, paths: string[]) => {
-    for (const file of paths) {
-      const encodedPath = file.split("/").map(encodeURIComponent).join("/")
-      const path = `repos/${repository}/contents/${encodedPath}?ref=${encodeURIComponent(branch)}`
-      try {
-        return await transport.text(path, "application/vnd.github.raw+json")
-      } catch (error) {
-        if (error instanceof GitHubApiError && error.status === 404) continue
-        throw error
-      }
-    }
-    return undefined
-  }
-
-  const contributing = (repository: string, branch: string) => optionalDocument(repository, branch, [
-    "CONTRIBUTING.md",
-    ".github/CONTRIBUTING.md",
-    "docs/CONTRIBUTING.md",
-  ])
-  const security = (repository: string, branch: string) => optionalDocument(repository, branch, [
-    "SECURITY.md",
-    ".github/SECURITY.md",
-    "docs/SECURITY.md",
-  ])
-  const license = async (repository: string, branch: string) => {
-    const path = `repos/${repository}/license?ref=${encodeURIComponent(branch)}`
-    try {
-      return await transport.text(path, "application/vnd.github.raw+json")
-    } catch (error) {
-      if (!(error instanceof GitHubApiError) || error.status !== 404) throw error
-      return optionalDocument(repository, branch, ["LICENSE", "LICENSE.md", "LICENSE.txt", "COPYING"])
     }
   }
 
@@ -249,16 +207,14 @@ export function createGitHubClient(transport: GitHubTransport) {
     return { items, hasMore: page * PAGE_SIZE < (response.total_count ?? items.length) }
   }
 
-  return { metadata, readme, contributing, security, license, branches, commits, commit, issues, pulls, runs }
+  return { metadata, documents, document, branches, commits, commit, issues, pulls, runs }
 }
 
 const client = createGitHubClient(githubTransport)
 
 export const loadGitHubMetadata = client.metadata
-export const loadGitHubReadme = client.readme
-export const loadGitHubContributing = client.contributing
-export const loadGitHubSecurity = client.security
-export const loadGitHubLicense = client.license
+export const loadGitHubDocuments = client.documents
+export const loadGitHubDocument = client.document
 export const loadGitHubBranches = client.branches
 export const loadGitHubCommits = client.commits
 export const loadGitHubCommit = client.commit

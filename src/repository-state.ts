@@ -6,17 +6,20 @@ import type {
   Paginated,
   PullRequestSummary,
   Repo,
+  RepositoryDocument,
   WorkflowRunSummary,
 } from "./models"
 
 export type ResourcePhase = "load" | "pagination"
 
-export type RepositoryDocumentKind = "readme" | "contributing" | "security" | "license"
-
 export type ResourceState<T> =
   | { status: "loading"; phase: ResourcePhase; value?: T }
   | { status: "ready"; value: T }
   | { status: "error"; phase: ResourcePhase; message: string; value?: T }
+
+export type RepositoryDocumentState = RepositoryDocument & {
+  resource: ResourceState<string>
+}
 
 export type CommitDetailState = {
   sha: string
@@ -31,10 +34,7 @@ export type OperationState =
 export type RepositoryData = {
   repo: Repo
   currentBranch: string
-  readme: ResourceState<string>
-  contributing: ResourceState<string | undefined>
-  security: ResourceState<string | undefined>
-  license: ResourceState<string | undefined>
+  documents: ResourceState<RepositoryDocumentState[]>
   branches: ResourceState<Paginated<string>>
   commits: ResourceState<Paginated<CommitSummary>>
   issues: Record<ListState, ResourceState<Paginated<IssueSummary>>>
@@ -48,10 +48,8 @@ export type RepositoryOperations = {
 }
 
 export type RepositoryResource =
-  | { kind: "readme" }
-  | { kind: "contributing" }
-  | { kind: "security" }
-  | { kind: "license" }
+  | { kind: "documents" }
+  | { kind: "document"; id: string }
   | { kind: "branches" }
   | { kind: "commits" }
   | { kind: "runs" }

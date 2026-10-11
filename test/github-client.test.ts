@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import { createGitHubClient } from "../src/github/client"
-import { GitHubApiError, type GitHubTransport } from "../src/github/transport"
+import type { GitHubTransport } from "../src/github/transport"
 
 type Responses = Record<string, unknown>
 
@@ -146,39 +146,6 @@ describe("GitHub client", () => {
     }))
     const result = await client.issues("owner/repo", "open")
     expect(result.items.map((issue) => issue.number)).toEqual([1])
-  })
-
-  test("treats only README 404 as missing", async () => {
-    const path = "repos/owner/repo/readme?ref=main"
-    const missing = createGitHubClient(transport({}, new GitHubApiError(path, "Not Found", 404)))
-    expect(await missing.readme("owner/repo", "main")).toBe("No README found.")
-
-    const forbidden = createGitHubClient(transport({}, new GitHubApiError(path, "Forbidden", 403)))
-    expect(forbidden.readme("owner/repo", "main")).rejects.toThrow("Forbidden")
-  })
-
-  test("finds optional repository documents and treats 404 as missing", async () => {
-    const requests: string[] = []
-    const client = createGitHubClient({
-      async json<T>() {
-        return undefined as T
-      },
-      async text(path: string) {
-        requests.push(path)
-        if (path.includes(".github/CONTRIBUTING.md")) return "# Contributing"
-        throw new GitHubApiError(path, "Not Found", 404)
-      },
-    })
-
-    expect(await client.contributing("owner/repo", "main")).toBe("# Contributing")
-    expect(requests).toEqual([
-      "repos/owner/repo/contents/CONTRIBUTING.md?ref=main",
-      "repos/owner/repo/contents/.github/CONTRIBUTING.md?ref=main",
-    ])
-
-    requests.length = 0
-    expect(await client.security("owner/repo", "main")).toBeUndefined()
-    expect(requests).toHaveLength(3)
   })
 
   test("paginates branches and falls back only for an empty first page", async () => {

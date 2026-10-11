@@ -2,6 +2,7 @@ import { afterEach, expect, test } from "bun:test"
 import { testRender } from "@opentui/solid"
 import { createSignal } from "solid-js"
 import type { CommitDetailState } from "../src/repository-state"
+import { defaultConfig } from "../src/config"
 import { App } from "../src/ui/app"
 import { commitDetailFixture, githubDataFixture, repositoryOperationsFixture } from "./fixtures/github-data"
 
@@ -26,6 +27,7 @@ test("commit tabs retain detail state and Escape restores the list after resizin
   let copies = 0
   const view = await testRender(() => (
     <App
+      config={{ ...defaultConfig, showStatusBarHints: true }}
       data={{ ...githubDataFixture, commits: { status: "ready", value: { items: commits, page: 1, hasMore: false } } }}
       operations={repositoryOperationsFixture}
       commitDetail={detail()}
@@ -126,8 +128,12 @@ test("overview and commit shortcuts open GitHub and copy the active URL or SHA",
   let browserSha: string | undefined = ""
   let browserFails = false
   let copiedSha = ""
+  let nativeClipboard = true
+  let copyFails = false
+  let terminalCopies = 0
   const view = await testRender(() => (
     <App
+      config={{ ...defaultConfig, showStatusBarHints: true }}
       data={githubDataFixture}
       operations={repositoryOperationsFixture}
       commitDetail={detail()}
@@ -144,30 +150,37 @@ test("overview and commit shortcuts open GitHub and copy the active URL or SHA",
         browserSha = value
       }}
       onCloseCommit={() => setDetail(undefined)}
+      onCopyToClipboard={async (value) => {
+        if (copyFails) throw new Error("Native clipboard unavailable")
+        if (!nativeClipboard) return false
+        copiedSha = value
+        return true
+      }}
     />
   ), { width: 100, height: 28, useThread: false })
   active.push(view)
-  view.renderer.copyToClipboardOSC52 = (value) => { copiedSha = value; return true }
+  view.renderer.copyToClipboardOSC52 = (value) => { terminalCopies++; copiedSha = value; return true }
   await view.flush()
   view.mockInput.pressKey("y")
   await view.flush()
   expect(copiedSha).toBe(githubDataFixture.repo.url)
-  expect(view.captureCharFrame()).toContain("URL sent to clipboard")
+  expect(view.captureCharFrame()).toContain("URL copied to clipboard")
+  expect(terminalCopies).toBe(0)
   view.mockInput.pressKey("o")
   await view.flush()
   expect(browserSha).toBeUndefined()
-  expect(view.captureCharFrame()).toContain("README.md")
+  expect(view.captureCharFrame()).toContain("README")
   expect(view.captureCharFrame()).toContain("Opened on GitHub")
 
   view.mockInput.pressKey("2")
   await view.flush()
   expect(view.captureCharFrame()).toContain("enter open · o GitHub · y SHA")
-  expect(view.captureCharFrame()).not.toContain("? help")
+  expect(view.captureCharFrame()).toContain("? help")
   view.mockInput.pressKey("j")
   view.mockInput.pressKey("y")
   await view.flush()
   expect(copiedSha).toBe(githubDataFixture.commits.value!.items[1]!.sha)
-  expect(view.captureCharFrame()).toContain("SHA sent to clipboard")
+  expect(view.captureCharFrame()).toContain("SHA copied to clipboard")
   view.mockInput.pressKey("o")
   await view.flush()
   expect(browserSha).toBe(githubDataFixture.commits.value!.items[1]!.sha)
@@ -220,7 +233,7 @@ test("overview and commit shortcuts open GitHub and copy the active URL or SHA",
   view.mockInput.pressKey("y")
   await view.flush()
   expect(copiedSha).toBe(sha)
-  expect(view.captureCharFrame()).toContain("SHA sent to clipboard")
+  expect(view.captureCharFrame()).toContain("SHA copied to clipboard")
   view.mockInput.pressKey("o")
   await view.flush()
   expect(browserSha).toBe(sha)
@@ -230,6 +243,20 @@ test("overview and commit shortcuts open GitHub and copy the active URL or SHA",
   await view.flush()
   expect(view.captureCharFrame()).toContain("Browser unavailable")
 
+  copyFails = true
+  view.mockInput.pressKey("y")
+  await view.flush()
+  expect(view.captureCharFrame()).toContain("Native clipboard")
+  expect(view.captureCharFrame()).toContain("unavailable")
+  expect(terminalCopies).toBe(0)
+  copyFails = false
+  nativeClipboard = false
+  view.mockInput.pressKey("y")
+  await view.flush()
+  expect(terminalCopies).toBe(1)
+  expect(copiedSha).toBe(sha)
+  expect(view.captureCharFrame()).toContain("SHA sent to terminal")
+  expect(view.captureCharFrame()).not.toContain("copied to clipboard")
   view.renderer.copyToClipboardOSC52 = () => false
   view.mockInput.pressKey("y")
   await view.flush()

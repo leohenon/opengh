@@ -3,7 +3,7 @@ import { useRenderer, useTerminalDimensions } from "@opentui/solid"
 import { createMemo, For, onCleanup, Show } from "solid-js"
 import type { AboutSidebar } from "../../config"
 import type { Repo } from "../../models"
-import type { RepositoryDocumentKind, ResourceState } from "../../repository-state"
+import type { RepositoryDocumentState, ResourceState } from "../../repository-state"
 import type { AppColors, ResolvedTheme } from "../../theme"
 import { ResourceStateView } from "../components/resource-state"
 import { count } from "../format"
@@ -82,34 +82,30 @@ function createReactiveMarkdownStyle(colors: AppColors, theme: ResolvedTheme) {
   return style
 }
 
-export type OverviewDocument = {
-  kind: RepositoryDocumentKind
-  label: string
-  resource: ResourceState<string | undefined>
-}
-
 export function OverviewScreen(props: {
   repo: Repo
-  documents: readonly OverviewDocument[]
-  currentDocument: RepositoryDocumentKind
+  documents: ResourceState<RepositoryDocumentState[]>
+  currentDocument?: string
   showScrollbar: boolean
   aboutSidebar: AboutSidebar
-  scrollRef: (value: ScrollBoxRenderable) => void
+  scrollRef: (value: ScrollBoxRenderable | undefined) => void
 }) {
   const dimensions = useTerminalDimensions()
   const { colors, theme } = useTheme()
   const repo = () => props.repo
   const about = createMemo(() => extractAboutContent(repo().description))
-  const document = () => props.documents.find((item) => item.kind === props.currentDocument) ?? props.documents[0]!
-  const documentResource = createMemo(() => document().resource)
+  const documents = () => props.documents.value ?? []
+  const document = () => documents().find((item) => item.id === props.currentDocument) ?? documents()[0]
+  const currentLabel = () => document()?.label ?? "Documentation"
+  const documentResource = createMemo<ResourceState<string>>(() => document()?.resource ?? { status: "loading", phase: "load" })
   const formattedDocument = createMemo(() => normalizeGitHubMarkdown(documentResource().value ?? ""))
-  const hasDocumentTabs = () => props.documents.length > 1
+  const hasDocumentTabs = () => documents().length > 1
   const showAboutSidebar = () => props.aboutSidebar === "show"
     || props.aboutSidebar === "auto" && dimensions().width >= 100
-  const documentLabelsWidth = () => props.documents.reduce((width, item) => width + item.label.length, 0)
-    + Math.max(0, props.documents.length - 1) * 2
+  const documentLabelsWidth = () => documents().reduce((width, item) => width + item.label.length, 0)
+    + Math.max(0, documents().length - 1) * 2
   const compactDocuments = () => hasDocumentTabs()
-    && documentLabelsWidth() > Math.max(1, dimensions().width - (showAboutSidebar() ? 40 : 8))
+    && documentLabelsWidth() > Math.max(1, dimensions().width - (showAboutSidebar() ? 42 : 8))
   const markdownStyle = createReactiveMarkdownStyle(colors, theme)
 
   return (
@@ -136,23 +132,23 @@ export function OverviewScreen(props: {
         >
           <Show
             when={hasDocumentTabs()}
-            fallback={<text fg={colors.text} attributes={TextAttributes.BOLD}>{document().label}</text>}
+            fallback={<text fg={colors.text} attributes={TextAttributes.BOLD}>{currentLabel()}</text>}
           >
             <Show
               when={!compactDocuments()}
               fallback={(
                 <box flexDirection="row" gap={1}>
                   <text fg={colors.muted}>‹</text>
-                  <text fg={colors.text} attributes={TextAttributes.BOLD}>{document().label}</text>
+                  <text fg={colors.text} attributes={TextAttributes.BOLD}>{currentLabel()}</text>
                   <text fg={colors.muted}>›</text>
                 </box>
               )}
             >
-              <For each={props.documents}>
+              <For each={documents()}>
                 {(item) => (
                   <text
-                    fg={item.kind === props.currentDocument ? colors.text : colors.muted}
-                    attributes={item.kind === props.currentDocument ? TextAttributes.BOLD : TextAttributes.NONE}
+                    fg={item.id === document()?.id ? colors.text : colors.muted}
+                    attributes={item.id === document()?.id ? TextAttributes.BOLD : TextAttributes.NONE}
                   >
                     {item.label}
                   </text>
@@ -168,15 +164,15 @@ export function OverviewScreen(props: {
               fallback={(
                 <>
                   <text fg={colors.border}>{"─".repeat(4)}</text>
-                  <text fg={colors.salmon}>{"─".repeat(document().label.length)}</text>
+                  <text fg={colors.salmon}>{"─".repeat(currentLabel().length)}</text>
                 </>
               )}
             >
               <text fg={colors.border}>──</text>
-              <For each={props.documents}>
+              <For each={documents()}>
                 {(item) => (
                   <>
-                    <text fg={item.kind === props.currentDocument ? colors.salmon : colors.border}>
+                    <text fg={item.id === document()?.id ? colors.salmon : colors.border}>
                       {"─".repeat(item.label.length)}
                     </text>
                     <text fg={colors.border}>──</text>
@@ -187,35 +183,48 @@ export function OverviewScreen(props: {
           </Show>
           <box flexGrow={1} height={1} border={["bottom"]} borderColor={colors.border} />
         </box>
-        <ResourceStateView resource={document().resource}>
-          {(_source) => (
-            <scrollbox
-              ref={props.scrollRef}
-              flexGrow={1}
-              minWidth={0}
-              minHeight={0}
-              backgroundColor={colors.canvas}
-              verticalScrollbarOptions={{ visible: props.showScrollbar }}
-              paddingX={2}
-              paddingY={1}
-              scrollY
-            >
-              <markdown
-                content={formattedDocument()}
-                syntaxStyle={markdownStyle()}
-                fg={colors.text}
-                bg={colors.canvas}
-                conceal
-                tableOptions={{
-                  style: "grid",
-                  widthMode: "full",
-                  wrapMode: "word",
-                  cellPaddingX: 1,
-                  borderColor: colors.border,
+        <ResourceStateView resource={props.documents}>
+          {() => (
+            <Show when={document()} fallback={(
+              <box flexGrow={1} alignItems="center" justifyContent="center">
+                <text fg={colors.muted}>No repository documentation.</text>
+              </box>
+            )}>
+              <ResourceStateView resource={documentResource()}>
+                {() => {
+                  onCleanup(() => props.scrollRef(undefined))
+                  return (
+                    <scrollbox
+                      ref={props.scrollRef}
+                      flexGrow={1}
+                      minWidth={0}
+                      minHeight={0}
+                      backgroundColor={colors.canvas}
+                      verticalScrollbarOptions={{ visible: props.showScrollbar }}
+                      paddingX={2}
+                      paddingY={1}
+                      scrollY
+                    >
+                      <markdown
+                        content={formattedDocument()}
+                        syntaxStyle={markdownStyle()}
+                        fg={colors.text}
+                        bg={colors.canvas}
+                        conceal
+                        tableOptions={{
+                          style: "grid",
+                          widthMode: "full",
+                          wrapMode: "word",
+                          cellPaddingX: 1,
+                          borderColor: colors.border,
+                        }}
+                        width="100%"
+                      />
+                    </scrollbox>
+                  )
                 }}
-                width="100%"
-              />
-            </scrollbox>
+              </ResourceStateView>
+            </Show>
           )}
         </ResourceStateView>
       </box>

@@ -1,40 +1,95 @@
 import { TextAttributes } from "@opentui/core";
-import type { JSX } from "solid-js";
+import { useTerminalDimensions } from "@opentui/solid";
+import { createMemo, For, type JSX } from "solid-js";
+import type { Page } from "../../navigation";
 import { useTheme } from "../theme";
 import { Popup } from "./popup";
 
-function Shortcut(props: { keys: string; children: JSX.Element }) {
+type ShortcutEntry = { keys: string; description: string };
+
+const commonShortcuts: ShortcutEntry[] = [
+  { keys: "j/k, ↑/↓", description: "move / scroll" },
+  { keys: "u/d", description: "half-page up / down" },
+  { keys: "g/G", description: "jump to top / bottom" },
+  { keys: "r", description: "refresh / retry" },
+  { keys: ",", description: "settings" },
+  { keys: "?", description: "toggle help" },
+  { keys: "q / C-c", description: "quit" },
+];
+
+function Shortcut(props: { keys: string; keyWidth: number; children: JSX.Element }) {
   const { colors } = useTheme();
 
   return (
     <box height={1} flexShrink={0} flexDirection="row">
-      <text width={20} fg={colors.text}>
+      <text width={props.keyWidth} height={1} flexShrink={0} wrapMode="none" fg={colors.text}>
         {props.keys}
       </text>
-      <text fg={colors.muted}>{props.children}</text>
+      <text height={1} flexGrow={1} flexShrink={1} minWidth={0} wrapMode="none" fg={colors.muted}>
+        {props.children}
+      </text>
     </box>
   );
 }
 
-export function Help() {
+export function Help(props: {
+  view: Page | "commit";
+  tabCount: number;
+  hasDocumentTabs?: boolean;
+  hasMoreFiles?: boolean;
+}) {
   const { colors } = useTheme();
+  const dimensions = useTerminalDimensions();
+  const compact = () => dimensions().width < 64;
+  const keyWidth = () => compact() ? 14 : 20;
+  const viewShortcuts = createMemo<ShortcutEntry[]>(() => {
+    switch (props.view) {
+      case "overview":
+        return [
+          ...(props.hasDocumentTabs ? [{ keys: "Tab / ⇧Tab", description: "switch documents" }] : []),
+          { keys: "o", description: "open repo on GitHub" },
+          { keys: "y", description: "copy repo URL" },
+        ];
+      case "commits":
+        return [
+          { keys: "Enter", description: "open commit" },
+          { keys: "Tab", description: "choose branch" },
+          { keys: "o", description: "open on GitHub" },
+          { keys: "y", description: "copy commit SHA" },
+        ];
+      case "commit":
+        return [
+          { keys: "Esc", description: "back to commits" },
+          { keys: "o", description: "open on GitHub" },
+          { keys: "y", description: "copy commit SHA" },
+          ...(props.hasMoreFiles ? [{ keys: "Enter", description: "load more files" }] : []),
+        ];
+      case "issues":
+      case "pulls":
+        return [{ keys: "Tab", description: "toggle open/closed" }];
+      case "actions":
+        return [];
+    }
+  });
+  const shortcuts = createMemo(() => {
+    const tabs = `1–${props.tabCount}, h/l, ←/→`;
+    const entries = [...viewShortcuts(), { keys: tabs, description: "switch tabs" }, ...commonShortcuts];
+    const order = ["Enter", "Tab", "Tab / ⇧Tab", "Esc", tabs, "j/k, ↑/↓", "u/d", "g/G", "o", "y", "r", ",", "?", "q / C-c"];
+    return order.flatMap((keys) => entries.filter((shortcut) => shortcut.keys === keys));
+  });
+  const height = () => shortcuts().length + 4;
 
   return (
-    <Popup width={64} height={18} zIndex={200}>
+    <Popup width={64} height={height()} zIndex={200} placement="center">
       <box
         flexGrow={1}
         minHeight={0}
         flexDirection="column"
-        paddingLeft={4}
-        paddingRight={4}
+        paddingLeft={compact() ? 2 : 4}
+        paddingRight={compact() ? 2 : 4}
         paddingBottom={1}
       >
-        <box
-          height={1}
-          flexShrink={0}
-          flexDirection="row"
-          justifyContent="space-between"
-        >
+        <box height={1} flexShrink={0} flexDirection="row" justifyContent="space-between">
           <text fg={colors.text} attributes={TextAttributes.BOLD}>
             Help
           </text>
@@ -43,19 +98,9 @@ export function Help() {
 
         <box height={1} flexShrink={0} />
         <box flexShrink={0} flexDirection="column">
-          <Shortcut keys="Enter">Select</Shortcut>
-          <Shortcut keys="Esc">back / close</Shortcut>
-          <Shortcut keys="Tab">cycle view options</Shortcut>
-          <Shortcut keys="1–5, h/l, ←/→">switch tabs</Shortcut>
-          <Shortcut keys="j/k, ↑/↓">move / scroll</Shortcut>
-          <Shortcut keys="u/d">half-page up / down</Shortcut>
-          <Shortcut keys="g/G">jump to top / bottom</Shortcut>
-          <Shortcut keys="o">open in github</Shortcut>
-          <Shortcut keys="y">copy</Shortcut>
-          <Shortcut keys="r">refresh</Shortcut>
-          <Shortcut keys=",">settings</Shortcut>
-          <Shortcut keys="?">toggle help</Shortcut>
-          <Shortcut keys="q / C-c">quit</Shortcut>
+          <For each={shortcuts()}>
+            {(shortcut) => <Shortcut keys={shortcut.keys} keyWidth={keyWidth()}>{shortcut.description}</Shortcut>}
+          </For>
         </box>
       </box>
     </Popup>

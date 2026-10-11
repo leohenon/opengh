@@ -15,6 +15,7 @@ export class GitHubApiError extends Error {
 export type GitHubTransport = {
   json<T>(path: string): Promise<T>
   text(path: string, accept?: string): Promise<string>
+  page?(url: string): Promise<string>
 }
 
 const REQUEST_TIMEOUT_MS = 20_000
@@ -57,5 +58,14 @@ export const githubTransport: GitHubTransport = {
   },
   text(path: string, accept?: string) {
     return request(path, accept)
+  },
+  async page(url: string) {
+    // Web pages are anonymous: never forward the CLI's API credentials here.
+    const response = await fetch(url, {
+      headers: { Accept: "text/html", "User-Agent": "openGH" },
+      signal: AbortSignal.timeout(10_000),
+    })
+    if (!response.ok) throw new Error(`GitHub page failed (HTTP ${response.status})`)
+    return response.text()
   },
 }

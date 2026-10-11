@@ -7,7 +7,6 @@ import { back, navigate, openDetail, type NavigationState, type Page } from "../
 import type {
   CommitDetailState,
   RepositoryData,
-  RepositoryDocumentKind,
   RepositoryOperations,
   RepositoryResource,
   ResourceState,
@@ -21,13 +20,13 @@ import { Toast } from "./components/toast"
 import { ActionsScreen } from "./pages/actions"
 import { CommitsScreen } from "./pages/commits"
 import { CommitScreen } from "./pages/commit"
-import { OverviewScreen, type OverviewDocument } from "./pages/overview"
+import { OverviewScreen } from "./pages/overview"
 import { WorkScreen } from "./pages/work"
 import { tabs } from "./tabs"
 import { useTheme } from "./theme"
 
 type Overlay = "help" | "branch-picker" | "settings"
-type ToastState = { id: number; title: string; message: string; duration?: number; tone?: "error" | "success" }
+type ToastState = { id: number; title: string; message: string; duration?: number; tone?: "error" | "success" | "info" }
 
 export type AppProps = {
   data: RepositoryData | (() => RepositoryData)
@@ -48,6 +47,7 @@ export type AppProps = {
   onLoadMoreCommitFiles?: () => Promise<void>
   onCloseCommit?: () => void
   onOpenInBrowser?: (sha?: string) => Promise<void>
+  onCopyToClipboard?: (value: string) => Promise<boolean>
   onLoadMoreRuns?: () => Promise<void>
   onLoadMoreIssues?: (state: ListState) => Promise<void>
   onLoadMorePulls?: (state: ListState) => Promise<void>
@@ -60,7 +60,7 @@ export function App(props: AppProps) {
   const [navigation, setNavigation] = createSignal<NavigationState>({ page: "overview" })
   const [issueState, setIssueState] = createSignal<ListState>("open")
   const [pullState, setPullState] = createSignal<ListState>("open")
-  const [overviewDocument, setOverviewDocument] = createSignal<RepositoryDocumentKind>("readme")
+  const [overviewDocument, setOverviewDocument] = createSignal<string>()
   const [overlay, setOverlay] = createSignal<Overlay>()
   const [toast, setToast] = createSignal<ToastState>()
   let toastId = 0
@@ -97,25 +97,13 @@ export function App(props: AppProps) {
       ? tabs.filter((tab) => tab.page !== "actions")
       : tabs
   }
-  const documentResource = (kind: RepositoryDocumentKind) => data()[kind]
-  const overviewDocuments = (): OverviewDocument[] => {
-    const current = data()
-    return [
-      { kind: "readme", label: "README.md", resource: current.readme },
-      ...(current.contributing.value === undefined
-        ? []
-        : [{ kind: "contributing" as const, label: "CONTRIBUTING.md", resource: current.contributing }]),
-      ...(current.security.value === undefined
-        ? []
-        : [{ kind: "security" as const, label: "SECURITY.md", resource: current.security }]),
-      ...(current.license.value === undefined
-        ? []
-        : [{ kind: "license" as const, label: "LICENSE", resource: current.license }]),
-    ]
-  }
+  const overviewDocuments = () => data().documents.value ?? []
+  const currentOverviewDocument = createMemo(() => overviewDocuments().find((document) => document.id === overviewDocument())
+    ?? overviewDocuments()[0])
   const activeResource = (): ResourceState<unknown> | undefined => {
     if (activeCommitSha()) return commitResource()
-    if (page() === "overview") return documentResource(overviewDocument())
+    if (page() === "overview") return data().documents.status !== "ready"
+      ? data().documents : currentOverviewDocument()?.resource ?? data().documents
     if (page() === "commits") return data().commits
     if (page() === "issues") return issues()
     if (page() === "pulls") return pulls()
@@ -123,7 +111,11 @@ export function App(props: AppProps) {
     return undefined
   }
   const retryTarget = (): RepositoryResource | undefined => {
-    if (page() === "overview") return { kind: overviewDocument() }
+    if (page() === "overview") {
+      const document = currentOverviewDocument()
+      return data().documents.status === "ready" && document
+        ? { kind: "document", id: document.id } : { kind: "documents" }
+    }
     if (page() === "commits") return { kind: "commits" }
     if (page() === "issues") return { kind: "issues", state: issueState() }
     if (page() === "pulls") return { kind: "pulls", state: pullState() }
@@ -144,7 +136,7 @@ export function App(props: AppProps) {
   const statusDetail = () => {
     if (activeCommitSha()) return "commit"
     if (page() === "overview")
-      return overviewDocuments().find((document) => document.kind === overviewDocument())?.label ?? "document"
+      return data().documents.status === "ready" ? currentOverviewDocument()?.label ?? "documentation" : "documentation"
     if (page() === "commits") return "commits"
     if (page() === "issues") return `${issueState()} issues`
     if (page() === "pulls") return `${pullState()} pull requests`
@@ -162,7 +154,7 @@ export function App(props: AppProps) {
   }
   const activeResourceSource = () => {
     if (activeCommitSha()) return `resource:commit:${commitSha()}`
-    if (page() === "overview") return `resource:overview:${overviewDocument()}`
+    if (page() === "overview") return `resource:overview:${data().documents.status === "ready" ? currentOverviewDocument()?.id : "documents"}`
     if (page() === "commits") return "resource:commits"
     if (page() === "issues") return `resource:issues:${issueState()}`
     if (page() === "pulls") return `resource:pulls:${pullState()}`
@@ -251,8 +243,8 @@ export function App(props: AppProps) {
   })
 
   createEffect(() => {
-    if (!overviewDocuments().some((document) => document.kind === overviewDocument())) {
-      setOverviewDocument("readme")
+    if (!overviewDocuments().some((document) => document.id === overviewDocument())) {
+      setOverviewDocument(overviewDocuments()[0]?.id)
       overviewScroll?.scrollTo(0)
     }
   })
@@ -272,8 +264,9 @@ export function App(props: AppProps) {
   }
   const moveOverviewDocument = (delta: number) => {
     const available = overviewDocuments()
-    const current = Math.max(0, available.findIndex((document) => document.kind === overviewDocument()))
-    setOverviewDocument(available[(current + delta + available.length) % available.length]!.kind)
+    if (!available.length) return
+    const current = Math.max(0, available.findIndex((document) => document.id === overviewDocument()))
+    setOverviewDocument(available[(current + delta + available.length) % available.length]!.id)
     overviewScroll?.scrollTo(0)
   }
   const quit = () => props.onQuit ? props.onQuit() : renderer.destroy()
@@ -294,21 +287,35 @@ export function App(props: AppProps) {
       openingBrowser = false
     }
   }
-  const copyToClipboard = (value: string, label: "SHA" | "URL") => {
+  let copying = false
+  const copyToClipboard = async (value: string, label: "SHA" | "URL") => {
+    if (copying) return
+    copying = true
+    const origin = navigation()
     try {
-      if (!renderer.copyToClipboardOSC52(value)) throw new Error(`Terminal clipboard is unavailable. Enable OSC 52 or copy the ${label} manually.`)
-      setToast({ id: ++toastId, title: `${label} sent to clipboard`, message: value, duration: 2000, tone: "success" })
+      const copied = await props.onCopyToClipboard?.(value) ?? false
+      if (renderer.isDestroyed) return
+      if (!copied && !renderer.copyToClipboardOSC52(value))
+        throw new Error(`Clipboard unavailable. Enable OSC 52 or copy the ${label} manually.`)
+      if (navigation() === origin) setToast(copied
+        ? { id: ++toastId, title: `${label} copied to clipboard`, message: value, duration: 2000, tone: "success" }
+        : { id: ++toastId, title: `${label} sent to terminal`, message: "Copy could not be confirmed. Your terminal/tmux must allow OSC 52 clipboard requests.", duration: 4000, tone: "info" })
     } catch (error) {
-      setToast({ id: ++toastId, title: `Could not copy ${label}`, message: error instanceof Error ? error.message : "Unknown error" })
+      if (!renderer.isDestroyed && navigation() === origin)
+        setToast({ id: ++toastId, title: `Could not copy ${label}`, message: error instanceof Error ? error.message : "Unknown error" })
+    } finally {
+      copying = false
     }
   }
   const shortcutHint = () => {
     if (!config().showStatusBarHints) return undefined
     if (activeCommitSha()) return "esc back · o GitHub · y SHA"
       + (dimensions().width >= 60 && commitResource().value?.files.hasMore ? " · enter more files" : "")
-    if (page() === "commits") return "enter open · o GitHub · y SHA"
-      + (dimensions().width >= 50 ? " · tab branch" : "")
-    if (page() === "overview") return "o GitHub · y URL"
+      + " · ? help"
+    if (page() === "commits") return (dimensions().width >= 45 ? "enter open" : "enter") + " · o GitHub · y SHA"
+      + (dimensions().width >= 60 ? " · tab branch" : "")
+      + " · ? help"
+    if (page() === "overview") return "o GitHub · y URL · ? help"
     return undefined
   }
 
@@ -343,7 +350,7 @@ export function App(props: AppProps) {
     if (sha) {
       if (event.ctrl || event.meta) return
       if (event.name === "o") void openInBrowser(sha)
-      else if (event.name === "y") copyToClipboard(sha, "SHA")
+      else if (event.name === "y") void copyToClipboard(sha, "SHA")
       else if (event.name === "return" || event.name === "enter") void props.onLoadMoreCommitFiles?.()
       else if (event.name === "r") {
         const resource = commitResource()
@@ -354,7 +361,7 @@ export function App(props: AppProps) {
     }
     if (page() === "overview" && !event.ctrl && !event.meta) {
       if (event.name === "o") return void openInBrowser()
-      if (event.name === "y") return copyToClipboard(data().repo.url, "URL")
+      if (event.name === "y") return void copyToClipboard(data().repo.url, "URL")
     }
     if (event.name === "tab") {
       if (page() === "overview") {
@@ -397,7 +404,7 @@ export function App(props: AppProps) {
       <box visible={page() === "overview"} flexGrow={1} minHeight={0}>
           <OverviewScreen
             repo={data().repo}
-            documents={overviewDocuments()}
+            documents={data().documents}
             currentDocument={overviewDocument()}
             showScrollbar={config().showScrollbars}
             aboutSidebar={config().aboutSidebar}
@@ -416,7 +423,7 @@ export function App(props: AppProps) {
               void props.onLoadCommit?.(commit.sha)
             }}
             onOpenCommitInBrowser={(commit) => void openInBrowser(commit.sha)}
-            onCopyCommitSha={(commit) => copyToClipboard(commit.sha, "SHA")}
+            onCopyCommitSha={(commit) => void copyToClipboard(commit.sha, "SHA")}
             onEndReached={() => {
               const commits = data().commits
               if (commits.status === "ready" && commits.value.hasMore) void props.onLoadMoreCommits?.()
@@ -491,7 +498,14 @@ export function App(props: AppProps) {
           />
         )}
       </Show>
-      <Show when={overlay() === "help"}><Help /></Show>
+      <Show when={overlay() === "help"}>
+        <Help
+          view={activeCommitSha() ? "commit" : page()}
+          tabCount={visibleTabs().length}
+          hasDocumentTabs={overviewDocuments().length > 1}
+          hasMoreFiles={commitResource().value?.files.hasMore}
+        />
+      </Show>
       <Show when={overlay() === "settings"}>
         <Settings
           config={config()}

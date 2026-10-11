@@ -1,5 +1,5 @@
 import type { CommitDetail } from "../../src/models"
-import type { RepositoryData, RepositoryOperations } from "../../src/repository-state"
+import type { RepositoryData, RepositoryDocumentState, RepositoryOperations } from "../../src/repository-state"
 
 const issues = {
   open: [
@@ -24,6 +24,21 @@ const pulls = {
   ],
 }
 
+export const repositoryDocumentsFixture: RepositoryDocumentState[] = [
+  { path: "README.md", label: "README", content: "# OpenTUI\n\nA TypeScript library for building rich terminal user interfaces." },
+  { path: "CODE_OF_CONDUCT.md", label: "Code of conduct", content: "# Code of conduct\n\nBe respectful and welcoming." },
+  { path: "CONTRIBUTING.md", label: "Contributing", content: "# Contributing\n\nThanks for helping improve OpenTUI." },
+  { path: "LICENSE", label: "MIT license", content: "MIT License\n\nCopyright OpenTUI contributors." },
+  { path: "SECURITY.md", label: "Security", content: "# Security Policy\n\nPlease report vulnerabilities privately." },
+].map(({ path, label, content }) => ({
+  id: `anomalyco/opentui:${path}`,
+  repository: "anomalyco/opentui",
+  ref: "main",
+  path,
+  label,
+  resource: { status: "ready" as const, value: content },
+}))
+
 export const githubDataFixture: RepositoryData = {
   repo: {
     nameWithOwner: "anomalyco/opentui",
@@ -39,22 +54,7 @@ export const githubDataFixture: RepositoryData = {
     license: "MIT",
     updatedAt: "2026-04-14T10:24:00Z",
   },
-  readme: {
-    status: "ready",
-    value: "# OpenTUI\n\nA TypeScript library for building rich terminal user interfaces.",
-  },
-  contributing: {
-    status: "ready",
-    value: "# Contributing\n\nThanks for helping improve OpenTUI.",
-  },
-  security: {
-    status: "ready",
-    value: "# Security Policy\n\nPlease report vulnerabilities privately.",
-  },
-  license: {
-    status: "ready",
-    value: "MIT License\n\nCopyright OpenTUI contributors.",
-  },
+  documents: { status: "ready", value: repositoryDocumentsFixture },
   issues: {
     open: { status: "ready", value: { items: issues.open, page: 1, hasMore: false } },
     closed: { status: "ready", value: { items: issues.closed, page: 1, hasMore: false } },
