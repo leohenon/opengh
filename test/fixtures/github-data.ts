@@ -15,12 +15,12 @@ const issues = {
 
 const pulls = {
   open: [
-    { number: 421, state: "open" as const, title: "fix: retain focused child during layout changes", author: "maria-dev", createdAt: "2026-04-14T08:32:00Z" },
-    { number: 418, state: "open" as const, title: "feat: add high contrast theme tokens", author: "samuelk", createdAt: "2026-04-13T14:11:00Z" },
-    { number: 410, state: "open" as const, title: "docs: explain renderable cleanup", author: "drewcodes", createdAt: "2026-04-11T10:05:00Z" },
+    { number: 421, state: "open" as const, merged: false, title: "fix: retain focused child during layout changes", author: "maria-dev", createdAt: "2026-04-14T08:32:00Z" },
+    { number: 418, state: "open" as const, merged: false, title: "feat: add high contrast theme tokens", author: "samuelk", createdAt: "2026-04-13T14:11:00Z" },
+    { number: 410, state: "open" as const, merged: false, title: "docs: explain renderable cleanup", author: "drewcodes", createdAt: "2026-04-11T10:05:00Z" },
   ],
   closed: [
-    { number: 402, state: "closed" as const, title: "fix: preserve selection after refresh", author: "terminal-dev", createdAt: "2026-04-08T15:45:00Z" },
+    { number: 402, state: "closed" as const, merged: true, title: "fix: preserve selection after refresh", author: "terminal-dev", createdAt: "2026-04-08T15:45:00Z" },
   ],
 }
 

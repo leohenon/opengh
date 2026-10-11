@@ -19,6 +19,17 @@ export function WorkScreen(props: {
   onEndReached?: () => void
 }) {
   const { colors } = useTheme()
+  const merged = (entry: IssueSummary | PullRequestSummary) => props.kind === "pull" && "merged" in entry && entry.merged
+  const entryColor = (entry: IssueSummary | PullRequestSummary) => {
+    if (merged(entry)) return colors.purple
+    if (entry.state === "open") return colors.openState
+    return props.kind === "pull" ? colors.red : colors.closedState
+  }
+  const entryIcon = (entry: IssueSummary | PullRequestSummary) => {
+    if (props.kind === "issue") return entry.state === "closed" ? "✓" : "●"
+    if (merged(entry)) return "⑃"
+    return entry.state === "closed" ? "×" : "⑂"
+  }
 
   return (
     <PageShell
@@ -53,9 +64,7 @@ export function WorkScreen(props: {
             {(entry, active) => (
               <>
                 <box height={2} width={3} flexShrink={0} alignItems="flex-start">
-                  <text fg={props.state === "closed" ? colors.closedState : colors.openState}>
-                    {props.kind === "issue" ? (props.state === "closed" ? "✓" : "●") : "⑂"}
-                  </text>
+                  <text fg={entryColor(entry())}>{entryIcon(entry())}</text>
                 </box>
                 <box height={2} flexGrow={1} flexBasis={0} minWidth={0} flexDirection="column" overflow="hidden">
                   <ListLine

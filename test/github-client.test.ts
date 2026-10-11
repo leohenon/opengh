@@ -148,6 +148,22 @@ describe("GitHub client", () => {
     expect(result.items.map((issue) => issue.number)).toEqual([1])
   })
 
+  test("distinguishes merged pulls from closed and open pulls", async () => {
+    const base = { title: "Pull", user: { login: "octocat" }, created_at: "2026-01-01T00:00:00Z" }
+    const client = createGitHubClient(transport({
+      "repos/owner/repo/pulls?state=closed&per_page=30&page=1": [
+        { ...base, number: 1, state: "closed", merged_at: "2026-01-02T00:00:00Z" },
+        { ...base, number: 2, state: "closed", merged_at: null },
+      ],
+      "repos/owner/repo/pulls?state=open&per_page=30&page=1": [
+        { ...base, number: 3, state: "open", merged_at: null },
+      ],
+    }))
+    expect((await client.pulls("owner/repo", "closed")).items.map(({ number, state, merged }) => ({ number, state, merged })))
+      .toEqual([{ number: 1, state: "closed", merged: true }, { number: 2, state: "closed", merged: false }])
+    expect((await client.pulls("owner/repo", "open")).items[0]).toMatchObject({ number: 3, state: "open", merged: false })
+  })
+
   test("paginates branches and falls back only for an empty first page", async () => {
     const firstPath = "repos/owner/repo/branches?per_page=100&page=1"
     const secondPath = "repos/owner/repo/branches?per_page=100&page=2"

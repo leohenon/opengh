@@ -31,7 +31,9 @@ export type IssueSummary = {
   createdAt: string
 }
 
-export type PullRequestSummary = IssueSummary
+export type PullRequestSummary = IssueSummary & {
+  merged: boolean
+}
 
 export type WorkflowRunSummary = {
   id: number

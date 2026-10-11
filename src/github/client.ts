@@ -41,7 +41,9 @@ type IssueResponse = {
   pull_request?: unknown
 }
 
-type PullResponse = IssueResponse
+type PullResponse = IssueResponse & {
+  merged_at: string | null
+}
 
 type CommitResponse = {
   sha: string
@@ -189,7 +191,10 @@ export function createGitHubClient(transport: GitHubTransport) {
     const items = await transport.json<PullResponse[]>(
       `repos/${repository}/pulls?state=${state}&per_page=${PAGE_SIZE}&page=${page}`,
     )
-    return { items: items.map(issueSummary), hasMore: items.length === PAGE_SIZE }
+    return {
+      items: items.map((item) => ({ ...issueSummary(item), merged: item.merged_at != null })),
+      hasMore: items.length === PAGE_SIZE,
+    }
   }
 
   const runs = async (repository: string, page = 1): Promise<Page<WorkflowRunSummary>> => {

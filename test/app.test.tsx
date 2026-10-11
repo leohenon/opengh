@@ -1,9 +1,10 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { testRender } from "@opentui/solid";
+import { RGBA } from "@opentui/core";
 import { createSignal } from "solid-js";
 import { App } from "../src/ui/app";
 import { defaultConfig, type Config } from "../src/config";
-import { resolveTheme } from "../src/theme";
+import { appColors, resolveTheme } from "../src/theme";
 import type { ResourceState } from "../src/repository-state";
 import { ThemeProvider, useTheme } from "../src/ui/theme";
 import {
@@ -186,6 +187,38 @@ describe("openGH TUI", () => {
     view.mockInput.pressKey("5");
     await view.flush();
     expect(view.captureCharFrame()).toContain("4 workflow runs");
+  });
+
+  test("PR rows distinguish purple merges from red unmerged closures", async () => {
+    const data = structuredClone(githubDataFixture);
+    const merged = data.pulls.closed.value!.items[0]!;
+    data.pulls.closed.value!.items = [
+      { ...merged, title: "Merged PR", merged: true },
+      { ...merged, number: 403, title: "Closed PR", merged: false },
+    ];
+    const view = await testRender(() => <App data={data} operations={repositoryOperationsFixture} />,
+      { width: 100, height: 26, useThread: false });
+    active.push(view);
+    const colors = appColors(resolveTheme("github"));
+    const iconColor = (icon: string) => view.captureSpans().lines.flatMap((line) => line.spans)
+      .find((span) => span.text.includes(icon))?.fg;
+    await view.flush();
+    view.mockInput.pressKey("4");
+    await view.flush();
+    expect(iconColor("⑂")).toEqual(RGBA.fromHex(colors.openState));
+    view.mockInput.pressTab();
+    for (const width of [100, 32]) {
+      view.resize(width, 26);
+      await view.flush();
+      expect(view.captureCharFrame()).toContain("Merged PR");
+      expect(view.captureCharFrame()).toContain("Closed PR");
+      expect(iconColor("⑃")).toEqual(RGBA.fromHex(colors.purple));
+      expect(iconColor("×")).toEqual(RGBA.fromHex(colors.red));
+    }
+    view.mockInput.pressKey("3");
+    view.mockInput.pressTab();
+    await view.flush();
+    expect(iconColor("✓")).toEqual(RGBA.fromHex(colors.closedState));
   });
 
   test("hides Actions only after an empty result resolves", async () => {
