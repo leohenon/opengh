@@ -65,10 +65,14 @@ export function CommitScreen(props: {
             contentOptions={{ paddingTop: 1, paddingBottom: 1 }}
           >
             <text width="100%" flexShrink={0} fg={colors.text} attributes={TextAttributes.BOLD}>{commit().message}</text>
-            <text width="100%" flexShrink={0} fg={colors.muted}>Author {commit().author} · {exactDate(commit().date)}</text>
+            <text width="100%" flexShrink={0} wrapMode="word" fg={colors.muted}>
+              Author <span style={{ fg: colors.text }}>{commit().author}</span>
+              {compact() ? "\n  " : " · "}{exactDate(commit().date)}
+            </text>
             <Show when={commit().committer && (commit().committer!.name !== commit().author || commit().committer!.date !== commit().date)}>
-              <text width="100%" flexShrink={0} fg={colors.muted}>
-                Committer {commit().committer?.name} · {exactDate(commit().committer?.date ?? "")}
+              <text width="100%" flexShrink={0} wrapMode="word" fg={colors.muted}>
+                Committer <span style={{ fg: colors.text }}>{commit().committer?.name}</span>
+                {compact() ? "\n  " : " · "}{exactDate(commit().committer?.date ?? "")}
               </text>
             </Show>
             <text width="100%" flexShrink={0} wrapMode="char" fg={colors.muted}>SHA {commit().sha}</text>
@@ -85,13 +89,20 @@ export function CommitScreen(props: {
                   <text width={compact() ? 2 : 10} flexShrink={0} fg={fileColor(file.status)}>
                     {compact() ? (fileLabels[file.status] ?? file.status).slice(0, 1).toUpperCase() : fileLabels[file.status] ?? file.status}
                   </text>
-                  <box minWidth={0} paddingRight={1}>
-                    <text wrapMode="char" fg={colors.text}>
-                      {file.previousPath ? `${file.previousPath} → ${file.path}` : file.path}
-                    </text>
+                  <box minWidth={0} flexDirection="column">
+                    <Show when={compact() && file.previousPath}>
+                      <text flexShrink={0} wrapMode="char" fg={colors.muted}>{file.previousPath}</text>
+                    </Show>
+                    <box minWidth={0} flexDirection="row" alignItems="flex-start">
+                      <box minWidth={0} paddingRight={1}>
+                        <text wrapMode="char" fg={colors.text}>
+                          {file.previousPath ? (compact() ? `→ ${file.path}` : `${file.previousPath} → ${file.path}`) : file.path}
+                        </text>
+                      </box>
+                      <text flexShrink={0} fg={colors.green}>+{file.additions}</text>
+                      <text flexShrink={0} fg={colors.red}> −{file.deletions}</text>
+                    </box>
                   </box>
-                  <text flexShrink={0} fg={colors.green}>+{file.additions}</text>
-                  <text flexShrink={0} fg={colors.red}> −{file.deletions}</text>
                 </box>
               )}
             </For>
