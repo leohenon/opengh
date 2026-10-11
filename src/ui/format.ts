@@ -7,6 +7,8 @@ export function ago(iso: string) {
   return hours > 0 ? `${hours}h ago` : "just now"
 }
 
+const graphemes = new Intl.Segmenter(undefined, { granularity: "grapheme" })
+
 export function fitText(value: string, width: number) {
   if (width <= 0) return ""
   if (Bun.stringWidth(value) <= width) return value
@@ -14,7 +16,7 @@ export function fitText(value: string, width: number) {
 
   const target = width - 3
   let result = ""
-  for (const character of value) {
+  for (const { segment: character } of graphemes.segment(value)) {
     if (Bun.stringWidth(result + character) > target) break
     result += character
   }

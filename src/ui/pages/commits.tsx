@@ -1,10 +1,13 @@
 import { TextAttributes } from "@opentui/core"
+import { useTerminalDimensions } from "@opentui/solid"
+import { Show } from "solid-js"
 import type { CommitSummary, Paginated } from "../../models"
 import type { ResourceState } from "../../repository-state"
 import { PageShell } from "../components/page-shell"
+import { ListLine } from "../components/list-line"
 import { ResourceStateView } from "../components/resource-state"
 import { SelectableList } from "../components/selectable-list"
-import { ago } from "../format"
+import { ago, fitText } from "../format"
 import { useTheme } from "../theme"
 
 export function CommitsScreen(props: {
@@ -19,18 +22,23 @@ export function CommitsScreen(props: {
   onCopyCommitSha?: (commit: CommitSummary) => void
 }) {
   const { colors } = useTheme()
+  const dimensions = useTerminalDimensions()
   const commitCount = () => props.commits.value?.items.length ?? 0
 
   return (
     <PageShell
       header={(
         <box flexGrow={1} minWidth={0} flexDirection="row" alignItems="center" gap={2}>
-          <text fg={colors.text} attributes={TextAttributes.BOLD}>
+          <text flexShrink={0} fg={colors.text} attributes={TextAttributes.BOLD}>
             {commitCount()} {commitCount() === 1 ? "commit" : "commits"}
           </text>
-          <box flexShrink={0} flexDirection="row">
-            <text fg={colors.blue} attributes={TextAttributes.BOLD}> {props.currentBranch}</text>
-            <text fg={colors.muted}> ▾</text>
+          <box width={Bun.stringWidth(props.currentBranch) + 4} flexShrink={1} minWidth={0} flexDirection="row" overflow="hidden">
+            <box flexGrow={1} flexBasis={0} minWidth={0}>
+              <ListLine fg={colors.blue} attributes={TextAttributes.BOLD}>
+                {(width) => fitText(` ${props.currentBranch}`, width)}
+              </ListLine>
+            </box>
+            <text flexShrink={0} fg={colors.muted}> ▾</text>
           </box>
         </box>
       )}
@@ -51,23 +59,22 @@ export function CommitsScreen(props: {
           >
             {(commit, active) => (
               <>
-                <box height={2} flexGrow={1} minWidth={0} flexDirection="column" overflow="hidden">
-                  <text
-                    width="100%"
-                    height={1}
-                    wrapMode="none"
+                <box height={2} flexGrow={1} flexBasis={0} minWidth={0} flexDirection="column" overflow="hidden">
+                  <ListLine
                     fg={colors.text}
                     attributes={active() ? TextAttributes.BOLD : TextAttributes.NONE}
                   >
-                    {commit().message}
-                  </text>
-                  <text width="100%" height={1} wrapMode="none" fg={colors.muted}>
-                    {commit().author} committed {ago(commit().date)}
-                  </text>
+                    {(width) => fitText(commit().message, width)}
+                  </ListLine>
+                  <ListLine fg={colors.muted}>
+                    {(width) => fitText(`${commit().author} committed ${ago(commit().date)}`, width)}
+                  </ListLine>
                 </box>
-                <box height={2} width={10} flexShrink={0} alignItems="center" justifyContent="flex-end" overflow="hidden">
-                  <text fg={colors.blue}>{commit().sha.slice(0, 7)}</text>
-                </box>
+                <Show when={dimensions().width >= 60}>
+                  <box height={2} width={10} flexShrink={0} alignItems="center" justifyContent="flex-end" overflow="hidden">
+                    <text fg={colors.blue}>{commit().sha.slice(0, 7)}</text>
+                  </box>
+                </Show>
               </>
             )}
           </SelectableList>

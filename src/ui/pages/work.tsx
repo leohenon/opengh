@@ -2,9 +2,10 @@ import { TextAttributes } from "@opentui/core"
 import type { IssueSummary, ListState, Paginated, PullRequestSummary } from "../../models"
 import type { ResourceState } from "../../repository-state"
 import { PageShell } from "../components/page-shell"
+import { ListLine } from "../components/list-line"
 import { ResourceStateView } from "../components/resource-state"
 import { SelectableList } from "../components/selectable-list"
-import { ago } from "../format"
+import { ago, fitText } from "../format"
 import { useTheme } from "../theme"
 
 export function WorkScreen(props: {
@@ -56,19 +57,16 @@ export function WorkScreen(props: {
                     {props.kind === "issue" ? (props.state === "closed" ? "✓" : "●") : "⑂"}
                   </text>
                 </box>
-                <box height={2} flexGrow={1} minWidth={0} flexDirection="column" overflow="hidden">
-                  <text
-                    width="100%"
-                    height={1}
-                    wrapMode="none"
+                <box height={2} flexGrow={1} flexBasis={0} minWidth={0} flexDirection="column" overflow="hidden">
+                  <ListLine
                     fg={colors.text}
                     attributes={active() ? TextAttributes.BOLD : TextAttributes.NONE}
                   >
-                    {entry().title}
-                  </text>
-                  <text width="100%" height={1} wrapMode="none" fg={colors.muted}>
-                    #{entry().number} · {ago(entry().createdAt)} · {entry().author}
-                  </text>
+                    {(width) => fitText(entry().title, width)}
+                  </ListLine>
+                  <ListLine fg={colors.muted}>
+                    {(width) => fitText(`#${entry().number} · ${ago(entry().createdAt)} · ${entry().author}`, width)}
+                  </ListLine>
                 </box>
               </>
             )}

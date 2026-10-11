@@ -1,7 +1,9 @@
 import type { BoxRenderable, ScrollBoxRenderable } from "@opentui/core"
 import { useKeyboard } from "@opentui/solid"
 import { createEffect, createSignal, Index, onCleanup, Show, type Accessor, type JSX } from "solid-js"
+import { fitText } from "../format"
 import { scrollRowIntoView } from "../scroll-selection"
+import { ListLine } from "./list-line"
 import { useTheme } from "../theme"
 
 type ItemKey = string | number
@@ -114,6 +116,7 @@ export function SelectableList<T>(props: {
       }}
       onSizeChange={updateContainerHeight}
       flexGrow={1}
+      minWidth={0}
       minHeight={0}
       flexDirection="column"
       overflow="hidden"
@@ -130,17 +133,25 @@ export function SelectableList<T>(props: {
         minHeight={0}
         backgroundColor={colors.canvas}
         verticalScrollbarOptions={{ visible: props.showScrollbar === true }}
+        scrollX={false}
         scrollY
       >
         <Show
           when={props.items.length > 0}
-          fallback={<box height={3} alignItems="center" paddingLeft={2}><text fg={colors.muted}>{props.empty}</text></box>}
+          fallback={(
+            <box width="100%" minWidth={0} height={3} alignItems="center" paddingLeft={2}>
+              <ListLine fg={colors.muted}>{(width) => fitText(props.empty, width)}</ListLine>
+            </box>
+          )}
         >
           <Index each={props.items}>
             {(item) => {
               const active = () => selectedKey() === props.itemKey(item())
               return (
                 <box
+                  width="100%"
+                  minWidth={0}
+                  overflow="hidden"
                   height={rowHeight()}
                   flexShrink={0}
                   flexDirection="row"

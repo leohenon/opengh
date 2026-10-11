@@ -2,9 +2,10 @@ import { TextAttributes } from "@opentui/core"
 import type { Paginated, WorkflowRunSummary } from "../../models"
 import type { ResourceState } from "../../repository-state"
 import { PageShell } from "../components/page-shell"
+import { ListLine } from "../components/list-line"
 import { ResourceStateView } from "../components/resource-state"
 import { SelectableList } from "../components/selectable-list"
-import { ago } from "../format"
+import { ago, fitText } from "../format"
 import { useTheme } from "../theme"
 
 function runIcon(run: WorkflowRunSummary) {
@@ -56,21 +57,23 @@ export function ActionsScreen(props: {
                 <box height={2} width={3} flexShrink={0} alignItems="flex-start">
                   <text fg={runColor(run())}>{runIcon(run())}</text>
                 </box>
-                <box height={2} flexGrow={1} minWidth={0} flexDirection="column" overflow="hidden">
-                  <text
-                    width="100%"
-                    height={1}
-                    wrapMode="none"
+                <box height={2} flexGrow={1} flexBasis={0} minWidth={0} flexDirection="column" overflow="hidden">
+                  <ListLine
                     fg={colors.text}
                     attributes={active() ? TextAttributes.BOLD : TextAttributes.NONE}
                   >
-                    {run().title}
-                  </text>
-                  <box height={1} flexDirection="row" overflow="hidden">
-                    <text fg={colors.muted}>{run().name} · </text>
-                    <text fg={runColor(run())}>{runState(run())}</text>
-                    <text fg={colors.muted}> · {ago(run().createdAt)}</text>
-                  </box>
+                    {(width) => fitText(run().title, width)}
+                  </ListLine>
+                  <ListLine fg={colors.muted}>
+                    {(width) => {
+                      const prefix = `${run().name} · `
+                      const state = runState(run())
+                      const value = fitText(`${prefix}${state} · ${ago(run().createdAt)}`, width)
+                      const stateStart = Math.min(prefix.length, value.length)
+                      const stateEnd = Math.min(prefix.length + state.length, value.length)
+                      return <>{value.slice(0, stateStart)}<span style={{ fg: runColor(run()) }}>{value.slice(stateStart, stateEnd)}</span>{value.slice(stateEnd)}</>
+                    }}
+                  </ListLine>
                 </box>
               </>
             )}
