@@ -5,7 +5,7 @@ import { createSignal } from "solid-js";
 import { App } from "../src/ui/app";
 import { defaultConfig, type Config } from "../src/config";
 import { appColors, resolveTheme } from "../src/theme";
-import type { ResourceState } from "../src/repository-state";
+import type { RepositoryData, ResourceState } from "../src/repository-state";
 import { ThemeProvider, useTheme } from "../src/ui/theme";
 import {
   commitDetailFixture,
@@ -88,7 +88,7 @@ describe("openGH TUI", () => {
     expect(statusLine()).toBe("o GitHub · y URL · ? help");
 
     view.mockInput.pressKey(",");
-    for (let i = 0; i < 3; i++) view.mockInput.pressKey("j");
+    for (let i = 0; i < 4; i++) view.mockInput.pressKey("j");
     view.mockInput.pressEnter();
     await view.flush();
     expect(view.captureCharFrame()).toContain("Status bar hints");
@@ -170,7 +170,7 @@ describe("openGH TUI", () => {
     await view.flush();
     expect(view.captureCharFrame()).toContain("Open (4)");
     expect(view.captureCharFrame()).toContain("Closed (1)");
-    expect(view.captureCharFrame()).toContain("#412 ·");
+    expect(view.captureCharFrame()).toContain("#412 opened");
     expect(view.captureCharFrame()).toContain("ScrollBox loses focus");
 
     view.mockInput.pressKey("j");
@@ -182,7 +182,7 @@ describe("openGH TUI", () => {
     view.mockInput.pressKey("4");
     await view.flush();
     expect(view.captureCharFrame()).toContain("Pull requests");
-    expect(view.captureCharFrame()).toContain("#421 ·");
+    expect(view.captureCharFrame()).toContain("#421 opened");
 
     view.mockInput.pressKey("5");
     await view.flush();
@@ -221,42 +221,65 @@ describe("openGH TUI", () => {
     expect(iconColor("✓")).toEqual(RGBA.fromHex(colors.closedState));
   });
 
-  test("hides Actions only after an empty result resolves", async () => {
-    const emptyRuns = {
-      status: "ready" as const,
-      value: { items: [], page: 1, hasMore: false },
-    };
-    const data = { ...githubDataFixture, runs: emptyRuns };
-    const view = await testRender(
-      () => (
-        <App
-          data={data}
-          operations={repositoryOperationsFixture}
-          onQuit={() => {}}
-        />
-      ),
-      { width: 120, height: 32, useThread: false },
-    );
+  test("keeps unknown tabs hidden, preserves navigation during refresh, and hides only confirmed empty sections", async () => {
+    const empty = { status: "ready" as const, value: { items: [], page: 1, hasMore: false } };
+    const [data, setData] = createSignal<RepositoryData>({
+      ...githubDataFixture, runs: { status: "loading", phase: "load" },
+    });
+    const [operations, setOperations] = createSignal(repositoryOperationsFixture);
+    const view = await testRender(() => (
+      <App data={data} operations={operations} />
+    ), { width: 120, height: 32, useThread: false });
     active.push(view);
+    const header = () => view.captureCharFrame().split("\n").slice(0, 5).join("\n");
     await view.flush();
-    expect(view.captureCharFrame()).not.toContain("Actions");
+    expect(header()).toContain("Overview");
+    expect(header()).toContain("Commits");
+    expect(header()).not.toContain("Actions");
+    expect(header()).not.toContain("Issues");
+    view.mockInput.pressKey("3");
+    await view.flush();
+    expect(view.captureCharFrame()).toContain("README");
 
-    const loadingView = await testRender(
-      () => (
-        <App
-          data={{
-            ...githubDataFixture,
-            runs: { status: "loading", phase: "load" },
-          }}
-          operations={repositoryOperationsFixture}
-          onQuit={() => {}}
-        />
-      ),
-      { width: 120, height: 32, useThread: false },
-    );
-    active.push(loadingView);
-    await loadingView.flush();
-    expect(loadingView.captureCharFrame()).toContain("Actions");
+    setData((current) => ({ ...current, runs: empty }));
+    await view.flush();
+    expect(header()).toContain("3 Issues");
+    expect(header()).toContain("4 Pull requests");
+    expect(header()).not.toContain("Actions");
+    view.mockInput.pressKey("3");
+    await view.flush();
+    setOperations((current) => ({ ...current, refresh: { status: "loading" } }));
+    setData((current) => ({ ...current, issues: { open: empty, closed: empty }, pulls: { open: empty, closed: empty } }));
+    await view.flush();
+    expect(header()).toContain("3 Issues");
+    expect(header()).toContain("4 Pull requests");
+    setOperations(repositoryOperationsFixture);
+    await view.flush();
+    expect(header()).not.toContain("Issues");
+    expect(header()).not.toContain("Pull requests");
+    expect(header()).not.toContain("Actions");
+    expect(view.captureCharFrame()).toContain("README");
+
+    setData((current) => ({ ...current, runs: { status: "error", phase: "load", message: "Actions unavailable" } }));
+    await view.flush();
+    expect(header()).toContain("3 Actions");
+    view.mockInput.pressKey("3");
+    await view.flush();
+    expect(view.captureCharFrame()).toContain("Actions unavailable");
+    setData((current) => ({ ...current, runs: empty,
+      issues: { open: empty, closed: githubDataFixture.issues.closed },
+      pulls: { open: empty, closed: githubDataFixture.pulls.closed },
+    }));
+    await view.flush();
+    expect(header()).toContain("Issues");
+    expect(header()).toContain("Pull requests");
+    expect(view.captureCharFrame()).toContain("README");
+    setData((current) => ({ ...current,
+      issues: { open: { status: "ready", value: { items: [], page: 1, hasMore: true } }, closed: empty },
+      pulls: { open: empty, closed: empty },
+    }));
+    await view.flush();
+    expect(header()).toContain("Issues"); // A partial page is not proof that a section is empty.
   });
 
   test("loads more commits and workflow runs near list ends", async () => {
@@ -507,8 +530,11 @@ describe("openGH TUI", () => {
 
     view.mockInput.pressTab();
     await view.flush();
-    await Bun.sleep(30); // Markdown parsing completes asynchronously after rendering starts.
-    await view.flush();
+    // Wait for asynchronous Markdown parsing, including a cold parser worker.
+    for (let attempt = 0; attempt < 10 && !view.captureCharFrame().includes("Be respectful and welcoming."); attempt++) {
+      await Bun.sleep(20);
+      await view.flush();
+    }
     expect(view.captureCharFrame()).toContain("Be respectful and welcoming.");
     view.mockInput.pressTab();
     view.mockInput.pressKey("r");
@@ -689,7 +715,7 @@ describe("openGH TUI", () => {
   });
 
   test("opens settings and applies saved changes immediately", async () => {
-    const [config, setConfig] = createSignal<Config>({ showScrollbars: false, theme: "github", aboutSidebar: "auto", showStatusBarHints: true });
+    const [config, setConfig] = createSignal<Config>({ showScrollbars: false, theme: "github", aboutSidebar: "auto", detailLayout: "centered", showStatusBarHints: true });
     let saves = 0;
     const view = await testRender(
       () => (
@@ -726,7 +752,7 @@ describe("openGH TUI", () => {
     await Bun.sleep(0);
     await view.flush();
     expect(saves).toBe(1);
-    expect(config()).toEqual({ showScrollbars: true, theme: "github", aboutSidebar: "auto", showStatusBarHints: true });
+    expect(config()).toEqual({ showScrollbars: true, theme: "github", aboutSidebar: "auto", detailLayout: "centered", showStatusBarHints: true });
     expect(view.captureCharFrame()).toContain("‹ on ›");
 
     view.mockInput.pressArrow("down");
@@ -739,6 +765,19 @@ describe("openGH TUI", () => {
     expect(config().aboutSidebar).toBe("show");
     expect(view.captureCharFrame()).toContain("‹ show ›");
 
+    view.mockInput.pressArrow("down");
+    await view.flush();
+    expect(view.captureCharFrame()).toContain("Detail layout");
+    expect(view.captureCharFrame()).toContain("Centered keeps a bounded reading");
+    view.mockInput.pressArrow("right");
+    await view.flush();
+    expect(config().detailLayout).toBe("wide");
+    expect(view.captureCharFrame()).toContain("‹ wide ›");
+    view.mockInput.pressArrow("left");
+    await view.flush();
+    expect(config().detailLayout).toBe("centered");
+    expect(saves).toBe(4);
+
     view.mockInput.pressEscape();
     await Bun.sleep(30);
     await view.flush();
@@ -746,7 +785,7 @@ describe("openGH TUI", () => {
   });
 
   test("previews and saves a theme from settings", async () => {
-    const [config, setConfig] = createSignal<Config>({ showScrollbars: false, theme: "github", aboutSidebar: "auto", showStatusBarHints: true });
+    const [config, setConfig] = createSignal<Config>({ showScrollbars: false, theme: "github", aboutSidebar: "auto", detailLayout: "centered", showStatusBarHints: true });
     let canvas = () => "";
     const ThemedApp = () => {
       const current = useTheme();
@@ -796,7 +835,7 @@ describe("openGH TUI", () => {
   });
 
   test("restores the configured theme when preview is cancelled", async () => {
-    const config: Config = { showScrollbars: false, theme: "github", aboutSidebar: "auto", showStatusBarHints: true };
+    const config: Config = { showScrollbars: false, theme: "github", aboutSidebar: "auto", detailLayout: "centered", showStatusBarHints: true };
     let canvas = () => "";
     const ThemedApp = () => {
       const current = useTheme();
@@ -835,7 +874,7 @@ describe("openGH TUI", () => {
         <App
           data={githubDataFixture}
           operations={repositoryOperationsFixture}
-          config={{ showScrollbars: false, theme: "github", aboutSidebar: "auto", showStatusBarHints: true }}
+          config={{ showScrollbars: false, theme: "github", aboutSidebar: "auto", detailLayout: "centered", showStatusBarHints: true }}
           onConfigChange={async () => { throw new Error("Config directory is read-only") }}
         />
       ),
@@ -992,7 +1031,7 @@ describe("openGH TUI", () => {
     await Bun.sleep(30);
     await view.flush();
     expect(view.captureCharFrame()).not.toContain("back to commits");
-    expect(view.captureCharFrame()).toContain("Commit 7ca91d2");
+    expect(view.captureCharFrame()).toContain(commitDetailFixture.message);
   });
 
   test("opens help and invokes global actions", async () => {
@@ -1095,6 +1134,7 @@ describe("openGH TUI", () => {
       showScrollbars: false,
       theme: "github",
       aboutSidebar: "show",
+      detailLayout: "centered",
       showStatusBarHints: true,
     });
     const view = await testRender(

@@ -1,6 +1,11 @@
 import type {
   CommitDetail,
   CommitSummary,
+  IssueComment,
+  IssueDetail,
+  IssueCommitReference,
+  IssueIssueReference,
+  IssueReference,
   IssueSummary,
   ListState,
   PullRequestSummary,
@@ -40,6 +45,47 @@ type IssueResponse = {
   created_at: string
   pull_request?: unknown
 }
+
+type IssueDetailResponse = IssueResponse & {
+  html_url: string
+  body: string | null
+  updated_at: string
+  closed_at: string | null
+  state_reason: string | null
+  locked: boolean
+  labels: (string | { name: string })[]
+  assignees: { login: string }[]
+  milestone: { title: string; due_on: string | null } | null
+  comments: number
+}
+
+type IssueCommentResponse = {
+  id: number
+  user: UserResponse
+  author_association?: string
+  body: string | null
+  created_at: string
+  updated_at: string
+}
+
+type IssueTimelineResponse = {
+  event?: string
+  actor?: UserResponse
+  created_at?: string
+  commit_id?: string | null
+  commit_url?: string | null
+  source?: {
+    issue?: {
+      number?: number
+      title?: string
+      html_url?: string
+      state?: string
+      draft?: boolean
+      repository?: { full_name?: string } | null
+      pull_request?: { merged_at?: string | null } | null
+    } | null
+  } | null
+} | null
 
 type PullResponse = IssueResponse & {
   merged_at: string | null
@@ -187,6 +233,136 @@ export function createGitHubClient(transport: GitHubTransport) {
     }
   }
 
+  const hasIssues = async (repository: string, state: ListState): Promise<boolean> => {
+    if (!transport.graphql) throw new Error("Issue availability could not be verified.")
+    const [owner, name, ...extra] = repository.split("/")
+    if (!owner || !name || extra.length) throw new Error("Invalid repository for issue availability.")
+    const response = await transport.graphql<{
+      data?: { repository?: { issues?: { totalCount?: number } } | null }
+      errors?: { message?: string }[]
+    }>(
+      "query($owner: String!, $name: String!, $state: IssueState!) { repository(owner: $owner, name: $name) { issues(states: [$state]) { totalCount } } }",
+      { owner, name, state: state.toUpperCase() },
+    )
+    if (response.errors?.length) throw new Error(response.errors.map((error) => error.message).filter(Boolean).join(" · ") || "Issue availability could not be verified.")
+    const count = response.data?.repository?.issues?.totalCount
+    if (typeof count !== "number" || !Number.isSafeInteger(count) || count < 0) throw new Error("Issue availability could not be verified.")
+    return count > 0
+  }
+
+  const issue = async (repository: string, number: number): Promise<IssueDetail> => {
+    const item = await transport.json<IssueDetailResponse>(`repos/${repository}/issues/${number}`)
+    if ("pull_request" in item) throw new Error(`Issue #${number} is a pull request.`)
+    return {
+      ...issueSummary(item),
+      url: item.html_url,
+      body: item.body ?? "",
+      updatedAt: item.updated_at,
+      ...(item.closed_at != null ? { closedAt: item.closed_at } : {}),
+      ...(item.state_reason != null ? { stateReason: item.state_reason } : {}),
+      locked: item.locked,
+      labels: item.labels.map((label) => typeof label === "string" ? label : label.name),
+      assignees: item.assignees.map((assignee) => assignee.login),
+      ...(item.milestone ? {
+        milestone: {
+          title: item.milestone.title,
+          ...(item.milestone.due_on != null ? { dueAt: item.milestone.due_on } : {}),
+        },
+      } : {}),
+      commentCount: item.comments,
+    }
+  }
+
+  const issueComments = async (repository: string, number: number, page = 1): Promise<Page<IssueComment>> => {
+    const items = await transport.json<IssueCommentResponse[]>(
+      `repos/${repository}/issues/${number}/comments?per_page=100&page=${page}`,
+    )
+    return {
+      items: items.map((item) => ({
+        id: item.id,
+        author: item.user?.login ?? "ghost",
+        authorAssociation: item.author_association ?? "NONE",
+        body: item.body ?? "",
+        createdAt: item.created_at,
+        updatedAt: item.updated_at,
+      })),
+      hasMore: items.length === 100,
+    }
+  }
+
+  const issueReferences = async (repository: string, number: number): Promise<IssueReference[]> => {
+    const references = new Map<string, IssueReference>()
+    for (let page = 1; ; page++) {
+      const items = await transport.json<IssueTimelineResponse[]>(
+        `repos/${repository}/issues/${number}/timeline?per_page=100&page=${page}`,
+      )
+      for (const item of items) {
+        if (!item || typeof item.created_at !== "string" || !Number.isFinite(Date.parse(item.created_at))) continue
+        const actor = item.actor?.login ?? "ghost"
+        if (item.event === "referenced") {
+          if (typeof item.commit_id !== "string" || !/^[a-f\d]{40}$/i.test(item.commit_id)
+            || typeof item.commit_url !== "string") continue
+          let url: URL
+          try { url = new URL(item.commit_url) } catch { continue }
+          const match = url.pathname.match(/^\/repos\/([a-z\d_.-]+)\/([a-z\d_.-]+)\/commits\/([a-f\d]{40})$/i)
+          if (url.protocol !== "https:" || url.hostname !== "api.github.com" || url.port
+            || url.username || url.password || url.search || url.hash || !match
+            || match[1] === "." || match[1] === ".." || match[2] === "." || match[2] === ".."
+            || match[3]!.toLowerCase() !== item.commit_id.toLowerCase()) continue
+          const sourceRepository = `${match[1]}/${match[2]}`
+          const sha = item.commit_id.toLowerCase()
+          const id = `referenced:${sourceRepository}:${sha}:${item.created_at}:${actor}`
+          references.set(id, {
+            kind: "commit", id, repository: sourceRepository, sha,
+            title: `Commit ${sha.slice(0, 7)}`, url: `https://github.com/${sourceRepository}/commit/${sha}`,
+            actor, createdAt: item.created_at,
+          })
+          continue
+        }
+        const source = item.source?.issue
+        const sourceRepository = source?.repository?.full_name
+        if (item.event !== "cross-referenced"
+          || typeof source?.number !== "number" || !Number.isSafeInteger(source.number) || source.number <= 0
+          || typeof source.title !== "string" || !source.title
+          || typeof source.html_url !== "string" || !source.html_url
+          || (source.state !== "open" && source.state !== "closed")
+          || typeof sourceRepository !== "string" || !sourceRepository) continue
+        const id = `cross-referenced:${sourceRepository}:${source.number}:${item.created_at}:${actor}`
+        const shared: Omit<IssueIssueReference, "kind"> = {
+          id, repository: sourceRepository, number: source.number, title: source.title, url: source.html_url,
+          state: source.state, actor, createdAt: item.created_at,
+        }
+        if (source.pull_request != null) {
+          if (typeof source.pull_request !== "object" || Array.isArray(source.pull_request)) continue
+          references.set(id, {
+            ...shared, kind: "pull", merged: source.pull_request.merged_at != null, draft: source.draft === true,
+          })
+        } else references.set(id, { ...shared, kind: "issue" })
+      }
+      if (items.length < 100) break
+    }
+    const commits = [...references.values()].filter((reference): reference is IssueCommitReference => reference.kind === "commit")
+    const titles = new Map<string, Promise<string>>()
+    const loadTitle = (reference: IssueCommitReference) => {
+      const path = `repos/${reference.repository}/commits/${reference.sha}`
+      let pending = titles.get(path)
+      if (!pending) {
+        pending = transport.json<CommitResponse>(path).then((commit) =>
+          commit.sha.toLowerCase() === reference.sha ? firstLine(commit.commit?.message, reference.title) : reference.title,
+        ).catch(() => reference.title)
+        titles.set(path, pending)
+      }
+      return pending
+    }
+    // Keep event deduplication separate from shared commit metadata, and bound concurrent API requests.
+    for (let offset = 0; offset < commits.length; offset += 4) {
+      await Promise.all(commits.slice(offset, offset + 4).map(async (reference) => {
+        reference.title = await loadTitle(reference)
+      }))
+    }
+    return [...references.values()].sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt))
+  }
+
   const pulls = async (repository: string, state: ListState, page = 1): Promise<Page<PullRequestSummary>> => {
     const items = await transport.json<PullResponse[]>(
       `repos/${repository}/pulls?state=${state}&per_page=${PAGE_SIZE}&page=${page}`,
@@ -212,7 +388,7 @@ export function createGitHubClient(transport: GitHubTransport) {
     return { items, hasMore: page * PAGE_SIZE < (response.total_count ?? items.length) }
   }
 
-  return { metadata, documents, document, branches, commits, commit, issues, pulls, runs }
+  return { metadata, documents, document, branches, commits, commit, issues, hasIssues, issue, issueComments, issueReferences, pulls, runs }
 }
 
 const client = createGitHubClient(githubTransport)
@@ -224,5 +400,9 @@ export const loadGitHubBranches = client.branches
 export const loadGitHubCommits = client.commits
 export const loadGitHubCommit = client.commit
 export const loadGitHubIssues = client.issues
+export const loadGitHubHasIssues = client.hasIssues
+export const loadGitHubIssue = client.issue
+export const loadGitHubIssueComments = client.issueComments
+export const loadGitHubIssueReferences = client.issueReferences
 export const loadGitHubPulls = client.pulls
 export const loadGitHubRuns = client.runs

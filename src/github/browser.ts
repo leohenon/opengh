@@ -1,7 +1,7 @@
 import { spawnGitHub } from "./process"
 
-export async function openGitHub(repository: string, sha?: string): Promise<void> {
-  const child = spawnGitHub(["browse", ...(sha ? [sha] : []), "--repo", repository])
+export async function openGitHub(repository: string, target?: string | number): Promise<void> {
+  const child = spawnGitHub(["browse", ...(target !== undefined ? [String(target)] : []), "--repo", repository])
   let timedOut = false
   const timeout = setTimeout(() => {
     timedOut = true

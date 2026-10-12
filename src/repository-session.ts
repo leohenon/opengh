@@ -5,7 +5,11 @@ import {
   loadGitHubCommits,
   loadGitHubDocument,
   loadGitHubDocuments,
+  loadGitHubIssue,
+  loadGitHubIssueComments,
+  loadGitHubIssueReferences,
   loadGitHubIssues,
+  loadGitHubHasIssues,
   loadGitHubMetadata,
   loadGitHubPulls,
   loadGitHubRuns,
@@ -14,6 +18,9 @@ import type {
   CommitDetail,
   CommitSummary,
   IssueSummary,
+  IssueDetail,
+  IssueComment,
+  IssueReference,
   ListState,
   Paginated,
   PullRequestSummary,
@@ -23,6 +30,7 @@ import type {
 } from "./models"
 import type {
   CommitDetailState,
+  IssueDetailState,
   OperationState,
   RepositoryData,
   RepositoryDocumentState,
@@ -41,7 +49,11 @@ export type RepositoryLoaders = {
   branches(repository: string, fallbackBranch: string, page?: number): Promise<Page<string>>
   commits(repository: string, branch: string, page?: number): Promise<Page<CommitSummary>>
   commit(repository: string, sha: string, page?: number): Promise<CommitDetail>
+  issue(repository: string, number: number): Promise<IssueDetail>
+  issueComments(repository: string, number: number, page?: number): Promise<Page<IssueComment>>
+  issueReferences(repository: string, number: number): Promise<IssueReference[]>
   issues(repository: string, state: ListState, page?: number): Promise<Page<IssueSummary>>
+  hasIssues?(repository: string, state: ListState): Promise<boolean>
   pulls(repository: string, state: ListState, page?: number): Promise<Page<PullRequestSummary>>
   runs(repository: string, page?: number): Promise<Page<WorkflowRunSummary>>
 }
@@ -52,6 +64,11 @@ export type RepositorySession = {
   loadCommit(sha: string): Promise<void>
   loadMoreCommitFiles(): Promise<void>
   clearCommit(): void
+  issueDetail: Accessor<IssueDetailState | undefined>
+  loadIssue(number: number): Promise<void>
+  loadMoreIssueComments(): Promise<void>
+  retryIssueReferences(): Promise<void>
+  clearIssue(): void
   load(repository: string): Promise<void>
   refresh(): Promise<void>
   retryResource(resource: RepositoryResource): Promise<void>
@@ -71,7 +88,11 @@ const defaultLoaders: RepositoryLoaders = {
   branches: loadGitHubBranches,
   commits: loadGitHubCommits,
   commit: loadGitHubCommit,
+  issue: loadGitHubIssue,
+  issueComments: loadGitHubIssueComments,
+  issueReferences: loadGitHubIssueReferences,
   issues: loadGitHubIssues,
+  hasIssues: loadGitHubHasIssues,
   pulls: loadGitHubPulls,
   runs: loadGitHubRuns,
 }
@@ -158,6 +179,8 @@ function updateReady(
 export function createRepositorySession(loaders: RepositoryLoaders = defaultLoaders): RepositorySession {
   const [state, setState] = createSignal<RepositoryState>({ status: "loading", repository: "" })
   const [commitDetail, setCommitDetail] = createSignal<CommitDetailState>()
+  const [issueDetail, setIssueDetail] = createSignal<IssueDetailState>()
+  let issueGeneration = 0
   let commitGeneration = 0
   let repositoryGeneration = 0
   let branchGeneration = 0
@@ -244,6 +267,12 @@ export function createRepositorySession(loaders: RepositoryLoaders = defaultLoad
   const fetchIssues = async (repository: string, listState: ListState, request: number, pageCount = 1) => {
     try {
       const result = await loadPageSet(pageCount, (page) => loaders.issues(repository, listState, page), (item) => item.number)
+      // REST issue pages include PRs. An empty filtered page with more pages cannot prove there are no issues.
+      if (result.items.length === 0 && result.hasMore && loaders.hasIssues) {
+        const current = state()
+        if (request !== repositoryGeneration || current.status !== "ready" || current.repository !== repository) return
+        result.hasMore = await loaders.hasIssues(current.data.repo.nameWithOwner, listState)
+      }
       updateReady(setState, request, generation, repository, (current) => ({
         ...current,
         data: {
@@ -386,8 +415,113 @@ export function createRepositorySession(loaders: RepositoryLoaders = defaultLoad
     }
   }
 
+  const clearIssue = () => {
+    ++issueGeneration
+    setIssueDetail(undefined)
+  }
+
+  const fetchIssueComments = async (
+    repository: string,
+    number: number,
+    request: number,
+    pageCount: number,
+    previous?: Paginated<IssueComment>,
+  ) => {
+    try {
+      const value = await loadPageSet(pageCount, (page) => loaders.issueComments(repository, number, page), (comment) => comment.id)
+      if (request !== issueGeneration) return
+      setIssueDetail((current) => current?.number === number
+        ? { ...current, comments: { status: "ready", value } } : current)
+    } catch (error) {
+      if (request !== issueGeneration) return
+      setIssueDetail((current) => current?.number === number
+        ? { ...current, comments: failedResource(error, previous) } : current)
+    }
+  }
+
+  const fetchIssueReferences = async (repository: string, number: number, request: number, previous?: IssueReference[]) => {
+    try {
+      const value = await loaders.issueReferences(repository, number)
+      if (request !== issueGeneration) return
+      setIssueDetail((current) => current?.number === number ? { ...current, references: { status: "ready", value } } : current)
+    } catch (error) {
+      if (request !== issueGeneration) return
+      setIssueDetail((current) => current?.number === number ? { ...current, references: failedResource(error, previous) } : current)
+    }
+  }
+
+  const retryIssueReferences = async () => {
+    const current = state()
+    const detail = issueDetail()
+    if (current.status !== "ready" || !detail?.resource.value || detail.resource.status === "loading"
+      || detail.references.status === "loading") return
+    setIssueDetail({ ...detail, references: loadingResource(detail.references.value) })
+    return fetchIssueReferences(current.repository, detail.number, issueGeneration, detail.references.value)
+  }
+
+  const loadIssue = async (number: number) => {
+    const current = state()
+    const previous = issueDetail()
+    if (current.status !== "ready" || (previous?.number === number
+      && (previous.resource.status === "loading" || previous.comments.status === "loading" || previous.references.status === "loading"))) return
+    const repository = current.repository
+    const request = ++issueGeneration
+    const value = previous?.number === number ? previous.resource.value : undefined
+    const comments = previous?.number === number ? previous.comments.value : undefined
+    const references = previous?.number === number ? previous.references.value : undefined
+    setIssueDetail({ number, resource: loadingResource(value), comments: loadingResource(comments), references: loadingResource(references) })
+    try {
+      const issue = await loaders.issue(repository, number)
+      if (request !== issueGeneration) return
+      setIssueDetail({ number, resource: { status: "ready", value: issue }, comments: loadingResource(comments), references: loadingResource(references) })
+      if (issue.commentCount === 0) {
+        setIssueDetail({ number, resource: { status: "ready", value: issue },
+          comments: { status: "ready", value: { items: [], page: 1, hasMore: false } }, references: loadingResource(references) })
+      }
+      await Promise.all([
+        issue.commentCount > 0 ? fetchIssueComments(repository, number, request, comments?.page ?? 1, comments) : Promise.resolve(),
+        fetchIssueReferences(repository, number, request, references),
+      ])
+    } catch (error) {
+      if (request === issueGeneration) setIssueDetail({ number, resource: failedResource(error, value),
+        comments: previous?.number === number ? previous.comments : { status: "ready", value: { items: [], page: 1, hasMore: false } },
+        references: previous?.number === number ? previous.references : { status: "ready", value: [] } })
+    }
+  }
+
+  const loadMoreIssueComments = async () => {
+    const current = state()
+    const detail = issueDetail()
+    if (current.status !== "ready" || !detail?.resource.value || detail.resource.status === "loading"
+      || detail.comments.status === "loading") return
+    const { number } = detail
+    const value = detail.comments.value
+    const request = issueGeneration
+    const reload = value === undefined || (detail.comments.status === "error" && detail.comments.phase === "load")
+    if (!reload && !value?.hasMore) return
+    setIssueDetail({ ...detail, comments: loadingResource(value, reload ? "load" : "pagination") })
+    if (reload) return fetchIssueComments(current.repository, number, request, value?.page ?? 1, value)
+    try {
+      const next = await loaders.issueComments(current.repository, number, value!.page + 1)
+      if (request !== issueGeneration) return
+      const ids = new Set(value!.items.map((comment) => comment.id))
+      const items = next.items.filter((comment) => {
+        if (ids.has(comment.id)) return false
+        ids.add(comment.id)
+        return true
+      })
+      setIssueDetail((latest) => latest?.number === number ? {
+        ...latest, comments: { status: "ready", value: page({ items: [...value!.items, ...items], hasMore: next.hasMore }, value!.page + 1) },
+      } : latest)
+    } catch (error) {
+      if (request === issueGeneration) setIssueDetail((latest) => latest?.number === number
+        ? { ...latest, comments: failedResource(error, value, "pagination") } : latest)
+    }
+  }
+
   const load = async (repository: string) => {
     clearCommit()
+    clearIssue()
     const request = ++repositoryGeneration
     ++branchGeneration
     setState({ status: "loading", repository })
@@ -789,6 +923,11 @@ export function createRepositorySession(loaders: RepositoryLoaders = defaultLoad
     loadCommit,
     loadMoreCommitFiles,
     clearCommit,
+    issueDetail,
+    loadIssue,
+    loadMoreIssueComments,
+    retryIssueReferences,
+    clearIssue,
     load,
     refresh,
     retryResource,

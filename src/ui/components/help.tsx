@@ -33,10 +33,12 @@ function Shortcut(props: { keys: string; keyWidth: number; children: JSX.Element
 }
 
 export function Help(props: {
-  view: Page | "commit";
+  view: Page | "commit" | "issue";
   tabCount: number;
   hasDocumentTabs?: boolean;
   hasMoreFiles?: boolean;
+  hasMoreComments?: boolean;
+  hasReferences?: boolean;
 }) {
   const { colors } = useTheme();
   const dimensions = useTerminalDimensions();
@@ -65,6 +67,20 @@ export function Help(props: {
           ...(props.hasMoreFiles ? [{ keys: "Enter", description: "load more files" }] : []),
         ];
       case "issues":
+        return [
+          { keys: "Enter", description: "open issue" },
+          { keys: "Tab", description: "toggle open/closed" },
+          { keys: "o", description: "open on GitHub" },
+          { keys: "y", description: "copy issue URL" },
+        ];
+      case "issue":
+        return [
+          { keys: "Esc", description: "back to issues" },
+          { keys: "o", description: "open on GitHub" },
+          { keys: "y", description: "copy issue URL" },
+          ...(props.hasReferences ? [{ keys: "p", description: "open references" }] : []),
+          ...(props.hasMoreComments ? [{ keys: "Enter", description: "load more comments" }] : []),
+        ];
       case "pulls":
         return [{ keys: "Tab", description: "toggle open/closed" }];
       case "actions":
@@ -74,7 +90,7 @@ export function Help(props: {
   const shortcuts = createMemo(() => {
     const tabs = `1–${props.tabCount}, h/l, ←/→`;
     const entries = [...viewShortcuts(), { keys: tabs, description: "switch tabs" }, ...commonShortcuts];
-    const order = ["Enter", "Tab", "Tab / ⇧Tab", "Esc", tabs, "j/k, ↑/↓", "u/d", "g/G", "o", "y", "r", ",", "?", "q / C-c"];
+    const order = ["Enter", "Tab", "Tab / ⇧Tab", "Esc", tabs, "j/k, ↑/↓", "u/d", "g/G", "o", "y", "p", "r", ",", "?", "q / C-c"];
     return order.flatMap((keys) => entries.filter((shortcut) => shortcut.keys === keys));
   });
   const height = () => shortcuts().length + 4;

@@ -31,6 +31,58 @@ export type IssueSummary = {
   createdAt: string
 }
 
+export type IssueDetail = IssueSummary & {
+  url: string
+  body: string
+  updatedAt: string
+  closedAt?: string
+  stateReason?: string
+  locked: boolean
+  labels: string[]
+  assignees: string[]
+  milestone?: { title: string; dueAt?: string }
+  commentCount: number
+}
+
+export type IssueComment = {
+  id: number
+  author: string
+  authorAssociation: string
+  body: string
+  createdAt: string
+  updatedAt: string
+}
+
+type IssueReferenceBase = {
+  id: string
+  repository: string
+  title: string
+  url: string
+  actor: string
+  createdAt: string
+}
+
+export type IssuePullReference = IssueReferenceBase & {
+  kind: "pull"
+  number: number
+  state: ListState
+  merged: boolean
+  draft: boolean
+}
+
+export type IssueIssueReference = IssueReferenceBase & {
+  kind: "issue"
+  number: number
+  state: ListState
+}
+
+export type IssueCommitReference = IssueReferenceBase & {
+  kind: "commit"
+  sha: string
+}
+
+export type IssueReference = IssuePullReference | IssueIssueReference | IssueCommitReference
+
 export type PullRequestSummary = IssueSummary & {
   merged: boolean
 }

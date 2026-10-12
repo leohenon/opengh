@@ -28,7 +28,7 @@ export type RootServices = {
   loadConfig(): Promise<Config>
   saveConfig(config: Config): Promise<void>
   createRepositorySession(): RepositorySession
-  openGitHub(repository: string, sha?: string): Promise<void>
+  openGitHub(repository: string, target?: string | number): Promise<void>
   copyToHostClipboard(value: string): Promise<boolean>
 }
 
@@ -156,7 +156,12 @@ export function Root(props: {
               onLoadCommit={session.loadCommit}
               onLoadMoreCommitFiles={session.loadMoreCommitFiles}
               onCloseCommit={session.clearCommit}
-              onOpenInBrowser={(sha) => services.openGitHub(current().repository, sha)}
+              issueDetail={session.issueDetail()}
+              onLoadIssue={session.loadIssue}
+              onLoadMoreIssueComments={session.loadMoreIssueComments}
+              onRetryIssueReferences={session.retryIssueReferences}
+              onCloseIssue={session.clearIssue}
+              onOpenInBrowser={(target, repository) => services.openGitHub(repository ?? current().repository, target)}
               onCopyToClipboard={services.copyToHostClipboard}
               onLoadMoreRuns={session.loadMoreRuns}
               onLoadMoreIssues={session.loadMoreIssues}

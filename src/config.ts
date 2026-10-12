@@ -4,11 +4,13 @@ import { configDirectory } from "./paths"
 import { isThemeName, type ThemeName } from "./theme"
 
 export type AboutSidebar = "auto" | "show" | "hide"
+export type DetailLayout = "centered" | "wide"
 
 export type Config = {
   showScrollbars: boolean
   theme: ThemeName
   aboutSidebar: AboutSidebar
+  detailLayout: DetailLayout
   showStatusBarHints: boolean
 }
 
@@ -16,6 +18,7 @@ export const defaultConfig: Config = {
   showScrollbars: false,
   theme: "github",
   aboutSidebar: "auto",
+  detailLayout: "centered",
   showStatusBarHints: false,
 }
 
@@ -52,6 +55,9 @@ function normalizeConfig(value: unknown): Config {
     aboutSidebar: input.aboutSidebar === "auto" || input.aboutSidebar === "show" || input.aboutSidebar === "hide"
       ? input.aboutSidebar
       : defaultConfig.aboutSidebar,
+    detailLayout: input.detailLayout === "centered" || input.detailLayout === "wide"
+      ? input.detailLayout
+      : defaultConfig.detailLayout,
     showStatusBarHints: typeof input.showStatusBarHints === "boolean"
       ? input.showStatusBarHints
       : defaultConfig.showStatusBarHints,

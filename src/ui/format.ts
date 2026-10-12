@@ -27,3 +27,8 @@ export function count(value: number) {
   if (value >= 1000) return `${(value / 1000).toFixed(1).replace(".0", "")}k`
   return String(value)
 }
+
+export function exactDate(value: string) {
+  const date = new Date(value)
+  return Number.isNaN(date.getTime()) ? "Unknown date" : date.toISOString().replace("T", " ").replace(".000Z", " UTC")
+}

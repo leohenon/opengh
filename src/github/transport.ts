@@ -14,6 +14,7 @@ export class GitHubApiError extends Error {
 
 export type GitHubTransport = {
   json<T>(path: string): Promise<T>
+  graphql?<T>(query: string, variables: Record<string, string>): Promise<T>
   text(path: string, accept?: string): Promise<string>
   page?(url: string): Promise<string>
 }
@@ -25,9 +26,10 @@ function httpStatus(message: string) {
   return match ? Number(match[1]) : undefined
 }
 
-async function request(path: string, accept?: string) {
+async function request(path: string, accept?: string, fields?: Record<string, string>) {
   const args = ["api", path]
   if (accept) args.push("-H", `Accept: ${accept}`)
+  if (fields) for (const [key, value] of Object.entries(fields)) args.push("-f", `${key}=${value}`)
   const process = spawnGitHub(args)
   let timedOut = false
   const timeout = setTimeout(() => {
@@ -55,6 +57,9 @@ async function request(path: string, accept?: string) {
 export const githubTransport: GitHubTransport = {
   async json<T>(path: string) {
     return JSON.parse(await request(path)) as T
+  },
+  async graphql<T>(query: string, variables: Record<string, string>) {
+    return JSON.parse(await request("graphql", undefined, { query, ...variables })) as T
   },
   text(path: string, accept?: string) {
     return request(path, accept)

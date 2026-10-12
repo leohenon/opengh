@@ -1,8 +1,8 @@
 import { describe, expect, test } from "bun:test"
-import type { CommitDetail, CommitSummary, RepositoryDocument } from "../src/models"
+import type { CommitDetail, CommitSummary, IssueDetail, IssueComment, RepositoryDocument } from "../src/models"
 import type { RepositoryLoaders } from "../src/repository-session"
 import { createRepositorySession } from "../src/repository-session"
-import { commitDetailFixture, githubDataFixture } from "./fixtures/github-data"
+import { commitDetailFixture, githubDataFixture, issueDetailFixture, issueCommentsFixture, issuePullReferenceFixture } from "./fixtures/github-data"
 
 function deferred<T>() {
   let resolve!: (value: T) => void
@@ -24,6 +24,9 @@ function loaders(overrides: Partial<RepositoryLoaders> = {}): RepositoryLoaders 
     branches: async () => ({ items: structuredClone(githubDataFixture.branches.value!.items), hasMore: false }),
     commits: async () => ({ items: structuredClone(githubDataFixture.commits.value!.items), hasMore: false }),
     commit: async () => structuredClone(commitDetailFixture),
+    issue: async () => structuredClone(issueDetailFixture),
+    issueComments: async () => ({ items: structuredClone(issueCommentsFixture), hasMore: false }),
+    issueReferences: async () => [],
     issues: async (_repository, state) => ({ items: structuredClone(githubDataFixture.issues[state].value!.items), hasMore: false }),
     pulls: async (_repository, state) => ({ items: structuredClone(githubDataFixture.pulls[state].value!.items), hasMore: false }),
     runs: async () => ({ items: structuredClone(githubDataFixture.runs.value!.items), hasMore: false }),
@@ -38,6 +41,116 @@ function ready(session: ReturnType<typeof createRepositorySession>) {
 }
 
 describe("repository session", () => {
+  test("confirms empty PR-only issue pages without scanning every PR page", async () => {
+    const checked: string[] = []
+    const session = createRepositorySession(loaders({
+      issues: async (_repository, state) => ({ items: [], hasMore: state === "open" }),
+      hasIssues: async (_repository, state) => { checked.push(state); return false },
+    }))
+    await session.load("owner/repo")
+    expect(checked).toEqual(["open"])
+    expect(ready(session).data.issues.open).toMatchObject({ status: "ready", value: { items: [], hasMore: false, page: 1 } })
+  })
+
+  test("issue details load on demand and reject results after back or repository replacement", async () => {
+    const pending = new Map<number, ReturnType<typeof deferred<IssueDetail>>>()
+    let commentCalls = 0
+    let referenceCalls = 0
+    const session = createRepositorySession(loaders({
+      issue: async (_repository, number) => {
+        const request = deferred<IssueDetail>()
+        pending.set(number, request)
+        return request.promise
+      },
+      issueComments: async () => { commentCalls++; return { items: [], hasMore: false } },
+      issueReferences: async () => { referenceCalls++; return [issuePullReferenceFixture] },
+    }))
+    await session.load("anomalyco/opentui")
+    expect(pending.size).toBe(0)
+    const first = session.loadIssue(1)
+    const second = session.loadIssue(2)
+    pending.get(2)!.resolve({ ...issueDetailFixture, number: 2, commentCount: 0 })
+    await second
+    pending.get(1)!.reject(new Error("Old issue unavailable"))
+    await first
+    expect(session.issueDetail()?.resource.value?.number).toBe(2)
+    expect(session.issueDetail()?.comments.value?.items).toEqual([])
+    expect(commentCalls).toBe(0)
+    expect(referenceCalls).toBe(1)
+    expect(session.issueDetail()?.references.value).toEqual([issuePullReferenceFixture])
+    const closed = session.loadIssue(3)
+    session.clearIssue()
+    pending.get(3)!.resolve({ ...issueDetailFixture, number: 3 })
+    await closed
+    expect(session.issueDetail()).toBeUndefined()
+    const replaced = session.loadIssue(4)
+    await session.load("owner/another-repository")
+    pending.get(4)!.resolve({ ...issueDetailFixture, number: 4 })
+    await replaced
+    expect(session.issueDetail()).toBeUndefined()
+    expect(commentCalls).toBe(0)
+  })
+
+  test("issue comments fail independently, retry with deduplication, and preserve loaded pages", async () => {
+    const initial = deferred<{ items: IssueComment[]; hasMore: boolean }>()
+    const pages: number[] = []
+    let metadataCalls = 0
+    let failPage = true
+    let failReferences = true
+    let holdComments = false
+    const lateComments = deferred<{ items: IssueComment[]; hasMore: boolean }>()
+    const session = createRepositorySession(loaders({
+      issue: async () => { metadataCalls++; return issueDetailFixture },
+      issueReferences: async () => {
+        if (failReferences) throw new Error("References unavailable")
+        return [issuePullReferenceFixture]
+      },
+      issueComments: async (_repository, _number, page = 1) => {
+        pages.push(page)
+        if (holdComments) return lateComments.promise
+        if (pages.length === 1) return initial.promise
+        if (page === 2 && failPage) throw new Error("Next comments unavailable")
+        return { items: page === 1 ? [issueCommentsFixture[0]!] : issueCommentsFixture, hasMore: page === 1 }
+      },
+    }))
+    await session.load("anomalyco/opentui")
+    const loading = session.loadIssue(issueDetailFixture.number)
+    await Promise.resolve()
+    expect(session.issueDetail()?.resource.status).toBe("ready")
+    expect(session.issueDetail()?.comments.status).toBe("loading")
+    await session.loadMoreIssueComments()
+    expect(pages).toEqual([1])
+    initial.reject(new Error("Comments unavailable"))
+    await loading
+    expect(session.issueDetail()?.resource.value).toBe(issueDetailFixture)
+    expect(session.issueDetail()?.comments).toMatchObject({ status: "error", phase: "load" })
+    expect(session.issueDetail()?.references).toMatchObject({ status: "error", message: "References unavailable" })
+    await session.loadMoreIssueComments()
+    expect(metadataCalls).toBe(1)
+    await session.loadMoreIssueComments()
+    expect(session.issueDetail()?.comments).toMatchObject({ status: "error", phase: "pagination" })
+    expect(session.issueDetail()?.comments.value?.items).toEqual([issueCommentsFixture[0]!])
+    failPage = false
+    await session.loadMoreIssueComments()
+    expect(pages).toEqual([1, 1, 2, 2])
+    expect(session.issueDetail()?.comments.value?.items).toEqual(issueCommentsFixture)
+    failReferences = false
+    await session.retryIssueReferences()
+    expect(session.issueDetail()?.references.value).toEqual([issuePullReferenceFixture])
+    expect(metadataCalls).toBe(1)
+    await session.loadIssue(issueDetailFixture.number)
+    expect(pages).toEqual([1, 1, 2, 2, 1, 2])
+    expect(session.issueDetail()?.comments.value?.items).toEqual(issueCommentsFixture)
+    expect(metadataCalls).toBe(2)
+    holdComments = true
+    const obsolete = session.loadIssue(issueDetailFixture.number)
+    await Promise.resolve()
+    session.clearIssue()
+    lateComments.resolve({ items: issueCommentsFixture, hasMore: false })
+    await obsolete
+    expect(session.issueDetail()).toBeUndefined()
+  })
+
   test("loads commit details on demand and ignores obsolete responses", async () => {
     const pending = new Map<string, ReturnType<typeof deferred<CommitDetail>>>()
     const session = createRepositorySession(loaders({

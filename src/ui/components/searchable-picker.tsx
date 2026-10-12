@@ -1,6 +1,7 @@
 import { TextAttributes, type KeyEvent, type ScrollBoxRenderable } from "@opentui/core"
 import { createEffect, createMemo, createSignal, Index, Show, type JSX } from "solid-js"
 import { useTheme } from "../theme"
+import { createScrollbarVisibility } from "../scrollbar-visibility"
 import { Popup } from "./popup"
 
 type Match = number | undefined
@@ -32,6 +33,7 @@ export function SearchablePicker<T>(props: {
   const [selectedKey, setSelectedKey] = createSignal<string | number>()
   const [listReady, setListReady] = createSignal(false)
   let list: ScrollBoxRenderable | undefined
+  const bindScrollbar = createScrollbarVisibility(() => props.showScrollbar === true)
 
   const items = createMemo(() => {
     const needle = query().trim()
@@ -157,13 +159,13 @@ export function SearchablePicker<T>(props: {
             <scrollbox
               ref={(value) => {
                 list = value
+                bindScrollbar(value)
                 setListReady(true)
               }}
               flexGrow={1}
               minHeight={0}
               paddingLeft={1}
               paddingRight={1}
-              verticalScrollbarOptions={{ visible: props.showScrollbar === true }}
               scrollY
             >
               <Show

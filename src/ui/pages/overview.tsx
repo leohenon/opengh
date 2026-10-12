@@ -1,14 +1,15 @@
-import { SyntaxStyle, TextAttributes, type ScrollBoxRenderable } from "@opentui/core"
-import { useRenderer, useTerminalDimensions } from "@opentui/solid"
+import { TextAttributes, type ScrollBoxRenderable } from "@opentui/core"
+import { useTerminalDimensions } from "@opentui/solid"
 import { createMemo, For, onCleanup, Show } from "solid-js"
 import type { AboutSidebar } from "../../config"
 import type { Repo } from "../../models"
 import type { RepositoryDocumentState, ResourceState } from "../../repository-state"
-import type { AppColors, ResolvedTheme } from "../../theme"
 import { ResourceStateView } from "../components/resource-state"
 import { count } from "../format"
-import { normalizeGitHubMarkdown } from "../github-markdown"
+import { GitHubMarkdown } from "../components/github-markdown"
+import { createReactiveMarkdownStyle } from "../markdown-style"
 import { useTheme } from "../theme"
+import { createScrollbarVisibility } from "../scrollbar-visibility"
 
 function extractAboutContent(value: string) {
   const urls: string[] = []
@@ -28,60 +29,6 @@ function displayUrl(value: string) {
   return value.replace(/^https?:\/\//, "").replace(/\/$/, "")
 }
 
-function createMarkdownStyle(colors: AppColors, theme: ResolvedTheme) {
-  return SyntaxStyle.fromStyles({
-    default: { fg: theme.markdownText },
-    conceal: { fg: colors.muted },
-    "markup.heading": { fg: theme.markdownHeading, bold: true },
-    "markup.heading.1": { fg: theme.markdownHeading, bold: true },
-    "markup.heading.2": { fg: theme.markdownHeading, bold: true },
-    "markup.heading.3": { fg: theme.markdownHeading, bold: true },
-    "markup.bold": { fg: theme.markdownStrong, bold: true },
-    "markup.strong": { fg: theme.markdownStrong, bold: true },
-    "markup.italic": { fg: theme.markdownEmph, italic: true },
-    "markup.raw": { fg: theme.markdownCode, bg: colors.panel },
-    "markup.raw.block": { fg: theme.markdownCodeBlock, bg: colors.panel },
-    "markup.raw.inline": { fg: theme.markdownText, bg: colors.panel },
-    "markup.link": { fg: theme.markdownLink },
-    "markup.link.label": { fg: theme.markdownLinkText, underline: true },
-    "markup.link.url": { fg: colors.muted },
-    "markup.list": { fg: theme.markdownListItem },
-    "markup.quote": { fg: theme.markdownBlockQuote, italic: true },
-    comment: { fg: theme.syntaxComment, italic: true },
-    keyword: { fg: theme.syntaxKeyword },
-    string: { fg: theme.syntaxString },
-    number: { fg: theme.syntaxNumber },
-    function: { fg: theme.syntaxFunction },
-    variable: { fg: theme.syntaxVariable },
-    property: { fg: theme.syntaxFunction },
-    type: { fg: theme.syntaxType },
-    constant: { fg: theme.syntaxNumber },
-    operator: { fg: theme.syntaxOperator },
-    punctuation: { fg: theme.syntaxPunctuation },
-  })
-}
-
-function createReactiveMarkdownStyle(colors: AppColors, theme: ResolvedTheme) {
-  const renderer = useRenderer()
-  let current: SyntaxStyle | undefined
-  const release = (style: SyntaxStyle) => {
-    queueMicrotask(() => {
-      if (!renderer.isDestroyed) renderer.requestRender()
-      void renderer.idle().catch(() => {}).finally(() => style.destroy())
-    })
-  }
-  const style = createMemo(() => {
-    const previous = current
-    current = createMarkdownStyle(colors, theme)
-    if (previous) release(previous)
-    return current
-  })
-  onCleanup(() => {
-    if (current) release(current)
-  })
-  return style
-}
-
 export function OverviewScreen(props: {
   repo: Repo
   documents: ResourceState<RepositoryDocumentState[]>
@@ -92,13 +39,13 @@ export function OverviewScreen(props: {
 }) {
   const dimensions = useTerminalDimensions()
   const { colors, theme } = useTheme()
+  const bindScrollbar = createScrollbarVisibility(() => props.showScrollbar)
   const repo = () => props.repo
   const about = createMemo(() => extractAboutContent(repo().description))
   const documents = () => props.documents.value ?? []
   const document = () => documents().find((item) => item.id === props.currentDocument) ?? documents()[0]
   const currentLabel = () => document()?.label ?? "Documentation"
   const documentResource = createMemo<ResourceState<string>>(() => document()?.resource ?? { status: "loading", phase: "load" })
-  const formattedDocument = createMemo(() => normalizeGitHubMarkdown(documentResource().value ?? ""))
   const hasDocumentTabs = () => documents().length > 1
   const showAboutSidebar = () => props.aboutSidebar === "show"
     || props.aboutSidebar === "auto" && dimensions().width >= 100
@@ -129,6 +76,8 @@ export function OverviewScreen(props: {
           gap={2}
           paddingLeft={2}
           paddingRight={2}
+          minWidth={0}
+          overflow="hidden"
         >
           <Show
             when={hasDocumentTabs()}
@@ -195,31 +144,16 @@ export function OverviewScreen(props: {
                   onCleanup(() => props.scrollRef(undefined))
                   return (
                     <scrollbox
-                      ref={props.scrollRef}
+                      ref={(value) => { bindScrollbar(value); props.scrollRef(value) }}
                       flexGrow={1}
                       minWidth={0}
                       minHeight={0}
                       backgroundColor={colors.canvas}
-                      verticalScrollbarOptions={{ visible: props.showScrollbar }}
                       paddingX={2}
                       paddingY={1}
                       scrollY
                     >
-                      <markdown
-                        content={formattedDocument()}
-                        syntaxStyle={markdownStyle()}
-                        fg={colors.text}
-                        bg={colors.canvas}
-                        conceal
-                        tableOptions={{
-                          style: "grid",
-                          widthMode: "full",
-                          wrapMode: "word",
-                          cellPaddingX: 1,
-                          borderColor: colors.border,
-                        }}
-                        width="100%"
-                      />
+                      <GitHubMarkdown content={documentResource().value ?? ""} syntaxStyle={markdownStyle()} />
                     </scrollbox>
                   )
                 }}

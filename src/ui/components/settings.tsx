@@ -6,9 +6,9 @@ import { useTheme } from "../theme"
 import { Popup } from "./popup"
 import { ThemePicker } from "./theme-picker"
 
-type Setting = "theme" | "scrollbars" | "about-sidebar" | "status-bar-hints"
+type Setting = "theme" | "scrollbars" | "about-sidebar" | "detail-layout" | "status-bar-hints"
 
-const settingOrder: Setting[] = ["theme", "scrollbars", "about-sidebar", "status-bar-hints"]
+const settingOrder: Setting[] = ["theme", "scrollbars", "about-sidebar", "detail-layout", "status-bar-hints"]
 const sidebarValues = ["auto", "show", "hide"] as const
 
 export function Settings(props: {
@@ -26,7 +26,7 @@ export function Settings(props: {
   const [saving, setSaving] = createSignal(false)
   const busy = () => saving() || props.saving === true
   const [error, setError] = createSignal("")
-  const popupHeight = 23
+  const popupHeight = 26
   const split = () => dimensions().width >= 110
   const scrollbarValue = () => props.config.showScrollbars ? "on" : "off"
 
@@ -63,6 +63,19 @@ export function Settings(props: {
     }
   }
 
+  const changeDetailLayout = async () => {
+    if (busy()) return
+    setSaving(true)
+    setError("")
+    try {
+      await props.onChange({ ...props.config, detailLayout: props.config.detailLayout === "centered" ? "wide" : "centered" })
+    } catch (error) {
+      setError(error instanceof Error ? error.message : "Could not save settings")
+    } finally {
+      setSaving(false)
+    }
+  }
+
   const openThemes = () => {
     setError("")
     setScreen("themes")
@@ -91,7 +104,9 @@ export function Settings(props: {
     if (selected() === "status-bar-hints" && (event.name === "left" || event.name === "right" || enter))
       return void toggleBoolean("showStatusBarHints")
     if (selected() === "about-sidebar" && (event.name === "left" || event.name === "right" || enter))
-      void changeSidebar(event.name === "left" ? -1 : 1)
+      return void changeSidebar(event.name === "left" ? -1 : 1)
+    if (selected() === "detail-layout" && (event.name === "left" || event.name === "right" || enter))
+      void changeDetailLayout()
   })
 
   const settingRow = (setting: Setting, title: string, description: string, value: string) => {
@@ -123,7 +138,11 @@ export function Settings(props: {
     }
     if (selected() === "scrollbars") return {
       title: "Scrollbars",
-      description: "Show vertical scrollbars beside repository documents and lists.",
+      description: "Show vertical scrollbars only when content exceeds the viewport.",
+    }
+    if (selected() === "detail-layout") return {
+      title: "Detail layout",
+      description: "Centered keeps a bounded reading column. Wide uses the available terminal width. Applies to issue and commit details.",
     }
     if (selected() === "status-bar-hints") return {
       title: "Status bar hints",
@@ -175,6 +194,7 @@ export function Settings(props: {
             {settingRow("theme", "Theme", "Interface color theme", props.config.theme)}
             {settingRow("scrollbars", "Scrollbars", "Lists and documents", scrollbarValue())}
             {settingRow("about-sidebar", "About sidebar", "Repository metadata", props.config.aboutSidebar)}
+            {settingRow("detail-layout", "Detail layout", "Detail page width", props.config.detailLayout)}
             {settingRow("status-bar-hints", "Status bar hints", "Keyboard shortcuts", props.config.showStatusBarHints ? "on" : "off")}
             <box flexGrow={1} minHeight={0} />
             <Show when={props.loadError || error()}>

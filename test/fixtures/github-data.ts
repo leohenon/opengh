@@ -1,4 +1,4 @@
-import type { CommitDetail } from "../../src/models"
+import type { CommitDetail, IssueDetail, IssueComment, IssuePullReference } from "../../src/models"
 import type { RepositoryData, RepositoryDocumentState, RepositoryOperations } from "../../src/repository-state"
 
 const issues = {
@@ -113,4 +113,37 @@ export const commitDetailFixture: CommitDetail = {
 export const repositoryOperationsFixture: RepositoryOperations = {
   refresh: { status: "idle" },
   branch: { status: "idle" },
+}
+
+export const issueDetailFixture: IssueDetail = {
+  ...githubDataFixture.issues.open.value!.items[0]!,
+  url: "https://github.com/anomalyco/opentui/issues/412",
+  body: "## Reproduction\n\nThe viewport loses focus after a resize.\n\n- [x] Confirmed on macOS\n- [ ] Check Linux\n\n```ts\nrenderer.resize(40, 24)\n```",
+  updatedAt: "2026-04-14T08:00:00Z",
+  locked: false,
+  labels: ["bug", "terminal"],
+  assignees: ["max", "jane"],
+  milestone: { title: "Next release", dueAt: "2026-05-01T00:00:00Z" },
+  commentCount: 2,
+}
+
+export const issueCommentsFixture: IssueComment[] = [
+  { id: 101, author: "max", authorAssociation: "MEMBER", body: "Thanks for the clear reproduction.",
+    createdAt: "2026-04-13T10:00:00Z", updatedAt: "2026-04-13T10:00:00Z" },
+  { id: 102, author: "maria-dev", authorAssociation: "NONE", body: "Still reproducible with **scrollbars enabled**.",
+    createdAt: "2026-04-14T08:00:00Z", updatedAt: "2026-04-14T08:30:00Z" },
+]
+
+export const issuePullReferenceFixture: IssuePullReference = {
+  kind: "pull",
+  id: "cross-referenced:other/repo:77:2026-04-14T09:00:00Z:max",
+  repository: "other/repo",
+  number: 77,
+  title: "Fix viewport focus after resize",
+  url: "https://github.com/other/repo/pull/77",
+  state: "closed",
+  merged: true,
+  draft: false,
+  actor: "max",
+  createdAt: "2026-04-14T09:00:00Z",
 }

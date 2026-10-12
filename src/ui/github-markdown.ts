@@ -1,4 +1,5 @@
 import type { Element, ElementContent, Root } from "hast"
+import type { Root as MarkdownRoot } from "mdast"
 import rehypeRaw from "rehype-raw"
 import rehypeRemark from "rehype-remark"
 import remarkGfm from "remark-gfm"
@@ -68,7 +69,7 @@ function isPresentationGroup(element: Element) {
     || child.type === "text" && child.value.trim() === "")
 }
 
-function terminalMedia() {
+function terminalMedia(options: { preserveImages?: boolean } = {}) {
   return (tree: Root) => {
     const presentationGroups = new WeakSet<Element>()
     visit(tree, "element", (element) => {
@@ -91,7 +92,7 @@ function terminalMedia() {
         const image = firstDescendant(element, "img")
         if (image) {
           const label = property(image, "alt") || property(image, "title") || "image"
-          if (/\blogo\b/i.test(label) || isBadgeImage(image, label)) {
+          if (!options.preserveImages && (/\blogo\b/i.test(label) || isBadgeImage(image, label))) {
             parent.children[index] = { type: "text", value: "" }
             return SKIP
           }
@@ -110,7 +111,7 @@ function terminalMedia() {
 
       if (tag === "img") {
         const label = property(element, "alt") || property(element, "title") || "image"
-        if (/\blogo\b/i.test(label) || isBadgeImage(element, label)) {
+        if (!options.preserveImages && (/\blogo\b/i.test(label) || isBadgeImage(element, label))) {
           parent.children[index] = { type: "text", value: "" }
           return
         }
@@ -160,6 +161,17 @@ const processor = unified()
     listItemIndent: "one",
   })
 
-export function normalizeGitHubMarkdown(value: string) {
-  return String(processor.processSync(value)).trim()
+// Issue attachments are evidence, even when their labels look like README branding.
+const discussionProcessor = processor().use(terminalMedia, { preserveImages: true })
+function plainCodeFences() {
+  return (tree: MarkdownRoot) => visit(tree, "code", (node) => { node.lang ||= "text" })
+}
+const panelProcessor = processor().use(plainCodeFences)
+const discussionPanelProcessor = discussionProcessor().use(plainCodeFences)
+
+export function normalizeGitHubMarkdown(value: string, options: { preserveImages?: boolean; codePanels?: boolean } = {}) {
+  const selected = options.codePanels
+    ? options.preserveImages ? discussionPanelProcessor : panelProcessor
+    : options.preserveImages ? discussionProcessor : processor
+  return String(selected.processSync(value)).trim()
 }

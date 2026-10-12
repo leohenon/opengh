@@ -17,6 +17,9 @@ export function WorkScreen(props: {
   interactive: boolean
   showScrollbar: boolean
   onEndReached?: () => void
+  onOpen?: (entry: IssueSummary | PullRequestSummary) => void
+  onOpenInBrowser?: (entry: IssueSummary | PullRequestSummary) => void
+  onCopy?: (entry: IssueSummary | PullRequestSummary) => void
 }) {
   const { colors } = useTheme()
   const merged = (entry: IssueSummary | PullRequestSummary) => props.kind === "pull" && "merged" in entry && entry.merged
@@ -26,7 +29,7 @@ export function WorkScreen(props: {
     return props.kind === "pull" ? colors.red : colors.closedState
   }
   const entryIcon = (entry: IssueSummary | PullRequestSummary) => {
-    if (props.kind === "issue") return entry.state === "closed" ? "✓" : "●"
+    if (props.kind === "issue") return entry.state === "closed" ? "✓" : "◉"
     if (merged(entry)) return "⑃"
     return entry.state === "closed" ? "×" : "⑂"
   }
@@ -60,10 +63,13 @@ export function WorkScreen(props: {
             resetKey={props.state}
             empty={`No ${props.state} ${props.kind === "issue" ? "issues" : "pull requests"}${page().hasMore ? " loaded yet" : ""}`}
             onEndReached={props.onEndReached}
+            onActivate={props.onOpen}
+            onOpenInBrowser={props.onOpenInBrowser}
+            onCopy={props.onCopy}
           >
             {(entry, active) => (
               <>
-                <box height={2} width={3} flexShrink={0} alignItems="flex-start">
+                <box height={2} width={2} flexShrink={0} alignItems="flex-start">
                   <text fg={entryColor(entry())}>{entryIcon(entry())}</text>
                 </box>
                 <box height={2} flexGrow={1} flexBasis={0} minWidth={0} flexDirection="column" overflow="hidden">
@@ -74,7 +80,7 @@ export function WorkScreen(props: {
                     {(width) => fitText(entry().title, width)}
                   </ListLine>
                   <ListLine fg={colors.muted}>
-                    {(width) => fitText(`#${entry().number} · ${ago(entry().createdAt)} · ${entry().author}`, width)}
+                    {(width) => fitText(`#${entry().number} opened ${ago(entry().createdAt)} by ${entry().author}`, width)}
                   </ListLine>
                 </box>
               </>

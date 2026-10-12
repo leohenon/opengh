@@ -57,14 +57,15 @@ test("commit tabs retain detail state and Escape restores the list after resizin
   await view.flush()
   expect(opened).toEqual([commits[18]!.sha])
   expect(view.captureCharFrame()).toContain("A full commit message body.")
-  expect(view.captureCharFrame()).toContain("Author max")
-  expect(view.captureCharFrame()).toContain("2026-04-14 06:41:00 UTC")
+  expect(view.captureCharFrame()).toContain(" max committed")
+  expect(view.captureCharFrame()).not.toContain("2026-04-14 06:41:00 UTC")
   expect(view.captureCharFrame()).toContain("Committer web-flow")
-  expect(view.captureCharFrame()).toContain("30 files changed")
+  expect(view.captureCharFrame()).toContain("Files changed · 30 files")
 
   view.mockInput.pressKey("G")
   await view.flush()
   expect(view.captureCharFrame()).toContain("src/module-29.ts")
+  expect(view.captureCharFrame()).not.toContain("Commit 18")
   view.mockInput.pressKey("?")
   view.mockInput.pressKey("g")
   view.mockInput.pressEscape()
@@ -93,9 +94,9 @@ test("commit tabs retain detail state and Escape restores the list after resizin
   await view.flush()
   const detailFrame = view.captureCharFrame()
   const retained = detail()
-  view.mockInput.pressKey("3")
+  view.mockInput.pressKey("4")
   await view.flush()
-  expect(view.captureCharFrame()).toContain("Open (4)")
+  expect(view.captureCharFrame()).toContain("Open (3)")
   expect(view.captureCharFrame()).not.toContain("o GitHub · y SHA")
   expect(view.captureCharFrame()).not.toContain("src/module-29.ts")
   view.mockInput.pressKey("g")
@@ -147,6 +148,7 @@ test("overview and commit shortcuts open GitHub and copy the active URL or SHA",
       onLoadMoreCommitFiles={async () => { more++ }}
       onOpenInBrowser={async (value) => {
         if (browserFails) throw new Error("Browser unavailable")
+        if (typeof value === "number") throw new Error("Unexpected issue browser action")
         browserSha = value
       }}
       onCloseCommit={() => setDetail(undefined)}
@@ -203,7 +205,7 @@ test("overview and commit shortcuts open GitHub and copy the active URL or SHA",
   expect(copiedSha).toBe("")
   view.mockInput.pressEscape()
   await Bun.sleep(30)
-  view.mockInput.pressKey("3")
+  view.mockInput.pressKey("4")
   view.mockInput.pressKey("o")
   view.mockInput.pressKey("y")
   await view.flush()

@@ -1,7 +1,7 @@
 import type { JSX } from "solid-js"
 import { useTheme } from "../theme"
 
-export function PageShell(props: { header: JSX.Element; children: JSX.Element }) {
+export function PageShell(props: { header: JSX.Element; headerHeight?: number | "auto"; children: JSX.Element }) {
   const { colors } = useTheme()
 
   return (
@@ -16,7 +16,7 @@ export function PageShell(props: { header: JSX.Element; children: JSX.Element })
       paddingRight={2}
     >
       <box
-        height={2}
+        height={props.headerHeight ?? 2}
         flexShrink={0}
         flexDirection="row"
         alignItems="center"

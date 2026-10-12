@@ -1,0 +1,315 @@
+import { RGBA, rgbToHex, TextAttributes, type ScrollBoxRenderable, type SyntaxStyle } from "@opentui/core"
+import { useKeyboard, useTerminalDimensions } from "@opentui/solid"
+import { createMemo, For, Show, type JSX } from "solid-js"
+import { defaultConfig, type DetailLayout } from "../../config"
+import type { IssueComment, IssueDetail, IssueReference } from "../../models"
+import type { IssueDetailState, ResourceState } from "../../repository-state"
+import { GitHubMarkdown } from "../components/github-markdown"
+import { ResourceStateView } from "../components/resource-state"
+import { ago } from "../format"
+import { detailContentWidth } from "../detail-layout"
+import { referenceColor, referenceIcon, referenceState, referencedPulls } from "../issue-references"
+import { createReactiveMarkdownStyle } from "../markdown-style"
+import { useTheme } from "../theme"
+import { createScrollbarVisibility } from "../scrollbar-visibility"
+
+function MetadataField(props: { label: string; compact: boolean; muted?: boolean; children: JSX.Element }) {
+  const { colors } = useTheme()
+  return (
+    <box width="100%" minWidth={0} flexShrink={0} marginTop={props.compact ? 0 : 1}>
+      <Show when={props.compact} fallback={(
+        <>
+          <text width="100%" flexShrink={0} fg={colors.muted}>{props.label}</text>
+          <text width="100%" flexShrink={0} fg={props.muted ? colors.muted : colors.text}>{props.children}</text>
+        </>
+      )}>
+        <text width="100%" flexShrink={0} fg={colors.muted}>{props.label} <span style={{ fg: props.muted ? colors.muted : colors.text }}>{props.children}</span></text>
+      </Show>
+    </box>
+  )
+}
+
+function IssueMetadata(props: { issue: IssueDetail; compact: boolean }) {
+  const { colors } = useTheme()
+  return (
+    <box width="100%" minWidth={0} flexShrink={0} flexDirection="column">
+      <Show when={!props.compact}>
+        <text height={1} flexShrink={0} fg={colors.text} attributes={TextAttributes.BOLD}>Details</text>
+      </Show>
+      <MetadataField label="Labels" compact={props.compact} muted={!props.issue.labels.length}>{props.issue.labels.join(" · ") || "none"}</MetadataField>
+      <MetadataField label="Assignees" compact={props.compact} muted={!props.issue.assignees.length}>{props.issue.assignees.join(", ") || "none"}</MetadataField>
+      <Show when={props.issue.milestone}>
+        <MetadataField label="Milestone" compact={props.compact}>
+          {props.issue.milestone?.title}
+        </MetadataField>
+      </Show>
+    </box>
+  )
+}
+
+function IssueDates(props: { issue: IssueDetail; compact: boolean }) {
+  return (
+    <box width="100%" minWidth={0} flexShrink={0} flexDirection="column">
+      <Show when={props.issue.closedAt}>
+        <MetadataField label="Closed" compact={props.compact} muted>{relativeTime(props.issue.closedAt!)}</MetadataField>
+      </Show>
+      <Show when={props.issue.milestone?.dueAt}>
+        <MetadataField label="Due" compact={props.compact} muted>{relativeTime(props.issue.milestone!.dueAt!)}</MetadataField>
+      </Show>
+    </box>
+  )
+}
+
+function ReferencedPulls(props: { resource: ResourceState<IssueReference[]>; repository: string }) {
+  const { colors } = useTheme()
+  const pulls = createMemo(() => referencedPulls(props.resource.value ?? []))
+  return (
+    <Show when={pulls().length > 0 || props.resource.status === "error"}>
+      <box width="100%" minWidth={0} flexShrink={0} marginTop={1} flexDirection="column">
+        <text height={1} flexShrink={0} fg={colors.text} attributes={TextAttributes.BOLD}>Referenced PRs</text>
+        <For each={pulls().slice(0, 3)}>
+          {(reference) => (
+            <box width="100%" minWidth={0} flexShrink={0} marginTop={1}>
+              <text width="100%" flexShrink={0} fg={referenceColor(colors, reference)}>
+                <a href={reference.url}>{referenceIcon(reference)} #{reference.number} · {referenceState(reference)}</a>
+              </text>
+              <Show when={reference.repository !== props.repository}>
+                <text width="100%" flexShrink={0} fg={colors.muted}>{reference.repository}</text>
+              </Show>
+              <text width="100%" flexShrink={0} fg={colors.text}>{reference.title}</text>
+            </box>
+          )}
+        </For>
+        <Show when={props.resource.status === "error"}>
+          <text width="100%" flexShrink={0} fg={colors.red}>References unavailable</text>
+        </Show>
+      </box>
+    </Show>
+  )
+}
+
+function relativeTime(iso?: string) {
+  const time = Date.parse(iso ?? "")
+  if (!Number.isFinite(time)) return "Unknown time"
+  const remaining = time - Date.now()
+  if (remaining <= 0) return ago(iso!)
+  if (remaining >= 86_400_000) return `in ${Math.ceil(remaining / 86_400_000)}d`
+  if (remaining >= 3_600_000) return `in ${Math.ceil(remaining / 3_600_000)}h`
+  return `in ${Math.max(1, Math.ceil(remaining / 60_000))}m`
+}
+
+function TimelineEntry(props: { icon: string; color?: string; nodeOffset?: number; children: JSX.Element }) {
+  const { colors } = useTheme()
+  return (
+    <box width="100%" minWidth={0} flexShrink={0} flexDirection="row">
+      <box width={3} flexShrink={0} alignSelf="stretch">
+        <box position="absolute" left={1} top={0} bottom={0} width={1} border={["left"]} borderColor={colors.border} />
+        <text position="absolute" left={1} top={props.nodeOffset ?? 1} width={1} height={1} fg={props.color ?? colors.muted} bg={colors.canvas}>{props.icon}</text>
+      </box>
+      <box flexGrow={1} flexBasis={0} minWidth={0} paddingTop={1} flexDirection="column">
+        {props.children}
+      </box>
+    </box>
+  )
+}
+
+function TimelineHeader(props: { children: JSX.Element }) {
+  const { colors } = useTheme()
+  return <text width="100%" flexShrink={0} fg={colors.muted}>{props.children}</text>
+}
+
+function Comment(props: { comment: IssueComment; syntaxStyle: SyntaxStyle; backgroundColor: string }) {
+  const { colors } = useTheme()
+  const association = () => props.comment.authorAssociation === "NONE"
+    ? "" : props.comment.authorAssociation.toLowerCase().replaceAll("_", " ")
+  return (
+    <TimelineEntry icon="" nodeOffset={2}>
+      <box width="100%" minWidth={0} flexShrink={0} backgroundColor={props.backgroundColor} paddingX={2} paddingY={1} flexDirection="column">
+        <TimelineHeader>
+          <b><span style={{ fg: colors.text }}>{props.comment.author}</span></b> · {ago(props.comment.createdAt)}
+          {association() ? ` · ${association()}` : ""}
+          {props.comment.updatedAt !== props.comment.createdAt ? " · edited" : ""}
+        </TimelineHeader>
+        <box width="100%" minWidth={0} flexShrink={0} marginTop={1}>
+          <Show when={props.comment.body.trim()} fallback={<text fg={colors.muted}>No comment text.</text>}>
+            <GitHubMarkdown content={props.comment.body} syntaxStyle={props.syntaxStyle} backgroundColor={props.backgroundColor} preserveImages codePanels />
+          </Show>
+        </box>
+      </box>
+    </TimelineEntry>
+  )
+}
+
+function ReferenceMention(props: { reference: IssueReference; repository: string }) {
+  const { colors } = useTheme()
+  const identifier = () => {
+    const reference = props.reference
+    const id = reference.kind === "commit" ? reference.sha.slice(0, 7) : `#${reference.number}`
+    return reference.repository === props.repository ? id : `${reference.repository}${reference.kind === "commit" ? "@" : ""}${id}`
+  }
+  const kind = () => props.reference.kind === "pull" ? "PR" : props.reference.kind
+  return (
+    <TimelineEntry icon={referenceIcon(props.reference)} color={referenceColor(colors, props.reference)}>
+      <box width="100%" minWidth={0} flexShrink={0} paddingX={2} flexDirection="column">
+        <TimelineHeader>
+          <b><span style={{ fg: colors.text }}>{props.reference.actor}</span></b> referenced this in {kind()} {identifier()}
+          <Show when={props.reference.kind !== "commit"}>
+            {" · "}<span style={{ fg: referenceColor(colors, props.reference) }}>{referenceState(props.reference)}</span>
+          </Show>
+        </TimelineHeader>
+        <box width="100%" minWidth={0} flexShrink={0} paddingLeft={2}>
+          <text width="100%" flexShrink={0} fg={colors.blue}>
+            <a href={props.reference.url}>{props.reference.title}</a>
+          </text>
+        </box>
+      </box>
+    </TimelineEntry>
+  )
+}
+
+export function IssueScreen(props: {
+  number: number
+  detail: IssueDetailState
+  interactive: boolean
+  showScrollbar: boolean
+  detailLayout?: DetailLayout
+}) {
+  const { colors, theme } = useTheme()
+  const dimensions = useTerminalDimensions()
+  const wide = () => dimensions().width >= 112
+  const centered = () => (props.detailLayout ?? defaultConfig.detailLayout) === "centered"
+  const contentWidth = () => detailContentWidth(props.detailLayout, wide() ? 32 : 0)
+  const surface = createMemo(() => {
+    const panel = RGBA.fromHex(colors.header)
+    const canvas = RGBA.fromHex(colors.canvas)
+    return rgbToHex(RGBA.fromValues(
+      panel.r * 0.4 + canvas.r * 0.6,
+      panel.g * 0.4 + canvas.g * 0.6,
+      panel.b * 0.4 + canvas.b * 0.6,
+      panel.a * 0.4 + canvas.a * 0.6,
+    ))
+  })
+  const markdownStyle = createReactiveMarkdownStyle(colors, theme)
+  const issue = () => props.detail.resource.value
+  const repository = () => issue()?.url.split("/").slice(3, 5).join("/") ?? ""
+  const comments = () => props.detail.comments
+  const references = () => props.detail.references
+  const activity = createMemo(() => [...(comments().value?.items ?? []), ...(references().value ?? [])]
+    .sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt)))
+  const failure = (resource: ResourceState<unknown>) => resource.status === "error" ? resource.message : ""
+  let scroll: ScrollBoxRenderable | undefined
+  const bindScrollbar = createScrollbarVisibility(() => props.showScrollbar)
+
+  useKeyboard((event) => {
+    if (!props.interactive || !scroll || event.ctrl || event.meta) return
+    if (event.name === "up" || event.name === "k") scroll.scrollBy(-1)
+    else if (event.name === "down" || event.name === "j") scroll.scrollBy(1)
+    else if (event.name === "u") scroll.scrollBy(-Math.max(1, Math.floor(scroll.viewport.height / 2)))
+    else if (event.name === "d") scroll.scrollBy(Math.max(1, Math.floor(scroll.viewport.height / 2)))
+    else if (event.name === "G" || (event.name === "g" && event.shift)) scroll.scrollTo(Math.max(0, scroll.scrollHeight - scroll.viewport.height))
+    else if (event.name === "g") scroll.scrollTo(0)
+  })
+
+  return (
+    <box flexGrow={1} minHeight={0} flexDirection="column" backgroundColor={colors.canvas} paddingX={2}>
+      <scrollbox
+        id="issue-detail-scroll"
+        ref={(value) => { scroll = value; bindScrollbar(value) }}
+        flexGrow={1}
+        minWidth={0}
+        minHeight={0}
+        scrollY
+        scrollX={false}
+        contentOptions={{ paddingTop: 0, paddingBottom: 1, alignItems: centered() ? "center" : "stretch" }}
+      >
+        <box width="100%" maxWidth={contentWidth()} minWidth={0} flexShrink={0} flexDirection="column" paddingTop={1} paddingBottom={1}>
+          <text width="100%" flexShrink={0} fg={colors.text} attributes={TextAttributes.BOLD}>
+            {issue()?.title ?? "Issue"} <span style={{ fg: colors.muted }}>#{props.number}</span>
+          </text>
+          <Show when={issue()}>
+            <text width="100%" flexShrink={0} marginTop={1} fg={colors.muted}>
+              <span style={{ fg: issue()?.state === "open" ? colors.openState : colors.closedState }}>
+                {issue()?.state === "open" ? "◉ Open" : "✓ Closed"}
+              </span>
+              {issue()?.stateReason ? ` · ${issue()!.stateReason!.replaceAll("_", " ")}` : ""}
+              {issue()?.locked ? " · locked" : ""}
+              {" · "}<span style={{ fg: colors.text }}>{issue()?.author}</span> opened {ago(issue()!.createdAt)}
+            </text>
+          </Show>
+        </box>
+        <ResourceStateView resource={props.detail.resource}>
+          {(current) => (
+            <>
+              <box width="100%" maxWidth={contentWidth()} minWidth={0} flexShrink={0} flexDirection="row" alignItems="flex-start">
+                <box flexGrow={1} flexBasis={0} minWidth={0} flexShrink={1} flexDirection="column" paddingRight={wide() ? 2 : 0}>
+                  <Show when={!wide()}>
+                    <box width="100%" minWidth={0} flexShrink={0} paddingBottom={1}>
+                      <IssueMetadata issue={current()} compact />
+                    </box>
+                  </Show>
+                  <box width="100%" minWidth={0} flexShrink={0} backgroundColor={surface()} paddingX={2} paddingY={1} flexDirection="column">
+                    <text width="100%" flexShrink={0} fg={colors.muted}>
+                       <b><span style={{ fg: colors.text }}>{current().author}</span></b> · author
+                    </text>
+                    <box width="100%" minWidth={0} flexShrink={0} marginTop={1}>
+                      <Show when={current().body.trim()} fallback={<text fg={colors.muted}>No description provided.</text>}>
+                        <GitHubMarkdown content={current().body} syntaxStyle={markdownStyle()} backgroundColor={surface()} preserveImages codePanels />
+                      </Show>
+                    </box>
+                  </box>
+                  <Show when={props.detail.resource.status === "error"}>
+                    <text width="100%" flexShrink={0} marginTop={1} fg={colors.red}>× {failure(props.detail.resource)}</text>
+                  </Show>
+                  <box width="100%" minWidth={0} flexShrink={0} flexDirection="column">
+                    <text width="100%" flexShrink={0} marginTop={1} fg={colors.muted}>
+                      <b><span style={{ fg: colors.text }}>Activity</span></b> · {current().commentCount} {current().commentCount === 1 ? "comment" : "comments"}
+                      {comments().value && (comments().value!.hasMore || comments().value!.items.length !== current().commentCount)
+                        ? ` · ${comments().value!.items.length} loaded` : ""}
+                      {references().value?.length ? ` · ${references().value!.length} ${references().value!.length === 1 ? "reference" : "references"}` : ""}
+                    </text>
+                    <For each={activity()}>
+                      {(entry, index) => (
+                        <>
+                          <Show when={index() === 0 || relativeTime(entry.createdAt) !== relativeTime(activity()[index() - 1]?.createdAt)}>
+                            <text width="100%" flexShrink={0} marginTop={1} fg={colors.muted} attributes={TextAttributes.BOLD}>
+                              {relativeTime(entry.createdAt)}
+                            </text>
+                          </Show>
+                          <Show when={"kind" in entry ? entry : undefined} keyed fallback={<Comment comment={entry as IssueComment} syntaxStyle={markdownStyle()} backgroundColor={surface()} />}>
+                            {(reference) => <ReferenceMention reference={reference} repository={repository()} />}
+                          </Show>
+                        </>
+                      )}
+                    </For>
+                    <Show when={comments().status === "ready" && references().status === "ready" && activity().length === 0}>
+                      <text width="100%" flexShrink={0} marginTop={1} fg={colors.muted}>No comments or references yet.</text>
+                    </Show>
+                    <Show when={comments().status === "error"}>
+                      <text width="100%" flexShrink={0} fg={colors.red}>× {failure(comments())}</text>
+                    </Show>
+                    <Show when={references().status === "error"}>
+                      <text width="100%" flexShrink={0} fg={colors.red}>× {failure(references())}</text>
+                    </Show>
+                    <Show when={!wide() && (current().closedAt || current().milestone?.dueAt)}>
+                      <box width="100%" minWidth={0} flexShrink={0} marginTop={1}>
+                        <IssueDates issue={current()} compact />
+                      </box>
+                    </Show>
+                  </box>
+                </box>
+                <Show when={wide()}>
+                  <box width={32} flexShrink={0} minWidth={0} backgroundColor={surface()} paddingX={2} paddingY={1} flexDirection="column">
+                    <IssueMetadata issue={current()} compact={false} />
+                    <ReferencedPulls resource={references()} repository={repository()} />
+                    <IssueDates issue={current()} compact={false} />
+                  </box>
+                </Show>
+              </box>
+
+            </>
+          )}
+        </ResourceStateView>
+      </scrollbox>
+    </box>
+  )
+}

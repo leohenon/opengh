@@ -5,6 +5,7 @@ import { fitText } from "../format"
 import { scrollRowIntoView } from "../scroll-selection"
 import { ListLine } from "./list-line"
 import { useTheme } from "../theme"
+import { createScrollbarVisibility } from "../scrollbar-visibility"
 
 type ItemKey = string | number
 
@@ -30,6 +31,7 @@ export function SelectableList<T>(props: {
   let previousResetKey = props.resetKey
   let container: BoxRenderable | undefined
   let list: ScrollBoxRenderable | undefined
+  const bindScrollbar = createScrollbarVisibility(() => props.showScrollbar === true)
 
   const rowHeight = () => props.rowHeight ?? 3
   const listHeight = () => Math.floor(Math.max(0, containerHeight()) / rowHeight()) * rowHeight()
@@ -120,11 +122,11 @@ export function SelectableList<T>(props: {
       minHeight={0}
       flexDirection="column"
       overflow="hidden"
-      backgroundColor={colors.canvas}
     >
       <scrollbox
         ref={(value) => {
           list = value
+          bindScrollbar(value)
           // Resize events run after ScrollBox updates its viewport and scrollbar bounds.
           list.viewport.on("resize", revealSelection)
         }}
@@ -132,7 +134,6 @@ export function SelectableList<T>(props: {
         flexShrink={0}
         minHeight={0}
         backgroundColor={colors.canvas}
-        verticalScrollbarOptions={{ visible: props.showScrollbar === true }}
         scrollX={false}
         scrollY
       >
@@ -167,7 +168,7 @@ export function SelectableList<T>(props: {
           </Index>
         </Show>
       </scrollbox>
-      <box flexGrow={1} minHeight={0} backgroundColor={colors.canvas} />
+      <box flexGrow={1} minHeight={0} />
     </box>
   )
 }

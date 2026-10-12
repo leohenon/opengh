@@ -31,7 +31,7 @@ export function Header(props: {
         </box>
         <box flexGrow={1} />
       </box>
-      <box height={2} flexDirection="row" paddingLeft={2} gap={3}>
+      <box height={2} minWidth={0} overflow="hidden" flexDirection="row" paddingLeft={2} gap={3}>
         <For each={props.tabs}>
           {(tab, index) => {
             const active = () => props.page === tab.page

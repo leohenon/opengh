@@ -1,4 +1,5 @@
 import { TextAttributes } from "@opentui/core"
+import { Show } from "solid-js"
 import type { Paginated, WorkflowRunSummary } from "../../models"
 import type { ResourceState } from "../../repository-state"
 import { PageShell } from "../components/page-shell"
@@ -36,9 +37,11 @@ export function ActionsScreen(props: {
     <PageShell
       header={(
         <box flexDirection="row" alignItems="center">
-          <text fg={colors.text} attributes={TextAttributes.BOLD}>
-            {runCount()} {runCount() === 1 ? "workflow run" : "workflow runs"}
-          </text>
+          <Show when={props.runs.value !== undefined} fallback={<text fg={colors.text} attributes={TextAttributes.BOLD}>Workflow runs</text>}>
+            <text fg={colors.text} attributes={TextAttributes.BOLD}>
+              {runCount()} {runCount() === 1 ? "workflow run" : "workflow runs"}
+            </text>
+          </Show>
         </box>
       )}
     >

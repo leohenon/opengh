@@ -29,9 +29,11 @@ export function CommitsScreen(props: {
     <PageShell
       header={(
         <box flexGrow={1} minWidth={0} flexDirection="row" alignItems="center" gap={2}>
-          <text flexShrink={0} fg={colors.text} attributes={TextAttributes.BOLD}>
-            {commitCount()} {commitCount() === 1 ? "commit" : "commits"}
-          </text>
+          <Show when={props.commits.value !== undefined} fallback={<text fg={colors.text} attributes={TextAttributes.BOLD}>Commits</text>}>
+            <text flexShrink={0} fg={colors.text} attributes={TextAttributes.BOLD}>
+              {commitCount()} {commitCount() === 1 ? "commit" : "commits"}
+            </text>
+          </Show>
           <box width={Bun.stringWidth(props.currentBranch) + 4} flexShrink={1} minWidth={0} flexDirection="row" overflow="hidden">
             <box flexGrow={1} flexBasis={0} minWidth={0}>
               <ListLine fg={colors.blue} attributes={TextAttributes.BOLD}>

@@ -6,6 +6,7 @@ import type { CommitDetail, ListState } from "../models"
 import { back, navigate, openDetail, type NavigationState, type Page } from "../navigation"
 import type {
   CommitDetailState,
+  IssueDetailState,
   RepositoryData,
   RepositoryOperations,
   RepositoryResource,
@@ -13,19 +14,22 @@ import type {
 } from "../repository-state"
 import { BranchPicker } from "./components/branch-picker"
 import { Header } from "./components/header"
+import { IssueReferencesPicker } from "./components/issue-references-picker"
 import { Help } from "./components/help"
 import { Settings } from "./components/settings"
 import { StatusBar, type StatusKind } from "./components/status-bar"
 import { Toast } from "./components/toast"
 import { ActionsScreen } from "./pages/actions"
 import { CommitsScreen } from "./pages/commits"
+import { IssueScreen } from "./pages/issue"
 import { CommitScreen } from "./pages/commit"
 import { OverviewScreen } from "./pages/overview"
 import { WorkScreen } from "./pages/work"
 import { tabs } from "./tabs"
+import { referencedItems } from "./issue-references"
 import { useTheme } from "./theme"
 
-type Overlay = "help" | "branch-picker" | "settings"
+type Overlay = "help" | "branch-picker" | "settings" | "issue-references"
 type ToastState = { id: number; title: string; message: string; duration?: number; tone?: "error" | "success" | "info" }
 
 export type AppProps = {
@@ -46,7 +50,12 @@ export type AppProps = {
   onLoadCommit?: (sha: string) => Promise<void>
   onLoadMoreCommitFiles?: () => Promise<void>
   onCloseCommit?: () => void
-  onOpenInBrowser?: (sha?: string) => Promise<void>
+  issueDetail?: IssueDetailState
+  onLoadIssue?: (number: number) => Promise<void>
+  onLoadMoreIssueComments?: () => Promise<void>
+  onRetryIssueReferences?: () => Promise<void>
+  onCloseIssue?: () => void
+  onOpenInBrowser?: (target?: string | number, repository?: string) => Promise<void>
   onCopyToClipboard?: (value: string) => Promise<boolean>
   onLoadMoreRuns?: () => Promise<void>
   onLoadMoreIssues?: (state: ListState) => Promise<void>
@@ -59,6 +68,7 @@ export function App(props: AppProps) {
   const dimensions = useTerminalDimensions()
   const [navigation, setNavigation] = createSignal<NavigationState>({ page: "overview" })
   const [issueState, setIssueState] = createSignal<ListState>("open")
+  const [issueRefresh, setIssueRefresh] = createSignal<{ number: number }>()
   const [pullState, setPullState] = createSignal<ListState>("open")
   const [overviewDocument, setOverviewDocument] = createSignal<string>()
   const [overlay, setOverlay] = createSignal<Overlay>()
@@ -81,6 +91,42 @@ export function App(props: AppProps) {
   const commitResource = createMemo<ResourceState<CommitDetail>>(() => props.commitDetail && props.commitDetail.sha === commitSha()
     ? props.commitDetail.resource
     : { status: "loading", phase: "load" })
+  const issueNumber = createMemo(() => {
+    const detail = navigation().details?.issues
+    return detail?.kind === "issue" ? detail.number : undefined
+  })
+  const activeIssueNumber = () => page() === "issues" ? issueNumber() : undefined
+  const issueDetail = createMemo<IssueDetailState>(() => props.issueDetail && props.issueDetail.number === issueNumber()
+    ? props.issueDetail
+    : { number: issueNumber() ?? 0, resource: { status: "loading", phase: "load" }, comments: { status: "loading", phase: "load" }, references: { status: "loading", phase: "load" } })
+  const issueMenuItems = createMemo(() => referencedItems(issueDetail().references.value ?? [], {
+    repository: data().repo.nameWithOwner, number: issueNumber() ?? 0,
+  }))
+  const issueDetailPart = () => {
+    const detail = issueDetail()
+    if (detail.resource.status !== "ready") return "issue"
+    if (detail.comments.status !== "ready") return "comments"
+    if (detail.references.status !== "ready") return "references"
+    return "issue"
+  }
+  const issueUrl = (number: number) => props.issueDetail?.number === number && props.issueDetail.resource.value
+    ? props.issueDetail.resource.value.url : `${data().repo.url}/issues/${number}`
+  const refreshIssue = async (number: number) => {
+    const detail = issueDetail()
+    if (issueRefresh()?.number === number
+      || [detail.resource, detail.comments, detail.references].some((resource) => resource.status === "loading")) return
+    const request = { number }
+    setIssueRefresh(request)
+    try {
+      if (detail.resource.status === "ready" && detail.comments.status === "error")
+        await props.onLoadMoreIssueComments?.()
+      else if (detail.resource.status === "ready" && detail.references.status === "error")
+        await props.onRetryIssueReferences?.()
+      else await props.onLoadIssue?.(number)
+    } finally {
+      setIssueRefresh((current) => current === request ? undefined : current)
+    }
+  }
   const issues = () => data().issues[issueState()]
   const pulls = () => data().pulls[pullState()]
   const issueCounts = () => ({
@@ -91,17 +137,38 @@ export function App(props: AppProps) {
     open: data().pulls.open.value?.items.length ?? 0,
     closed: data().pulls.closed.value?.items.length ?? 0,
   })
-  const visibleTabs = () => {
-    const runs = data().runs
-    return runs.status === "ready" && runs.value.items.length === 0
-      ? tabs.filter((tab) => tab.page !== "actions")
-      : tabs
-  }
+  const baseTabs = tabs.filter((tab) => tab.page === "overview" || tab.page === "commits")
+  const sectionAvailable = (...resources: ResourceState<{ items: readonly unknown[]; hasMore: boolean }>[]) => resources.some((resource) =>
+    resource.status === "error" || Boolean(resource.value && (resource.value.items.length > 0 || resource.value.hasMore)),
+  )
+  const navigationTabs = createMemo<{ repository: string; tabs: typeof tabs; resolved: boolean }>((previous) => {
+    const current = data()
+    const repository = current.repo.nameWithOwner
+    const conditional = [current.issues.open, current.issues.closed, current.pulls.open, current.pulls.closed, current.runs]
+    const pending = operations().refresh.status === "loading" || conditional.some((resource) => resource.status === "loading")
+    // Freeze availability across partial refresh responses; unknown initial tabs stay hidden until availability is known.
+    if (pending && previous.repository === repository && previous.resolved) return previous
+    if (pending && conditional.some((resource) => resource.value === undefined)) return { repository, tabs: baseTabs, resolved: false }
+    const available = tabs.filter((tab) => {
+      if (tab.page === "issues") return sectionAvailable(current.issues.open, current.issues.closed)
+      if (tab.page === "pulls") return sectionAvailable(current.pulls.open, current.pulls.closed)
+      if (tab.page === "actions") return sectionAvailable(current.runs)
+      return true
+    })
+    if (previous.repository === repository && previous.resolved && available.length === previous.tabs.length
+      && available.every((tab, index) => tab.page === previous.tabs[index]?.page)) return previous
+    return { repository, tabs: available, resolved: true }
+  }, { repository: "", tabs: baseTabs, resolved: false })
+  const visibleTabs = () => navigationTabs().tabs
   const overviewDocuments = () => data().documents.value ?? []
   const currentOverviewDocument = createMemo(() => overviewDocuments().find((document) => document.id === overviewDocument())
     ?? overviewDocuments()[0])
   const activeResource = (): ResourceState<unknown> | undefined => {
     if (activeCommitSha()) return commitResource()
+    if (activeIssueNumber()) {
+      const part = issueDetailPart()
+      return part === "issue" ? issueDetail().resource : issueDetail()[part]
+    }
     if (page() === "overview") return data().documents.status !== "ready"
       ? data().documents : currentOverviewDocument()?.resource ?? data().documents
     if (page() === "commits") return data().commits
@@ -129,12 +196,18 @@ export function App(props: AppProps) {
     const resource = activeResource()
     if (resource?.status === "loading") {
       if (resource.phase === "pagination") return "loading-more"
+      if (activeCommitSha() && resource.value !== undefined) return "refreshing"
+      if (activeIssueNumber() && issueDetail().resource.value) {
+        if (issueRefresh()?.number === activeIssueNumber() || resource.value !== undefined) return "refreshing"
+        return "loading-resource"
+      }
       return resource.value === undefined ? undefined : "loading-resource"
     }
     return undefined
   }
   const statusDetail = () => {
     if (activeCommitSha()) return "commit"
+    if (activeIssueNumber()) return issueDetailPart()
     if (page() === "overview")
       return data().documents.status === "ready" ? currentOverviewDocument()?.label ?? "documentation" : "documentation"
     if (page() === "commits") return "commits"
@@ -146,6 +219,7 @@ export function App(props: AppProps) {
   const status = createMemo(statusKind)
   const paginationSource = () => {
     if (activeCommitSha()) return `pagination:commit:${commitSha()}`
+    if (activeIssueNumber()) return `pagination:issue:${issueNumber()}`
     if (page() === "commits") return "pagination:commits"
     if (page() === "issues") return `pagination:issues:${issueState()}`
     if (page() === "pulls") return `pagination:pulls:${pullState()}`
@@ -154,6 +228,7 @@ export function App(props: AppProps) {
   }
   const activeResourceSource = () => {
     if (activeCommitSha()) return `resource:commit:${commitSha()}`
+    if (activeIssueNumber()) return `resource:issue:${issueNumber()}:${issueDetailPart()}`
     if (page() === "overview") return `resource:overview:${data().documents.status === "ready" ? currentOverviewDocument()?.id : "documents"}`
     if (page() === "commits") return "resource:commits"
     if (page() === "issues") return `resource:issues:${issueState()}`
@@ -179,6 +254,7 @@ export function App(props: AppProps) {
       ["pagination:pulls:closed", current.pulls.closed],
     ]
     if (commitSha()) paginationResources.push([`pagination:commit:${commitSha()}`, commitResource()])
+    if (issueNumber()) paginationResources.push([`pagination:issue:${issueNumber()}`, issueDetail().comments])
     for (const [source, resource] of paginationResources) {
       if (resource.status === "error" && resource.phase === "pagination") failures.set(source, resource.message)
     }
@@ -224,14 +300,21 @@ export function App(props: AppProps) {
       setPullState("open")
     }
 
+    if (navigationTabs().resolved) {
+      if (!visibleTabs().some((tab) => tab.page === "issues")) issueDefaultResolved = false
+      if (!visibleTabs().some((tab) => tab.page === "pulls")) pullDefaultResolved = false
+    }
+
     if (!issueDefaultResolved && current.issues.open.status === "ready" && current.issues.closed.status === "ready"
+      && (current.issues.open.value.items.length > 0 || current.issues.closed.value.items.length > 0)
       && (current.issues.open.value.items.length > 0 || !current.issues.open.value.hasMore)) {
       issueDefaultResolved = true
       if (current.issues.open.value.items.length === 0 && current.issues.closed.value.items.length > 0)
         setIssueState("closed")
     }
 
-    if (!pullDefaultResolved && current.pulls.open.status === "ready" && current.pulls.closed.status === "ready") {
+    if (!pullDefaultResolved && current.pulls.open.status === "ready" && current.pulls.closed.status === "ready"
+      && (current.pulls.open.value.items.length > 0 || current.pulls.closed.value.items.length > 0)) {
       pullDefaultResolved = true
       if (current.pulls.open.value.items.length === 0 && current.pulls.closed.value.items.length > 0)
         setPullState("closed")
@@ -239,7 +322,11 @@ export function App(props: AppProps) {
   })
 
   createEffect(() => {
-    if (!visibleTabs().some((tab) => tab.page === page())) setNavigation((state) => navigate(state, "pulls"))
+    if (visibleTabs().some((tab) => tab.page === page())) return
+    const detail = navigation().details?.[page()]
+    setNavigation((state) => navigate(back(state), "overview"))
+    if (detail?.kind === "issue") props.onCloseIssue?.()
+    if (overlay() === "issue-references") setOverlay()
   })
 
   createEffect(() => {
@@ -249,12 +336,13 @@ export function App(props: AppProps) {
     }
   })
 
-  onCleanup(() => props.onCloseCommit?.())
+  onCleanup(() => { props.onCloseCommit?.(); props.onCloseIssue?.() })
 
   const closeDetail = () => {
     const detail = navigation().details?.[page()]
     setNavigation(back)
     if (detail?.kind === "commit") props.onCloseCommit?.()
+    if (detail?.kind === "issue") props.onCloseIssue?.()
   }
   const selectPage = (next: Page) => setNavigation((state) => navigate(state, next))
   const movePage = (delta: number) => {
@@ -271,13 +359,13 @@ export function App(props: AppProps) {
   }
   const quit = () => props.onQuit ? props.onQuit() : renderer.destroy()
   let openingBrowser = false
-  const openInBrowser = async (sha?: string) => {
+  const openInBrowser = async (target?: string | number, repository?: string) => {
     if (openingBrowser || !props.onOpenInBrowser) return
     openingBrowser = true
     const origin = navigation()
-    const label = sha?.slice(0, 7) ?? data().repo.nameWithOwner
+    const label = typeof target === "number" ? `${repository ? repository + "#" : "#"}${target}` : target?.slice(0, 7) ?? data().repo.nameWithOwner
     try {
-      await props.onOpenInBrowser(sha)
+      await props.onOpenInBrowser(target, repository)
       if (!renderer.isDestroyed && navigation() === origin)
         setToast({ id: ++toastId, title: "Opened on GitHub", message: label, duration: 2000, tone: "success" })
     } catch (error) {
@@ -309,9 +397,30 @@ export function App(props: AppProps) {
   }
   const shortcutHint = () => {
     if (!config().showStatusBarHints) return undefined
-    if (activeCommitSha()) return "esc back · o GitHub · y SHA"
-      + (dimensions().width >= 60 && commitResource().value?.files.hasMore ? " · enter more files" : "")
-      + " · ? help"
+    if (activeCommitSha()) {
+      const retry = commitResource().status === "error"
+      const more = commitResource().value?.files.hasMore
+      if (dimensions().width < 60 && (retry || more)) return "esc back"
+        + (retry ? " · r retry" : " · enter more") + " · ? help"
+      return "esc back · o GitHub · y SHA"
+        + (retry ? " · r retry" : more ? " · enter more files" : "")
+        + " · ? help"
+    }
+    if (activeIssueNumber()) {
+      const retry = activeResource()?.status === "error"
+      const more = issueDetail().comments.value?.hasMore
+      const references = issueMenuItems().length
+      if (dimensions().width < 64) return "esc back"
+        + (retry ? " · r retry" : more ? " · enter more" : references ? " · p references" : " · o GitHub")
+        + " · ? help"
+      return "esc back"
+        + (retry ? ` · r retry ${statusDetail()}` : more ? " · enter more comments" : "")
+        + (references ? " · p references" : "")
+        + (dimensions().width >= 100 || !retry && !more ? " · o GitHub · y URL" : "")
+        + " · ? help"
+    }
+    if (page() === "issues") return (dimensions().width >= 45 ? "enter open" : "enter") + " · o GitHub · y URL"
+      + (dimensions().width >= 60 ? " · tab open/closed" : "") + " · ? help"
     if (page() === "commits") return (dimensions().width >= 45 ? "enter open" : "enter") + " · o GitHub · y SHA"
       + (dimensions().width >= 60 ? " · tab branch" : "")
       + " · ? help"
@@ -323,7 +432,7 @@ export function App(props: AppProps) {
   // Hidden tabs remain mounted, so their lists must also gate interaction explicitly.
   useKeyboard((event) => {
     const escape = event.name === "escape" || event.name === "esc" || event.raw === "\u001b" || event.sequence === "\u001b"
-    if (overlay() === "branch-picker") {
+    if (overlay() === "branch-picker" || overlay() === "issue-references") {
       if (escape) setOverlay()
       return
     }
@@ -354,9 +463,20 @@ export function App(props: AppProps) {
       else if (event.name === "return" || event.name === "enter") void props.onLoadMoreCommitFiles?.()
       else if (event.name === "r") {
         const resource = commitResource()
+        if (resource.status === "loading") return
         if (resource.status === "error" && resource.phase === "pagination") void props.onLoadMoreCommitFiles?.()
         else void props.onLoadCommit?.(sha)
       }
+      return
+    }
+    const number = activeIssueNumber()
+    if (number) {
+      if (event.ctrl || event.meta) return
+      if (event.name === "o") void openInBrowser(number)
+      else if (event.name === "y") void copyToClipboard(issueUrl(number), "URL")
+      else if (event.name === "p" && issueMenuItems().length) setOverlay("issue-references")
+      else if (event.name === "return" || event.name === "enter") void props.onLoadMoreIssueComments?.()
+      else if (event.name === "r") void refreshIssue(number)
       return
     }
     if (page() === "overview" && !event.ctrl && !event.meta) {
@@ -430,15 +550,21 @@ export function App(props: AppProps) {
             }}
           />
         </box>
-        <box visible={page() === "issues"} flexGrow={1} minHeight={0}>
+        <box visible={page() === "issues" && !issueNumber()} flexGrow={1} minHeight={0}>
           <WorkScreen
             kind="issue"
             state={issueState()}
             counts={issueCounts()}
             resource={issues()}
-            active={page() === "issues"}
+            active={page() === "issues" && !issueNumber()}
             interactive={overlay() === undefined}
             showScrollbar={config().showScrollbars}
+            onOpen={(issue) => {
+              setNavigation((state) => openDetail(state, { kind: "issue", number: issue.number }))
+              void props.onLoadIssue?.(issue.number)
+            }}
+            onOpenInBrowser={(issue) => void openInBrowser(issue.number)}
+            onCopy={(issue) => void copyToClipboard(issueUrl(issue.number), "URL")}
             onEndReached={() => {
               const resource = issues()
               if (resource.status === "ready" && resource.value.hasMore) void props.onLoadMoreIssues?.(issueState())
@@ -482,6 +608,20 @@ export function App(props: AppProps) {
               resource={commitResource()}
               interactive={page() === "commits" && overlay() === undefined}
               showScrollbar={config().showScrollbars}
+              detailLayout={config().detailLayout}
+            />
+          </box>
+        )}
+      </Show>
+      <Show when={issueNumber()} keyed>
+        {(number) => (
+          <box visible={page() === "issues"} flexGrow={1} minHeight={0}>
+            <IssueScreen
+              number={number}
+              detail={issueDetail()}
+              interactive={page() === "issues" && overlay() === undefined}
+              showScrollbar={config().showScrollbars}
+              detailLayout={config().detailLayout}
             />
           </box>
         )}
@@ -500,10 +640,21 @@ export function App(props: AppProps) {
       </Show>
       <Show when={overlay() === "help"}>
         <Help
-          view={activeCommitSha() ? "commit" : page()}
+          view={activeCommitSha() ? "commit" : activeIssueNumber() ? "issue" : page()}
           tabCount={visibleTabs().length}
           hasDocumentTabs={overviewDocuments().length > 1}
           hasMoreFiles={commitResource().value?.files.hasMore}
+          hasMoreComments={issueDetail().comments.value?.hasMore}
+          hasReferences={issueMenuItems().length > 0}
+        />
+      </Show>
+      <Show when={overlay() === "issue-references" && activeIssueNumber()}>
+        <IssueReferencesPicker
+          references={issueDetail().references.value ?? []}
+          currentIssue={{ repository: data().repo.nameWithOwner, number: activeIssueNumber()! }}
+          showScrollbar={config().showScrollbars}
+          onOpen={(reference) => { setOverlay(); void openInBrowser(reference.number, reference.repository) }}
+          onCopy={(reference) => { setOverlay(); void copyToClipboard(reference.url, "URL") }}
         />
       </Show>
       <Show when={overlay() === "settings"}>

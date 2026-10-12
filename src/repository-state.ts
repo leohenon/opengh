@@ -2,6 +2,9 @@ import type {
   CommitDetail,
   CommitSummary,
   IssueSummary,
+  IssueDetail,
+  IssueComment,
+  IssueReference,
   ListState,
   Paginated,
   PullRequestSummary,
@@ -24,6 +27,13 @@ export type RepositoryDocumentState = RepositoryDocument & {
 export type CommitDetailState = {
   sha: string
   resource: ResourceState<CommitDetail>
+}
+
+export type IssueDetailState = {
+  number: number
+  resource: ResourceState<IssueDetail>
+  comments: ResourceState<Paginated<IssueComment>>
+  references: ResourceState<IssueReference[]>
 }
 
 export type OperationState =
