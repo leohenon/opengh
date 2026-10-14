@@ -84,7 +84,7 @@ describe("openGH TUI", () => {
     const statusLine = () => view.captureCharFrame().split("\n")[31]!.trim();
     await view.flush();
     expect(statusLine()).toBe("");
-    setConfig({ ...defaultConfig, showStatusBarHints: true });
+    setConfig({ ...defaultConfig, showStatusBarHints: true, iconStyle: "unicode" });
     await view.flush();
     expect(statusLine()).toBe("o GitHub · y URL · ? help");
 
@@ -114,7 +114,7 @@ describe("openGH TUI", () => {
     expect(statusLine()).toContain("Refreshing…");
 
     setOperations(repositoryOperationsFixture);
-    setConfig({ ...defaultConfig, showStatusBarHints: true });
+    setConfig({ ...defaultConfig, showStatusBarHints: true, iconStyle: "unicode" });
     await view.flush();
     expect(statusLine()).toBe("esc back · o GitHub · y SHA · ? help");
   });
@@ -198,7 +198,7 @@ describe("openGH TUI", () => {
       { ...merged, title: "Merged PR", merged: true },
       { ...merged, number: 403, title: "Closed PR", merged: false },
     ];
-    const view = await testRender(() => <App data={data} operations={repositoryOperationsFixture} />,
+    const view = await testRender(() => <App data={data} operations={repositoryOperationsFixture} config={{ ...defaultConfig, iconStyle: "nerd" }} />,
       { width: 100, height: 26, useThread: false });
     active.push(view);
     const colors = appColors(resolveTheme("github"));
@@ -235,7 +235,7 @@ describe("openGH TUI", () => {
     }));
     const view = await testRender(() => <App data={{ ...githubDataFixture,
       runs: { status: "ready", value: { items: [...completed, ...pending], page: 1, hasMore: false } },
-    }} operations={repositoryOperationsFixture} />, { width: 120, height: 44, useThread: false });
+    }} operations={repositoryOperationsFixture} config={{ ...defaultConfig, iconStyle: "nerd" }} />, { width: 120, height: 44, useThread: false });
     active.push(view);
     await view.flush();
     view.mockInput.pressKey("5");
@@ -759,7 +759,7 @@ describe("openGH TUI", () => {
   });
 
   test("opens settings and applies saved changes immediately", async () => {
-    const [config, setConfig] = createSignal<Config>({ showScrollbars: false, theme: "github", aboutSidebar: "auto", detailLayout: "centered", showStatusBarHints: true });
+    const [config, setConfig] = createSignal<Config>({ showScrollbars: false, theme: "github", aboutSidebar: "auto", detailLayout: "centered", showStatusBarHints: true, iconStyle: "unicode" });
     let saves = 0;
     const view = await testRender(
       () => (
@@ -796,7 +796,7 @@ describe("openGH TUI", () => {
     await Bun.sleep(0);
     await view.flush();
     expect(saves).toBe(1);
-    expect(config()).toEqual({ showScrollbars: true, theme: "github", aboutSidebar: "auto", detailLayout: "centered", showStatusBarHints: true });
+    expect(config()).toEqual({ showScrollbars: true, theme: "github", aboutSidebar: "auto", detailLayout: "centered", showStatusBarHints: true, iconStyle: "unicode" });
     expect(view.captureCharFrame()).toContain("‹ on ›");
 
     view.mockInput.pressArrow("down");
@@ -822,14 +822,33 @@ describe("openGH TUI", () => {
     expect(config().detailLayout).toBe("centered");
     expect(saves).toBe(4);
 
+    view.mockInput.pressArrow("down");
+    view.mockInput.pressArrow("down");
+    await view.flush();
+    expect(view.captureCharFrame()).toContain("Icon style");
+    view.mockInput.pressArrow("right");
+    await view.flush();
+    expect(config().iconStyle).toBe("nerd");
+    expect(view.captureCharFrame()).toContain("‹ Nerd Font ›");
     view.mockInput.pressEscape();
     await Bun.sleep(30);
     await view.flush();
+    expect(view.captureCharFrame()).toContain(repositoryIcons.star);
+
+    view.mockInput.pressKey(",");
+    for (let i = 0; i < 5; i++) view.mockInput.pressKey("j");
+    view.mockInput.pressArrow("left");
+    await view.flush();
+    expect(config().iconStyle).toBe("unicode");
+    view.mockInput.pressEscape();
+    await Bun.sleep(30);
+    await view.flush();
+    expect(view.captureCharFrame()).not.toMatch(/[\uE000-\uF8FF]/);
     expect(view.captureCharFrame()).not.toContain("Show vertical scrollbars");
   });
 
   test("previews and saves a theme from settings", async () => {
-    const [config, setConfig] = createSignal<Config>({ showScrollbars: false, theme: "github", aboutSidebar: "auto", detailLayout: "centered", showStatusBarHints: true });
+    const [config, setConfig] = createSignal<Config>({ showScrollbars: false, theme: "github", aboutSidebar: "auto", detailLayout: "centered", showStatusBarHints: true, iconStyle: "unicode" });
     let canvas = () => "";
     const ThemedApp = () => {
       const current = useTheme();
@@ -879,7 +898,7 @@ describe("openGH TUI", () => {
   });
 
   test("restores the configured theme when preview is cancelled", async () => {
-    const config: Config = { showScrollbars: false, theme: "github", aboutSidebar: "auto", detailLayout: "centered", showStatusBarHints: true };
+    const config: Config = { showScrollbars: false, theme: "github", aboutSidebar: "auto", detailLayout: "centered", showStatusBarHints: true, iconStyle: "unicode" };
     let canvas = () => "";
     const ThemedApp = () => {
       const current = useTheme();
@@ -918,7 +937,7 @@ describe("openGH TUI", () => {
         <App
           data={githubDataFixture}
           operations={repositoryOperationsFixture}
-          config={{ showScrollbars: false, theme: "github", aboutSidebar: "auto", detailLayout: "centered", showStatusBarHints: true }}
+          config={{ showScrollbars: false, theme: "github", aboutSidebar: "auto", detailLayout: "centered", showStatusBarHints: true, iconStyle: "unicode" }}
           onConfigChange={async () => { throw new Error("Config directory is read-only") }}
         />
       ),
@@ -1132,7 +1151,7 @@ describe("openGH TUI", () => {
       },
     };
     const view = await testRender(
-      () => <App data={data} operations={repositoryOperationsFixture} onQuit={() => {}} />,
+      () => <App data={data} operations={repositoryOperationsFixture} config={{ ...defaultConfig, iconStyle: "nerd" }} onQuit={() => {}} />,
       { width: 120, height: 32, useThread: false },
     );
     active.push(view);
@@ -1179,7 +1198,7 @@ describe("openGH TUI", () => {
       theme: "github",
       aboutSidebar: "show",
       detailLayout: "centered",
-      showStatusBarHints: true,
+      showStatusBarHints: true, iconStyle: "unicode",
     });
     const view = await testRender(
       () => <App data={githubDataFixture} operations={repositoryOperationsFixture} config={config()} />,

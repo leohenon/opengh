@@ -8,21 +8,22 @@ import { ResourceStateView } from "../components/resource-state"
 import { SelectableList } from "../components/selectable-list"
 import { ago, fitText } from "../format"
 import { useTheme } from "../theme"
-import { workflowIcons } from "../icons"
+import { useIcons } from "../icon-style"
+import type { IconSet } from "../icons"
 
 const spinnerFrames = ["◐", "◓", "◑", "◒"] as const
 
-function runIcon(run: WorkflowRunSummary) {
-  if (run.status !== "completed") return workflowIcons.clock
+function runIcon(run: WorkflowRunSummary, icons: IconSet["workflow"]) {
+  if (run.status !== "completed") return icons.clock
   switch (run.conclusion) {
-    case "success": return workflowIcons.success
+    case "success": return icons.success
     case "failure":
-    case "timed_out": return workflowIcons.failure
+    case "timed_out": return icons.failure
     case "cancelled":
-    case "stale": return workflowIcons.cancelled
-    case "skipped": return workflowIcons.skipped
-    case "action_required": return workflowIcons.attention
-    default: return workflowIcons.neutral
+    case "stale": return icons.cancelled
+    case "skipped": return icons.skipped
+    case "action_required": return icons.attention
+    default: return icons.neutral
   }
 }
 
@@ -39,6 +40,7 @@ export function ActionsScreen(props: {
   onEndReached?: () => void
 }) {
   const { colors } = useTheme()
+  const icons = useIcons()
   const runCount = () => props.runs.value?.items.length ?? 0
   const [frame, setFrame] = createSignal(0)
   const spinning = createMemo(() => props.active && props.interactive
@@ -81,7 +83,7 @@ export function ActionsScreen(props: {
             {(run, active) => (
               <>
                 <box height={2} width={3} flexShrink={0} alignItems="flex-start">
-                  <text fg={runColor(run())}>{run().status === "in_progress" ? spinnerFrames[frame()] : runIcon(run())}</text>
+                  <text fg={runColor(run())}>{run().status === "in_progress" ? spinnerFrames[frame()] : runIcon(run(), icons().workflow)}</text>
                 </box>
                 <box height={2} flexGrow={1} flexBasis={0} minWidth={0} flexDirection="column" overflow="hidden">
                   <ListLine

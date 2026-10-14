@@ -9,6 +9,7 @@ import { ResourceStateView } from "../components/resource-state"
 import { SelectableList } from "../components/selectable-list"
 import { ago, fitText } from "../format"
 import { useTheme } from "../theme"
+import { useIcons } from "../icon-style"
 
 export function CommitsScreen(props: {
   commits: ResourceState<Paginated<CommitSummary>>
@@ -22,6 +23,7 @@ export function CommitsScreen(props: {
   onCopyCommitSha?: (commit: CommitSummary) => void
 }) {
   const { colors } = useTheme()
+  const icons = useIcons()
   const dimensions = useTerminalDimensions()
   const commitCount = () => props.commits.value?.items.length ?? 0
 
@@ -37,7 +39,7 @@ export function CommitsScreen(props: {
           <box width={Bun.stringWidth(props.currentBranch) + 4} flexShrink={1} minWidth={0} flexDirection="row" overflow="hidden">
             <box flexGrow={1} flexBasis={0} minWidth={0}>
               <ListLine fg={colors.blue} attributes={TextAttributes.BOLD}>
-                {(width) => fitText(` ${props.currentBranch}`, width)}
+                {(width) => fitText(`${icons().branch} ${props.currentBranch}`, width)}
               </ListLine>
             </box>
             <text flexShrink={0} fg={colors.muted}> ▾</text>

@@ -8,6 +8,7 @@ import { ResourceStateView } from "../components/resource-state"
 import { ago } from "../format"
 import { detailContentWidth } from "../detail-layout"
 import { useTheme } from "../theme"
+import { useIcons } from "../icon-style"
 import { createScrollbarVisibility } from "../scrollbar-visibility"
 
 const fileLabels: Record<string, string> = {
@@ -23,6 +24,7 @@ export function CommitScreen(props: {
   detailLayout?: DetailLayout
 }) {
   const { colors } = useTheme()
+  const icons = useIcons()
   const dimensions = useTerminalDimensions()
   const compact = () => dimensions().width < 60
   const centered = () => (props.detailLayout ?? defaultConfig.detailLayout) === "centered"
@@ -81,11 +83,11 @@ export function CommitScreen(props: {
             {(commit) => (
               <>
                 <text width="100%" flexShrink={0} marginTop={1} fg={colors.muted}>
-                   <b><span style={{ fg: colors.text }}>{commit().author}</span></b> committed {ago(commit().date)} · {props.sha.slice(0, 7)}
+                  {icons().user} <b><span style={{ fg: colors.text }}>{commit().author}</span></b> committed {ago(commit().date)} · {props.sha.slice(0, 7)}
                 </text>
                 <Show when={commit().committer && (commit().committer!.name !== commit().author || commit().committer!.date !== commit().date)}>
                   <text width="100%" flexShrink={0} fg={colors.muted}>
-                     Committer <b><span style={{ fg: colors.text }}>{commit().committer?.name}</span></b> · {ago(commit().committer!.date)}
+                    {icons().user} Committer <b><span style={{ fg: colors.text }}>{commit().committer?.name}</span></b> · {ago(commit().committer!.date)}
                   </text>
                 </Show>
               </>

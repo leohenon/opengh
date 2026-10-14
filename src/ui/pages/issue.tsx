@@ -11,6 +11,7 @@ import { detailContentWidth } from "../detail-layout"
 import { issueIcon, referenceColor, referenceIcon, referenceState, referencedPulls } from "../issue-references"
 import { createReactiveMarkdownStyle } from "../markdown-style"
 import { useTheme } from "../theme"
+import { useIcons } from "../icon-style"
 import { createScrollbarVisibility } from "../scrollbar-visibility"
 
 function MetadataField(props: { label: string; compact: boolean; muted?: boolean; children: JSX.Element }) {
@@ -62,6 +63,7 @@ function IssueDates(props: { issue: IssueDetail; compact: boolean }) {
 
 function ReferencedPulls(props: { resource: ResourceState<IssueReference[]>; repository: string }) {
   const { colors } = useTheme()
+  const icons = useIcons()
   const pulls = createMemo(() => referencedPulls(props.resource.value ?? []))
   return (
     <Show when={pulls().length > 0 || props.resource.status === "error"}>
@@ -71,7 +73,7 @@ function ReferencedPulls(props: { resource: ResourceState<IssueReference[]>; rep
           {(reference) => (
             <box width="100%" minWidth={0} flexShrink={0} marginTop={1}>
               <text width="100%" flexShrink={0} fg={referenceColor(colors, reference)}>
-                <a href={reference.url}>{referenceIcon(reference)} #{reference.number} · {referenceState(reference)}</a>
+                <a href={reference.url}>{referenceIcon(reference, icons())} #{reference.number} · {referenceState(reference)}</a>
               </text>
               <Show when={reference.repository !== props.repository}>
                 <text width="100%" flexShrink={0} fg={colors.muted}>{reference.repository}</text>
@@ -120,10 +122,11 @@ function TimelineHeader(props: { children: JSX.Element }) {
 
 function Comment(props: { comment: IssueComment; syntaxStyle: SyntaxStyle; backgroundColor: string }) {
   const { colors } = useTheme()
+  const icons = useIcons()
   const association = () => props.comment.authorAssociation === "NONE"
     ? "" : props.comment.authorAssociation.toLowerCase().replaceAll("_", " ")
   return (
-    <TimelineEntry icon="" nodeOffset={2}>
+    <TimelineEntry icon={icons().user} nodeOffset={2}>
       <box width="100%" minWidth={0} flexShrink={0} backgroundColor={props.backgroundColor} paddingX={2} paddingY={1} flexDirection="column">
         <TimelineHeader>
           <b><span style={{ fg: colors.text }}>{props.comment.author}</span></b> · {ago(props.comment.createdAt)}
@@ -142,6 +145,7 @@ function Comment(props: { comment: IssueComment; syntaxStyle: SyntaxStyle; backg
 
 function ReferenceMention(props: { reference: IssueReference; repository: string }) {
   const { colors } = useTheme()
+  const icons = useIcons()
   const identifier = () => {
     const reference = props.reference
     const id = reference.kind === "commit" ? reference.sha.slice(0, 7) : `#${reference.number}`
@@ -149,7 +153,7 @@ function ReferenceMention(props: { reference: IssueReference; repository: string
   }
   const kind = () => props.reference.kind === "pull" ? "PR" : props.reference.kind
   return (
-    <TimelineEntry icon={referenceIcon(props.reference)} color={referenceColor(colors, props.reference)}>
+    <TimelineEntry icon={referenceIcon(props.reference, icons())} color={referenceColor(colors, props.reference)}>
       <box width="100%" minWidth={0} flexShrink={0} paddingX={2} flexDirection="column">
         <TimelineHeader>
           <b><span style={{ fg: colors.text }}>{props.reference.actor}</span></b> referenced this in {kind()} {identifier()}
@@ -175,6 +179,7 @@ export function IssueScreen(props: {
   detailLayout?: DetailLayout
 }) {
   const { colors, theme } = useTheme()
+  const icons = useIcons()
   const dimensions = useTerminalDimensions()
   const wide = () => dimensions().width >= 112
   const centered = () => (props.detailLayout ?? defaultConfig.detailLayout) === "centered"
@@ -229,7 +234,7 @@ export function IssueScreen(props: {
           <Show when={issue()}>
             <text width="100%" flexShrink={0} marginTop={1} fg={colors.muted}>
               <span style={{ fg: issue()?.state === "open" ? colors.openState : colors.closedState }}>
-                {issueIcon(issue()!.state)} {issue()?.state === "open" ? "Open" : "Closed"}
+                {issueIcon(issue()!.state, icons())} {issue()?.state === "open" ? "Open" : "Closed"}
               </span>
               {issue()?.stateReason ? ` · ${issue()!.stateReason!.replaceAll("_", " ")}` : ""}
               {issue()?.locked ? " · locked" : ""}
@@ -249,7 +254,7 @@ export function IssueScreen(props: {
                   </Show>
                   <box width="100%" minWidth={0} flexShrink={0} backgroundColor={surface()} paddingX={2} paddingY={1} flexDirection="column">
                     <text width="100%" flexShrink={0} fg={colors.muted}>
-                       <b><span style={{ fg: colors.text }}>{current().author}</span></b> · author
+                      {icons().user} <b><span style={{ fg: colors.text }}>{current().author}</span></b> · author
                     </text>
                     <box width="100%" minWidth={0} flexShrink={0} marginTop={1}>
                       <Show when={current().body.trim()} fallback={<text fg={colors.muted}>No description provided.</text>}>

@@ -26,3 +26,33 @@ export const workflowIcons = {
   attention: "\uf421",
   neutral: "\uf48b",
 } as const
+
+export type IconSet = {
+  pullRequest: { open: string; merged: string; closed: string; draft: string }
+  issue: { open: string; closed: string }
+  repository: { fork: string; star: string; watching: string }
+  workflow: { success: string; failure: string; cancelled: string; skipped: string; clock: string; attention: string; neutral: string }
+  user: string
+  commit: string
+  branch: string
+}
+
+export const nerdIcons: IconSet = {
+  pullRequest: pullRequestIcons,
+  issue: issueIcons,
+  repository: repositoryIcons,
+  workflow: workflowIcons,
+  user: "\uf007",
+  commit: "\uf417",
+  branch: "\ue0a0",
+}
+
+export const unicodeIcons: IconSet = {
+  pullRequest: { open: "⑂", merged: "⑃", closed: "×", draft: "◌" },
+  issue: issueIcons,
+  repository: { fork: "⑂", star: "☆", watching: "◉" },
+  workflow: { success: "✓", failure: "×", cancelled: "⊘", skipped: "↷", clock: "◷", attention: "!", neutral: "−" },
+  user: "●",
+  commit: "◇",
+  branch: "⑂",
+}

@@ -6,10 +6,10 @@ import type { Repo } from "../../models"
 import type { RepositoryDocumentState, ResourceState } from "../../repository-state"
 import { ResourceStateView } from "../components/resource-state"
 import { count } from "../format"
-import { repositoryIcons } from "../icons"
 import { GitHubMarkdown } from "../components/github-markdown"
 import { createReactiveMarkdownStyle } from "../markdown-style"
 import { useTheme } from "../theme"
+import { useIcons } from "../icon-style"
 import { createScrollbarVisibility } from "../scrollbar-visibility"
 
 function extractAboutContent(value: string) {
@@ -40,6 +40,7 @@ export function OverviewScreen(props: {
 }) {
   const dimensions = useTerminalDimensions()
   const { colors, theme } = useTheme()
+  const icons = useIcons()
   const bindScrollbar = createScrollbarVisibility(() => props.showScrollbar)
   const repo = () => props.repo
   const about = createMemo(() => extractAboutContent(repo().description))
@@ -203,15 +204,15 @@ export function OverviewScreen(props: {
             <text height={1} flexShrink={0} fg={colors.blue}>{repo().language}</text>
             <box height={1} flexShrink={0} />
             <box height={1} flexShrink={0} flexDirection="row">
-              <text width={2} fg={colors.muted}>{repositoryIcons.star}</text>
+              <text width={2} fg={colors.muted}>{icons().repository.star}</text>
               <text fg={colors.text}>{count(repo().stars)} stars</text>
             </box>
             <box height={1} flexShrink={0} flexDirection="row">
-              <text width={2} fg={colors.muted}>{repositoryIcons.fork}</text>
+              <text width={2} fg={colors.muted}>{icons().repository.fork}</text>
               <text fg={colors.text}>{count(repo().forks)} forks</text>
             </box>
             <box height={1} flexShrink={0} flexDirection="row">
-              <text width={2} fg={colors.muted}>{repositoryIcons.watching}</text>
+              <text width={2} fg={colors.muted}>{icons().repository.watching}</text>
               <text fg={colors.text}>{count(repo().watchers)} watching</text>
             </box>
             <box height={1} flexShrink={0} />

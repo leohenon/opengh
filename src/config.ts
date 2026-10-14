@@ -5,6 +5,7 @@ import { isThemeName, type ThemeName } from "./theme"
 
 export type AboutSidebar = "auto" | "show" | "hide"
 export type DetailLayout = "centered" | "wide"
+export type IconStyle = "unicode" | "nerd"
 
 export type Config = {
   showScrollbars: boolean
@@ -12,6 +13,7 @@ export type Config = {
   aboutSidebar: AboutSidebar
   detailLayout: DetailLayout
   showStatusBarHints: boolean
+  iconStyle: IconStyle
 }
 
 export const defaultConfig: Config = {
@@ -20,6 +22,7 @@ export const defaultConfig: Config = {
   aboutSidebar: "auto",
   detailLayout: "centered",
   showStatusBarHints: false,
+  iconStyle: "nerd",
 }
 
 export class ConfigFileError extends Error {
@@ -61,6 +64,7 @@ function normalizeConfig(value: unknown): Config {
     showStatusBarHints: typeof input.showStatusBarHints === "boolean"
       ? input.showStatusBarHints
       : defaultConfig.showStatusBarHints,
+    iconStyle: input.iconStyle === "unicode" || input.iconStyle === "nerd" ? input.iconStyle : defaultConfig.iconStyle,
   }
 }
 

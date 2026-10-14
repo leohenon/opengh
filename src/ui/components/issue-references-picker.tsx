@@ -5,6 +5,7 @@ import type { IssueReference } from "../../models"
 import { fitText } from "../format"
 import { referenceColor, referenceIcon, referenceState, referencedItems, type IssueLinkReference } from "../issue-references"
 import { useTheme } from "../theme"
+import { useIcons } from "../icon-style"
 import { ListLine } from "./list-line"
 import { Popup } from "./popup"
 import { SelectableList } from "./selectable-list"
@@ -17,6 +18,7 @@ export function IssueReferencesPicker(props: {
   onCopy: (reference: IssueLinkReference) => void
 }) {
   const { colors } = useTheme()
+  const icons = useIcons()
   const items = createMemo(() => referencedItems(props.references, props.currentIssue))
   const pulls = createMemo(() => items().filter((reference) => reference.kind === "pull"))
   const issues = createMemo(() => items().filter((reference) => reference.kind === "issue"))
@@ -68,7 +70,7 @@ export function IssueReferencesPicker(props: {
               >
                 {(reference, selected) => (
                   <>
-                    <text width={3} flexShrink={0} fg={referenceColor(colors, reference())}>{referenceIcon(reference())}</text>
+                    <text width={3} flexShrink={0} fg={referenceColor(colors, reference())}>{referenceIcon(reference(), icons())}</text>
                     <box height={2} flexGrow={1} flexBasis={0} minWidth={0}>
                       <ListLine fg={colors.text} attributes={selected() ? TextAttributes.BOLD : TextAttributes.NONE}>
                         {(width) => fitText(`#${reference().number} ${reference().title}`, width)}

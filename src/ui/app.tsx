@@ -28,6 +28,7 @@ import { WorkScreen } from "./pages/work"
 import { tabs } from "./tabs"
 import { referencedItems } from "./issue-references"
 import { useTheme } from "./theme"
+import { IconProvider } from "./icon-style"
 
 type Overlay = "help" | "branch-picker" | "settings" | "issue-references"
 type ToastState = { id: number; title: string; message: string; duration?: number; tone?: "error" | "success" | "info" }
@@ -519,6 +520,7 @@ export function App(props: AppProps) {
   })
 
   return (
+    <IconProvider style={config().iconStyle}>
     <box width={dimensions().width} height={dimensions().height} flexDirection="column" backgroundColor={colors.canvas}>
       <Header repo={data().repo} page={page()} tabs={visibleTabs()} />
       <box visible={page() === "overview"} flexGrow={1} minHeight={0}>
@@ -683,5 +685,6 @@ export function App(props: AppProps) {
         />
       </Show>
     </box>
+    </IconProvider>
   )
 }

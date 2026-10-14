@@ -6,9 +6,9 @@ import { useTheme } from "../theme"
 import { Popup } from "./popup"
 import { ThemePicker } from "./theme-picker"
 
-type Setting = "theme" | "scrollbars" | "about-sidebar" | "detail-layout" | "status-bar-hints"
+type Setting = "theme" | "scrollbars" | "about-sidebar" | "detail-layout" | "status-bar-hints" | "icon-style"
 
-const settingOrder: Setting[] = ["theme", "scrollbars", "about-sidebar", "detail-layout", "status-bar-hints"]
+const settingOrder: Setting[] = ["theme", "scrollbars", "about-sidebar", "detail-layout", "status-bar-hints", "icon-style"]
 const sidebarValues = ["auto", "show", "hide"] as const
 
 export function Settings(props: {
@@ -26,7 +26,8 @@ export function Settings(props: {
   const [saving, setSaving] = createSignal(false)
   const busy = () => saving() || props.saving === true
   const [error, setError] = createSignal("")
-  const popupHeight = 26
+  const rowHeight = () => dimensions().height < 29 ? 2 : 3
+  const popupHeight = () => settingOrder.length * rowHeight() + 11
   const split = () => dimensions().width >= 110
   const scrollbarValue = () => props.config.showScrollbars ? "on" : "off"
 
@@ -76,6 +77,19 @@ export function Settings(props: {
     }
   }
 
+  const changeIconStyle = async () => {
+    if (busy()) return
+    setSaving(true)
+    setError("")
+    try {
+      await props.onChange({ ...props.config, iconStyle: props.config.iconStyle === "nerd" ? "unicode" : "nerd" })
+    } catch (error) {
+      setError(error instanceof Error ? error.message : "Could not save settings")
+    } finally {
+      setSaving(false)
+    }
+  }
+
   const openThemes = () => {
     setError("")
     setScreen("themes")
@@ -106,14 +120,16 @@ export function Settings(props: {
     if (selected() === "about-sidebar" && (event.name === "left" || event.name === "right" || enter))
       return void changeSidebar(event.name === "left" ? -1 : 1)
     if (selected() === "detail-layout" && (event.name === "left" || event.name === "right" || enter))
-      void changeDetailLayout()
+      return void changeDetailLayout()
+    if (selected() === "icon-style" && (event.name === "left" || event.name === "right" || enter))
+      void changeIconStyle()
   })
 
   const settingRow = (setting: Setting, title: string, description: string, value: string) => {
     const active = () => selected() === setting
     return (
       <box
-        height={3}
+        height={rowHeight()}
         flexShrink={0}
         flexDirection="row"
         alignItems="flex-start"
@@ -123,10 +139,10 @@ export function Settings(props: {
       >
         <text width={2} fg={colors.blue}>{active() ? "›" : " "}</text>
         <box flexGrow={1} minWidth={0} flexDirection="column">
-          <text fg={colors.text} attributes={active() ? TextAttributes.BOLD : TextAttributes.NONE}>{title}</text>
-          <text fg={colors.muted}>{description}</text>
+          <text width="100%" height={1} wrapMode="none" fg={colors.text} attributes={active() ? TextAttributes.BOLD : TextAttributes.NONE}>{title}</text>
+          <text width="100%" height={1} wrapMode="none" fg={colors.muted}>{description}</text>
         </box>
-        <text width={24} flexShrink={0} fg={active() ? colors.blue : colors.muted}>‹ {value} ›</text>
+        <text width={split() ? 24 : Math.min(24, Math.max(12, Math.floor((dimensions().width - 10) * 0.35)))} flexShrink={0} fg={active() ? colors.blue : colors.muted}>‹ {value} ›</text>
       </box>
     )
   }
@@ -139,6 +155,10 @@ export function Settings(props: {
     if (selected() === "scrollbars") return {
       title: "Scrollbars",
       description: "Show vertical scrollbars only when content exceeds the viewport.",
+    }
+    if (selected() === "icon-style") return {
+      title: "Icon style",
+      description: "Standard Unicode works with ordinary terminal fonts. Nerd Font uses GitHub-style glyphs and requires a Nerd Font selected in your terminal. This setting cannot change or detect the terminal font.",
     }
     if (selected() === "detail-layout") return {
       title: "Detail layout",
@@ -155,7 +175,7 @@ export function Settings(props: {
   }
 
   return (
-    <Popup width={100} height={popupHeight} zIndex={200} placement="center">
+    <Popup width={100} height={popupHeight()} zIndex={200} placement="center">
       <Show
         when={screen() === "settings"}
         fallback={(
@@ -196,6 +216,7 @@ export function Settings(props: {
             {settingRow("about-sidebar", "About sidebar", "Repository metadata", props.config.aboutSidebar)}
             {settingRow("detail-layout", "Detail layout", "Detail page width", props.config.detailLayout)}
             {settingRow("status-bar-hints", "Status bar hints", "Keyboard shortcuts", props.config.showStatusBarHints ? "on" : "off")}
+            {settingRow("icon-style", "Icon style", "Terminal symbols", props.config.iconStyle === "nerd" ? "Nerd Font" : "Unicode")}
             <box flexGrow={1} minHeight={0} />
             <Show when={props.loadError || error()}>
               {(message) => <text fg={colors.red} wrapMode="word">{message()}</text>}
@@ -206,7 +227,7 @@ export function Settings(props: {
               position="relative"
               top={-1}
               width="42%"
-              height={popupHeight}
+              height={popupHeight()}
               minWidth={0}
               flexDirection="column"
               paddingTop={1}

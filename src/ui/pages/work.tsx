@@ -8,6 +8,7 @@ import { SelectableList } from "../components/selectable-list"
 import { ago, fitText } from "../format"
 import { issueIcon, pullRequestIcon } from "../issue-references"
 import { useTheme } from "../theme"
+import { useIcons } from "../icon-style"
 
 export function WorkScreen(props: {
   kind: "issue" | "pull"
@@ -23,6 +24,7 @@ export function WorkScreen(props: {
   onCopy?: (entry: IssueSummary | PullRequestSummary) => void
 }) {
   const { colors } = useTheme()
+  const icons = useIcons()
   const merged = (entry: IssueSummary | PullRequestSummary) => props.kind === "pull" && "merged" in entry && entry.merged
   const entryColor = (entry: IssueSummary | PullRequestSummary) => {
     if (merged(entry)) return colors.purple
@@ -31,8 +33,8 @@ export function WorkScreen(props: {
     return props.kind === "pull" ? colors.red : colors.closedState
   }
   const entryIcon = (entry: IssueSummary | PullRequestSummary) => {
-    if (props.kind === "issue") return issueIcon(entry.state)
-    return pullRequestIcon({ state: entry.state, merged: merged(entry), draft: "merged" in entry && entry.draft })
+    if (props.kind === "issue") return issueIcon(entry.state, icons())
+    return pullRequestIcon({ state: entry.state, merged: merged(entry), draft: "merged" in entry && entry.draft }, icons())
   }
 
   return (
