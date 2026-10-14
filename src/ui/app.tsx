@@ -548,12 +548,13 @@ export function App(props: AppProps) {
   return (
     <IconProvider style={config().iconStyle}>
     <box width={dimensions().width} height={dimensions().height} flexDirection="column" backgroundColor={colors.canvas}>
-      <Header repo={data().repo} page={page()} tabs={visibleTabs()} />
+      <Header repo={data().repo} page={page()} tabs={visibleTabs()} compact={config().compactHeader} />
       <box visible={page() === "overview"} flexGrow={1} minHeight={0}>
           <OverviewScreen
             repo={data().repo}
             documents={data().documents}
             currentDocument={overviewDocument()}
+            compactHeader={config().compactHeader}
             showScrollbar={config().showScrollbars}
             aboutSidebar={config().aboutSidebar}
             scrollRef={(value) => (overviewScroll = value)}

@@ -6,9 +6,9 @@ import { useTheme } from "../theme"
 import { Popup } from "./popup"
 import { ThemePicker } from "./theme-picker"
 
-type Setting = "theme" | "scrollbars" | "about-sidebar" | "detail-layout" | "status-bar-hints" | "icon-style"
+type Setting = "theme" | "scrollbars" | "about-sidebar" | "detail-layout" | "status-bar-hints" | "icon-style" | "compact-header"
 
-const settingOrder: Setting[] = ["theme", "scrollbars", "about-sidebar", "detail-layout", "status-bar-hints", "icon-style"]
+const settingOrder: Setting[] = ["theme", "scrollbars", "about-sidebar", "detail-layout", "status-bar-hints", "icon-style", "compact-header"]
 const sidebarValues = ["auto", "show", "hide"] as const
 
 export function Settings(props: {
@@ -36,7 +36,7 @@ export function Settings(props: {
     setSelected(settingOrder[Math.max(0, Math.min(settingOrder.length - 1, current + delta))]!)
   }
 
-  const toggleBoolean = async (key: "showScrollbars" | "showStatusBarHints") => {
+  const toggleBoolean = async (key: "showScrollbars" | "showStatusBarHints" | "compactHeader") => {
     if (busy()) return
     setSaving(true)
     setError("")
@@ -115,6 +115,8 @@ export function Settings(props: {
     }
     if (selected() === "scrollbars" && (event.name === "left" || event.name === "right" || enter))
       return void toggleBoolean("showScrollbars")
+    if (selected() === "compact-header" && (event.name === "left" || event.name === "right" || enter))
+      return void toggleBoolean("compactHeader")
     if (selected() === "status-bar-hints" && (event.name === "left" || event.name === "right" || enter))
       return void toggleBoolean("showStatusBarHints")
     if (selected() === "about-sidebar" && (event.name === "left" || event.name === "right" || enter))
@@ -151,6 +153,10 @@ export function Settings(props: {
     if (selected() === "theme") return {
       title: "Theme",
       description: "Choose the color theme used throughout openGH. Moving through the theme list previews each theme.",
+    }
+    if (selected() === "compact-header") return {
+      title: "Compact header",
+      description: "Use one header row instead of five, with tabs on the left and the repository name on the right.",
     }
     if (selected() === "scrollbars") return {
       title: "Scrollbars",
@@ -217,6 +223,7 @@ export function Settings(props: {
             {settingRow("detail-layout", "Detail layout", "Detail page width", props.config.detailLayout)}
             {settingRow("status-bar-hints", "Status bar hints", "Keyboard shortcuts", props.config.showStatusBarHints ? "on" : "off")}
             {settingRow("icon-style", "Icon style", "Terminal symbols", props.config.iconStyle === "nerd" ? "Nerd Font" : "Unicode")}
+            {settingRow("compact-header", "Compact header", "More room for content", props.config.compactHeader ? "on" : "off")}
             <box flexGrow={1} minHeight={0} />
             <Show when={props.loadError || error()}>
               {(message) => <text fg={colors.red} wrapMode="word">{message()}</text>}

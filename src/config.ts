@@ -14,6 +14,7 @@ export type Config = {
   detailLayout: DetailLayout
   showStatusBarHints: boolean
   iconStyle: IconStyle
+  compactHeader: boolean
 }
 
 export const defaultConfig: Config = {
@@ -23,6 +24,7 @@ export const defaultConfig: Config = {
   detailLayout: "centered",
   showStatusBarHints: false,
   iconStyle: "nerd",
+  compactHeader: false,
 }
 
 export class ConfigFileError extends Error {
@@ -65,6 +67,7 @@ function normalizeConfig(value: unknown): Config {
       ? input.showStatusBarHints
       : defaultConfig.showStatusBarHints,
     iconStyle: input.iconStyle === "unicode" || input.iconStyle === "nerd" ? input.iconStyle : defaultConfig.iconStyle,
+    compactHeader: typeof input.compactHeader === "boolean" ? input.compactHeader : defaultConfig.compactHeader,
   }
 }
 
