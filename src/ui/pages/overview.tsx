@@ -6,6 +6,7 @@ import type { Repo } from "../../models"
 import type { RepositoryDocumentState, ResourceState } from "../../repository-state"
 import { ResourceStateView } from "../components/resource-state"
 import { count } from "../format"
+import { repositoryIcons } from "../icons"
 import { GitHubMarkdown } from "../components/github-markdown"
 import { createReactiveMarkdownStyle } from "../markdown-style"
 import { useTheme } from "../theme"
@@ -185,6 +186,11 @@ export function OverviewScreen(props: {
             paddingLeft={2}
             paddingRight={2}
           >
+            <Show when={repo().parentRepository}>
+              <text height={1} flexShrink={0} fg={colors.muted}>Forked from</text>
+              <text flexShrink={0} fg={colors.blue} wrapMode="word">{repo().parentRepository}</text>
+              <box height={1} flexShrink={0} />
+            </Show>
             <text flexShrink={0} fg={colors.text} wrapMode="word">{about().description}</text>
             <Show when={about().urls.length > 0}>
               <box height={1} flexShrink={0} />
@@ -197,15 +203,15 @@ export function OverviewScreen(props: {
             <text height={1} flexShrink={0} fg={colors.blue}>{repo().language}</text>
             <box height={1} flexShrink={0} />
             <box height={1} flexShrink={0} flexDirection="row">
-              <text width={2} fg={colors.muted}>★</text>
+              <text width={2} fg={colors.muted}>{repositoryIcons.star}</text>
               <text fg={colors.text}>{count(repo().stars)} stars</text>
             </box>
             <box height={1} flexShrink={0} flexDirection="row">
-              <text width={2} fg={colors.muted}>⑂</text>
+              <text width={2} fg={colors.muted}>{repositoryIcons.fork}</text>
               <text fg={colors.text}>{count(repo().forks)} forks</text>
             </box>
             <box height={1} flexShrink={0} flexDirection="row">
-              <text width={2} fg={colors.muted}>◉</text>
+              <text width={2} fg={colors.muted}>{repositoryIcons.watching}</text>
               <text fg={colors.text}>{count(repo().watchers)} watching</text>
             </box>
             <box height={1} flexShrink={0} />

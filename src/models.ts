@@ -1,5 +1,6 @@
 export type Repo = {
   nameWithOwner: string
+  parentRepository?: string
   url: string
   description: string
   visibility: string
@@ -85,6 +86,7 @@ export type IssueReference = IssuePullReference | IssueIssueReference | IssueCom
 
 export type PullRequestSummary = IssueSummary & {
   merged: boolean
+  draft?: boolean
 }
 
 export type WorkflowRunSummary = {

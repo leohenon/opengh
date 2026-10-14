@@ -6,6 +6,7 @@ import { ListLine } from "../components/list-line"
 import { ResourceStateView } from "../components/resource-state"
 import { SelectableList } from "../components/selectable-list"
 import { ago, fitText } from "../format"
+import { issueIcon, pullRequestIcon } from "../issue-references"
 import { useTheme } from "../theme"
 
 export function WorkScreen(props: {
@@ -25,13 +26,13 @@ export function WorkScreen(props: {
   const merged = (entry: IssueSummary | PullRequestSummary) => props.kind === "pull" && "merged" in entry && entry.merged
   const entryColor = (entry: IssueSummary | PullRequestSummary) => {
     if (merged(entry)) return colors.purple
+    if (props.kind === "pull" && "merged" in entry && entry.draft && entry.state === "open") return colors.muted
     if (entry.state === "open") return colors.openState
     return props.kind === "pull" ? colors.red : colors.closedState
   }
   const entryIcon = (entry: IssueSummary | PullRequestSummary) => {
-    if (props.kind === "issue") return entry.state === "closed" ? "✓" : "◉"
-    if (merged(entry)) return "⑃"
-    return entry.state === "closed" ? "×" : "⑂"
+    if (props.kind === "issue") return issueIcon(entry.state)
+    return pullRequestIcon({ state: entry.state, merged: merged(entry), draft: "merged" in entry && entry.draft })
   }
 
   return (

@@ -253,11 +253,14 @@ describe("GitHub client", () => {
       ],
       "repos/owner/repo/pulls?state=open&per_page=30&page=1": [
         { ...base, number: 3, state: "open", merged_at: null },
+        { ...base, number: 4, state: "open", merged_at: null, draft: true },
       ],
     }))
     expect((await client.pulls("owner/repo", "closed")).items.map(({ number, state, merged }) => ({ number, state, merged })))
       .toEqual([{ number: 1, state: "closed", merged: true }, { number: 2, state: "closed", merged: false }])
-    expect((await client.pulls("owner/repo", "open")).items[0]).toMatchObject({ number: 3, state: "open", merged: false })
+    const open = (await client.pulls("owner/repo", "open")).items
+    expect(open[0]).toMatchObject({ number: 3, state: "open", merged: false, draft: false })
+    expect(open[1]).toMatchObject({ number: 4, state: "open", merged: false, draft: true })
   })
 
   test("paginates branches and falls back only for an empty first page", async () => {

@@ -22,6 +22,7 @@ type Page<T> = { items: T[]; hasMore: boolean }
 
 type RepositoryResponse = {
   full_name: string
+  parent?: { full_name: string } | null
   html_url: string
   description: string | null
   visibility?: string | null
@@ -89,6 +90,7 @@ type IssueTimelineResponse = {
 
 type PullResponse = IssueResponse & {
   merged_at: string | null
+  draft?: boolean
 }
 
 type CommitResponse = {
@@ -161,6 +163,7 @@ export function createGitHubClient(transport: GitHubTransport) {
     const repo = await transport.json<RepositoryResponse>(`repos/${repository}`)
     return {
       nameWithOwner: repo.full_name,
+      parentRepository: repo.parent?.full_name,
       url: repo.html_url,
       description: repo.description ?? "No description provided.",
       visibility: repo.visibility?.toUpperCase() ?? "PUBLIC",
@@ -368,7 +371,7 @@ export function createGitHubClient(transport: GitHubTransport) {
       `repos/${repository}/pulls?state=${state}&per_page=${PAGE_SIZE}&page=${page}`,
     )
     return {
-      items: items.map((item) => ({ ...issueSummary(item), merged: item.merged_at != null })),
+      items: items.map((item) => ({ ...issueSummary(item), merged: item.merged_at != null, draft: item.draft === true })),
       hasMore: items.length === PAGE_SIZE,
     }
   }

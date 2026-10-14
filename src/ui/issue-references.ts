@@ -1,4 +1,5 @@
-import type { IssuePullReference, IssueReference } from "../models"
+import type { IssuePullReference, IssueReference, ListState, PullRequestSummary } from "../models"
+import { issueIcons, pullRequestIcons } from "./icons"
 import type { AppColors } from "../theme"
 
 export type IssueLinkReference = Extract<IssueReference, { kind: "pull" | "issue" }>
@@ -22,10 +23,19 @@ export function referencedPulls(references: readonly IssueReference[]): IssuePul
   return referencedItems(references).filter((reference): reference is IssuePullReference => reference.kind === "pull")
 }
 
+export function pullRequestIcon(pull: Pick<PullRequestSummary, "state" | "merged" | "draft">) {
+  return pull.merged ? pullRequestIcons.merged : pull.state === "closed" ? pullRequestIcons.closed
+    : pull.draft ? pullRequestIcons.draft : pullRequestIcons.open
+}
+
+export function issueIcon(state: ListState) {
+  return state === "closed" ? issueIcons.closed : issueIcons.open
+}
+
 export function referenceIcon(reference: IssueReference) {
   if (reference.kind === "commit") return ""
-  if (reference.kind === "issue") return reference.state === "closed" ? "✓" : "◉"
-  return reference.merged ? "⑃" : reference.state === "closed" ? "×" : reference.draft ? "◌" : "⑂"
+  if (reference.kind === "issue") return issueIcon(reference.state)
+  return pullRequestIcon(reference)
 }
 
 export function referenceState(reference: IssueReference) {

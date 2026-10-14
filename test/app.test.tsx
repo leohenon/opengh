@@ -5,6 +5,7 @@ import { createSignal } from "solid-js";
 import { App } from "../src/ui/app";
 import { defaultConfig, type Config } from "../src/config";
 import { appColors, resolveTheme } from "../src/theme";
+import { issueIcons, pullRequestIcons, repositoryIcons, workflowIcons } from "../src/ui/icons";
 import type { RepositoryData, ResourceState } from "../src/repository-state";
 import { ThemeProvider, useTheme } from "../src/ui/theme";
 import {
@@ -192,6 +193,7 @@ describe("openGH TUI", () => {
   test("PR rows distinguish purple merges from red unmerged closures", async () => {
     const data = structuredClone(githubDataFixture);
     const merged = data.pulls.closed.value!.items[0]!;
+    data.pulls.open.value!.items.push({ ...data.pulls.open.value!.items[0]!, number: 404, title: "Draft PR", draft: true });
     data.pulls.closed.value!.items = [
       { ...merged, title: "Merged PR", merged: true },
       { ...merged, number: 403, title: "Closed PR", merged: false },
@@ -205,20 +207,62 @@ describe("openGH TUI", () => {
     await view.flush();
     view.mockInput.pressKey("4");
     await view.flush();
-    expect(iconColor("⑂")).toEqual(RGBA.fromHex(colors.openState));
+    expect(iconColor(pullRequestIcons.open)).toEqual(RGBA.fromHex(colors.openState));
+    expect(view.captureCharFrame()).toContain("Draft PR");
+    expect(iconColor(pullRequestIcons.draft)).toEqual(RGBA.fromHex(colors.muted));
     view.mockInput.pressTab();
     for (const width of [100, 32]) {
       view.resize(width, 26);
       await view.flush();
       expect(view.captureCharFrame()).toContain("Merged PR");
       expect(view.captureCharFrame()).toContain("Closed PR");
-      expect(iconColor("⑃")).toEqual(RGBA.fromHex(colors.purple));
-      expect(iconColor("×")).toEqual(RGBA.fromHex(colors.red));
+      expect(iconColor(pullRequestIcons.merged)).toEqual(RGBA.fromHex(colors.purple));
+      expect(iconColor(pullRequestIcons.closed)).toEqual(RGBA.fromHex(colors.red));
     }
     view.mockInput.pressKey("3");
     view.mockInput.pressTab();
     await view.flush();
-    expect(iconColor("✓")).toEqual(RGBA.fromHex(colors.closedState));
+    expect(iconColor(issueIcons.closed)).toEqual(RGBA.fromHex(colors.closedState));
+  });
+
+  test("workflow icons distinguish failures, neutral conclusions, queued runs, and active progress", async () => {
+    const colors = appColors(resolveTheme("github"));
+    const completed = ["success", "failure", "timed_out", "cancelled", "skipped", "neutral", "action_required"].map((conclusion, index) => ({
+      id: index, name: "CI", title: `${conclusion} run`, status: "completed", conclusion, createdAt: "2026-04-14T09:00:00Z",
+    }));
+    const pending = ["in_progress", "queued", "waiting"].map((status, index) => ({
+      id: 20 + index, name: "CI", title: `${status} run`, status, conclusion: "", createdAt: "2026-04-14T09:00:00Z",
+    }));
+    const view = await testRender(() => <App data={{ ...githubDataFixture,
+      runs: { status: "ready", value: { items: [...completed, ...pending], page: 1, hasMore: false } },
+    }} operations={repositoryOperationsFixture} />, { width: 120, height: 44, useThread: false });
+    active.push(view);
+    await view.flush();
+    view.mockInput.pressKey("5");
+    await view.flush();
+    const icon = (title: string, glyph: string) => view.captureSpans().lines
+      .find((line) => line.spans.some((span) => span.text.includes(title)))?.spans.find((span) => span.text.includes(glyph));
+    for (const [title, glyph, color] of [
+      ["success run", workflowIcons.success, colors.green],
+      ["failure run", workflowIcons.failure, colors.red],
+      ["timed_out run", workflowIcons.failure, colors.red],
+      ["cancelled run", workflowIcons.cancelled, colors.muted],
+      ["skipped run", workflowIcons.skipped, colors.muted],
+      ["neutral run", workflowIcons.neutral, colors.muted],
+      ["action_required run", workflowIcons.attention, colors.yellow],
+      ["queued run", workflowIcons.clock, colors.muted],
+      ["waiting run", workflowIcons.clock, colors.yellow],
+    ]) expect(icon(title!, glyph!)?.fg).toEqual(RGBA.fromHex(color!));
+    const spinner = () => view.captureSpans().lines
+      .find((line) => line.spans.some((span) => span.text.includes("in_progress run")))?.spans
+      .find((span) => /[◐◓◑◒]/.test(span.text));
+    expect(spinner()?.fg).toEqual(RGBA.fromHex(colors.yellow));
+    const first = spinner()?.text;
+    for (let attempt = 0; attempt < 12 && spinner()?.text === first; attempt++) {
+      await Bun.sleep(40);
+      await view.flush();
+    }
+    expect(spinner()?.text).not.toBe(first);
   });
 
   test("keeps unknown tabs hidden, preserves navigation during refresh, and hides only confirmed empty sections", async () => {
@@ -1099,9 +1143,9 @@ describe("openGH TUI", () => {
     expect(frame).not.toContain("https://cloud.example.com");
     expect(frame).toContain("Language");
     expect(frame).not.toContain("REPOSITORY");
-    expect(frame).toContain("★ 35k stars");
-    expect(frame).toContain("⑂ 2.7k forks");
-    expect(frame).toContain("◉ 166 watching");
+    expect(frame).toContain(`${repositoryIcons.star} 35k stars`);
+    expect(frame).toContain(`${repositoryIcons.fork} 2.7k forks`);
+    expect(frame).toContain(`${repositoryIcons.watching} 166 watching`);
     expect(frame).toContain("License");
     expect(frame).toContain("Apache-2.0");
   });

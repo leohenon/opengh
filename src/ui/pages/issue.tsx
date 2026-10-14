@@ -8,7 +8,7 @@ import { GitHubMarkdown } from "../components/github-markdown"
 import { ResourceStateView } from "../components/resource-state"
 import { ago } from "../format"
 import { detailContentWidth } from "../detail-layout"
-import { referenceColor, referenceIcon, referenceState, referencedPulls } from "../issue-references"
+import { issueIcon, referenceColor, referenceIcon, referenceState, referencedPulls } from "../issue-references"
 import { createReactiveMarkdownStyle } from "../markdown-style"
 import { useTheme } from "../theme"
 import { createScrollbarVisibility } from "../scrollbar-visibility"
@@ -229,7 +229,7 @@ export function IssueScreen(props: {
           <Show when={issue()}>
             <text width="100%" flexShrink={0} marginTop={1} fg={colors.muted}>
               <span style={{ fg: issue()?.state === "open" ? colors.openState : colors.closedState }}>
-                {issue()?.state === "open" ? "◉ Open" : "✓ Closed"}
+                {issueIcon(issue()!.state)} {issue()?.state === "open" ? "Open" : "Closed"}
               </span>
               {issue()?.stateReason ? ` · ${issue()!.stateReason!.replaceAll("_", " ")}` : ""}
               {issue()?.locked ? " · locked" : ""}
