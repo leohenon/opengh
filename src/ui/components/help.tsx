@@ -39,6 +39,7 @@ export function Help(props: {
   hasMoreFiles?: boolean;
   hasMoreComments?: boolean;
   hasReferences?: boolean;
+  command?: string;
 }) {
   const { colors } = useTheme();
   const dimensions = useTerminalDimensions();
@@ -89,8 +90,8 @@ export function Help(props: {
   });
   const shortcuts = createMemo(() => {
     const tabs = `1–${props.tabCount}, h/l, ←/→`;
-    const entries = [...viewShortcuts(), { keys: tabs, description: "switch tabs" }, ...commonShortcuts];
-    const order = ["Enter", "Tab", "Tab / ⇧Tab", "Esc", tabs, "j/k, ↑/↓", "u/d", "g/G", "o", "y", "p", "r", ",", "?", "q / C-c"];
+    const entries = [...(props.command ? [{ keys: "x", description: props.command }] : []), ...viewShortcuts(), { keys: tabs, description: "switch tabs" }, ...commonShortcuts];
+    const order = ["Enter", "Tab", "Tab / ⇧Tab", "Esc", tabs, "j/k, ↑/↓", "u/d", "g/G", "o", "y", "x", "p", "r", ",", "?", "q / C-c"];
     return order.flatMap((keys) => entries.filter((shortcut) => shortcut.keys === keys));
   });
   const height = () => shortcuts().length + 4;

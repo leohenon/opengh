@@ -2,6 +2,8 @@ import type { ScrollBoxRenderable } from "@opentui/core"
 import { useKeyboard, useRenderer, useTerminalDimensions } from "@opentui/solid"
 import { createEffect, createMemo, createSignal, onCleanup, Show } from "solid-js"
 import { defaultConfig, type Config } from "../config"
+import { cloneCommand, cloneDestination, matchesLocalRepository, type LocalRepository, type CommandSpec, type CommandTask } from "../command-actions"
+import { CommandDialog, type CommandAction } from "./components/command-dialog"
 import type { CommitDetail, ListState } from "../models"
 import { back, navigate, openDetail, type NavigationState, type Page } from "../navigation"
 import type {
@@ -30,7 +32,7 @@ import { referencedItems } from "./issue-references"
 import { useTheme } from "./theme"
 import { IconProvider } from "./icon-style"
 
-type Overlay = "help" | "branch-picker" | "settings" | "issue-references"
+type Overlay = "help" | "branch-picker" | "settings" | "issue-references" | "command"
 type ToastState = { id: number; title: string; message: string; duration?: number; tone?: "error" | "success" | "info" }
 
 export type AppProps = {
@@ -40,6 +42,10 @@ export type AppProps = {
   configSaving?: boolean
   configError?: string
   onConfigChange?: (config: Config) => Promise<void>
+  cwd?: string
+  localRepository?: LocalRepository
+  onRunCommand?: (spec: CommandSpec, output: (chunk: string) => void, signal: AbortSignal) => Promise<CommandTask>
+  onCommandCaptureCancel?: (cancel: (() => void) | undefined) => void
   onQuit?: () => void
   onRefresh?: () => void
   onRetryResource?: (resource: RepositoryResource) => void
@@ -74,6 +80,9 @@ export function App(props: AppProps) {
   const [overviewDocument, setOverviewDocument] = createSignal<string>()
   const [overlay, setOverlay] = createSignal<Overlay>()
   const [toast, setToast] = createSignal<ToastState>()
+  const [commandAction, setCommandAction] = createSignal<CommandAction>()
+  const canClone = () => Boolean(props.onRunCommand && props.cwd && !matchesLocalRepository(props.localRepository, data().repo.nameWithOwner))
+  const openCommand = (action: CommandAction) => { setCommandAction(action); setOverlay("command") }
   let toastId = 0
   let overviewScroll: ScrollBoxRenderable | undefined
   let defaultStateRepository: string | undefined
@@ -425,7 +434,7 @@ export function App(props: AppProps) {
     if (page() === "commits") return (dimensions().width >= 45 ? "enter open" : "enter") + " · o GitHub · y SHA"
       + (dimensions().width >= 60 ? " · tab branch" : "")
       + " · ? help"
-    if (page() === "overview") return "o GitHub · y URL · ? help"
+    if (page() === "overview") return "o GitHub · y URL" + (canClone() ? " · x clone" : "") + " · ? help"
     return undefined
   }
 
@@ -437,7 +446,7 @@ export function App(props: AppProps) {
       if (escape) setOverlay()
       return
     }
-    if (overlay() === "settings") return
+    if (overlay() === "settings" || overlay() === "command") return
     if (event.name === "q") return quit()
     if (overlay() === "help") {
       if (event.name === "?" || escape) setOverlay()
@@ -481,6 +490,10 @@ export function App(props: AppProps) {
       return
     }
     if (page() === "overview" && !event.ctrl && !event.meta) {
+      if (event.name === "x" && canClone()) {
+        const repository = data().repo.nameWithOwner
+        return openCommand({ title: `Clone ${repository}`, destination: cloneDestination(repository.split("/")[1]!, props.cwd!), command: (destination) => cloneCommand(repository, destination, props.cwd!) })
+      }
       if (event.name === "o") return void openInBrowser()
       if (event.name === "y") return void copyToClipboard(data().repo.url, "URL")
     }
@@ -640,6 +653,15 @@ export function App(props: AppProps) {
           />
         )}
       </Show>
+      <Show when={overlay() === "command" && commandAction()} keyed>
+        {(action) => <CommandDialog
+          action={action}
+          onRun={props.onRunCommand!}
+          onCaptureCancel={props.onCommandCaptureCancel}
+          onCopy={props.onCopyToClipboard}
+          onClose={() => { setOverlay(); setCommandAction() }}
+        />}
+      </Show>
       <Show when={overlay() === "help"}>
         <Help
           view={activeCommitSha() ? "commit" : activeIssueNumber() ? "issue" : page()}
@@ -648,6 +670,7 @@ export function App(props: AppProps) {
           hasMoreFiles={commitResource().value?.files.hasMore}
           hasMoreComments={issueDetail().comments.value?.hasMore}
           hasReferences={issueMenuItems().length > 0}
+          command={page() === "overview" && canClone() ? "clone repository" : undefined}
         />
       </Show>
       <Show when={overlay() === "issue-references" && activeIssueNumber()}>

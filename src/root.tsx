@@ -2,6 +2,7 @@ import { useKeyboard, useRenderer } from "@opentui/solid"
 import { createSignal, Match, onMount, Show, Switch } from "solid-js"
 import { defaultConfig, loadConfig, saveConfig, type Config } from "./config"
 import { copyToHostClipboard } from "./clipboard"
+import { resolveLocalRepository, runCommand, type LocalRepository } from "./command-actions"
 import { loadRecentRepositories, rememberRepository, resolveRepository } from "./github/repository"
 import { openGitHub } from "./github/browser"
 import { createRepositorySession, type RepositorySession } from "./repository-session"
@@ -30,6 +31,8 @@ export type RootServices = {
   createRepositorySession(): RepositorySession
   openGitHub(repository: string, target?: string | number): Promise<void>
   copyToHostClipboard(value: string): Promise<boolean>
+  resolveLocalRepository: typeof resolveLocalRepository
+  runCommand: typeof runCommand
 }
 
 const defaultServices: RootServices = {
@@ -41,6 +44,8 @@ const defaultServices: RootServices = {
   createRepositorySession,
   openGitHub,
   copyToHostClipboard,
+  resolveLocalRepository,
+  runCommand,
 }
 
 export function Root(props: {
@@ -58,6 +63,9 @@ export function Root(props: {
   const [configError, setConfigError] = createSignal("")
   const [configWarningDismissed, setConfigWarningDismissed] = createSignal(false)
   const session = services.createRepositorySession()
+  const [localRepository, setLocalRepository] = createSignal<LocalRepository>()
+  let commandCancel: (() => void) | undefined
+  const refreshLocalRepository = async () => { setLocalRepository(await services.resolveLocalRepository(props.cwd)) }
   let quitting = false
 
   const quit = () => {
@@ -69,7 +77,8 @@ export function Root(props: {
   useKeyboard((event) => {
     if (event.ctrl && event.name === "c") {
       event.stopPropagation()
-      quit()
+      if (commandCancel) commandCancel()
+      else quit()
     }
   })
 
@@ -93,6 +102,7 @@ export function Root(props: {
   }
 
   onMount(() => {
+    void refreshLocalRepository().catch(() => setLocalRepository(undefined))
     void Promise.all([
       services.resolveRepository(props.repositoryArgument, props.cwd),
       services.loadRecentRepositories(),
@@ -145,6 +155,13 @@ export function Root(props: {
               configSaving={configSaving()}
               configError={configError()}
               onConfigChange={updateConfig}
+              cwd={props.cwd}
+              localRepository={localRepository()}
+              onCommandCaptureCancel={(cancel) => { commandCancel = cancel }}
+              onRunCommand={async (spec, output, signal) => {
+                if (signal.aborted) throw new Error("Command cancelled before execution")
+                return services.runCommand(spec, output)
+              }}
               onQuit={quit}
               onRefresh={() => void session.refresh()}
               onRetryResource={(resource) => void session.retryResource(resource)}
