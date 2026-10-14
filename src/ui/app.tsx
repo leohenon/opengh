@@ -555,6 +555,7 @@ export function App(props: AppProps) {
             documents={data().documents}
             currentDocument={overviewDocument()}
             compactHeader={config().compactHeader}
+            hideDocumentsTab={config().hideDocumentsTab}
             showScrollbar={config().showScrollbars}
             aboutSidebar={config().aboutSidebar}
             scrollRef={(value) => (overviewScroll = value)}

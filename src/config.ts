@@ -15,6 +15,7 @@ export type Config = {
   showStatusBarHints: boolean
   iconStyle: IconStyle
   compactHeader: boolean
+  hideDocumentsTab: boolean
 }
 
 export const defaultConfig: Config = {
@@ -25,6 +26,7 @@ export const defaultConfig: Config = {
   showStatusBarHints: false,
   iconStyle: "nerd",
   compactHeader: false,
+  hideDocumentsTab: false,
 }
 
 export class ConfigFileError extends Error {
@@ -68,6 +70,7 @@ function normalizeConfig(value: unknown): Config {
       : defaultConfig.showStatusBarHints,
     iconStyle: input.iconStyle === "unicode" || input.iconStyle === "nerd" ? input.iconStyle : defaultConfig.iconStyle,
     compactHeader: typeof input.compactHeader === "boolean" ? input.compactHeader : defaultConfig.compactHeader,
+    hideDocumentsTab: typeof input.hideDocumentsTab === "boolean" ? input.hideDocumentsTab : defaultConfig.hideDocumentsTab,
   }
 }
 

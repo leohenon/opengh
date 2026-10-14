@@ -35,6 +35,7 @@ export function OverviewScreen(props: {
   documents: ResourceState<RepositoryDocumentState[]>
   currentDocument?: string
   compactHeader?: boolean
+  hideDocumentsTab?: boolean
   showScrollbar: boolean
   aboutSidebar: AboutSidebar
   scrollRef: (value: ScrollBoxRenderable | undefined) => void
@@ -81,71 +82,73 @@ export function OverviewScreen(props: {
       backgroundColor={colors.canvas}
     >
       <box flexGrow={1} minWidth={0} minHeight={0} flexDirection="column">
-        <box
-          height={1}
-          flexShrink={0}
-          flexDirection="row"
-          alignItems="center"
-          gap={2}
-          paddingLeft={2}
-          paddingRight={2}
-          minWidth={0}
-          overflow="hidden"
-        >
-          <Show
-            when={hasDocumentTabs()}
-            fallback={<text fg={props.compactHeader ? colors.salmon : colors.text} attributes={TextAttributes.BOLD}>{currentLabel()}</text>}
+        <Show when={!props.hideDocumentsTab}>
+          <box
+            height={1}
+            flexShrink={0}
+            flexDirection="row"
+            alignItems="center"
+            gap={2}
+            paddingLeft={2}
+            paddingRight={2}
+            minWidth={0}
+            overflow="hidden"
           >
             <Show
-              when={!compactDocuments()}
-              fallback={(
-                <box flexDirection="row" gap={1}>
-                  <text fg={colors.muted}>‹</text>
-                  <text fg={props.compactHeader ? colors.salmon : colors.text} attributes={TextAttributes.BOLD}>{currentLabel()}</text>
-                  <text fg={colors.muted}>›</text>
-                </box>
-              )}
+              when={hasDocumentTabs()}
+              fallback={<text fg={props.compactHeader ? colors.salmon : colors.text} attributes={TextAttributes.BOLD}>{currentLabel()}</text>}
             >
-              <For each={documents()}>
-                {(item) => (
-                  <text
-                    fg={item.id === document()?.id ? props.compactHeader ? colors.salmon : colors.text : colors.muted}
-                    attributes={item.id === document()?.id ? TextAttributes.BOLD : TextAttributes.NONE}
-                  >
-                    {item.label}
-                  </text>
-                )}
-              </For>
-            </Show>
-          </Show>
-        </box>
-        <Show when={!props.compactHeader}>
-          <box height={1} flexShrink={0} flexDirection="row">
-            <Show when={hasDocumentTabs()}>
               <Show
                 when={!compactDocuments()}
                 fallback={(
-                  <>
-                    <text fg={colors.border}>{"─".repeat(4)}</text>
-                    <text fg={colors.salmon}>{"─".repeat(currentLabel().length)}</text>
-                  </>
+                  <box flexDirection="row" gap={1}>
+                    <text fg={colors.muted}>‹</text>
+                    <text fg={props.compactHeader ? colors.salmon : colors.text} attributes={TextAttributes.BOLD}>{currentLabel()}</text>
+                    <text fg={colors.muted}>›</text>
+                  </box>
                 )}
               >
-                <text fg={colors.border}>──</text>
                 <For each={documents()}>
                   {(item) => (
-                    <>
-                      <text fg={item.id === document()?.id ? colors.salmon : colors.border}>
-                        {"─".repeat(item.label.length)}
-                      </text>
-                      <text fg={colors.border}>──</text>
-                    </>
+                    <text
+                      fg={item.id === document()?.id ? props.compactHeader ? colors.salmon : colors.text : colors.muted}
+                      attributes={item.id === document()?.id ? TextAttributes.BOLD : TextAttributes.NONE}
+                    >
+                      {item.label}
+                    </text>
                   )}
                 </For>
               </Show>
             </Show>
-            <box flexGrow={1} height={1} border={["bottom"]} borderColor={colors.border} />
           </box>
+          <Show when={!props.compactHeader}>
+            <box height={1} flexShrink={0} flexDirection="row">
+              <Show when={hasDocumentTabs()}>
+                <Show
+                  when={!compactDocuments()}
+                  fallback={(
+                    <>
+                      <text fg={colors.border}>{"─".repeat(4)}</text>
+                      <text fg={colors.salmon}>{"─".repeat(currentLabel().length)}</text>
+                    </>
+                  )}
+                >
+                  <text fg={colors.border}>──</text>
+                  <For each={documents()}>
+                    {(item) => (
+                      <>
+                        <text fg={item.id === document()?.id ? colors.salmon : colors.border}>
+                          {"─".repeat(item.label.length)}
+                        </text>
+                        <text fg={colors.border}>──</text>
+                      </>
+                    )}
+                  </For>
+                </Show>
+              </Show>
+              <box flexGrow={1} height={1} border={["bottom"]} borderColor={colors.border} />
+            </box>
+          </Show>
         </Show>
         <ResourceStateView resource={props.documents}>
           {() => (

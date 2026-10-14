@@ -144,7 +144,7 @@ describe("application root", () => {
             resolveRepository: async () => "cli/cli",
             loadRecentRepositories: async () => [],
             rememberRepository: idle,
-            loadConfig: async () => ({ showScrollbars: false, theme: "github", aboutSidebar: "auto", detailLayout: "centered", showStatusBarHints: true, compactHeader: false, iconStyle: "unicode" }),
+            loadConfig: async () => ({ showScrollbars: false, theme: "github", aboutSidebar: "auto", detailLayout: "centered", showStatusBarHints: true, hideDocumentsTab: false, compactHeader: false, iconStyle: "unicode" }),
             saveConfig: async (config) => {
               saved.push(config)
               await writes[saved.length - 1]!.promise
@@ -165,7 +165,7 @@ describe("application root", () => {
     await Bun.sleep(0)
     await view.flush()
 
-    expect(saved).toEqual([{ showScrollbars: true, theme: "github", aboutSidebar: "auto", detailLayout: "centered", showStatusBarHints: true, compactHeader: false, iconStyle: "unicode" }])
+    expect(saved).toEqual([{ showScrollbars: true, theme: "github", aboutSidebar: "auto", detailLayout: "centered", showStatusBarHints: true, hideDocumentsTab: false, compactHeader: false, iconStyle: "unicode" }])
     expect(view.captureCharFrame()).toContain("‹ off ›")
     expect(view.captureCharFrame()).toContain("Saving…")
 
@@ -193,7 +193,7 @@ describe("application root", () => {
     await view.flush()
     expect(view.captureCharFrame()).toContain("Themes")
     expect(view.captureCharFrame()).toContain("Saving…")
-    expect(saved[1]).toEqual({ showScrollbars: true, theme: "nord", aboutSidebar: "auto", detailLayout: "centered", showStatusBarHints: true, compactHeader: false, iconStyle: "unicode" })
+    expect(saved[1]).toEqual({ showScrollbars: true, theme: "nord", aboutSidebar: "auto", detailLayout: "centered", showStatusBarHints: true, hideDocumentsTab: false, compactHeader: false, iconStyle: "unicode" })
 
     writes[1]!.resolve()
     await view.flush()
