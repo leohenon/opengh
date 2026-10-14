@@ -634,6 +634,7 @@ export function App(props: AppProps) {
             <IssueScreen
               number={number}
               detail={issueDetail()}
+              defaultBranch={data().repo.defaultBranch}
               interactive={page() === "issues" && overlay() === undefined}
               showScrollbar={config().showScrollbars}
               detailLayout={config().detailLayout}

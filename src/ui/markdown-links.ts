@@ -1,0 +1,81 @@
+import type { CodeRenderable, SimpleHighlight, TextChunk } from "@opentui/core"
+import remarkGfm from "remark-gfm"
+import remarkParse from "remark-parse"
+import { unified } from "unified"
+import { visit } from "unist-util-visit"
+
+const parser = unified().use(remarkParse).use(remarkGfm)
+
+// Native table cells already have styled chunks, with a separate URL suffix.
+export function compactLinkChunks(chunks: TextChunk[]) {
+  const result: TextChunk[] = []
+  for (let index = 0; index < chunks.length; index++) {
+    const chunk = chunks[index]!
+    const url = chunk.link?.url
+    if (url && chunk.text === " (" && chunks[index + 1]?.text === url
+      && chunks[index + 1]?.link?.url === url && chunks[index + 2]?.text === ")"
+      && chunks[index + 2]?.link?.url === url) {
+      index += 2
+    } else result.push(chunk)
+  }
+  return result
+}
+
+// Conceal destinations, not the links themselves: keep labels selectable and linked.
+export function compactMarkdownLinks(block: CodeRenderable) {
+  let source = ""
+  let links: Array<{ start: number; end: number; labelStart: number; labelEnd: number; url: string }> = []
+  block.onHighlight = (highlights, context) => {
+    source = context.content
+    links = []
+    const tree = parser.parse(source)
+    const markers: SimpleHighlight[] = []
+    visit(tree, "text", (node) => {
+      const start = node.position?.start.offset
+      const end = node.position?.end.offset
+      if (start === undefined || end === undefined) return
+      for (const match of source.slice(start, end).matchAll(/▧/g))
+        markers.push([start + match.index!, start + match.index! + 1, "markup.image.marker"])
+    })
+    visit(tree, "link", (node) => {
+      const start = node.position?.start.offset
+      const end = node.position?.end.offset
+      const labelEnd = node.children.at(-1)?.position?.end.offset
+      if (start === undefined || end === undefined || labelEnd === undefined) return
+      const labelStart = source[start] === "[" || source[start] === "<" ? start + 1 : start
+      links.push({ start, end, labelStart, labelEnd, url: node.url })
+    })
+    if (!links.length) return markers.length ? [...highlights, ...markers] : highlights
+    // Remove existing conceal replacements inside the destination (notably the
+    // closing bracket's space), then conceal the entire suffix including titles.
+    const result = highlights.filter(([start, end, , meta]) => !(
+      meta?.conceal !== undefined && links.some((link) => start >= link.labelEnd && end <= link.end)
+    ))
+    for (const link of links) {
+      const meta = { conceal: "", isInjection: true }
+      result.push([link.start, link.labelStart, "conceal", meta] satisfies SimpleHighlight)
+      result.push([link.labelEnd, link.end, "conceal", meta] satisfies SimpleHighlight)
+    }
+    return [...result, ...markers]
+  }
+  const linkify = block.onChunks
+  block.onChunks = async (chunks, context) => {
+    const result = await linkify?.(chunks, context) ?? chunks
+    let offset = 0
+    for (const chunk of result) {
+      if (!chunk.text) continue
+      let index = source.indexOf(chunk.text, offset)
+      // Don't match repeated text or spaces inside a concealed URL/title.
+      let hidden = links.find((item) => index >= item.labelEnd && index < item.end)
+      while (hidden) {
+        index = source.indexOf(chunk.text, hidden.end)
+        hidden = links.find((item) => index >= item.labelEnd && index < item.end)
+      }
+      if (index < 0) continue // Concealed markers and decoded entities aren't source text.
+      const link = links.find((item) => index >= item.labelStart && index + chunk.text.length <= item.labelEnd)
+      chunk.link = link ? { url: link.url } : undefined
+      offset = index + chunk.text.length
+    }
+    return result
+  }
+}

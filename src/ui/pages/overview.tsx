@@ -47,6 +47,16 @@ export function OverviewScreen(props: {
   const documents = () => props.documents.value ?? []
   const document = () => documents().find((item) => item.id === props.currentDocument) ?? documents()[0]
   const currentLabel = () => document()?.label ?? "Documentation"
+  const markdownContext = () => {
+    const source = document()
+    return source ? {
+      repositoryUrl: new URL(`/${source.repository}`, repo().url).href.replace(/\/$/, ""),
+      ref: source.ref,
+      path: source.path,
+    } : undefined
+  }
+  const plainDocument = () => /(?:^|\/)(?:licen[sc]e|copying|unlicense)(?:$|[._-])/i.test(document()?.path ?? "")
+    && !/\.(?:md|markdown|mdown|mkd)$/i.test(document()?.path ?? "")
   const documentResource = createMemo<ResourceState<string>>(() => document()?.resource ?? { status: "loading", phase: "load" })
   const hasDocumentTabs = () => documents().length > 1
   const showAboutSidebar = () => props.aboutSidebar === "show"
@@ -155,7 +165,12 @@ export function OverviewScreen(props: {
                       paddingY={1}
                       scrollY
                     >
-                      <GitHubMarkdown content={documentResource().value ?? ""} syntaxStyle={markdownStyle()} />
+                      <GitHubMarkdown
+                        content={documentResource().value ?? ""}
+                        syntaxStyle={markdownStyle()}
+                        context={markdownContext()}
+                        plainText={plainDocument()}
+                      />
                     </scrollbox>
                   )
                 }}

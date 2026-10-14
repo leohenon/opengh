@@ -5,6 +5,7 @@ import { defaultConfig, type DetailLayout } from "../../config"
 import type { IssueComment, IssueDetail, IssueReference } from "../../models"
 import type { IssueDetailState, ResourceState } from "../../repository-state"
 import { GitHubMarkdown } from "../components/github-markdown"
+import type { GitHubMarkdownContext } from "../github-markdown"
 import { ResourceStateView } from "../components/resource-state"
 import { ago } from "../format"
 import { detailContentWidth } from "../detail-layout"
@@ -120,7 +121,7 @@ function TimelineHeader(props: { children: JSX.Element }) {
   return <text width="100%" flexShrink={0} fg={colors.muted}>{props.children}</text>
 }
 
-function Comment(props: { comment: IssueComment; syntaxStyle: SyntaxStyle; backgroundColor: string }) {
+function Comment(props: { comment: IssueComment; syntaxStyle: SyntaxStyle; backgroundColor: string; context: GitHubMarkdownContext }) {
   const { colors } = useTheme()
   const icons = useIcons()
   const association = () => props.comment.authorAssociation === "NONE"
@@ -135,7 +136,7 @@ function Comment(props: { comment: IssueComment; syntaxStyle: SyntaxStyle; backg
         </TimelineHeader>
         <box width="100%" minWidth={0} flexShrink={0} marginTop={1}>
           <Show when={props.comment.body.trim()} fallback={<text fg={colors.muted}>No comment text.</text>}>
-            <GitHubMarkdown content={props.comment.body} syntaxStyle={props.syntaxStyle} backgroundColor={props.backgroundColor} preserveImages codePanels />
+            <GitHubMarkdown content={props.comment.body} syntaxStyle={props.syntaxStyle} backgroundColor={props.backgroundColor} context={props.context} preserveImages codePanels />
           </Show>
         </box>
       </box>
@@ -176,6 +177,7 @@ export function IssueScreen(props: {
   detail: IssueDetailState
   interactive: boolean
   showScrollbar: boolean
+  defaultBranch?: string
   detailLayout?: DetailLayout
 }) {
   const { colors, theme } = useTheme()
@@ -197,6 +199,11 @@ export function IssueScreen(props: {
   const markdownStyle = createReactiveMarkdownStyle(colors, theme)
   const issue = () => props.detail.resource.value
   const repository = () => issue()?.url.split("/").slice(3, 5).join("/") ?? ""
+  const markdownContext = (): GitHubMarkdownContext => ({
+    repositoryUrl: issue()?.url.replace(/\/issues\/\d+$/, "") ?? "",
+    ref: props.defaultBranch,
+    sourceUrl: issue()?.url,
+  })
   const comments = () => props.detail.comments
   const references = () => props.detail.references
   const activity = createMemo(() => [...(comments().value?.items ?? []), ...(references().value ?? [])]
@@ -258,7 +265,7 @@ export function IssueScreen(props: {
                     </text>
                     <box width="100%" minWidth={0} flexShrink={0} marginTop={1}>
                       <Show when={current().body.trim()} fallback={<text fg={colors.muted}>No description provided.</text>}>
-                        <GitHubMarkdown content={current().body} syntaxStyle={markdownStyle()} backgroundColor={surface()} preserveImages codePanels />
+                        <GitHubMarkdown content={current().body} syntaxStyle={markdownStyle()} backgroundColor={surface()} context={markdownContext()} preserveImages codePanels />
                       </Show>
                     </box>
                   </box>
@@ -280,7 +287,7 @@ export function IssueScreen(props: {
                               {relativeTime(entry.createdAt)}
                             </text>
                           </Show>
-                          <Show when={"kind" in entry ? entry : undefined} keyed fallback={<Comment comment={entry as IssueComment} syntaxStyle={markdownStyle()} backgroundColor={surface()} />}>
+                          <Show when={"kind" in entry ? entry : undefined} keyed fallback={<Comment comment={entry as IssueComment} syntaxStyle={markdownStyle()} backgroundColor={surface()} context={markdownContext()} />}>
                             {(reference) => <ReferenceMention reference={reference} repository={repository()} />}
                           </Show>
                         </>
