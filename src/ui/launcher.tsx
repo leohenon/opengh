@@ -35,9 +35,15 @@ export function ResolvingRepository() {
   );
 }
 
-export function LoadingRepository(props: { repository: string }) {
+export function LoadingRepository(props: { repository: string; onSwitchRepository?: () => void }) {
   const dimensions = useTerminalDimensions();
   const { colors } = useTheme();
+  useKeyboard((event) => {
+    if (event.name === "s" && !event.ctrl && !event.meta && !event.shift && props.onSwitchRepository) {
+      event.stopPropagation();
+      props.onSwitchRepository();
+    }
+  });
   return (
     <box
       width={dimensions().width}
@@ -60,6 +66,7 @@ export function RepositoryLoadError(props: {
   repository: string;
   message: string;
   onRetry: () => void;
+  onSwitchRepository?: () => void;
   onQuit?: () => void;
 }) {
   const dimensions = useTerminalDimensions();
@@ -69,6 +76,10 @@ export function RepositoryLoadError(props: {
 
   useKeyboard((event) => {
     if (event.name === "r") return props.onRetry();
+    if (event.name === "s" && !event.ctrl && !event.meta && !event.shift && props.onSwitchRepository) {
+      event.stopPropagation();
+      return props.onSwitchRepository();
+    }
     if (event.name === "q") quit();
   });
 
@@ -87,7 +98,7 @@ export function RepositoryLoadError(props: {
           <text fg={colors.text} attributes={TextAttributes.BOLD}>Repository unavailable</text>
           <text fg={colors.text}>{props.repository}</text>
           <text flexGrow={1} minHeight={0} fg={colors.red} wrapMode="word">{props.message}</text>
-          <text fg={colors.muted}>r retry · q quit</text>
+          <text fg={colors.muted}>{props.onSwitchRepository ? "r retry · s switch repo · q quit" : "r retry · q quit"}</text>
         </box>
       </Popup>
     </box>
@@ -104,7 +115,7 @@ export function RepositoryPicker(props: {
   const { colors } = useTheme();
   const quit = () => props.onQuit ? props.onQuit() : renderer.destroy();
   const [error, setError] = createSignal(props.error ?? "");
-  const recent = () => props.recent.slice(0, 5);
+  const recent = () => props.recent;
 
   const open = (candidate: string) => {
     const repository = normalizeRepository(candidate);
@@ -113,12 +124,12 @@ export function RepositoryPicker(props: {
     props.onOpen(repository);
   };
 
-  const height = () => Math.min(20, 7 + recent().length + (error() ? 1 : 0));
+  const height = () => 7 + Math.min(20, recent().length) + (error() ? 1 : 0);
 
   return (
     <SearchablePicker
       title="Open a GitHub repository"
-      placeholder="owner/repository or GitHub URL"
+      placeholder="Search recent repositories, owner/repository or GitHub URL"
       items={recent()}
       itemKey={(repository) => repository}
       match={(repository, query) => {
@@ -127,14 +138,14 @@ export function RepositoryPicker(props: {
         return index < 0 ? undefined : index;
       }}
       height={height()}
+      width={80}
       placement="center"
       listTitle={recent().length ? "Recent repositories" : undefined}
       empty={recent().length ? "No matching repositories" : undefined}
-      numbered
       error={error()}
       onQueryChange={() => setError("")}
       onSelect={open}
-      onSubmit={(query, selected) => open(query || selected || "")}
+      onSubmit={(query, selected) => open(normalizeRepository(query) ?? selected ?? query)}
       onClose={quit}
     >
       {(repository) => {

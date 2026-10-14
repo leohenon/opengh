@@ -77,17 +77,22 @@ describe("repository launcher", () => {
     expect(opened).toBe("cli/cli")
   })
 
-  test("shows at most five recent repositories", async () => {
-    const recent = Array.from({ length: 6 }, (_, index) => `owner/repository-${index + 1}`)
+  test("shows twenty recent repositories and searches beyond the visible list", async () => {
+    let opened = ""
+    const recent = Array.from({ length: 30 }, (_, index) => `owner/repository-${index + 1}`)
     const view = await testRender(
-      () => <RepositoryPicker recent={recent} onOpen={() => {}} />,
-      { width: 80, height: 24, useThread: false },
+      () => <RepositoryPicker recent={recent} onOpen={(repository) => opened = repository} />,
+      { width: 100, height: 40, useThread: false },
     )
     active.push(view)
     await view.flush()
     const frame = view.captureCharFrame()
-    expect(frame).toContain("repository-5")
-    expect(frame).not.toContain("repository-6")
+    expect(frame).toContain("repository-20")
+    expect(frame).not.toContain("repository-21")
+    await view.mockInput.typeText("repository-30")
+    view.mockInput.pressEnter()
+    await view.flush()
+    expect(opened).toBe("owner/repository-30")
   })
 
   test("opens a selected recent repository with arrow keys", async () => {
@@ -105,7 +110,7 @@ describe("repository launcher", () => {
   })
 
 
-  test("opens a recent repository by number", async () => {
+  test("typing a number searches instead of opening a repository", async () => {
     let opened = ""
     const view = await testRender(
       () => <RepositoryPicker recent={["anomalyco/opentui"]} onOpen={(repository) => opened = repository} />,
@@ -115,7 +120,8 @@ describe("repository launcher", () => {
     await view.flush()
     view.mockInput.pressKey("1")
     await view.flush()
-    expect(opened).toBe("anomalyco/opentui")
+    expect(opened).toBe("")
+    expect(view.captureCharFrame()).toContain("1")
   })
 
   test("shows validation errors directly beneath the input", async () => {

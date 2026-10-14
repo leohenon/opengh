@@ -4,7 +4,7 @@ import { configDirectory } from "../paths";
 import { mkdir } from "node:fs/promises";
 import { dirname, join } from "node:path";
 
-const MAX_RECENT = 8;
+const MAX_RECENT = 100;
 
 export async function repositoryFromDirectory(
   cwd: string,
@@ -52,12 +52,17 @@ export async function loadRecentRepositories(
   try {
     const value = await Bun.file(path).json();
     if (!Array.isArray(value)) return [];
+    const seen = new Set<string>();
     return value
       .flatMap((item) =>
         typeof item === "string" ? [normalizeRepository(item)] : [],
       )
-      .filter(Boolean)
-      .slice(0, MAX_RECENT) as string[];
+      .filter((repository): repository is string => {
+        if (!repository || seen.has(repository.toLowerCase())) return false;
+        seen.add(repository.toLowerCase());
+        return true;
+      })
+      .slice(0, MAX_RECENT);
   } catch {
     return [];
   }

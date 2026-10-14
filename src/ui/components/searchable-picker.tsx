@@ -8,6 +8,7 @@ type Match = number | undefined
 
 export function SearchablePicker<T>(props: {
   title: string
+  hideCloseHint?: boolean
   placeholder: string
   items: readonly T[]
   itemKey: (item: T) => string | number
@@ -20,7 +21,6 @@ export function SearchablePicker<T>(props: {
   showScrollbar?: boolean
   listTitle?: string
   empty?: string
-  numbered?: boolean
   error?: string
   onQueryChange?: (query: string) => void
   onSelect: (item: T) => void
@@ -60,12 +60,6 @@ export function SearchablePicker<T>(props: {
     const item = items()[index]
     if (item) setSelectedKey(props.itemKey(item))
   }
-  const activate = (index: number) => {
-    const item = items()[index]
-    if (!item) return
-    setSelectedKey(props.itemKey(item))
-    props.onSelect(item)
-  }
 
   createEffect(() => {
     listReady()
@@ -95,15 +89,6 @@ export function SearchablePicker<T>(props: {
       event.preventDefault()
       return move(1)
     }
-    if (props.numbered && !query() && event.name >= "1" && event.name <= "9") {
-      const index = Number(event.name) - 1
-      if (index < items().length) {
-        event.preventDefault()
-        event.stopPropagation()
-        activate(index)
-      }
-      return
-    }
     if (event.name === "return" || event.name === "enter") {
       event.preventDefault()
       const item = items()[selected()]
@@ -116,14 +101,14 @@ export function SearchablePicker<T>(props: {
     <Popup
       width={props.width ?? 64}
       height={props.height}
-      zIndex={100}
       placement={props.placement}
+      zIndex={100}
     >
       <box flexGrow={1} minHeight={0} flexDirection="column" gap={1} paddingBottom={1}>
         <box flexShrink={0} paddingLeft={4} paddingRight={4}>
           <box height={1} flexDirection="row" justifyContent="space-between">
             <text fg={colors.text} attributes={TextAttributes.BOLD}>{props.title}</text>
-            <text fg={colors.muted}>{props.titleMeta ? `${props.titleMeta} · esc` : "esc"}</text>
+            <text fg={colors.muted}>{props.hideCloseHint ? props.titleMeta : props.titleMeta ? `${props.titleMeta} · esc` : "esc"}</text>
           </box>
           <box height={2} flexShrink={0} paddingTop={1}>
             <input
@@ -187,9 +172,6 @@ export function SearchablePicker<T>(props: {
                         backgroundColor={active() ? colors.panelHover : colors.panel}
                       >
                         <text width={2} fg={colors.blue}>{active() ? "›" : " "}</text>
-                        <Show when={props.numbered}>
-                          <text width={2} fg={colors.muted}>{index + 1}</text>
-                        </Show>
                         {props.children(item(), active, rowIndex)}
                       </box>
                     )

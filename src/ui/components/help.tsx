@@ -12,6 +12,7 @@ const commonShortcuts: ShortcutEntry[] = [
   { keys: "u/d", description: "half-page up / down" },
   { keys: "g/G", description: "jump to top / bottom" },
   { keys: "r", description: "refresh / retry" },
+  { keys: "s", description: "switch repository" },
   { keys: ",", description: "settings" },
   { keys: "?", description: "toggle help" },
   { keys: "q / C-c", description: "quit" },
@@ -91,7 +92,7 @@ export function Help(props: {
   const shortcuts = createMemo(() => {
     const tabs = `1–${props.tabCount}, h/l, ←/→`;
     const entries = [...(props.command ? [{ keys: "x", description: props.command }] : []), ...viewShortcuts(), { keys: tabs, description: "switch tabs" }, ...commonShortcuts];
-    const order = ["Enter", "Tab", "Tab / ⇧Tab", "Esc", tabs, "j/k, ↑/↓", "u/d", "g/G", "o", "y", "x", "p", "r", ",", "?", "q / C-c"];
+    const order = ["Enter", "Tab", "Tab / ⇧Tab", "Esc", tabs, "j/k, ↑/↓", "u/d", "g/G", "o", "y", "x", "p", "r", "s", ",", "?", "q / C-c"];
     return order.flatMap((keys) => entries.filter((shortcut) => shortcut.keys === keys));
   });
   const height = () => shortcuts().length + 4;

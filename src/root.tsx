@@ -10,6 +10,7 @@ import type { RepositoryState } from "./repository-state"
 import { App } from "./ui/app"
 import { ThemeProvider } from "./ui/theme"
 import { Toast } from "./ui/components/toast"
+import { SwitchRepositoryScreen } from "./ui/pages/switch-repository"
 import {
   LoadingRepository,
   RepositoryLoadError,
@@ -17,7 +18,7 @@ import {
   ResolvingRepository,
 } from "./ui/launcher"
 
-type View = "resolving" | "picker" | "repository"
+type View = "resolving" | "picker" | "repository" | "switch"
 type ReadyState = Extract<RepositoryState, { status: "ready" }>
 type LoadingState = Extract<RepositoryState, { status: "loading" }>
 type ErrorState = Extract<RepositoryState, { status: "error" }>
@@ -95,17 +96,31 @@ export function Root(props: {
     }
   }
 
+  let recentRequest = 0
+  const refreshRecent = async () => {
+    const request = ++recentRequest
+    try {
+      const repositories = await services.loadRecentRepositories()
+      if (!renderer.isDestroyed && request === recentRequest) setRecent(repositories)
+    } catch {
+      // Recents are optional; keep the last usable list when persistence is unavailable.
+    }
+  }
   const open = (repository: string) => {
     setView("repository")
-    void services.rememberRepository(repository)
+    void services.rememberRepository(repository).catch(() => {}).then(refreshRecent)
     void session.load(repository)
+  }
+  const showSwitcher = () => {
+    setView("switch")
+    void refreshRecent()
   }
 
   onMount(() => {
     void refreshLocalRepository().catch(() => setLocalRepository(undefined))
     void Promise.all([
       services.resolveRepository(props.repositoryArgument, props.cwd),
-      services.loadRecentRepositories(),
+      services.loadRecentRepositories().catch(() => []),
       services.loadConfig().catch((error) => {
         const message = error instanceof Error ? error.message : "Could not load config"
         setConfigError(`${message}. Fix or move the config file and restart before saving settings.`)
@@ -127,14 +142,22 @@ export function Root(props: {
       <Show
         when={view() === "repository"}
       fallback={
-        <Show when={view() === "resolving"} fallback={<RepositoryPicker recent={recent()} error={pickerError()} onOpen={open} onQuit={quit} />}>
-          <ResolvingRepository />
-        </Show>
+        <Switch>
+          <Match when={view() === "resolving"}><ResolvingRepository /></Match>
+          <Match when={view() === "switch"}>
+            <SwitchRepositoryScreen recent={recent()} showScrollbar={config().showScrollbars}
+              showStatusBarHints={config().showStatusBarHints}
+              onOpen={open} onClose={() => setView("repository")} />
+          </Match>
+          <Match when={view() === "picker"}>
+            <RepositoryPicker recent={recent()} error={pickerError()} onOpen={open} onQuit={quit} />
+          </Match>
+        </Switch>
       }
     >
       <Switch>
         <Match when={session.state().status === "loading" ? session.state() as LoadingState : undefined}>
-          {(current) => <LoadingRepository repository={current().repository} />}
+          {(current) => <LoadingRepository repository={current().repository} onSwitchRepository={showSwitcher} />}
         </Match>
         <Match when={session.state().status === "error" ? session.state() as ErrorState : undefined}>
           {(current) => (
@@ -142,13 +165,15 @@ export function Root(props: {
               repository={current().repository}
               message={current().message}
               onRetry={() => void session.load(current().repository)}
+              onSwitchRepository={showSwitcher}
               onQuit={quit}
             />
           )}
         </Match>
         <Match when={session.state().status === "ready" ? session.state() as ReadyState : undefined}>
           {(current) => (
-            <App
+            <Show when={current().repository} keyed>
+              {(repositoryName) => <App
               data={() => current().data}
               operations={() => current().operations}
               config={config()}
@@ -164,6 +189,9 @@ export function Root(props: {
               }}
               onQuit={quit}
               onRefresh={() => void session.refresh()}
+              recentRepositories={recent()}
+              onRefreshRecentRepositories={refreshRecent}
+              onSwitchRepository={open}
               onRetryResource={(resource) => void session.retryResource(resource)}
               canSwitchBranch={session.canSwitchBranch()}
               onBranchChange={(branch) => void session.switchBranch(branch)}
@@ -178,12 +206,13 @@ export function Root(props: {
               onLoadMoreIssueComments={session.loadMoreIssueComments}
               onRetryIssueReferences={session.retryIssueReferences}
               onCloseIssue={session.clearIssue}
-              onOpenInBrowser={(target, repository) => services.openGitHub(repository ?? current().repository, target)}
+              onOpenInBrowser={(target, repository) => services.openGitHub(repository ?? repositoryName, target)}
               onCopyToClipboard={services.copyToHostClipboard}
               onLoadMoreRuns={session.loadMoreRuns}
               onLoadMoreIssues={session.loadMoreIssues}
               onLoadMorePulls={session.loadMorePulls}
-            />
+            />}
+            </Show>
           )}
         </Match>
         </Switch>

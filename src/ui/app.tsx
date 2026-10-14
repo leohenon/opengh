@@ -27,12 +27,13 @@ import { IssueScreen } from "./pages/issue"
 import { CommitScreen } from "./pages/commit"
 import { OverviewScreen } from "./pages/overview"
 import { WorkScreen } from "./pages/work"
+import { SwitchRepositoryScreen } from "./pages/switch-repository"
 import { tabs } from "./tabs"
 import { referencedItems } from "./issue-references"
 import { useTheme } from "./theme"
 import { IconProvider } from "./icon-style"
 
-type Overlay = "help" | "branch-picker" | "settings" | "issue-references" | "command"
+type Overlay = "help" | "branch-picker" | "settings" | "issue-references" | "command" | "switch-repo"
 type ToastState = { id: number; title: string; message: string; duration?: number; tone?: "error" | "success" | "info" }
 
 export type AppProps = {
@@ -48,6 +49,9 @@ export type AppProps = {
   onCommandCaptureCancel?: (cancel: (() => void) | undefined) => void
   onQuit?: () => void
   onRefresh?: () => void
+  recentRepositories?: readonly string[]
+  onRefreshRecentRepositories?: () => Promise<void>
+  onSwitchRepository?: (repository: string) => void
   onRetryResource?: (resource: RepositoryResource) => void
   canSwitchBranch?: boolean
   onBranchChange?: (branch: string) => void
@@ -407,14 +411,15 @@ export function App(props: AppProps) {
   }
   const shortcutHint = () => {
     if (!config().showStatusBarHints) return undefined
+    const common = (props.onSwitchRepository ? " · s switch repo" : "") + " · ? help"
     if (activeCommitSha()) {
       const retry = commitResource().status === "error"
       const more = commitResource().value?.files.hasMore
       if (dimensions().width < 60 && (retry || more)) return "esc back"
-        + (retry ? " · r retry" : " · enter more") + " · ? help"
+        + (retry ? " · r retry" : " · enter more") + common
       return "esc back · o GitHub · y SHA"
         + (retry ? " · r retry" : more ? " · enter more files" : "")
-        + " · ? help"
+        + common
     }
     if (activeIssueNumber()) {
       const retry = activeResource()?.status === "error"
@@ -422,20 +427,21 @@ export function App(props: AppProps) {
       const references = issueMenuItems().length
       if (dimensions().width < 64) return "esc back"
         + (retry ? " · r retry" : more ? " · enter more" : references ? " · p references" : " · o GitHub")
-        + " · ? help"
+        + common
       return "esc back"
         + (retry ? ` · r retry ${statusDetail()}` : more ? " · enter more comments" : "")
         + (references ? " · p references" : "")
         + (dimensions().width >= 100 || !retry && !more ? " · o GitHub · y URL" : "")
-        + " · ? help"
+        + common
     }
     if (page() === "issues") return (dimensions().width >= 45 ? "enter open" : "enter") + " · o GitHub · y URL"
-      + (dimensions().width >= 60 ? " · tab open/closed" : "") + " · ? help"
+      + (dimensions().width >= 60 ? " · tab open/closed" : "") + common
     if (page() === "commits") return (dimensions().width >= 45 ? "enter open" : "enter") + " · o GitHub · y SHA"
       + (dimensions().width >= 60 ? " · tab branch" : "")
-      + " · ? help"
-    if (page() === "overview") return "o GitHub · y URL" + (canClone() ? " · x clone" : "") + " · ? help"
-    return undefined
+      + common
+    if (page() === "overview") return "o GitHub · y URL" + (canClone() ? " · x clone" : "")
+      + common
+    return props.onSwitchRepository ? "s switch repo · ? help" : undefined
   }
 
   // Global handlers run before focused inputs; overlay checks must precede page shortcuts.
@@ -446,10 +452,17 @@ export function App(props: AppProps) {
       if (escape) setOverlay()
       return
     }
-    if (overlay() === "settings" || overlay() === "command") return
+    if (overlay() === "settings" || overlay() === "command" || overlay() === "switch-repo") return
     if (event.name === "q") return quit()
     if (overlay() === "help") {
       if (event.name === "?" || escape) setOverlay()
+      return
+    }
+    if (event.name === "s" && !event.ctrl && !event.meta && !event.shift && !event.super && !event.hyper && !event.option && props.onSwitchRepository) {
+      event.preventDefault()
+      event.stopPropagation()
+      setOverlay("switch-repo")
+      void props.onRefreshRecentRepositories?.().catch(() => {})
       return
     }
     if (event.name === "?") return setOverlay("help")
@@ -653,6 +666,19 @@ export function App(props: AppProps) {
             onDismiss={() => setToast((value) => value?.id === current.id ? undefined : value)}
           />
         )}
+      </Show>
+      <Show when={overlay() === "switch-repo"}>
+        <SwitchRepositoryScreen
+          recent={props.recentRepositories ?? []}
+          showStatusBarHints={config().showStatusBarHints}
+          current={data().repo.nameWithOwner}
+          showScrollbar={config().showScrollbars}
+          onClose={() => setOverlay()}
+          onOpen={(repository) => {
+            setOverlay()
+            if (repository.toLowerCase() !== data().repo.nameWithOwner.toLowerCase()) props.onSwitchRepository?.(repository)
+          }}
+        />
       </Show>
       <Show when={overlay() === "command" && commandAction()} keyed>
         {(action) => <CommandDialog
