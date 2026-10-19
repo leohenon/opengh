@@ -63,7 +63,7 @@ async function setup() {
   };
 }
 
-describe("openGH TUI", () => {
+describe("opengh TUI", () => {
   test("status bar hints can be disabled on every page without disabling shortcuts or loading feedback", async () => {
     const [config, setConfig] = createSignal({ ...defaultConfig });
     const [operations, setOperations] = createSignal(repositoryOperationsFixture);

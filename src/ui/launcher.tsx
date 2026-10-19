@@ -24,7 +24,7 @@ export function ResolvingRepository() {
     >
       <box flexDirection="column" alignItems="center" gap={1}>
         <text fg={colors.text} attributes={TextAttributes.BOLD}>
-          ◉ openGH
+          ◉ opengh
         </text>
         <LoadingText
           text="Finding repository…"

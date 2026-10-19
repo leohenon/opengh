@@ -154,7 +154,7 @@ export function Settings(props: {
   const detail = () => {
     if (selected() === "theme") return {
       title: "Theme",
-      description: "Choose the color theme used throughout openGH. Moving through the theme list previews each theme.",
+      description: "Choose the color theme used throughout opengh. Moving through the theme list previews each theme.",
     }
     if (selected() === "hide-documents-tab") return {
       title: "Hide documents tab",

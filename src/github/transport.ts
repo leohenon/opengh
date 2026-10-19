@@ -77,7 +77,7 @@ export const githubTransport: GitHubTransport = {
   async page(url: string) {
     // Web pages are anonymous: never forward the CLI's API credentials here.
     const response = await fetch(url, {
-      headers: { Accept: "text/html", "User-Agent": "openGH" },
+      headers: { Accept: "text/html", "User-Agent": "opengh" },
       signal: AbortSignal.timeout(10_000),
     })
     if (!response.ok) throw new Error(`GitHub page failed (HTTP ${response.status})`)

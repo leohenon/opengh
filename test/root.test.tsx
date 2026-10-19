@@ -81,7 +81,7 @@ describe("application root", () => {
     active.push(view)
     await view.flush()
 
-    expect(view.captureCharFrame()).toContain("openGH")
+    expect(view.captureCharFrame()).toContain("opengh")
     expect(receivedArgument).toBe(".")
     expect(receivedCwd).toBe("/work/repository")
 
