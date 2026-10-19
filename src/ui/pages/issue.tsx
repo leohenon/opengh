@@ -1,6 +1,6 @@
 import { RGBA, rgbToHex, TextAttributes, type ScrollBoxRenderable, type SyntaxStyle } from "@opentui/core"
-import { useKeyboard, useTerminalDimensions } from "@opentui/solid"
-import { createMemo, For, Show, type JSX } from "solid-js"
+import { useKeyboard, useRenderer, useTerminalDimensions } from "@opentui/solid"
+import { createEffect, createMemo, For, onCleanup, Show, type JSX } from "solid-js"
 import { defaultConfig, type DetailLayout } from "../../config"
 import type { IssueComment, IssueDetail, IssueReference } from "../../models"
 import type { IssueDetailState, ResourceState } from "../../repository-state"
@@ -175,6 +175,7 @@ function ReferenceMention(props: { reference: IssueReference; repository: string
 export function IssueScreen(props: {
   number: number
   detail: IssueDetailState
+  revealActivity?: number
   interactive: boolean
   showScrollbar: boolean
   defaultBranch?: string
@@ -183,6 +184,7 @@ export function IssueScreen(props: {
   const { colors, theme } = useTheme()
   const icons = useIcons()
   const dimensions = useTerminalDimensions()
+  const renderer = useRenderer()
   const wide = () => dimensions().width >= 112
   const centered = () => (props.detailLayout ?? defaultConfig.detailLayout) === "centered"
   const contentWidth = () => detailContentWidth(props.detailLayout, wide() ? 32 : 0)
@@ -211,6 +213,15 @@ export function IssueScreen(props: {
   const failure = (resource: ResourceState<unknown>) => resource.status === "error" ? resource.message : ""
   let scroll: ScrollBoxRenderable | undefined
   const bindScrollbar = createScrollbarVisibility(() => props.showScrollbar)
+  const revealActivity = () => scroll?.scrollTo(scroll.scrollHeight)
+  createEffect(() => {
+    if (props.revealActivity === undefined) return
+    // Wait for layout before scrolling to the newly posted activity.
+    renderer.off("frame", revealActivity)
+    renderer.once("frame", revealActivity)
+    renderer.requestRender()
+  })
+  onCleanup(() => renderer.off("frame", revealActivity))
 
   useKeyboard((event) => {
     if (!props.interactive || !scroll || event.ctrl || event.meta) return

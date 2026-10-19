@@ -13,7 +13,11 @@ import {
   loadGitHubMetadata,
   loadGitHubPulls,
   loadGitHubRuns,
+  createGitHubIssueComment,
+  updateGitHubIssueState,
+  markGitHubIssueDuplicate,
 } from "./github/client"
+import { GitHubApiError } from "./github/transport"
 import type {
   CommitDetail,
   CommitSummary,
@@ -21,6 +25,9 @@ import type {
   IssueDetail,
   IssueComment,
   IssueReference,
+  IssueActionKind,
+  IssueActionResult,
+  IssueCloseReason,
   ListState,
   Paginated,
   PullRequestSummary,
@@ -31,6 +38,7 @@ import type {
 import type {
   CommitDetailState,
   IssueDetailState,
+  IssueActionState,
   OperationState,
   RepositoryData,
   RepositoryDocumentState,
@@ -52,6 +60,9 @@ export type RepositoryLoaders = {
   issue(repository: string, number: number): Promise<IssueDetail>
   issueComments(repository: string, number: number, page?: number): Promise<Page<IssueComment>>
   issueReferences(repository: string, number: number): Promise<IssueReference[]>
+  createIssueComment?(repository: string, number: number, body: string): Promise<IssueComment>
+  updateIssueState?(repository: string, number: number, state: ListState, reason?: IssueCloseReason): Promise<IssueDetail>
+  markIssueDuplicate?(repository: string, number: number, canonicalNumber: number): Promise<IssueDetail>
   issues(repository: string, state: ListState, page?: number): Promise<Page<IssueSummary>>
   hasIssues?(repository: string, state: ListState): Promise<boolean>
   pulls(repository: string, state: ListState, page?: number): Promise<Page<PullRequestSummary>>
@@ -69,6 +80,11 @@ export type RepositorySession = {
   loadMoreIssueComments(): Promise<void>
   retryIssueReferences(): Promise<void>
   clearIssue(): void
+  issueAction(number: number): IssueActionState
+  prepareIssueAction(number: number, kind: IssueActionKind): void
+  updateIssueDraft(number: number, draft: Partial<Pick<IssueActionState, "body" | "reason" | "duplicateTarget">>): void
+  discardIssueDraft(number: number): void
+  submitIssueAction(number: number, kind: IssueActionKind): Promise<IssueActionResult>
   load(repository: string): Promise<void>
   refresh(): Promise<void>
   retryResource(resource: RepositoryResource): Promise<void>
@@ -91,6 +107,9 @@ const defaultLoaders: RepositoryLoaders = {
   issue: loadGitHubIssue,
   issueComments: loadGitHubIssueComments,
   issueReferences: loadGitHubIssueReferences,
+  createIssueComment: createGitHubIssueComment,
+  updateIssueState: updateGitHubIssueState,
+  markIssueDuplicate: markGitHubIssueDuplicate,
   issues: loadGitHubIssues,
   hasIssues: loadGitHubHasIssues,
   pulls: loadGitHubPulls,
@@ -180,6 +199,14 @@ export function createRepositorySession(loaders: RepositoryLoaders = defaultLoad
   const [state, setState] = createSignal<RepositoryState>({ status: "loading", repository: "" })
   const [commitDetail, setCommitDetail] = createSignal<CommitDetailState>()
   const [issueDetail, setIssueDetail] = createSignal<IssueDetailState>()
+  const [issueActions, setIssueActions] = createSignal<Record<string, IssueActionState>>({})
+  const emptyIssueAction: IssueActionState = { body: "", reason: "completed", operation: idle() }
+  const issueKey = (repository: string, number: number) => `${repository.toLowerCase()}#${number}`
+  const postedComments = new Map<string, IssueComment[]>()
+  const issueWriteRevision = new Map<string, number>()
+  const confirmIssueWrite = (key: string) => issueWriteRevision.set(key, (issueWriteRevision.get(key) ?? 0) + 1)
+  let repositoryScope = 0
+  const issueListGeneration: Record<ListState, number> = { open: 0, closed: 0 }
   let issueGeneration = 0
   let commitGeneration = 0
   let repositoryGeneration = 0
@@ -265,6 +292,7 @@ export function createRepositorySession(loaders: RepositoryLoaders = defaultLoad
   }
 
   const fetchIssues = async (repository: string, listState: ListState, request: number, pageCount = 1) => {
+    const listRequest = ++issueListGeneration[listState]
     try {
       const result = await loadPageSet(pageCount, (page) => loaders.issues(repository, listState, page), (item) => item.number)
       // REST issue pages include PRs. An empty filtered page with more pages cannot prove there are no issues.
@@ -273,7 +301,7 @@ export function createRepositorySession(loaders: RepositoryLoaders = defaultLoad
         if (request !== repositoryGeneration || current.status !== "ready" || current.repository !== repository) return
         result.hasMore = await loaders.hasIssues(current.data.repo.nameWithOwner, listState)
       }
-      updateReady(setState, request, generation, repository, (current) => ({
+      updateReady(setState, request, generation, repository, (current) => listRequest !== issueListGeneration[listState] ? current : ({
         ...current,
         data: {
           ...current.data,
@@ -281,7 +309,7 @@ export function createRepositorySession(loaders: RepositoryLoaders = defaultLoad
         },
       }))
     } catch (error) {
-      updateReady(setState, request, generation, repository, (current) => ({
+      updateReady(setState, request, generation, repository, (current) => listRequest !== issueListGeneration[listState] ? current : ({
         ...current,
         data: {
           ...current.data,
@@ -420,6 +448,21 @@ export function createRepositorySession(loaders: RepositoryLoaders = defaultLoad
     setIssueDetail(undefined)
   }
 
+  // Keep confirmed new comments visible across unloaded pages and refreshes. Once the
+  // server returns a comment, it owns that entry again (including later edits/deletion).
+  const withPostedComments = (
+    repository: string, number: number, value: Paginated<IssueComment>, returned: readonly IssueComment[] = value.items,
+  ): Paginated<IssueComment> => {
+    const key = issueKey(repository, number)
+    const ids = new Set(returned.map((comment) => comment.id))
+    const missing = (postedComments.get(key) ?? []).filter((comment) => !ids.has(comment.id))
+    if (missing.length) postedComments.set(key, missing)
+    else postedComments.delete(key)
+    const merged = new Map(value.items.map((comment) => [comment.id, comment]))
+    for (const comment of missing) if (!merged.has(comment.id)) merged.set(comment.id, comment)
+    return { ...value, items: [...merged.values()].sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt)) }
+  }
+
   const fetchIssueComments = async (
     repository: string,
     number: number,
@@ -428,14 +471,15 @@ export function createRepositorySession(loaders: RepositoryLoaders = defaultLoad
     previous?: Paginated<IssueComment>,
   ) => {
     try {
-      const value = await loadPageSet(pageCount, (page) => loaders.issueComments(repository, number, page), (comment) => comment.id)
+      const loaded = await loadPageSet(pageCount, (page) => loaders.issueComments(repository, number, page), (comment) => comment.id)
       if (request !== issueGeneration) return
+      const value = withPostedComments(repository, number, loaded)
       setIssueDetail((current) => current?.number === number
         ? { ...current, comments: { status: "ready", value } } : current)
     } catch (error) {
       if (request !== issueGeneration) return
       setIssueDetail((current) => current?.number === number
-        ? { ...current, comments: failedResource(error, previous) } : current)
+        ? { ...current, comments: failedResource(error, current.comments.value ?? previous) } : current)
     }
   }
 
@@ -467,25 +511,38 @@ export function createRepositorySession(loaders: RepositoryLoaders = defaultLoad
     const repository = current.repository
     const request = ++issueGeneration
     const value = previous?.number === number ? previous.resource.value : undefined
-    const comments = previous?.number === number ? previous.comments.value : undefined
+    let comments = previous?.number === number ? previous.comments.value : undefined
     const references = previous?.number === number ? previous.references.value : undefined
     setIssueDetail({ number, resource: loadingResource(value), comments: loadingResource(comments), references: loadingResource(references) })
     try {
-      const issue = await loaders.issue(repository, number)
+      const key = issueKey(repository, number)
+      let revision = issueWriteRevision.get(key)
+      let issue = await loaders.issue(repository, number)
       if (request !== issueGeneration) return
+      // A confirmed write must not be overwritten by an earlier read response.
+      while (revision !== issueWriteRevision.get(key)) {
+        const confirmed = issueDetail()?.resource.value
+        if (confirmed) { issue = confirmed; break }
+        revision = issueWriteRevision.get(key)
+        issue = await loaders.issue(repository, number)
+        if (request !== issueGeneration) return
+      }
+      comments = issueDetail()?.comments.value ?? comments
       setIssueDetail({ number, resource: { status: "ready", value: issue }, comments: loadingResource(comments), references: loadingResource(references) })
-      if (issue.commentCount === 0) {
+      const hasComments = issue.commentCount > 0 || (postedComments.get(issueKey(repository, number))?.length ?? 0) > 0
+      if (!hasComments) {
         setIssueDetail({ number, resource: { status: "ready", value: issue },
           comments: { status: "ready", value: { items: [], page: 1, hasMore: false } }, references: loadingResource(references) })
       }
       await Promise.all([
-        issue.commentCount > 0 ? fetchIssueComments(repository, number, request, comments?.page ?? 1, comments) : Promise.resolve(),
+        hasComments ? fetchIssueComments(repository, number, request, comments?.page ?? 1, comments) : Promise.resolve(),
         fetchIssueReferences(repository, number, request, references),
       ])
     } catch (error) {
-      if (request === issueGeneration) setIssueDetail({ number, resource: failedResource(error, value),
-        comments: previous?.number === number ? previous.comments : { status: "ready", value: { items: [], page: 1, hasMore: false } },
-        references: previous?.number === number ? previous.references : { status: "ready", value: [] } })
+      if (request === issueGeneration) setIssueDetail((latest) => ({ number, resource: failedResource(error, latest?.resource.value ?? value),
+        comments: previous?.number === number ? { ...previous.comments, ...(latest?.comments.value ? { value: latest.comments.value } : {}) }
+          : { status: "ready", value: latest?.comments.value ?? { items: [], page: 1, hasMore: false } },
+        references: previous?.number === number ? previous.references : { status: "ready", value: [] } }))
     }
   }
 
@@ -504,22 +561,167 @@ export function createRepositorySession(loaders: RepositoryLoaders = defaultLoad
     try {
       const next = await loaders.issueComments(current.repository, number, value!.page + 1)
       if (request !== issueGeneration) return
-      const ids = new Set(value!.items.map((comment) => comment.id))
-      const items = next.items.filter((comment) => {
-        if (ids.has(comment.id)) return false
-        ids.add(comment.id)
-        return true
+      setIssueDetail((latest) => {
+        if (latest?.number !== number) return latest
+        const existing = latest.comments.value?.items ?? value!.items
+        const merged = new Map(existing.map((comment) => [comment.id, comment]))
+        for (const comment of next.items) merged.set(comment.id, comment)
+        return {
+          ...latest,
+          comments: { status: "ready", value: withPostedComments(current.repository, number,
+            page({ items: [...merged.values()], hasMore: next.hasMore }, value!.page + 1), next.items) },
+        }
       })
-      setIssueDetail((latest) => latest?.number === number ? {
-        ...latest, comments: { status: "ready", value: page({ items: [...value!.items, ...items], hasMore: next.hasMore }, value!.page + 1) },
-      } : latest)
     } catch (error) {
       if (request === issueGeneration) setIssueDetail((latest) => latest?.number === number
-        ? { ...latest, comments: failedResource(error, value, "pagination") } : latest)
+        ? { ...latest, comments: failedResource(error, latest.comments.value ?? value, "pagination") } : latest)
+    }
+  }
+
+  const issueAction = (number: number) => issueActions()[issueKey(state().repository, number)] ?? emptyIssueAction
+  const updateAction = (key: string, update: (action: IssueActionState) => IssueActionState) => {
+    setIssueActions((actions) => ({ ...actions, [key]: update(actions[key] ?? emptyIssueAction) }))
+  }
+  const prepareIssueAction = (number: number, kind: IssueActionKind) => {
+    updateAction(issueKey(state().repository, number), (action) => {
+      if (action.operation.status === "loading" || action.retry === kind) return action
+      // Selecting a new action must not resume a different failed state change.
+      return { ...action, retry: undefined, operation: idle() }
+    })
+  }
+  const updateIssueDraft = (number: number, draft: Partial<Pick<IssueActionState, "body" | "reason" | "duplicateTarget">>) => {
+    updateAction(issueKey(state().repository, number), (action) => action.operation.status === "loading" || action.retry
+      ? action : { ...action, ...draft, operation: idle() })
+  }
+  const discardIssueDraft = (number: number) => {
+    updateAction(issueKey(state().repository, number), (action) => action.operation.status === "loading" ? action : emptyIssueAction)
+  }
+
+  const actionError = (error: unknown, locked: boolean) => {
+    const message = messageFrom(error)
+    if (!(error instanceof GitHubApiError)) return message
+    if (error.status === 401) return `${message}. Run gh auth login and try again.`
+    if (error.status === 403) return `${message}. ${locked
+      ? "This thread is locked; maintainer access may be required."
+      : "Your account may not have permission, or GitHub may be rate limiting requests."}`
+    if (error.status === 404) return `${message}. The issue may be unavailable to your account.`
+    if (error.status === undefined || error.status >= 500)
+      return `${message}. GitHub did not confirm the change; check the issue on GitHub before retrying.`
+    return message
+  }
+
+  const reconcileIssueState = (repository: string, number: number, updated: IssueDetail, scope: number) => {
+    confirmIssueWrite(issueKey(repository, number))
+    const stillHere = () => scope === repositoryScope && state().repository === repository
+    if (!stillHere()) return
+    setIssueDetail((latest) => latest?.number === number
+      ? { ...latest, resource: { status: "ready", value: updated } } : latest)
+    setState((latest) => {
+      if (latest.status !== "ready" || latest.repository !== repository) return latest
+      const lists = { ...latest.data.issues }
+      for (const listState of ["open", "closed"] as const) {
+        const resource = lists[listState]
+        if (!resource.value) continue
+        const items = resource.value.items.filter((item) => item.number !== number)
+        if (listState === updated.state) {
+          const { title, author, createdAt, state } = updated
+          items.push({ number, title, author, createdAt, state })
+          items.sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt))
+        }
+        lists[listState] = loadingResource({ ...resource.value, items })
+      }
+      return { ...latest, data: { ...latest.data, issues: lists } }
+    })
+    // Writes succeeded; any refresh failure is a separate read error, not a failed write.
+    const latest = state()
+    if (latest.status === "ready") {
+      const request = repositoryGeneration
+      void fetchIssues(repository, "open", request, latest.data.issues.open.value?.page)
+      void fetchIssues(repository, "closed", request, latest.data.issues.closed.value?.page)
+      void loaders.metadata(repository).then((repo) => {
+        if (stillHere()) updateReady(setState, request, generation, repository, (state) => ({
+          ...state, data: { ...state.data, repo },
+        }))
+      }).catch(() => {})
+    }
+  }
+
+  const submitIssueAction = async (number: number, kind: IssueActionKind): Promise<IssueActionResult> => {
+    const current = state()
+    const detail = issueDetail()
+    const issue = detail?.resource.value
+    if (current.status !== "ready" || detail?.number !== number || !issue || detail.resource.status === "loading")
+      throw new Error("Wait for the issue to load before taking action.")
+    const repository = current.repository
+    const key = issueKey(repository, number)
+    const action = issueActions()[key] ?? emptyIssueAction
+    if (action.operation.status === "loading") throw new Error("An issue action is already in progress.")
+    if (action.retry && action.retry !== kind) throw new Error(`Retry ${action.retry === "close" ? "closing" : "reopening"} or discard the pending action first.`)
+    const scope = repositoryScope
+    const result: IssueActionResult = {}
+    const stillHere = () => scope === repositoryScope && state().repository === repository
+    updateAction(key, (draft) => ({ ...draft, operation: loading() }))
+    try {
+      if (kind === "duplicate") {
+        if (issue.state !== "open") throw new Error("Reopen the issue before marking it as a duplicate.")
+        const match = action.duplicateTarget?.trim().match(/^#?([1-9]\d*)$/)
+        const canonicalNumber = Number(match?.[1])
+        if (!Number.isSafeInteger(canonicalNumber) || canonicalNumber <= 0) throw new Error("Enter a valid target issue number.")
+        if (canonicalNumber === number) throw new Error("An issue cannot be a duplicate of itself.")
+        if (!loaders.markIssueDuplicate) throw new Error("Marking duplicates is unavailable.")
+        const updated = await loaders.markIssueDuplicate(repository, number, canonicalNumber)
+        if (updated.number !== number || updated.state !== "closed" || updated.stateReason !== "duplicate")
+          throw new Error("GitHub did not confirm that this issue was closed as a duplicate.")
+        reconcileIssueState(repository, number, updated, scope)
+        // Duplicate marking must not post or discard an unrelated comment draft.
+        updateAction(key, (draft) => ({ ...draft, duplicateTarget: "", operation: idle() }))
+        return { issue: updated, duplicateOf: canonicalNumber }
+      }
+      if (kind === "comment" && !action.body.trim()) throw new Error("Write a comment before posting.")
+      if (kind !== "comment" && !loaders.updateIssueState) throw new Error("Issue state changes are unavailable.")
+      if (!action.retry && action.body.trim()) {
+        if (!loaders.createIssueComment) throw new Error("Commenting is unavailable.")
+        const comment = await loaders.createIssueComment(repository, number, action.body)
+        result.comment = comment
+        confirmIssueWrite(key)
+        postedComments.set(key, [...(postedComments.get(key) ?? []), comment])
+        // Clear only after confirmation. Save the retry target before the second write.
+        updateAction(key, (draft) => ({ ...draft, body: "", ...(kind !== "comment" ? { retry: kind } : {}) }))
+        if (stillHere()) setIssueDetail((latest) => {
+          if (latest?.number !== number) return latest
+          const comments = latest.comments.value ?? { items: [], page: 0, hasMore: true }
+          const items = [...comments.items.filter((item) => item.id !== comment.id), comment]
+            .sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt))
+          return {
+            ...latest,
+            resource: latest.resource.value ? { status: "ready", value: {
+              ...latest.resource.value, commentCount: latest.resource.value.commentCount + 1,
+              updatedAt: comment.createdAt,
+            } } : latest.resource,
+            comments: { ...latest.comments, value: { ...comments, items } },
+          }
+        })
+      }
+      if (kind !== "comment") {
+        const nextState = kind === "close" ? "closed" : "open"
+        const updated = await loaders.updateIssueState!(repository, number, nextState, action.reason)
+        if (updated.state !== nextState) throw new Error("GitHub did not change the issue state. Check your permissions on GitHub.")
+        result.issue = updated
+        reconcileIssueState(repository, number, updated, scope)
+      }
+      updateAction(key, () => ({ ...emptyIssueAction, reason: action.reason }))
+      return result
+    } catch (error) {
+      const retry = issueActions()[key]?.retry
+      const failure = actionError(error, issue.locked)
+      const message = retry ? `Comment posted, but ${retry === "close" ? "closing" : "reopening"} failed. ${failure}` : failure
+      updateAction(key, (draft) => ({ ...draft, operation: { status: "error", message } }))
+      throw new Error(message)
     }
   }
 
   const load = async (repository: string) => {
+    ++repositoryScope
     clearCommit()
     clearIssue()
     const request = ++repositoryGeneration
@@ -838,6 +1040,7 @@ export function createRepositorySession(loaders: RepositoryLoaders = defaultLoad
     const repository = current.repository
     const request = repositoryGeneration
     const nextPage = value.page + 1
+    const listRequest = issueListGeneration[listState]
     setState({
       ...current,
       data: { ...current.data, issues: { ...current.data.issues, [listState]: loadingResource(value, "pagination") } },
@@ -846,7 +1049,7 @@ export function createRepositorySession(loaders: RepositoryLoaders = defaultLoad
       const result = await loaders.issues(repository, listState, nextPage)
       updateReady(setState, request, generation, repository, (latest) => {
         const latestValue = latest.data.issues[listState].value
-        if (!latestValue || latestValue.page !== nextPage - 1) return latest
+        if (listRequest !== issueListGeneration[listState] || !latestValue || latestValue.page !== nextPage - 1) return latest
         const existing = new Set(latestValue.items.map((item) => item.number))
         return {
           ...latest,
@@ -863,7 +1066,7 @@ export function createRepositorySession(loaders: RepositoryLoaders = defaultLoad
         }
       })
     } catch (error) {
-      updateReady(setState, request, generation, repository, (latest) => ({
+      updateReady(setState, request, generation, repository, (latest) => listRequest !== issueListGeneration[listState] ? latest : ({
         ...latest,
         data: {
           ...latest.data,
@@ -928,6 +1131,11 @@ export function createRepositorySession(loaders: RepositoryLoaders = defaultLoad
     loadMoreIssueComments,
     retryIssueReferences,
     clearIssue,
+    issueAction,
+    prepareIssueAction,
+    updateIssueDraft,
+    discardIssueDraft,
+    submitIssueAction,
     load,
     refresh,
     retryResource,

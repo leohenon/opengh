@@ -151,6 +151,164 @@ describe("repository session", () => {
     expect(session.issueDetail()).toBeUndefined()
   })
 
+  test("confirmed comments survive in-flight pagination and refreshes without duplicates", async () => {
+    const first = issueCommentsFixture[0]!
+    const posted = { ...first, id: 9000, body: "A new comment", createdAt: "2026-07-01T00:00:00Z" }
+    const next = deferred<{ items: IssueComment[]; hasMore: boolean }>()
+    let paginationPending = true
+    const session = createRepositorySession(loaders({
+      issueComments: async (_repository, _number, page = 1) => page === 2 && paginationPending ? next.promise
+        : { items: page === 3 ? [posted] : [first], hasMore: page < 3 },
+      createIssueComment: async () => posted,
+    }))
+    await session.load("anomalyco/opentui")
+    await session.loadIssue(issueDetailFixture.number)
+    const pagination = session.loadMoreIssueComments()
+    session.updateIssueDraft(issueDetailFixture.number, { body: posted.body })
+    await session.submitIssueAction(issueDetailFixture.number, "comment")
+    expect(session.issueDetail()?.resource.value?.commentCount).toBe(issueDetailFixture.commentCount + 1)
+    expect(session.issueDetail()?.comments.value?.items).toContainEqual(posted)
+    expect(session.issueAction(issueDetailFixture.number).body).toBe("")
+    paginationPending = false
+    next.resolve({ items: [first], hasMore: true })
+    await pagination
+    await session.loadIssue(issueDetailFixture.number)
+    expect(session.issueDetail()?.comments.value?.page).toBe(2)
+    expect(session.issueDetail()?.comments.value?.items).toContainEqual(posted)
+    await session.loadMoreIssueComments()
+    expect(session.issueDetail()?.comments.value?.items.filter((comment) => comment.id === posted.id)).toHaveLength(1)
+    expect(session.issueDetail()?.comments.value?.hasMore).toBe(false)
+  })
+
+  test("comment-and-close preserves failures and retries only the unconfirmed state change", async () => {
+    const number = issueDetailFixture.number
+    const posted = { ...issueCommentsFixture[0]!, id: 9001, body: "Resolved", createdAt: "2026-07-01T00:00:00Z" }
+    let remote = { ...issueDetailFixture }
+    let commentCalls = 0
+    let stateCalls = 0
+    const reasons: unknown[] = []
+    const session = createRepositorySession(loaders({
+      issue: async () => remote,
+      issues: async (_repository, state) => ({ items: remote.state === state ? [remote] : [], hasMore: false }),
+      createIssueComment: async () => {
+        if (++commentCalls === 1) throw new Error("Comment denied")
+        return posted
+      },
+      updateIssueState: async (_repository, _number, state, reason) => {
+        stateCalls++
+        reasons.push(reason)
+        if (stateCalls === 1) throw new Error("Closing denied")
+        remote = { ...remote, state, stateReason: reason, commentCount: remote.commentCount + 1 }
+        return remote
+      },
+    }))
+    await session.load("anomalyco/opentui")
+    await session.loadIssue(number)
+    session.updateIssueDraft(number, { body: posted.body, reason: "not_planned" })
+    await expect(session.submitIssueAction(number, "close")).rejects.toThrow("Comment denied")
+    expect(stateCalls).toBe(0)
+    expect(session.issueAction(number).body).toBe(posted.body)
+    await expect(session.submitIssueAction(number, "close")).rejects.toThrow("Comment posted, but closing failed")
+    expect(session.issueAction(number)).toMatchObject({ body: "", retry: "close", operation: { status: "error" } })
+    expect(session.issueDetail()?.resource.value?.state).toBe("open")
+    expect(session.issueDetail()?.comments.value?.items).toContainEqual(posted)
+    session.clearIssue()
+    await session.loadIssue(number)
+    expect(session.issueAction(number).retry).toBe("close")
+    session.updateIssueDraft(number, { body: "Do not repost", reason: "completed" })
+    expect(session.issueAction(number).body).toBe("")
+    session.prepareIssueAction(number, "close")
+    expect(session.issueAction(number).retry).toBe("close")
+    session.prepareIssueAction(number, "reopen")
+    expect(session.issueAction(number).retry).toBeUndefined()
+    expect(session.issueAction(number)).toMatchObject({ body: "", reason: "not_planned", operation: { status: "idle" } })
+    session.prepareIssueAction(number, "close")
+    await session.submitIssueAction(number, "close")
+    expect(commentCalls).toBe(2)
+    expect(stateCalls).toBe(2)
+    expect(reasons).toEqual(["not_planned", "not_planned"])
+    expect(session.issueDetail()?.resource.value?.state).toBe("closed")
+    expect(session.issueAction(number)).toMatchObject({ body: "", operation: { status: "idle" } })
+    expect(session.issueAction(number).retry).toBeUndefined()
+    expect(ready(session).data.issues.open.value?.items).toEqual([])
+    expect(ready(session).data.issues.closed.value?.items.map((issue) => issue.number)).toEqual([number])
+  })
+
+  test("issue actions prevent duplicate writes and stay scoped to their original repository", async () => {
+    const number = issueDetailFixture.number
+    const pending = deferred<IssueComment>()
+    const posted = { ...issueCommentsFixture[0]!, id: 9002, body: "Original repository draft" }
+    const calls: string[] = []
+    const session = createRepositorySession(loaders({
+      createIssueComment: async (repository) => { calls.push(repository); return pending.promise },
+    }))
+    await session.load("owner/original")
+    await session.loadIssue(number)
+    session.updateIssueDraft(number, { body: posted.body })
+    session.clearIssue()
+    await session.loadIssue(number)
+    expect(session.issueAction(number).body).toBe(posted.body)
+    const submission = session.submitIssueAction(number, "comment")
+    await expect(session.submitIssueAction(number, "comment")).rejects.toThrow("already in progress")
+    await session.load("owner/other")
+    await session.loadIssue(number)
+    session.updateIssueDraft(number, { body: "Other repository draft" })
+    pending.resolve(posted)
+    await submission
+    expect(calls).toEqual(["owner/original"])
+    expect(session.issueAction(number).body).toBe("Other repository draft")
+    expect(session.issueDetail()?.comments.value?.items.some((comment) => comment.id === posted.id)).toBe(false)
+    expect(session.issueDetail()?.resource.value?.commentCount).toBe(issueDetailFixture.commentCount)
+  })
+
+  test("duplicate marking preserves comment drafts, confirms state, and supports reopening", async () => {
+    const number = issueDetailFixture.number
+    let remote = { ...issueDetailFixture }
+    const pending = deferred<IssueDetail>()
+    const targets: number[] = []
+    let commentCalls = 0
+    const session = createRepositorySession(loaders({
+      issue: async () => remote,
+      issues: async (_repository, state) => ({ items: remote.state === state ? [remote] : [], hasMore: false }),
+      createIssueComment: async () => { commentCalls++; return issueCommentsFixture[0]! },
+      markIssueDuplicate: async (_repository, _number, target) => {
+        targets.push(target)
+        if (targets.length === 1) throw new Error("Duplicate marking denied")
+        return pending.promise
+      },
+      updateIssueState: async (_repository, _number, state) => {
+        remote = { ...remote, state, stateReason: "reopened" }
+        return remote
+      },
+    }))
+    await session.load("anomalyco/opentui")
+    await session.loadIssue(number)
+    session.updateIssueDraft(number, { body: "An unrelated comment draft", duplicateTarget: `#${number}` })
+    await expect(session.submitIssueAction(number, "duplicate")).rejects.toThrow("duplicate of itself")
+    expect(targets).toEqual([])
+    session.updateIssueDraft(number, { duplicateTarget: "#123" })
+    await expect(session.submitIssueAction(number, "duplicate")).rejects.toThrow("Duplicate marking denied")
+    expect(session.issueDetail()?.resource.value?.state).toBe("open")
+    expect(session.issueAction(number)).toMatchObject({ body: "An unrelated comment draft", duplicateTarget: "#123" })
+    const marking = session.submitIssueAction(number, "duplicate")
+    await expect(session.submitIssueAction(number, "duplicate")).rejects.toThrow("already in progress")
+    remote = { ...remote, state: "closed", stateReason: "duplicate" }
+    pending.resolve(remote)
+    expect(await marking).toMatchObject({ duplicateOf: 123, issue: { state: "closed", stateReason: "duplicate" } })
+    expect(targets).toEqual([123, 123])
+    expect(commentCalls).toBe(0)
+    expect(session.issueAction(number)).toMatchObject({ body: "An unrelated comment draft", duplicateTarget: "", operation: { status: "idle" } })
+    expect(ready(session).data.issues.open.value?.items).toEqual([])
+    expect(ready(session).data.issues.closed.value?.items.map((issue) => issue.number)).toEqual([number])
+    // The user clears the optional comment before confirming reopening.
+    session.updateIssueDraft(number, { body: "" })
+    await session.submitIssueAction(number, "reopen")
+    expect(session.issueDetail()?.resource.value?.state).toBe("open")
+    expect(ready(session).data.issues.open.value?.items.map((issue) => issue.number)).toEqual([number])
+    expect(ready(session).data.issues.closed.value?.items).toEqual([])
+    expect(commentCalls).toBe(0)
+  })
+
   test("loads commit details on demand and ignores obsolete responses", async () => {
     const pending = new Map<string, ReturnType<typeof deferred<CommitDetail>>>()
     const session = createRepositorySession(loaders({

@@ -244,6 +244,115 @@ describe("GitHub client", () => {
     })
   })
 
+  test("maps issue mutations and preserves raw comment bodies and state reasons", async () => {
+    const body = "  Markdown\r\n\n`$(not a command)`\n"
+    const date = "2026-01-01T00:00:00Z"
+    const issue = {
+      number: 42, state: "open", title: "Issue", user: null, created_at: date,
+      html_url: "https://github.com/owner/repo/issues/42", body: null, updated_at: date,
+      closed_at: null, state_reason: null, locked: false, labels: [], assignees: [],
+      milestone: null, comments: 1,
+    }
+    const calls: { path: string; method: string; body: Record<string, unknown> }[] = []
+    const client = createGitHubClient({
+      ...transport(),
+      async mutate<T>(path: string, method: "POST" | "PATCH", input: Record<string, unknown>) {
+        calls.push({ path, method, body: input })
+        return (method === "POST"
+          ? { id: 9876543210, user: null, body: input.body, created_at: date, updated_at: date }
+          : { ...issue, state: input.state, state_reason: input.state_reason ?? null }) as T
+      },
+    })
+    expect(await client.createIssueComment("owner/repo", 42, body)).toEqual({
+      id: 9876543210, author: "ghost", authorAssociation: "NONE", body, createdAt: date, updatedAt: date,
+    })
+    expect(await client.updateIssueState("owner/repo", 42, "closed")).toMatchObject({
+      state: "closed", stateReason: "completed", body: "", author: "ghost", commentCount: 1,
+    })
+    expect(await client.updateIssueState("owner/repo", 42, "closed", "not_planned")).toMatchObject({
+      state: "closed", stateReason: "not_planned",
+    })
+    const reopened = await client.updateIssueState("owner/repo", 42, "open", "not_planned")
+    expect(reopened.state).toBe("open")
+    expect(reopened).not.toHaveProperty("stateReason")
+    expect(calls).toEqual([
+      { path: "repos/owner/repo/issues/42/comments", method: "POST", body: { body } },
+      { path: "repos/owner/repo/issues/42", method: "PATCH", body: { state: "closed", state_reason: "completed" } },
+      { path: "repos/owner/repo/issues/42", method: "PATCH", body: { state: "closed", state_reason: "not_planned" } },
+      { path: "repos/owner/repo/issues/42", method: "PATCH", body: { state: "open" } },
+    ])
+  })
+
+  test("closes duplicates using the canonical global ID and rejects invalid targets without writes", async () => {
+    const date = "2026-01-01T00:00:00Z"
+    const source = {
+      number: 42, state: "open", title: "Duplicate", user: null, created_at: date,
+      html_url: "https://github.com/owner/repo/issues/42", body: null, updated_at: date,
+      closed_at: null, state_reason: null, locked: false, labels: [], assignees: [],
+      milestone: null, comments: 0,
+    }
+    const sourcePath = "repos/owner/repo/issues/42"
+    const canonicalPath = "repos/owner/repo/issues/7"
+    const responses: Responses = {
+      [sourcePath]: source,
+      [canonicalPath]: { ...source, number: 7, id: 9876543210, state: "closed" },
+    }
+    const reads: string[] = []
+    const writes: { path: string; method: string; body: Record<string, unknown> }[] = []
+    const stub = transport(responses)
+    const fixture: GitHubTransport = {
+      ...stub,
+      async json<T>(path: string) { reads.push(path); return stub.json<T>(path) },
+      async mutate<T>(path: string, method: "POST" | "PATCH", body: Record<string, unknown>) {
+        writes.push({ path, method, body })
+        return { ...source, state: body.state, state_reason: body.state_reason, closed_at: date } as T
+      },
+    }
+    const client = createGitHubClient(fixture)
+    await expect(client.markIssueDuplicate("owner/repo", 42, 42)).rejects.toThrow("itself")
+    await expect(client.markIssueDuplicate("owner/repo", 0, 7)).rejects.toThrow("positive safe integers")
+    await expect(client.markIssueDuplicate("owner/repo", 42, 1.5)).rejects.toThrow("positive safe integers")
+    await expect(createGitHubClient({ ...fixture, mutate: undefined }).markIssueDuplicate("owner/repo", 42, 7))
+      .rejects.toThrow("does not support mutations")
+    expect(reads).toEqual([])
+    responses[sourcePath] = { ...source, state: "closed" }
+    await expect(client.markIssueDuplicate("owner/repo", 42, 7)).rejects.toThrow("Reopen the issue first")
+    expect(reads).toEqual([sourcePath])
+    responses[sourcePath] = source
+    responses[canonicalPath] = { number: 7, id: 9876543210, pull_request: {} }
+    await expect(client.markIssueDuplicate("owner/repo", 42, 7)).rejects.toThrow("is a pull request")
+    responses[canonicalPath] = { number: 7 }
+    await expect(client.markIssueDuplicate("owner/repo", 42, 7)).rejects.toThrow("valid global issue ID")
+    expect(writes).toEqual([])
+    responses[canonicalPath] = { number: 7, id: 9876543210, state: "closed" }
+    expect(await client.markIssueDuplicate("owner/repo", 42, 7)).toEqual({
+      number: 42, state: "closed", stateReason: "duplicate", title: "Duplicate", author: "ghost",
+      createdAt: date, url: source.html_url, body: "", updatedAt: date, closedAt: date,
+      locked: false, labels: [], assignees: [], commentCount: 0,
+    })
+    expect(writes).toEqual([{ path: sourcePath, method: "PATCH", body: {
+      state: "closed", state_reason: "duplicate", duplicate_issue_id: 9876543210,
+    } }])
+  })
+
+  test("rejects blank comments and unsupported mutations, and does not retry failed writes", async () => {
+    const readonly = createGitHubClient(transport())
+    await expect(readonly.createIssueComment("owner/repo", 42, "body")).rejects.toThrow("does not support mutations")
+    await expect(readonly.updateIssueState("owner/repo", 42, "closed")).rejects.toThrow("does not support mutations")
+    let calls = 0
+    const error = new Error("Write denied")
+    const client = createGitHubClient({
+      ...transport(),
+      async mutate<T>(): Promise<T> { calls++; throw error },
+    })
+    await expect(client.createIssueComment("owner/repo", 42, " \r\n\t")).rejects.toThrow("must not be blank")
+    expect(calls).toBe(0)
+    await expect(client.createIssueComment("owner/repo", 42, "body")).rejects.toBe(error)
+    expect(calls).toBe(1)
+    await expect(client.updateIssueState("owner/repo", 42, "closed")).rejects.toBe(error)
+    expect(calls).toBe(2)
+  })
+
   test("distinguishes merged pulls from closed and open pulls", async () => {
     const base = { title: "Pull", user: { login: "octocat" }, created_at: "2026-01-01T00:00:00Z" }
     const client = createGitHubClient(transport({

@@ -1,11 +1,11 @@
-const children = new Set<Bun.Subprocess<"ignore", "pipe", "pipe">>()
+const children = new Set<Bun.Subprocess<"ignore" | Uint8Array, "pipe", "pipe">>()
 let stopping = false
 
-export function spawnGitHub(args: string[], cwd?: string) {
+export function spawnGitHub(args: string[], cwd?: string, input?: string) {
   if (stopping) throw new Error("Application is shutting down")
   const child = Bun.spawn(["gh", ...args], {
     cwd,
-    stdin: "ignore",
+    stdin: input === undefined ? "ignore" : new TextEncoder().encode(input),
     stdout: "pipe",
     stderr: "pipe",
   })

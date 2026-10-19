@@ -48,6 +48,7 @@ type IssueResponse = {
 }
 
 type IssueDetailResponse = IssueResponse & {
+  id?: number
   html_url: string
   body: string | null
   updated_at: string
@@ -144,6 +145,39 @@ function issueSummary(item: IssueResponse): IssueSummary {
     title: item.title,
     author: item.user?.login ?? "ghost",
     createdAt: item.created_at,
+  }
+}
+
+function issueDetail(item: IssueDetailResponse): IssueDetail {
+  if ("pull_request" in item) throw new Error(`Issue #${item.number} is a pull request.`)
+  return {
+    ...issueSummary(item),
+    url: item.html_url,
+    body: item.body ?? "",
+    updatedAt: item.updated_at,
+    ...(item.closed_at != null ? { closedAt: item.closed_at } : {}),
+    ...(item.state_reason != null ? { stateReason: item.state_reason } : {}),
+    locked: item.locked,
+    labels: item.labels.map((label) => typeof label === "string" ? label : label.name),
+    assignees: item.assignees.map((assignee) => assignee.login),
+    ...(item.milestone ? {
+      milestone: {
+        title: item.milestone.title,
+        ...(item.milestone.due_on != null ? { dueAt: item.milestone.due_on } : {}),
+      },
+    } : {}),
+    commentCount: item.comments,
+  }
+}
+
+function issueComment(item: IssueCommentResponse): IssueComment {
+  return {
+    id: item.id,
+    author: item.user?.login ?? "ghost",
+    authorAssociation: item.author_association ?? "NONE",
+    body: item.body ?? "",
+    createdAt: item.created_at,
+    updatedAt: item.updated_at,
   }
 }
 
@@ -255,25 +289,7 @@ export function createGitHubClient(transport: GitHubTransport) {
 
   const issue = async (repository: string, number: number): Promise<IssueDetail> => {
     const item = await transport.json<IssueDetailResponse>(`repos/${repository}/issues/${number}`)
-    if ("pull_request" in item) throw new Error(`Issue #${number} is a pull request.`)
-    return {
-      ...issueSummary(item),
-      url: item.html_url,
-      body: item.body ?? "",
-      updatedAt: item.updated_at,
-      ...(item.closed_at != null ? { closedAt: item.closed_at } : {}),
-      ...(item.state_reason != null ? { stateReason: item.state_reason } : {}),
-      locked: item.locked,
-      labels: item.labels.map((label) => typeof label === "string" ? label : label.name),
-      assignees: item.assignees.map((assignee) => assignee.login),
-      ...(item.milestone ? {
-        milestone: {
-          title: item.milestone.title,
-          ...(item.milestone.due_on != null ? { dueAt: item.milestone.due_on } : {}),
-        },
-      } : {}),
-      commentCount: item.comments,
-    }
+    return issueDetail(item)
   }
 
   const issueComments = async (repository: string, number: number, page = 1): Promise<Page<IssueComment>> => {
@@ -281,16 +297,61 @@ export function createGitHubClient(transport: GitHubTransport) {
       `repos/${repository}/issues/${number}/comments?per_page=100&page=${page}`,
     )
     return {
-      items: items.map((item) => ({
-        id: item.id,
-        author: item.user?.login ?? "ghost",
-        authorAssociation: item.author_association ?? "NONE",
-        body: item.body ?? "",
-        createdAt: item.created_at,
-        updatedAt: item.updated_at,
-      })),
+      items: items.map(issueComment),
       hasMore: items.length === 100,
     }
+  }
+
+  const createIssueComment = async (repository: string, number: number, body: string): Promise<IssueComment> => {
+    if (!body.trim()) throw new Error("Issue comment body must not be blank.")
+    if (!transport.mutate) throw new Error("GitHub transport does not support mutations.")
+    const item = await transport.mutate<IssueCommentResponse>(
+      `repos/${repository}/issues/${number}/comments`, "POST", { body },
+    )
+    return issueComment(item)
+  }
+
+  const updateIssueState = async (
+    repository: string,
+    number: number,
+    state: ListState,
+    reason?: "completed" | "not_planned",
+  ): Promise<IssueDetail> => {
+    if (!transport.mutate) throw new Error("GitHub transport does not support mutations.")
+    const item = await transport.mutate<IssueDetailResponse>(
+      `repos/${repository}/issues/${number}`, "PATCH",
+      { state, ...(state === "closed" ? { state_reason: reason ?? "completed" } : {}) },
+    )
+    return issueDetail(item)
+  }
+
+  const markIssueDuplicate = async (
+    repository: string,
+    number: number,
+    canonicalNumber: number,
+  ): Promise<IssueDetail> => {
+    if (!Number.isSafeInteger(number) || number <= 0
+      || !Number.isSafeInteger(canonicalNumber) || canonicalNumber <= 0) {
+      throw new Error("Issue numbers must be positive safe integers.")
+    }
+    if (number === canonicalNumber) throw new Error("An issue cannot be a duplicate of itself.")
+    if (!transport.mutate) throw new Error("GitHub transport does not support mutations.")
+    const source = await issue(repository, number)
+    if (source.state !== "open") throw new Error("Only open issues can be marked as duplicate. Reopen the issue first.")
+    const canonical = await transport.json<IssueDetailResponse>(`repos/${repository}/issues/${canonicalNumber}`)
+    if ("pull_request" in canonical) throw new Error(`Issue #${canonicalNumber} is a pull request.`)
+    if (typeof canonical.id !== "number" || !Number.isSafeInteger(canonical.id) || canonical.id <= 0) {
+      throw new Error(`Canonical issue #${canonicalNumber} has no valid global issue ID.`)
+    }
+    const item = await transport.mutate<IssueDetailResponse>(
+      `repos/${repository}/issues/${number}`, "PATCH",
+      { state: "closed", state_reason: "duplicate", duplicate_issue_id: canonical.id },
+    )
+    const detail = issueDetail(item)
+    if (detail.number !== number || detail.state !== "closed" || detail.stateReason !== "duplicate") {
+      throw new Error(`GitHub did not confirm closing issue #${number} as duplicate; the requested update may have been ignored.`)
+    }
+    return detail
   }
 
   const issueReferences = async (repository: string, number: number): Promise<IssueReference[]> => {
@@ -391,7 +452,7 @@ export function createGitHubClient(transport: GitHubTransport) {
     return { items, hasMore: page * PAGE_SIZE < (response.total_count ?? items.length) }
   }
 
-  return { metadata, documents, document, branches, commits, commit, issues, hasIssues, issue, issueComments, issueReferences, pulls, runs }
+  return { metadata, documents, document, branches, commits, commit, issues, hasIssues, issue, issueComments, createIssueComment, updateIssueState, markIssueDuplicate, issueReferences, pulls, runs }
 }
 
 const client = createGitHubClient(githubTransport)
@@ -406,6 +467,9 @@ export const loadGitHubIssues = client.issues
 export const loadGitHubHasIssues = client.hasIssues
 export const loadGitHubIssue = client.issue
 export const loadGitHubIssueComments = client.issueComments
+export const createGitHubIssueComment = client.createIssueComment
+export const updateGitHubIssueState = client.updateIssueState
+export const markGitHubIssueDuplicate = client.markIssueDuplicate
 export const loadGitHubIssueReferences = client.issueReferences
 export const loadGitHubPulls = client.pulls
 export const loadGitHubRuns = client.runs

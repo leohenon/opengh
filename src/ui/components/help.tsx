@@ -40,6 +40,8 @@ export function Help(props: {
   hasMoreFiles?: boolean;
   hasMoreComments?: boolean;
   hasReferences?: boolean;
+  canComment?: boolean;
+  hasIssueActions?: boolean;
   command?: string;
 }) {
   const { colors } = useTheme();
@@ -78,6 +80,8 @@ export function Help(props: {
       case "issue":
         return [
           { keys: "Esc", description: "back to issues" },
+          ...(props.canComment ? [{ keys: "c", description: "add comment" }] : []),
+          ...(props.hasIssueActions ? [{ keys: "a", description: "issue actions" }] : []),
           { keys: "o", description: "open on GitHub" },
           { keys: "y", description: "copy issue URL" },
           ...(props.hasReferences ? [{ keys: "p", description: "open references" }] : []),
@@ -92,7 +96,7 @@ export function Help(props: {
   const shortcuts = createMemo(() => {
     const tabs = `1–${props.tabCount}, h/l, ←/→`;
     const entries = [...(props.command ? [{ keys: "x", description: props.command }] : []), ...viewShortcuts(), { keys: tabs, description: "switch tabs" }, ...commonShortcuts];
-    const order = ["Enter", "Tab", "Tab / ⇧Tab", "Esc", tabs, "j/k, ↑/↓", "u/d", "g/G", "o", "y", "x", "p", "r", "s", ",", "?", "q / C-c"];
+    const order = ["Enter", "Tab", "Tab / ⇧Tab", "Esc", tabs, "j/k, ↑/↓", "u/d", "g/G", "c", "a", "o", "y", "x", "p", "r", "s", ",", "?", "q / C-c"];
     return order.flatMap((keys) => entries.filter((shortcut) => shortcut.keys === keys));
   });
   const height = () => shortcuts().length + 4;

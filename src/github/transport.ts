@@ -14,6 +14,7 @@ export class GitHubApiError extends Error {
 
 export type GitHubTransport = {
   json<T>(path: string): Promise<T>
+  mutate?<T>(path: string, method: "POST" | "PATCH", body: Record<string, unknown>): Promise<T>
   graphql?<T>(query: string, variables: Record<string, string>): Promise<T>
   text(path: string, accept?: string): Promise<string>
   page?(url: string): Promise<string>
@@ -26,11 +27,17 @@ function httpStatus(message: string) {
   return match ? Number(match[1]) : undefined
 }
 
-async function request(path: string, accept?: string, fields?: Record<string, string>) {
+async function request(
+  path: string,
+  accept?: string,
+  fields?: Record<string, string>,
+  mutation?: { method: "POST" | "PATCH"; body: Record<string, unknown> },
+) {
   const args = ["api", path]
   if (accept) args.push("-H", `Accept: ${accept}`)
   if (fields) for (const [key, value] of Object.entries(fields)) args.push("-f", `${key}=${value}`)
-  const process = spawnGitHub(args)
+  if (mutation) args.push("--method", mutation.method, "--input", "-")
+  const process = spawnGitHub(args, undefined, mutation ? JSON.stringify(mutation.body) : undefined)
   let timedOut = false
   const timeout = setTimeout(() => {
     timedOut = true
@@ -57,6 +64,9 @@ async function request(path: string, accept?: string, fields?: Record<string, st
 export const githubTransport: GitHubTransport = {
   async json<T>(path: string) {
     return JSON.parse(await request(path)) as T
+  },
+  async mutate<T>(path: string, method: "POST" | "PATCH", body: Record<string, unknown>) {
+    return JSON.parse(await request(path, undefined, undefined, { method, body })) as T
   },
   async graphql<T>(query: string, variables: Record<string, string>) {
     return JSON.parse(await request("graphql", undefined, { query, ...variables })) as T

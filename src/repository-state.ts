@@ -5,6 +5,8 @@ import type {
   IssueDetail,
   IssueComment,
   IssueReference,
+  IssueActionKind,
+  IssueCloseReason,
   ListState,
   Paginated,
   PullRequestSummary,
@@ -40,6 +42,15 @@ export type OperationState =
   | { status: "idle" }
   | { status: "loading" }
   | { status: "error"; message: string }
+
+export type IssueActionState = {
+  body: string
+  reason: IssueCloseReason
+  duplicateTarget?: string
+  operation: OperationState
+  // A comment already succeeded; the next submission must only retry the state change.
+  retry?: Extract<IssueActionKind, "close" | "reopen">
+}
 
 export type RepositoryData = {
   repo: Repo

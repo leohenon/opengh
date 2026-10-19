@@ -45,6 +45,10 @@ export type IssueDetail = IssueSummary & {
   commentCount: number
 }
 
+export type IssueCloseReason = "completed" | "not_planned"
+export type IssueActionKind = "comment" | "close" | "reopen" | "duplicate"
+export type IssueActionResult = { comment?: IssueComment; issue?: IssueDetail; duplicateOf?: number }
+
 export type IssueComment = {
   id: number
   author: string

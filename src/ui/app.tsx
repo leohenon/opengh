@@ -4,11 +4,12 @@ import { createEffect, createMemo, createSignal, onCleanup, Show } from "solid-j
 import { defaultConfig, type Config } from "../config"
 import { cloneCommand, cloneDestination, matchesLocalRepository, type LocalRepository, type CommandSpec, type CommandTask } from "../command-actions"
 import { CommandDialog, type CommandAction } from "./components/command-dialog"
-import type { CommitDetail, ListState } from "../models"
+import type { CommitDetail, IssueActionKind, IssueActionResult, ListState } from "../models"
 import { back, navigate, openDetail, type NavigationState, type Page } from "../navigation"
 import type {
   CommitDetailState,
   IssueDetailState,
+  IssueActionState,
   RepositoryData,
   RepositoryOperations,
   RepositoryResource,
@@ -17,6 +18,7 @@ import type {
 import { BranchPicker } from "./components/branch-picker"
 import { Header } from "./components/header"
 import { IssueReferencesPicker } from "./components/issue-references-picker"
+import { IssueActionDialog, IssueActionsMenu } from "./components/issue-actions"
 import { Help } from "./components/help"
 import { Settings } from "./components/settings"
 import { StatusBar, type StatusKind } from "./components/status-bar"
@@ -33,7 +35,7 @@ import { referencedItems } from "./issue-references"
 import { useTheme } from "./theme"
 import { IconProvider } from "./icon-style"
 
-type Overlay = "help" | "branch-picker" | "settings" | "issue-references" | "command" | "switch-repo"
+type Overlay = "help" | "branch-picker" | "settings" | "issue-references" | "issue-actions" | "issue-action" | "command" | "switch-repo"
 type ToastState = { id: number; title: string; message: string; duration?: number; tone?: "error" | "success" | "info" }
 
 export type AppProps = {
@@ -66,6 +68,11 @@ export type AppProps = {
   onLoadMoreIssueComments?: () => Promise<void>
   onRetryIssueReferences?: () => Promise<void>
   onCloseIssue?: () => void
+  getIssueAction?: (number: number) => IssueActionState
+  onPrepareIssueAction?: (number: number, kind: IssueActionKind) => void
+  onIssueDraftChange?: (number: number, draft: Partial<Pick<IssueActionState, "body" | "reason" | "duplicateTarget">>) => void
+  onDiscardIssueDraft?: (number: number) => void
+  onSubmitIssueAction?: (number: number, kind: IssueActionKind) => Promise<IssueActionResult>
   onOpenInBrowser?: (target?: string | number, repository?: string) => Promise<void>
   onCopyToClipboard?: (value: string) => Promise<boolean>
   onLoadMoreRuns?: () => Promise<void>
@@ -85,6 +92,11 @@ export function App(props: AppProps) {
   const [overlay, setOverlay] = createSignal<Overlay>()
   const [toast, setToast] = createSignal<ToastState>()
   const [commandAction, setCommandAction] = createSignal<CommandAction>()
+  const [issueAction, setIssueAction] = createSignal<{ number: number; kind: IssueActionKind }>()
+  const [issueActionHint, setIssueActionHint] = createSignal<string>()
+  const [revealActivity, setRevealActivity] = createSignal<{ number: number; id: number }>()
+  const emptyIssueAction: IssueActionState = { body: "", reason: "completed", operation: { status: "idle" } }
+  let revealId = 0
   const canClone = () => Boolean(props.onRunCommand && props.cwd && !matchesLocalRepository(props.localRepository, data().repo.nameWithOwner))
   const openCommand = (action: CommandAction) => { setCommandAction(action); setOverlay("command") }
   let toastId = 0
@@ -125,6 +137,34 @@ export function App(props: AppProps) {
   }
   const issueUrl = (number: number) => props.issueDetail?.number === number && props.issueDetail.resource.value
     ? props.issueDetail.resource.value.url : `${data().repo.url}/issues/${number}`
+  const canActOnIssue = () => Boolean(props.onSubmitIssueAction && issueDetail().resource.value
+    && issueDetail().resource.status !== "loading")
+  const openIssueAction = (kind: IssueActionKind) => {
+    const number = activeIssueNumber()
+    if (!number || !canActOnIssue() || props.getIssueAction?.(number).operation.status === "loading") return
+    props.onPrepareIssueAction?.(number, kind)
+    setIssueAction({ number, kind })
+    setOverlay("issue-action")
+  }
+  const submitIssueAction = async () => {
+    const action = issueAction()
+    if (!action || !props.onSubmitIssueAction || props.getIssueAction?.(action.number).operation.status === "loading") return
+    const repository = data().repo.nameWithOwner
+    const retry = props.getIssueAction?.(action.number).retry
+    try {
+      const result = await props.onSubmitIssueAction(action.number, action.kind)
+      if (renderer.isDestroyed || data().repo.nameWithOwner !== repository || issueAction() !== action) return
+      if (result.comment || retry) setRevealActivity({ number: action.number, id: ++revealId })
+      setOverlay()
+      setIssueAction()
+      setToast({ id: ++toastId, title: action.kind === "comment" ? "Comment posted"
+        : action.kind === "duplicate" ? "Issue marked as duplicate" : action.kind === "close" ? "Issue closed" : "Issue reopened",
+        message: result.duplicateOf ? `#${action.number} → #${result.duplicateOf}` : `#${action.number}`, duration: 2000, tone: "success" })
+    } catch (error) {
+      if (!renderer.isDestroyed && issueAction() === action && props.getIssueAction?.(action.number).operation.status !== "error")
+        setToast({ id: ++toastId, title: "Issue action failed", message: error instanceof Error ? error.message : "Unknown error" })
+    }
+  }
   const refreshIssue = async (number: number) => {
     const detail = issueDetail()
     if (issueRefresh()?.number === number
@@ -204,6 +244,14 @@ export function App(props: AppProps) {
     return undefined
   }
   const statusKind = (): StatusKind | undefined => {
+    if (overlay() === "issue-action") {
+      const action = issueAction()
+      if (action && props.getIssueAction?.(action.number).operation.status === "loading")
+        return action.kind === "duplicate" ? "marking-duplicate" : action.kind === "comment" ? "posting-comment"
+          : action.kind === "close" ? "closing-issue" : "reopening-issue"
+      return undefined
+    }
+    if (overlay() === "issue-actions") return undefined
     const current = operations()
     if (current.refresh.status === "loading") return "refreshing"
     if (current.branch.status === "loading") return "switching-branch"
@@ -340,7 +388,7 @@ export function App(props: AppProps) {
     const detail = navigation().details?.[page()]
     setNavigation((state) => navigate(back(state), "overview"))
     if (detail?.kind === "issue") props.onCloseIssue?.()
-    if (overlay() === "issue-references") setOverlay()
+    if (overlay() === "issue-references" || overlay() === "issue-actions" || overlay() === "issue-action") { setOverlay(); setIssueAction() }
   })
 
   createEffect(() => {
@@ -356,7 +404,7 @@ export function App(props: AppProps) {
     const detail = navigation().details?.[page()]
     setNavigation(back)
     if (detail?.kind === "commit") props.onCloseCommit?.()
-    if (detail?.kind === "issue") props.onCloseIssue?.()
+    if (detail?.kind === "issue") { props.onCloseIssue?.(); setRevealActivity() }
   }
   const selectPage = (next: Page) => setNavigation((state) => navigate(state, next))
   const movePage = (delta: number) => {
@@ -411,6 +459,8 @@ export function App(props: AppProps) {
   }
   const shortcutHint = () => {
     if (!config().showStatusBarHints) return undefined
+    if (overlay() === "issue-action") return issueActionHint()
+    if (overlay() === "issue-actions") return "↑/↓ select · enter open · esc cancel"
     const common = (props.onSwitchRepository ? " · s switch repo" : "") + " · ? help"
     if (activeCommitSha()) {
       const retry = commitResource().status === "error"
@@ -425,13 +475,15 @@ export function App(props: AppProps) {
       const retry = activeResource()?.status === "error"
       const more = issueDetail().comments.value?.hasMore
       const references = issueMenuItems().length
-      if (dimensions().width < 64) return "esc back"
-        + (retry ? " · r retry" : more ? " · enter more" : references ? " · p references" : " · o GitHub")
+      const actions = canActOnIssue() ? " · c comment · a actions" : ""
+      const hintWidth = dimensions().width - actions.length
+      if (dimensions().width < 64) return "esc back" + actions
+        + (!actions ? retry ? " · r retry" : more ? " · enter more" : references ? " · p references" : " · o GitHub" : "")
         + common
-      return "esc back"
+      return "esc back" + actions
         + (retry ? ` · r retry ${statusDetail()}` : more ? " · enter more comments" : "")
-        + (references ? " · p references" : "")
-        + (dimensions().width >= 100 || !retry && !more ? " · o GitHub · y URL" : "")
+        + (references && hintWidth >= 64 ? " · p references" : "")
+        + (hintWidth >= 100 || !retry && !more && hintWidth >= 64 ? " · o GitHub · y URL" : "")
         + common
     }
     if (page() === "issues") return (dimensions().width >= 45 ? "enter open" : "enter") + " · o GitHub · y URL"
@@ -452,7 +504,8 @@ export function App(props: AppProps) {
       if (escape) setOverlay()
       return
     }
-    if (overlay() === "settings" || overlay() === "command" || overlay() === "switch-repo") return
+    if (overlay() === "settings" || overlay() === "command" || overlay() === "switch-repo"
+      || overlay() === "issue-actions" || overlay() === "issue-action") return
     if (event.name === "q") return quit()
     if (overlay() === "help") {
       if (event.name === "?" || escape) setOverlay()
@@ -497,6 +550,8 @@ export function App(props: AppProps) {
       if (event.ctrl || event.meta) return
       if (event.name === "o") void openInBrowser(number)
       else if (event.name === "y") void copyToClipboard(issueUrl(number), "URL")
+      else if (event.name === "c" && canActOnIssue()) { event.stopPropagation(); openIssueAction("comment") }
+      else if (event.name === "a" && canActOnIssue()) { event.stopPropagation(); setOverlay("issue-actions") }
       else if (event.name === "p" && issueMenuItems().length) setOverlay("issue-references")
       else if (event.name === "return" || event.name === "enter") void props.onLoadMoreIssueComments?.()
       else if (event.name === "r") void refreshIssue(number)
@@ -649,6 +704,7 @@ export function App(props: AppProps) {
             <IssueScreen
               number={number}
               detail={issueDetail()}
+              revealActivity={revealActivity()?.number === number ? revealActivity()?.id : undefined}
               defaultBranch={data().repo.defaultBranch}
               interactive={page() === "issues" && overlay() === undefined}
               showScrollbar={config().showScrollbars}
@@ -657,7 +713,8 @@ export function App(props: AppProps) {
           </box>
         )}
       </Show>
-      <StatusBar kind={status()} detail={statusDetail()} hint={shortcutHint()} />
+      <StatusBar kind={status()} detail={statusDetail()} hint={shortcutHint()}
+        zIndex={overlay() === "issue-action" || overlay() === "issue-actions" ? 350 : 0} />
       <Show when={toast()} keyed>
         {(current) => (
           <Toast
@@ -699,8 +756,36 @@ export function App(props: AppProps) {
           hasMoreFiles={commitResource().value?.files.hasMore}
           hasMoreComments={issueDetail().comments.value?.hasMore}
           hasReferences={issueMenuItems().length > 0}
+          canComment={canActOnIssue()}
+          hasIssueActions={canActOnIssue()}
           command={page() === "overview" && canClone() ? "clone repository" : undefined}
         />
+      </Show>
+      <Show when={overlay() === "issue-actions" && activeIssueNumber()}>
+        <IssueActionsMenu
+          number={activeIssueNumber()!}
+          state={issueDetail().resource.value?.state ?? "open"}
+          onSelect={openIssueAction}
+          onClose={() => setOverlay()}
+        />
+      </Show>
+      <Show when={overlay() === "issue-action" ? issueAction() : undefined} keyed>
+        {(action) => <IssueActionDialog
+          number={action.number}
+          kind={action.kind}
+          state={props.getIssueAction?.(action.number) ?? emptyIssueAction}
+          showScrollbar={config().showScrollbars}
+          locked={issueDetail().resource.value?.locked}
+          repositoryUrl={data().repo.url}
+          defaultBranch={data().repo.defaultBranch}
+          onBodyChange={(body) => props.onIssueDraftChange?.(action.number, { body })}
+          onReasonChange={(reason) => props.onIssueDraftChange?.(action.number, { reason })}
+          onDuplicateTargetChange={(duplicateTarget) => props.onIssueDraftChange?.(action.number, { duplicateTarget })}
+          onSubmit={() => void submitIssueAction()}
+          onDiscard={() => props.onDiscardIssueDraft?.(action.number)}
+          onHintChange={setIssueActionHint}
+          onClose={() => { setOverlay(); setIssueAction() }}
+        />}
       </Show>
       <Show when={overlay() === "issue-references" && activeIssueNumber()}>
         <IssueReferencesPicker

@@ -7,15 +7,23 @@ export type StatusKind =
   | "switching-branch"
   | "loading-resource"
   | "loading-more"
+  | "posting-comment"
+  | "closing-issue"
+  | "reopening-issue"
+  | "marking-duplicate"
 
 const loadingMessages: Record<StatusKind, string> = {
   refreshing: "Refreshing…",
   "switching-branch": "Switching branch…",
   "loading-resource": "Loading…",
   "loading-more": "Loading more…",
+  "posting-comment": "Posting comment…",
+  "closing-issue": "Closing issue…",
+  "reopening-issue": "Reopening issue…",
+  "marking-duplicate": "Marking duplicate…",
 }
 
-export function StatusBar(props: { kind?: StatusKind; detail?: string; hint?: string }) {
+export function StatusBar(props: { kind?: StatusKind; detail?: string; hint?: string; zIndex?: number }) {
   const { colors } = useTheme()
   const loadingMessage = () => {
     if (!props.kind) return undefined
@@ -27,6 +35,7 @@ export function StatusBar(props: { kind?: StatusKind; detail?: string; hint?: st
     <box
       height={1}
       flexShrink={0}
+      zIndex={props.zIndex ?? 0}
       paddingLeft={2}
       paddingRight={2}
       backgroundColor={colors.canvas}
