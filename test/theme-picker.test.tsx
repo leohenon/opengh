@@ -10,21 +10,22 @@ afterEach(() => {
 
 describe("ThemePicker", () => {
   test("filters, previews, and confirms a theme", async () => {
-    let preview: ThemeName = "github"
+    let preview: ThemeName = "opengh"
     let selected: ThemeName | undefined
     const view = await testRender(
       () => (
         <ThemePicker
-          current="github"
+          current="opengh"
           onPreview={(theme) => { preview = theme }}
           onCancel={() => {}}
           onSelect={async (theme) => { selected = theme }}
         />
       ),
-      { width: 80, height: 20, useThread: false },
+      { width: 80, height: 45, useThread: false },
     )
     active.push(view)
     await view.flush()
+    expect(view.captureCharFrame()).toContain("opengh (default)")
 
     await view.mockInput.typeText("drac")
     await view.flush()

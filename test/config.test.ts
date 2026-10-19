@@ -5,7 +5,7 @@ import { ConfigFileError, loadConfig, saveConfig } from "../src/config"
 
 describe("config", () => {
   test("uses defaults when the config file does not exist", async () => {
-    expect(await loadConfig("/path/that/does/not/exist.json")).toEqual({ showScrollbars: false, theme: "github", aboutSidebar: "auto", detailLayout: "centered", showStatusBarHints: false, hideDocumentsTab: false, compactHeader: false, iconStyle: "nerd" })
+    expect(await loadConfig("/path/that/does/not/exist.json")).toEqual({ showScrollbars: false, theme: "opengh", aboutSidebar: "auto", detailLayout: "centered", showStatusBarHints: false, hideDocumentsTab: false, compactHeader: false, iconStyle: "nerd" })
   })
 
   test("loads valid fields and defaults invalid fields", async () => {
@@ -16,7 +16,7 @@ describe("config", () => {
     await Bun.write(invalidPath, JSON.stringify({ showScrollbars: "yes", theme: "unknown", aboutSidebar: "sometimes", detailLayout: "invalid", showStatusBarHints: "no", iconStyle: "invalid", compactHeader: "yes", hideDocumentsTab: "yes" }))
 
     expect(await loadConfig(enabledPath)).toEqual({ showScrollbars: true, theme: "nord", aboutSidebar: "hide", detailLayout: "centered", showStatusBarHints: false, hideDocumentsTab: true, compactHeader: true, iconStyle: "nerd" })
-    expect(await loadConfig(invalidPath)).toEqual({ showScrollbars: false, theme: "github", aboutSidebar: "auto", detailLayout: "centered", showStatusBarHints: false, hideDocumentsTab: false, compactHeader: false, iconStyle: "nerd" })
+    expect(await loadConfig(invalidPath)).toEqual({ showScrollbars: false, theme: "opengh", aboutSidebar: "auto", detailLayout: "centered", showStatusBarHints: false, hideDocumentsTab: false, compactHeader: false, iconStyle: "nerd" })
   })
 
   test("reports malformed config files", async () => {

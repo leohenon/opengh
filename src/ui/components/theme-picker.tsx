@@ -1,6 +1,6 @@
 import { TextAttributes, type KeyEvent, type ScrollBoxRenderable } from "@opentui/core"
 import { createEffect, createMemo, createSignal, For, Show } from "solid-js"
-import { themeNames, type ThemeName } from "../../theme"
+import { defaultTheme, themeNames, type ThemeName } from "../../theme"
 import { useTheme } from "../theme"
 
 function fuzzyScore(value: string, query: string) {
@@ -141,7 +141,7 @@ export function ThemePicker(props: {
                     fg={active() ? colors.blue : colors.text}
                     attributes={active() ? TextAttributes.BOLD : TextAttributes.NONE}
                   >
-                    {entry.theme}
+                    {entry.theme === defaultTheme ? `${entry.theme} (default)` : entry.theme}
                   </text>
                   <text width={10} flexShrink={0} fg={colors.green}>
                     {entry.theme === props.current ? "✓ current" : ""}

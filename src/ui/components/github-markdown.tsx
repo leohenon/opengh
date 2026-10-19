@@ -9,7 +9,7 @@ import { useTheme } from "../theme"
 // One prose renderer for repository documents, issue descriptions, and comments.
 export function GitHubMarkdown(props: { content: string; syntaxStyle: SyntaxStyle; preserveImages?: boolean; codePanels?: boolean; backgroundColor?: string; context?: GitHubMarkdownContext; plainText?: boolean }) {
   const renderer = useRenderer()
-  const { colors } = useTheme()
+  const { colors, theme } = useTheme()
   const content = createMemo(() => props.plainText ? props.content : normalizeGitHubMarkdown(props.content, { preserveImages: props.preserveImages, codePanels: props.codePanels, context: props.context }))
   const tableOptions = createMemo<MarkdownOptions["tableOptions"]>(() => ({
     style: "grid",
@@ -28,10 +28,10 @@ export function GitHubMarkdown(props: { content: string; syntaxStyle: SyntaxStyl
     const panels = props.codePanels !== false
     const syntaxStyle = props.syntaxStyle
     const border = colors.border
-    const yellow = colors.yellow
-    const red = colors.red
-    const green = colors.green
-    const blue = colors.blue
+    const yellow = theme.markdownWarning ?? colors.yellow
+    const red = theme.markdownError ?? colors.red
+    const green = theme.markdownSuccess ?? colors.green
+    const blue = theme.markdownInfo ?? colors.blue
     const tables = tableOptions()
     const codePanels = new WeakSet<Renderable>()
     const codePanel = (source: CodeRenderable, language = source.filetype ?? "text") => {

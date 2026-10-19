@@ -37,8 +37,12 @@ const required = [
 ] as const
 
 describe("themes", () => {
-  test("includes the complete OpenCode built-in theme list", () => {
-    expect(themeNames).toHaveLength(33)
+  test("includes the OpenCode built-in themes and custom bundled themes", () => {
+    expect(themeNames).toHaveLength(37)
+    expect(themeNames).toContain("opengh")
+    expect(themeNames).toContain("github-light")
+    expect(themeNames).toContain("terminal-minimal")
+    expect(themeNames).toContain("terminal-native")
     expect(themeNames).toContain("github")
     expect(themeNames).toContain("opencode")
     expect(themeNames).toContain("tokyonight")
@@ -54,7 +58,7 @@ describe("themes", () => {
     }
   })
 
-  test("preserves the existing GitHub palette as the default", () => {
+  test("preserves the existing GitHub palette", () => {
     const colors = appColors(resolveTheme("github"))
     expect(colors).toEqual({
       header: "#010409",
@@ -103,8 +107,61 @@ describe("themes", () => {
     })
   })
 
+  test("keeps GitHub Light light regardless of requested mode", () => {
+    expect(resolveTheme("github-light")).toEqual(resolveTheme("github", "light"))
+    expect(resolveTheme("github-light", "light")).toEqual(resolveTheme("github-light"))
+  })
+
+  test("uses neutral terminal UI with bright status colors and colored Markdown", () => {
+    for (const [foreground, background] of [["#eeeeee", "#111111"], ["#111111", "#eeeeee"]]) {
+      const theme = resolveTheme("terminal-minimal", "dark", {
+        defaultForeground: foreground!,
+        defaultBackground: background!,
+        palette: [null, "#cc3333", "#33aa55", "#ccaa33", "#5588ff", "#aa55cc", "#33aaaa", null, null, "#ff5555", "#55ff55"],
+      })
+      expect(theme.text).toBe(foreground!)
+      expect(theme.background).toBe(background!)
+      expect(theme.primary).toBe(foreground!)
+      expect(theme.syntaxKeyword).toBe("#aa55cc")
+      expect(theme.markdownHeading).toBe(foreground!)
+      expect(theme.markdownLink).toBe("#5588ff")
+      expect(theme.markdownCodeBlock).toBe("#33aa55")
+      expect(theme.syntaxString).toBe("#33aa55")
+      expect(theme.textMuted).not.toBe(foreground!)
+      expect(theme.backgroundElement).not.toBe(background!)
+      expect(theme.error).toBe("#ff5555")
+      expect(theme.diffAdded).toBe("#33aa55")
+      expect(theme.warning).toBe(foreground!)
+      expect(appColors(theme)).toMatchObject({
+        openState: "#55ff55",
+        closedState: "#ff5555",
+        purple: "#aa55cc",
+      })
+    }
+    expect(resolveTheme("terminal-minimal", "dark", {
+      defaultForeground: null, defaultBackground: null, palette: [],
+    })).toEqual(resolveTheme("terminal-minimal"))
+  })
+
+  test("uses the full terminal palette for terminal-native", () => {
+    const palette = ["#101010", "#cc3333", "#33aa55", "#ccaa33", "#5588ff", "#aa55cc", "#33aaaa"]
+    const theme = resolveTheme("terminal-native", "dark", {
+      defaultForeground: "#eeeeee", defaultBackground: "#111111", palette,
+    })
+    expect(theme.text).toBe("#eeeeee")
+    expect(theme.background).toBe("#111111")
+    expect(theme.primary).toBe(palette[4]!)
+    expect(theme.accent).toBe(palette[6]!)
+    expect(theme.warning).toBe(palette[3]!)
+    expect(theme.markdownHeading).toBe(palette[4]!)
+    expect(theme.syntaxKeyword).toBe(palette[5]!)
+    expect(appColors(theme)).toMatchObject({
+      openState: palette[2]!, closedState: palette[1]!, purple: palette[5]!,
+    })
+  })
+
   test("falls back safely for unknown theme names", () => {
     expect(isThemeName("unknown")).toBe(false)
-    expect(resolveTheme("unknown")).toEqual(resolveTheme("github"))
+    expect(resolveTheme("unknown")).toEqual(resolveTheme("opengh"))
   })
 })

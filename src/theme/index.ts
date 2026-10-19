@@ -21,12 +21,14 @@ import nightowl from "./assets/nightowl.json"
 import nord from "./assets/nord.json"
 import oneDark from "./assets/one-dark.json"
 import opencode from "./assets/opencode.json"
+import opengh from "./assets/opengh.json"
 import orng from "./assets/orng.json"
 import osakaJade from "./assets/osaka-jade.json"
 import palenight from "./assets/palenight.json"
 import rosepine from "./assets/rosepine.json"
 import solarized from "./assets/solarized.json"
 import synthwave84 from "./assets/synthwave84.json"
+import terminal from "./assets/terminal-minimal.json"
 import tokyonight from "./assets/tokyonight.json"
 import vercel from "./assets/vercel.json"
 import vesper from "./assets/vesper.json"
@@ -53,6 +55,7 @@ export const themeNames = [
   "everforest",
   "flexoki",
   "github",
+  "github-light",
   "gruvbox",
   "kanagawa",
   "lucent-orng",
@@ -64,12 +67,15 @@ export const themeNames = [
   "nord",
   "one-dark",
   "opencode",
+  "opengh",
   "orng",
   "osaka-jade",
   "palenight",
   "rosepine",
   "solarized",
   "synthwave84",
+  "terminal-minimal",
+  "terminal-native",
   "tokyonight",
   "vercel",
   "vesper",
@@ -77,6 +83,8 @@ export const themeNames = [
 ] as const
 
 export type ThemeName = typeof themeNames[number]
+
+export const defaultTheme: ThemeName = "opengh"
 
 const upstreamGitHub = github as ThemeJson
 const githubDark = (key: string, dark: ThemeValue): ThemeValue => {
@@ -115,6 +123,25 @@ const githubTheme: ThemeJson = {
   },
 }
 
+const terminalNativeTheme: ThemeJson = {
+  ...terminal,
+  theme: {
+    ...terminal.theme,
+    primary: 4,
+    secondary: 5,
+    accent: 6,
+    error: 1,
+    warning: 3,
+    success: 2,
+    info: 6,
+    borderActive: 4,
+    closedState: 1,
+    markdownHeading: 4,
+    syntaxVariable: 6,
+    syntaxOperator: 5,
+  },
+}
+
 const themes: Record<ThemeName, ThemeJson> = {
   aura: aura as ThemeJson,
   ayu: ayu as ThemeJson,
@@ -128,6 +155,7 @@ const themes: Record<ThemeName, ThemeJson> = {
   everforest: everforest as ThemeJson,
   flexoki: flexoki as ThemeJson,
   github: githubTheme,
+  "github-light": githubTheme,
   gruvbox: gruvbox as ThemeJson,
   kanagawa: kanagawa as ThemeJson,
   "lucent-orng": lucentOrng as ThemeJson,
@@ -139,12 +167,15 @@ const themes: Record<ThemeName, ThemeJson> = {
   nord: nord as ThemeJson,
   "one-dark": oneDark as ThemeJson,
   opencode: opencode as ThemeJson,
+  opengh: opengh as ThemeJson,
   orng: orng as ThemeJson,
   "osaka-jade": osakaJade as ThemeJson,
   palenight: palenight as ThemeJson,
   rosepine: rosepine as ThemeJson,
   solarized: solarized as ThemeJson,
   synthwave84: synthwave84 as ThemeJson,
+  "terminal-minimal": terminal as ThemeJson,
+  "terminal-native": terminalNativeTheme,
   tokyonight: tokyonight as ThemeJson,
   vercel: vercel as ThemeJson,
   vesper: vesper as ThemeJson,
@@ -211,9 +242,15 @@ function ansiColor(code: number) {
   return `#${hex}${hex}${hex}`
 }
 
-function resolve(theme: ThemeJson, mode: Mode): ResolvedTheme {
+export type TerminalThemeColors = {
+  defaultForeground: string | null
+  defaultBackground: string | null
+  palette: (string | null)[]
+}
+
+function resolve(theme: ThemeJson, mode: Mode, palette?: (string | null)[]): ResolvedTheme {
   const resolveValue = (value: ThemeValue, chain: string[] = []): string => {
-    if (typeof value === "number") return ansiColor(value)
+    if (typeof value === "number") return palette?.[value] ?? ansiColor(value)
     if (typeof value !== "string") return resolveValue(value[mode], chain)
     if (value === "transparent" || value === "none") return "#00000000"
     if (value.startsWith("#")) return value
@@ -231,13 +268,30 @@ function resolve(theme: ThemeJson, mode: Mode): ResolvedTheme {
   return result
 }
 
-export function resolveTheme(name: string, mode: Mode = "dark"): ResolvedTheme {
-  const selected = isThemeName(name) ? name : "github"
+function terminalTheme(theme: ThemeJson, colors?: TerminalThemeColors): ThemeJson {
+  const foreground = colors?.defaultForeground ?? "#c0c0c0"
+  const background = colors?.defaultBackground ?? "#000000"
+  const fg = rgb(foreground)!
+  const bg = rgb(background)!
+  const mix = (amount: number) => `#${bg.map((value, index) =>
+    Math.round(value + (fg[index]! - value) * amount).toString(16).padStart(2, "0"),
+  ).join("")}`
+  return {
+    ...theme,
+    defs: { foreground, background, muted: mix(0.6), panel: mix(0.08), hover: mix(0.16), border: mix(0.35) },
+  }
+}
+
+export function resolveTheme(name: string, mode: Mode = "dark", terminalColors?: TerminalThemeColors): ResolvedTheme {
+  const selected = isThemeName(name) ? name : defaultTheme
   try {
-    return resolve(themes[selected], mode)
+    if (selected === "terminal-minimal" || selected === "terminal-native") {
+      return resolve(terminalTheme(themes[selected], terminalColors), mode, terminalColors?.palette)
+    }
+    return resolve(themes[selected], selected === "github-light" ? "light" : mode)
   } catch (error) {
-    if (selected === "github") throw error
-    return resolve(themes.github, mode)
+    if (selected === defaultTheme) throw error
+    return resolve(themes[defaultTheme], mode)
   }
 }
 
@@ -278,6 +332,6 @@ export function appColors(theme: ResolvedTheme): AppColors {
     yellow: theme.warning,
     purple: theme.secondary,
     openState: theme.success,
-    closedState: distinctStateColor(theme.success, [theme.secondary, theme.accent, theme.primary, theme.warning]),
+    closedState: theme.closedState ?? distinctStateColor(theme.success, [theme.secondary, theme.accent, theme.primary, theme.warning]),
   }
 }

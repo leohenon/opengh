@@ -1,7 +1,7 @@
 import { chmod, lstat, mkdir, realpath, rename, rm, stat, writeFile } from "node:fs/promises"
 import { dirname, join } from "node:path"
 import { configDirectory } from "./paths"
-import { isThemeName, type ThemeName } from "./theme"
+import { defaultTheme, isThemeName, type ThemeName } from "./theme"
 
 export type AboutSidebar = "auto" | "show" | "hide"
 export type DetailLayout = "centered" | "wide"
@@ -20,7 +20,7 @@ export type Config = {
 
 export const defaultConfig: Config = {
   showScrollbars: false,
-  theme: "github",
+  theme: defaultTheme,
   aboutSidebar: "auto",
   detailLayout: "centered",
   showStatusBarHints: false,
