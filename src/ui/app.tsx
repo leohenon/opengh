@@ -10,6 +10,7 @@ import type {
   CommitDetailState,
   IssueDetailState,
   IssueActionState,
+  PullDetailState,
   RepositoryData,
   RepositoryOperations,
   RepositoryResource,
@@ -26,6 +27,7 @@ import { Toast } from "./components/toast"
 import { ActionsScreen } from "./pages/actions"
 import { CommitsScreen } from "./pages/commits"
 import { IssueScreen } from "./pages/issue"
+import { PullScreen } from "./pages/pull"
 import { CommitScreen } from "./pages/commit"
 import { OverviewScreen } from "./pages/overview"
 import { WorkScreen } from "./pages/work"
@@ -73,6 +75,13 @@ export type AppProps = {
   onIssueDraftChange?: (number: number, draft: Partial<Pick<IssueActionState, "body" | "reason" | "duplicateTarget">>) => void
   onDiscardIssueDraft?: (number: number) => void
   onSubmitIssueAction?: (number: number, kind: IssueActionKind) => Promise<IssueActionResult>
+  pullDetail?: PullDetailState
+  onLoadPull?: (number: number) => Promise<void>
+  onLoadMorePullComments?: () => Promise<void>
+  onRetryPullReferences?: () => Promise<void>
+  onRetryPullCommits?: () => Promise<void>
+  onRetryPullContext?: () => Promise<void>
+  onClosePull?: () => void
   onOpenInBrowser?: (target?: string | number, repository?: string) => Promise<void>
   onCopyToClipboard?: (value: string) => Promise<boolean>
   onLoadMoreRuns?: () => Promise<void>
@@ -88,6 +97,7 @@ export function App(props: AppProps) {
   const [issueState, setIssueState] = createSignal<ListState>("open")
   const [issueRefresh, setIssueRefresh] = createSignal<{ number: number }>()
   const [pullState, setPullState] = createSignal<ListState>("open")
+  const [pullRefresh, setPullRefresh] = createSignal<{ number: number }>()
   const [overviewDocument, setOverviewDocument] = createSignal<string>()
   const [overlay, setOverlay] = createSignal<Overlay>()
   const [toast, setToast] = createSignal<ToastState>()
@@ -137,8 +147,12 @@ export function App(props: AppProps) {
   }
   const issueUrl = (number: number) => props.issueDetail?.number === number && props.issueDetail.resource.value
     ? props.issueDetail.resource.value.url : `${data().repo.url}/issues/${number}`
-  const canActOnIssue = () => Boolean(props.onSubmitIssueAction && issueDetail().resource.value
-    && issueDetail().resource.status !== "loading")
+  const canActOnIssue = () => {
+    const number = activeIssueNumber()
+    return Boolean(number && props.onSubmitIssueAction && issueDetail().resource.value
+      && issueDetail().resource.status !== "loading"
+      && props.getIssueAction?.(number).operation.status !== "loading")
+  }
   const openIssueAction = (kind: IssueActionKind) => {
     const number = activeIssueNumber()
     if (!number || !canActOnIssue() || props.getIssueAction?.(number).operation.status === "loading") return
@@ -148,7 +162,7 @@ export function App(props: AppProps) {
   }
   const submitIssueAction = async () => {
     const action = issueAction()
-    if (!action || !props.onSubmitIssueAction || props.getIssueAction?.(action.number).operation.status === "loading") return
+    if (!action || !props.onSubmitIssueAction || action.number !== activeIssueNumber() || !canActOnIssue()) return
     const repository = data().repo.nameWithOwner
     const retry = props.getIssueAction?.(action.number).retry
     try {
@@ -181,6 +195,50 @@ export function App(props: AppProps) {
       setIssueRefresh((current) => current === request ? undefined : current)
     }
   }
+  const pullNumber = createMemo(() => {
+    const detail = navigation().details?.pulls
+    return detail?.kind === "pull" ? detail.number : undefined
+  })
+  const activePullNumber = () => page() === "pulls" ? pullNumber() : undefined
+  const pullDetail = createMemo<PullDetailState>(() => props.pullDetail && props.pullDetail.number === pullNumber()
+    ? props.pullDetail
+    : { number: pullNumber() ?? 0, resource: { status: "loading", phase: "load" }, commits: { status: "loading", phase: "load" }, context: { status: "loading", phase: "load" }, comments: { status: "loading", phase: "load" }, references: { status: "loading", phase: "load" } })
+  const pullResource = () => pullDetail().resource
+  const pullDetailPart = () => {
+    const detail = pullDetail()
+    if (detail.resource.status !== "ready") return "pull"
+    if (detail.commits.status !== "ready") return "commits"
+    if (detail.context.status !== "ready") return "context"
+    if (detail.comments.status !== "ready") return "comments"
+    if (detail.references.status !== "ready") return "references"
+    return "pull"
+  }
+  const pullMenuItems = createMemo(() => referencedItems(pullDetail().references.value ?? [], {
+    repository: data().repo.nameWithOwner, number: pullNumber() ?? 0,
+  }))
+  const activeMenuItems = () => activePullNumber() ? pullMenuItems() : issueMenuItems()
+  const refreshPull = async (number: number) => {
+    const detail = pullDetail()
+    if (pullRefresh()?.number === number
+      || [detail.resource, detail.commits, detail.context, detail.comments, detail.references].some((resource) => resource.status === "loading")) return
+    const request = { number }
+    setPullRefresh(request)
+    try {
+      if (detail.resource.status === "ready" && detail.commits.status === "error")
+        await props.onRetryPullCommits?.()
+      else if (detail.resource.status === "ready" && detail.context.status === "error")
+        await props.onRetryPullContext?.()
+      else if (detail.resource.status === "ready" && detail.comments.status === "error")
+        await props.onLoadMorePullComments?.()
+      else if (detail.resource.status === "ready" && detail.references.status === "error")
+        await props.onRetryPullReferences?.()
+      else await props.onLoadPull?.(number)
+    } finally {
+      setPullRefresh((current) => current === request ? undefined : current)
+    }
+  }
+  const pullUrl = (number: number) => props.pullDetail?.number === number && props.pullDetail.resource.value
+    ? props.pullDetail.resource.value.url : `${data().repo.url}/pull/${number}`
   const issues = () => data().issues[issueState()]
   const pulls = () => data().pulls[pullState()]
   const issueCounts = () => ({
@@ -191,7 +249,7 @@ export function App(props: AppProps) {
     open: data().pulls.open.value?.items.length ?? 0,
     closed: data().pulls.closed.value?.items.length ?? 0,
   })
-  const baseTabs = tabs.filter((tab) => tab.page === "overview" || tab.page === "commits")
+  const baseTabs = tabs.filter((tab) => tab.page !== "actions")
   const sectionAvailable = (...resources: ResourceState<{ items: readonly unknown[]; hasMore: boolean }>[]) => resources.some((resource) =>
     resource.status === "error" || Boolean(resource.value && (resource.value.items.length > 0 || resource.value.hasMore)),
   )
@@ -204,8 +262,6 @@ export function App(props: AppProps) {
     if (pending && previous.repository === repository && previous.resolved) return previous
     if (pending && conditional.some((resource) => resource.value === undefined)) return { repository, tabs: baseTabs, resolved: false }
     const available = tabs.filter((tab) => {
-      if (tab.page === "issues") return sectionAvailable(current.issues.open, current.issues.closed)
-      if (tab.page === "pulls") return sectionAvailable(current.pulls.open, current.pulls.closed)
       if (tab.page === "actions") return sectionAvailable(current.runs)
       return true
     })
@@ -219,6 +275,10 @@ export function App(props: AppProps) {
     ?? overviewDocuments()[0])
   const activeResource = (): ResourceState<unknown> | undefined => {
     if (activeCommitSha()) return commitResource()
+    if (activePullNumber()) {
+      const part = pullDetailPart()
+      return part === "pull" ? pullResource() : pullDetail()[part]
+    }
     if (activeIssueNumber()) {
       const part = issueDetailPart()
       return part === "issue" ? issueDetail().resource : issueDetail()[part]
@@ -259,6 +319,10 @@ export function App(props: AppProps) {
     if (resource?.status === "loading") {
       if (resource.phase === "pagination") return "loading-more"
       if (activeCommitSha() && resource.value !== undefined) return "refreshing"
+      if (activePullNumber() && pullResource().value) {
+        if (pullRefresh()?.number === activePullNumber() || resource.value !== undefined) return "refreshing"
+        return "loading-resource"
+      }
       if (activeIssueNumber() && issueDetail().resource.value) {
         if (issueRefresh()?.number === activeIssueNumber() || resource.value !== undefined) return "refreshing"
         return "loading-resource"
@@ -269,6 +333,7 @@ export function App(props: AppProps) {
   }
   const statusDetail = () => {
     if (activeCommitSha()) return "commit"
+    if (activePullNumber()) return pullDetailPart() === "pull" ? "pull request" : pullDetailPart() === "context" ? "PR details" : pullDetailPart()
     if (activeIssueNumber()) return issueDetailPart()
     if (page() === "overview")
       return data().documents.status === "ready" ? currentOverviewDocument()?.label ?? "documentation" : "documentation"
@@ -282,6 +347,7 @@ export function App(props: AppProps) {
   const paginationSource = () => {
     if (activeCommitSha()) return `pagination:commit:${commitSha()}`
     if (activeIssueNumber()) return `pagination:issue:${issueNumber()}`
+    if (activePullNumber()) return `pagination:pull:${pullNumber()}`
     if (page() === "commits") return "pagination:commits"
     if (page() === "issues") return `pagination:issues:${issueState()}`
     if (page() === "pulls") return `pagination:pulls:${pullState()}`
@@ -290,6 +356,7 @@ export function App(props: AppProps) {
   }
   const activeResourceSource = () => {
     if (activeCommitSha()) return `resource:commit:${commitSha()}`
+    if (activePullNumber()) return `resource:pull:${pullNumber()}:${pullDetailPart()}`
     if (activeIssueNumber()) return `resource:issue:${issueNumber()}:${issueDetailPart()}`
     if (page() === "overview") return `resource:overview:${data().documents.status === "ready" ? currentOverviewDocument()?.id : "documents"}`
     if (page() === "commits") return "resource:commits"
@@ -317,6 +384,7 @@ export function App(props: AppProps) {
     ]
     if (commitSha()) paginationResources.push([`pagination:commit:${commitSha()}`, commitResource()])
     if (issueNumber()) paginationResources.push([`pagination:issue:${issueNumber()}`, issueDetail().comments])
+    if (pullNumber()) paginationResources.push([`pagination:pull:${pullNumber()}`, pullDetail().comments])
     for (const [source, resource] of paginationResources) {
       if (resource.status === "error" && resource.phase === "pagination") failures.set(source, resource.message)
     }
@@ -388,6 +456,8 @@ export function App(props: AppProps) {
     const detail = navigation().details?.[page()]
     setNavigation((state) => navigate(back(state), "overview"))
     if (detail?.kind === "issue") props.onCloseIssue?.()
+    if (detail?.kind === "pull") props.onClosePull?.()
+    if (detail?.kind === "issue") setRevealActivity()
     if (overlay() === "issue-references" || overlay() === "issue-actions" || overlay() === "issue-action") { setOverlay(); setIssueAction() }
   })
 
@@ -398,13 +468,14 @@ export function App(props: AppProps) {
     }
   })
 
-  onCleanup(() => { props.onCloseCommit?.(); props.onCloseIssue?.() })
+  onCleanup(() => { props.onCloseCommit?.(); props.onCloseIssue?.(); props.onClosePull?.() })
 
   const closeDetail = () => {
     const detail = navigation().details?.[page()]
     setNavigation(back)
     if (detail?.kind === "commit") props.onCloseCommit?.()
     if (detail?.kind === "issue") { props.onCloseIssue?.(); setRevealActivity() }
+    if (detail?.kind === "pull") props.onClosePull?.()
   }
   const selectPage = (next: Page) => setNavigation((state) => navigate(state, next))
   const movePage = (delta: number) => {
@@ -486,6 +557,19 @@ export function App(props: AppProps) {
         + (hintWidth >= 100 || !retry && !more && hintWidth >= 64 ? " · o GitHub · y URL" : "")
         + common
     }
+    if (activePullNumber()) {
+      const retry = activeResource()?.status === "error"
+      const more = pullDetail().comments.value?.hasMore
+      const references = pullMenuItems().length
+      if (dimensions().width < 64) return "esc back"
+        + (retry ? " · r retry" : more ? " · enter more" : references ? " · p references" : " · o GitHub") + common
+      return "esc back"
+        + (retry ? ` · r retry ${statusDetail()}` : more ? " · enter more comments" : "")
+        + (references ? " · p references" : "")
+        + (dimensions().width >= 100 || !retry && !more ? " · o GitHub · y URL" : "") + common
+    }
+    if (page() === "pulls") return (dimensions().width >= 45 ? "enter open" : "enter") + " · o GitHub · y URL"
+      + (dimensions().width >= 60 ? " · tab open/closed" : "") + common
     if (page() === "issues") return (dimensions().width >= 45 ? "enter open" : "enter") + " · o GitHub · y URL"
       + (dimensions().width >= 60 ? " · tab open/closed" : "") + common
     if (page() === "commits") return (dimensions().width >= 45 ? "enter open" : "enter") + " · o GitHub · y SHA"
@@ -557,6 +641,16 @@ export function App(props: AppProps) {
       else if (event.name === "r") void refreshIssue(number)
       return
     }
+    const pull = activePullNumber()
+    if (pull) {
+      if (event.ctrl || event.meta) return
+      if (event.name === "o") void openInBrowser(pull)
+      else if (event.name === "y") void copyToClipboard(pullUrl(pull), "URL")
+      else if (event.name === "p" && pullMenuItems().length) setOverlay("issue-references")
+      else if (event.name === "return" || event.name === "enter") void props.onLoadMorePullComments?.()
+      else if (event.name === "r") void refreshPull(pull)
+      return
+    }
     if (page() === "overview" && !event.ctrl && !event.meta) {
       if (event.name === "x" && canClone()) {
         const repository = data().repo.nameWithOwner
@@ -603,7 +697,7 @@ export function App(props: AppProps) {
   return (
     <IconProvider style={config().iconStyle}>
     <box width={dimensions().width} height={dimensions().height} flexDirection="column" backgroundColor={colors.canvas}>
-      <Header repo={data().repo} page={page()} tabs={visibleTabs()} compact={config().compactHeader} />
+      <Header repo={data().repo} page={page()} tabs={visibleTabs()} workCounts={data().workCounts} compact={config().compactHeader} />
       <box visible={page() === "overview"} flexGrow={1} minHeight={0}>
           <OverviewScreen
             repo={data().repo}
@@ -619,6 +713,7 @@ export function App(props: AppProps) {
         <box visible={page() === "commits" && !commitSha()} flexGrow={1} minHeight={0}>
           <CommitsScreen
             commits={data().commits}
+            commitCount={data().commitCount}
             currentBranch={data().currentBranch}
             active={page() === "commits" && !commitSha()}
             interactive={overlay() === undefined}
@@ -656,15 +751,21 @@ export function App(props: AppProps) {
             }}
           />
         </box>
-        <box visible={page() === "pulls"} flexGrow={1} minHeight={0}>
+        <box visible={page() === "pulls" && !pullNumber()} flexGrow={1} minHeight={0}>
           <WorkScreen
             kind="pull"
             state={pullState()}
             counts={pullCounts()}
             resource={pulls()}
-            active={page() === "pulls"}
+            active={page() === "pulls" && !pullNumber()}
             interactive={overlay() === undefined}
             showScrollbar={config().showScrollbars}
+            onOpen={(pull) => {
+              setNavigation((state) => openDetail(state, { kind: "pull", number: pull.number }))
+              void props.onLoadPull?.(pull.number)
+            }}
+            onOpenInBrowser={(pull) => void openInBrowser(pull.number)}
+            onCopy={(pull) => void copyToClipboard(pullUrl(pull.number), "URL")}
             onEndReached={() => {
               const resource = pulls()
               if (resource.status === "ready" && resource.value.hasMore) void props.onLoadMorePulls?.(pullState())
@@ -713,6 +814,20 @@ export function App(props: AppProps) {
           </box>
         )}
       </Show>
+      <Show when={pullNumber()} keyed>
+        {(number) => (
+          <box visible={page() === "pulls"} flexGrow={1} minHeight={0}>
+            <PullScreen
+              number={number}
+              detail={pullDetail()}
+              defaultBranch={data().repo.defaultBranch}
+              interactive={page() === "pulls" && overlay() === undefined}
+              showScrollbar={config().showScrollbars}
+              detailLayout={config().detailLayout}
+            />
+          </box>
+        )}
+      </Show>
       <StatusBar kind={status()} detail={statusDetail()} hint={shortcutHint()}
         zIndex={overlay() === "issue-action" || overlay() === "issue-actions" ? 350 : 0} />
       <Show when={toast()} keyed>
@@ -750,12 +865,12 @@ export function App(props: AppProps) {
       </Show>
       <Show when={overlay() === "help"}>
         <Help
-          view={activeCommitSha() ? "commit" : activeIssueNumber() ? "issue" : page()}
+          view={activeCommitSha() ? "commit" : activeIssueNumber() ? "issue" : activePullNumber() ? "pull" : page()}
           tabCount={visibleTabs().length}
           hasDocumentTabs={overviewDocuments().length > 1}
           hasMoreFiles={commitResource().value?.files.hasMore}
-          hasMoreComments={issueDetail().comments.value?.hasMore}
-          hasReferences={issueMenuItems().length > 0}
+          hasMoreComments={activePullNumber() ? pullDetail().comments.value?.hasMore : issueDetail().comments.value?.hasMore}
+          hasReferences={activeMenuItems().length > 0}
           canComment={canActOnIssue()}
           hasIssueActions={canActOnIssue()}
           command={page() === "overview" && canClone() ? "clone repository" : undefined}
@@ -787,10 +902,10 @@ export function App(props: AppProps) {
           onClose={() => { setOverlay(); setIssueAction() }}
         />}
       </Show>
-      <Show when={overlay() === "issue-references" && activeIssueNumber()}>
+      <Show when={overlay() === "issue-references" && (activeIssueNumber() || activePullNumber())}>
         <IssueReferencesPicker
-          references={issueDetail().references.value ?? []}
-          currentIssue={{ repository: data().repo.nameWithOwner, number: activeIssueNumber()! }}
+          references={(activePullNumber() ? pullDetail() : issueDetail()).references.value ?? []}
+          currentIssue={{ repository: data().repo.nameWithOwner, number: (activeIssueNumber() ?? activePullNumber())! }}
           showScrollbar={config().showScrollbars}
           onOpen={(reference) => { setOverlay(); void openInBrowser(reference.number, reference.repository) }}
           onCopy={(reference) => { setOverlay(); void copyToClipboard(reference.url, "URL") }}

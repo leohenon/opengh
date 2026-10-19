@@ -4,7 +4,7 @@ import { defaultConfig } from "../src/config"
 import { createRepositorySession, type RepositoryLoaders } from "../src/repository-session"
 import { Root } from "../src/root"
 import type { CommandResult } from "../src/command-actions"
-import { commitDetailFixture, githubDataFixture, issueDetailFixture } from "./fixtures/github-data"
+import { commitDetailFixture, githubDataFixture, issueDetailFixture, pullContextFixture } from "./fixtures/github-data"
 
 // Exercise the real Root, session, focused input, and mounted repository pages without GitHub or disk writes.
 test("repository switch popup isolates input, preserves cancelled navigation, and resets confirmed switches", async () => {
@@ -17,6 +17,8 @@ test("repository switch popup isolates input, preserves cancelled navigation, an
   let finishMetadata!: () => void
   const pendingMetadata = new Promise<void>((resolve) => { finishMetadata = resolve })
   const loaders: RepositoryLoaders = {
+    workCounts: async () => ({ issues: 61, pulls: 24 }),
+    commitCount: async () => 4,
     metadata: async (repository) => {
       loads.push(repository)
       if (repository === "owner/missing") throw new Error("Repository not found")
@@ -33,6 +35,8 @@ test("repository switch popup isolates input, preserves cancelled navigation, an
     issueReferences: async () => [],
     issues: async (_repository, state) => ({ items: githubDataFixture.issues[state].value!.items, hasMore: false }),
     pulls: async (_repository, state) => ({ items: githubDataFixture.pulls[state].value!.items, hasMore: false }),
+    pullCommits: async () => githubDataFixture.commits.value!.items,
+    pullContext: async () => pullContextFixture,
     runs: async () => ({ items: githubDataFixture.runs.value!.items, hasMore: false }),
   }
   const view = await testRender(() => <Root cwd="/work" repositoryArgument="anomalyco/opentui" services={{

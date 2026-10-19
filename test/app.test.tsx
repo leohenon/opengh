@@ -64,6 +64,93 @@ async function setup() {
 }
 
 describe("opengh TUI", () => {
+  test("shows loaded versus total commits for the selected branch without changing the tab", async () => {
+    const commits = Array.from({ length: 30 }, (_, index) => ({
+      ...githubDataFixture.commits.value!.items[0]!, sha: `commit-${index}`,
+    }));
+    const [data, setData] = createSignal<RepositoryData>({
+      ...githubDataFixture,
+      commits: { status: "ready", value: { items: commits, page: 1, hasMore: true } },
+      commitCount: { status: "loading", phase: "load" },
+    });
+    const view = await testRender(() => <App data={data} operations={repositoryOperationsFixture} />,
+      { width: 120, height: 32, useThread: false });
+    active.push(view);
+    view.mockInput.pressKey("2");
+    await view.flush();
+    expect(view.captureCharFrame()).toContain("30 of … commits");
+    setData((current) => ({ ...current, commitCount: { status: "ready", value: 1284 } }));
+    await view.flush();
+    expect(view.captureCharFrame()).toContain("30 of 1,284 commits");
+    const header = view.captureCharFrame().split("\n").slice(0, 5).join("\n");
+    expect(header).toContain("2 Commits");
+    expect(header).not.toContain("2 Commits (");
+    setData((current) => ({ ...current, commits: { status: "ready", value: {
+      items: [...commits, ...commits.map((commit) => ({ ...commit, sha: `${commit.sha}-next` }))], page: 2, hasMore: true,
+    } } }));
+    await view.flush();
+    expect(view.captureCharFrame()).toContain("60 of 1,284 commits");
+    setData((current) => ({ ...current, currentBranch: "feature/next",
+      commits: { status: "ready", value: { items: [commits[0]!], page: 1, hasMore: false } },
+      commitCount: { status: "ready", value: 1 },
+    }));
+    await view.flush();
+    expect(view.captureCharFrame()).toContain("1 of 1 commit");
+    expect(view.captureCharFrame()).toContain("feature/next");
+    setData((current) => ({ ...current, commits: { status: "ready", value: { items: [], page: 1, hasMore: false } },
+      commitCount: { status: "ready", value: 0 },
+    }));
+    await view.flush();
+    expect(view.captureCharFrame()).toContain("0 of 0 commits");
+    setData((current) => ({ ...current, commitCount: { status: "error", phase: "load", message: "Offline" } }));
+    await view.flush();
+    expect(view.captureCharFrame()).toContain("0 commits");
+    expect(view.captureCharFrame()).not.toContain("of 0 commits");
+    setData((current) => ({ ...current, commitCount: { status: "error", phase: "load", message: "Offline", value: 0 } }));
+    await view.flush();
+    expect(view.captureCharFrame()).toContain("0 of 0 commits");
+  });
+
+  test("shows stable open totals in work tabs across loading, state filters, and compact mode", async () => {
+    const [data, setData] = createSignal<RepositoryData>({
+      ...githubDataFixture, workCounts: { status: "loading", phase: "load" },
+    });
+    const [config, setConfig] = createSignal({ ...defaultConfig });
+    const view = await testRender(() => (
+      <App data={data} operations={repositoryOperationsFixture} config={config()} />
+    ), { width: 140, height: 32, useThread: false });
+    active.push(view);
+    const header = () => view.captureCharFrame().split("\n").slice(0, config().compactHeader ? 1 : 5).join("\n");
+    await view.flush();
+    expect(header()).toContain("Issues (…)");
+    expect(header()).toContain("Pull requests (…)");
+    setData((current) => ({ ...current, workCounts: { status: "ready", value: { issues: 2450, pulls: 1200 } } }));
+    await view.flush();
+    expect(header()).toContain("Issues (2450)");
+    expect(header()).toContain("Pull requests (1200)");
+    view.mockInput.pressKey("3");
+    await view.flush();
+    view.mockInput.pressKey("tab");
+    await view.flush();
+    expect(header()).toContain("Issues (2450)");
+    expect(header()).toContain("Pull requests (1200)");
+    setConfig({ ...defaultConfig, compactHeader: true });
+    setData((current) => ({ ...current, workCounts: {
+      status: "loading", phase: "load", value: { issues: 2450, pulls: 1200 },
+    } }));
+    await view.flush();
+    expect(header()).toContain("Issues (2450)");
+    expect(header()).toContain("Pull requests (1200)");
+    setData((current) => ({ ...current, workCounts: { status: "ready", value: { issues: 0, pulls: 0 } } }));
+    await view.flush();
+    expect(header()).toContain("Issues (0)");
+    expect(header()).toContain("Pull requests (0)");
+    setData((current) => ({ ...current, workCounts: { status: "error", phase: "load", message: "Offline" } }));
+    await view.flush();
+    expect(header()).toContain("Issues (—)");
+    expect(header()).toContain("Pull requests (—)");
+  });
+
   test("status bar hints can be disabled on every page without disabling shortcuts or loading feedback", async () => {
     const [config, setConfig] = createSignal({ ...defaultConfig });
     const [operations, setOperations] = createSignal(repositoryOperationsFixture);
@@ -202,7 +289,7 @@ describe("opengh TUI", () => {
     const view = await testRender(() => <App data={data} operations={repositoryOperationsFixture} config={{ ...defaultConfig, hideDocumentsTab: false, compactHeader: false, iconStyle: "nerd" }} />,
       { width: 100, height: 26, useThread: false });
     active.push(view);
-    const colors = appColors(resolveTheme("github"));
+    const colors = appColors(resolveTheme(defaultConfig.theme));
     const iconColor = (icon: string) => view.captureSpans().lines.flatMap((line) => line.spans)
       .find((span) => span.text.includes(icon))?.fg;
     await view.flush();
@@ -227,7 +314,7 @@ describe("opengh TUI", () => {
   });
 
   test("workflow icons distinguish failures, neutral conclusions, queued runs, and active progress", async () => {
-    const colors = appColors(resolveTheme("github"));
+    const colors = appColors(resolveTheme(defaultConfig.theme));
     const completed = ["success", "failure", "timed_out", "cancelled", "skipped", "neutral", "action_required"].map((conclusion, index) => ({
       id: index, name: "CI", title: `${conclusion} run`, status: "completed", conclusion, createdAt: "2026-04-14T09:00:00Z",
     }));
@@ -266,7 +353,7 @@ describe("opengh TUI", () => {
     expect(spinner()?.text).not.toBe(first);
   });
 
-  test("keeps unknown tabs hidden, preserves navigation during refresh, and hides only confirmed empty sections", async () => {
+  test("keeps work tabs visible while loading and when empty, and hides unavailable Actions", async () => {
     const empty = { status: "ready" as const, value: { items: [], page: 1, hasMore: false } };
     const [data, setData] = createSignal<RepositoryData>({
       ...githubDataFixture, runs: { status: "loading", phase: "load" },
@@ -281,10 +368,11 @@ describe("opengh TUI", () => {
     expect(header()).toContain("Overview");
     expect(header()).toContain("Commits");
     expect(header()).not.toContain("Actions");
-    expect(header()).not.toContain("Issues");
+    expect(header()).toContain("3 Issues (61)");
+    expect(header()).toContain("4 Pull requests (24)");
     view.mockInput.pressKey("3");
     await view.flush();
-    expect(view.captureCharFrame()).toContain("README");
+    expect(view.captureCharFrame()).toContain("Open (");
 
     setData((current) => ({ ...current, runs: empty }));
     await view.flush();
@@ -300,15 +388,15 @@ describe("opengh TUI", () => {
     expect(header()).toContain("4 Pull requests");
     setOperations(repositoryOperationsFixture);
     await view.flush();
-    expect(header()).not.toContain("Issues");
-    expect(header()).not.toContain("Pull requests");
+    expect(header()).toContain("3 Issues (61)");
+    expect(header()).toContain("4 Pull requests (24)");
     expect(header()).not.toContain("Actions");
-    expect(view.captureCharFrame()).toContain("README");
+    expect(view.captureCharFrame()).toContain("No open issues");
 
     setData((current) => ({ ...current, runs: { status: "error", phase: "load", message: "Actions unavailable" } }));
     await view.flush();
-    expect(header()).toContain("3 Actions");
-    view.mockInput.pressKey("3");
+    expect(header()).toContain("5 Actions");
+    view.mockInput.pressKey("5");
     await view.flush();
     expect(view.captureCharFrame()).toContain("Actions unavailable");
     setData((current) => ({ ...current, runs: empty,
@@ -332,6 +420,7 @@ describe("opengh TUI", () => {
     if (!initial.commits.value || !initial.runs.value)
       throw new Error("Expected loaded fixtures");
     initial.commits.value.hasMore = true;
+    initial.commitCount = { status: "ready", value: 5 };
     initial.runs.value.hasMore = true;
     const [data, setData] = createSignal(initial);
     let commitLoads = 0;
@@ -398,7 +487,7 @@ describe("opengh TUI", () => {
     view.mockInput.pressKey("j");
     await view.flush();
     expect(commitLoads).toBe(1);
-    expect(view.captureCharFrame()).toContain("5 commits");
+    expect(view.captureCharFrame()).toContain("5 of 5 commits");
 
     view.mockInput.pressKey("5");
     view.mockInput.pressKey("j");

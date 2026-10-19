@@ -13,6 +13,7 @@ import { useIcons } from "../icon-style"
 
 export function CommitsScreen(props: {
   commits: ResourceState<Paginated<CommitSummary>>
+  commitCount: ResourceState<number>
   currentBranch: string
   active: boolean
   interactive: boolean
@@ -25,7 +26,16 @@ export function CommitsScreen(props: {
   const { colors } = useTheme()
   const icons = useIcons()
   const dimensions = useTerminalDimensions()
-  const commitCount = () => props.commits.value?.items.length ?? 0
+  const loadedCount = () => props.commits.value?.items.length ?? 0
+  const countLabel = () => {
+    const total = props.commitCount.value
+    const loaded = loadedCount().toLocaleString("en-US")
+    const quantity = total ?? loadedCount()
+    const unit = quantity === 1 ? "commit" : "commits"
+    if (total !== undefined) return `${loaded} of ${total.toLocaleString("en-US")} ${unit}`
+    if (props.commitCount.status === "loading") return `${loaded} of … ${unit}`
+    return `${loaded} ${unit}`
+  }
 
   return (
     <PageShell
@@ -33,7 +43,7 @@ export function CommitsScreen(props: {
         <box flexGrow={1} minWidth={0} flexDirection="row" alignItems="center" gap={2}>
           <Show when={props.commits.value !== undefined} fallback={<text fg={colors.text} attributes={TextAttributes.BOLD}>Commits</text>}>
             <text flexShrink={0} fg={colors.text} attributes={TextAttributes.BOLD}>
-              {commitCount()} {commitCount() === 1 ? "commit" : "commits"}
+              {countLabel()}
             </text>
           </Show>
           <box width={Bun.stringWidth(props.currentBranch) + 4} flexShrink={1} minWidth={0} flexDirection="row" overflow="hidden">

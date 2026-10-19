@@ -1,4 +1,4 @@
-import type { CommitDetail, IssueDetail, IssueComment, IssuePullReference } from "../../src/models"
+import type { CommitDetail, IssueDetail, IssueComment, IssuePullReference, PullContext } from "../../src/models"
 import type { RepositoryData, RepositoryDocumentState, RepositoryOperations } from "../../src/repository-state"
 
 const issues = {
@@ -40,6 +40,8 @@ export const repositoryDocumentsFixture: RepositoryDocumentState[] = [
 }))
 
 export const githubDataFixture: RepositoryData = {
+  commitCount: { status: "ready", value: 4 },
+  workCounts: { status: "ready", value: { issues: 61, pulls: 24 } },
   repo: {
     nameWithOwner: "anomalyco/opentui",
     url: "https://github.com/anomalyco/opentui",
@@ -108,6 +110,11 @@ export const commitDetailFixture: CommitDetail = {
     hasMore: false,
   },
   filesTruncated: false,
+}
+
+export const pullContextFixture: PullContext = {
+  threads: [], projects: [], closingIssues: [], warnings: [],
+  readiness: { headSha: commitDetailFixture.sha, mergeable: "UNKNOWN", mergeStateStatus: "UNKNOWN", checks: [], checksComplete: true },
 }
 
 export const repositoryOperationsFixture: RepositoryOperations = {

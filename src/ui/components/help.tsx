@@ -34,7 +34,7 @@ function Shortcut(props: { keys: string; keyWidth: number; children: JSX.Element
 }
 
 export function Help(props: {
-  view: Page | "commit" | "issue";
+  view: Page | "commit" | "issue" | "pull";
   tabCount: number;
   hasDocumentTabs?: boolean;
   hasMoreFiles?: boolean;
@@ -88,7 +88,20 @@ export function Help(props: {
           ...(props.hasMoreComments ? [{ keys: "Enter", description: "load more comments" }] : []),
         ];
       case "pulls":
-        return [{ keys: "Tab", description: "toggle open/closed" }];
+        return [
+          { keys: "Enter", description: "open pull request" },
+          { keys: "Tab", description: "toggle open/closed" },
+          { keys: "o", description: "open on GitHub" },
+          { keys: "y", description: "copy pull request URL" },
+        ];
+      case "pull":
+        return [
+          { keys: "Esc", description: "back to pull requests" },
+          { keys: "o", description: "open on GitHub" },
+          { keys: "y", description: "copy pull request URL" },
+          ...(props.hasReferences ? [{ keys: "p", description: "open references" }] : []),
+          ...(props.hasMoreComments ? [{ keys: "Enter", description: "load more comments" }] : []),
+        ];
       case "actions":
         return [];
     }

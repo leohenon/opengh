@@ -7,9 +7,12 @@ import type {
   IssueReference,
   IssueActionKind,
   IssueCloseReason,
+  IssueTimelineEvent,
   ListState,
   Paginated,
+  PullRequestDetail,
   PullRequestSummary,
+  PullContext,
   Repo,
   RepositoryDocument,
   WorkflowRunSummary,
@@ -31,11 +34,22 @@ export type CommitDetailState = {
   resource: ResourceState<CommitDetail>
 }
 
+export type PullDetailState = {
+  number: number
+  resource: ResourceState<PullRequestDetail>
+  comments: ResourceState<Paginated<IssueComment>>
+  references: ResourceState<IssueReference[]>
+  events?: IssueTimelineEvent[]
+  commits: ResourceState<CommitSummary[]>
+  context: ResourceState<PullContext>
+}
+
 export type IssueDetailState = {
   number: number
   resource: ResourceState<IssueDetail>
   comments: ResourceState<Paginated<IssueComment>>
   references: ResourceState<IssueReference[]>
+  events?: IssueTimelineEvent[]
 }
 
 export type OperationState =
@@ -55,9 +69,11 @@ export type IssueActionState = {
 export type RepositoryData = {
   repo: Repo
   currentBranch: string
+  workCounts: ResourceState<{ issues: number; pulls: number }>
   documents: ResourceState<RepositoryDocumentState[]>
   branches: ResourceState<Paginated<string>>
   commits: ResourceState<Paginated<CommitSummary>>
+  commitCount: ResourceState<number>
   issues: Record<ListState, ResourceState<Paginated<IssueSummary>>>
   pulls: Record<ListState, ResourceState<Paginated<PullRequestSummary>>>
   runs: ResourceState<Paginated<WorkflowRunSummary>>

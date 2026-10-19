@@ -211,6 +211,13 @@ export function Root(props: {
               onIssueDraftChange={session.updateIssueDraft}
               onDiscardIssueDraft={session.discardIssueDraft}
               onSubmitIssueAction={session.submitIssueAction}
+              pullDetail={session.pullDetail()}
+              onLoadPull={session.loadPull}
+              onLoadMorePullComments={session.loadMorePullComments}
+              onRetryPullReferences={session.retryPullReferences}
+              onRetryPullCommits={session.retryPullCommits}
+              onRetryPullContext={session.retryPullContext}
+              onClosePull={session.clearPull}
               onOpenInBrowser={(target, repository) => services.openGitHub(repository ?? repositoryName, target)}
               onCopyToClipboard={services.copyToHostClipboard}
               onLoadMoreRuns={session.loadMoreRuns}

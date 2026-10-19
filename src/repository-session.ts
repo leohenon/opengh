@@ -3,14 +3,20 @@ import {
   loadGitHubBranches,
   loadGitHubCommit,
   loadGitHubCommits,
+  loadGitHubCommitCount,
   loadGitHubDocument,
   loadGitHubDocuments,
   loadGitHubIssue,
   loadGitHubIssueComments,
   loadGitHubIssueReferences,
+  loadGitHubIssueTimeline,
   loadGitHubIssues,
   loadGitHubHasIssues,
   loadGitHubMetadata,
+  loadGitHubWorkCounts,
+  loadGitHubPull,
+  loadGitHubPullCommits,
+  loadGitHubPullContext,
   loadGitHubPulls,
   loadGitHubRuns,
   createGitHubIssueComment,
@@ -28,8 +34,11 @@ import type {
   IssueActionKind,
   IssueActionResult,
   IssueCloseReason,
+  IssueTimeline,
   ListState,
   Paginated,
+  PullRequestDetail,
+  PullContext,
   PullRequestSummary,
   Repo,
   RepositoryDocument,
@@ -40,6 +49,7 @@ import type {
   IssueDetailState,
   IssueActionState,
   OperationState,
+  PullDetailState,
   RepositoryData,
   RepositoryDocumentState,
   RepositoryResource,
@@ -52,10 +62,12 @@ type Page<T> = { items: T[]; hasMore: boolean }
 
 export type RepositoryLoaders = {
   metadata(repository: string): Promise<Repo>
+  workCounts(repository: string): Promise<{ issues: number; pulls: number }>
   documents(repo: Repo, branch: string): Promise<RepositoryDocument[]>
   document(source: RepositoryDocument): Promise<string>
   branches(repository: string, fallbackBranch: string, page?: number): Promise<Page<string>>
   commits(repository: string, branch: string, page?: number): Promise<Page<CommitSummary>>
+  commitCount(repository: string, branch: string): Promise<number>
   commit(repository: string, sha: string, page?: number): Promise<CommitDetail>
   issue(repository: string, number: number): Promise<IssueDetail>
   issueComments(repository: string, number: number, page?: number): Promise<Page<IssueComment>>
@@ -63,8 +75,12 @@ export type RepositoryLoaders = {
   createIssueComment?(repository: string, number: number, body: string): Promise<IssueComment>
   updateIssueState?(repository: string, number: number, state: ListState, reason?: IssueCloseReason): Promise<IssueDetail>
   markIssueDuplicate?(repository: string, number: number, canonicalNumber: number): Promise<IssueDetail>
+  issueTimeline?(repository: string, number: number): Promise<IssueTimeline>
   issues(repository: string, state: ListState, page?: number): Promise<Page<IssueSummary>>
   hasIssues?(repository: string, state: ListState): Promise<boolean>
+  pull?(repository: string, number: number): Promise<PullRequestDetail>
+  pullCommits(repository: string, number: number): Promise<CommitSummary[]>
+  pullContext(repository: string, number: number): Promise<PullContext>
   pulls(repository: string, state: ListState, page?: number): Promise<Page<PullRequestSummary>>
   runs(repository: string, page?: number): Promise<Page<WorkflowRunSummary>>
 }
@@ -75,6 +91,13 @@ export type RepositorySession = {
   loadCommit(sha: string): Promise<void>
   loadMoreCommitFiles(): Promise<void>
   clearCommit(): void
+  pullDetail: Accessor<PullDetailState | undefined>
+  loadPull(number: number): Promise<void>
+  loadMorePullComments(): Promise<void>
+  retryPullReferences(): Promise<void>
+  retryPullCommits(): Promise<void>
+  retryPullContext(): Promise<void>
+  clearPull(): void
   issueDetail: Accessor<IssueDetailState | undefined>
   loadIssue(number: number): Promise<void>
   loadMoreIssueComments(): Promise<void>
@@ -99,10 +122,12 @@ export type RepositorySession = {
 
 const defaultLoaders: RepositoryLoaders = {
   metadata: loadGitHubMetadata,
+  workCounts: loadGitHubWorkCounts,
   documents: loadGitHubDocuments,
   document: loadGitHubDocument,
   branches: loadGitHubBranches,
   commits: loadGitHubCommits,
+  commitCount: loadGitHubCommitCount,
   commit: loadGitHubCommit,
   issue: loadGitHubIssue,
   issueComments: loadGitHubIssueComments,
@@ -110,8 +135,12 @@ const defaultLoaders: RepositoryLoaders = {
   createIssueComment: createGitHubIssueComment,
   updateIssueState: updateGitHubIssueState,
   markIssueDuplicate: markGitHubIssueDuplicate,
+  issueTimeline: loadGitHubIssueTimeline,
   issues: loadGitHubIssues,
   hasIssues: loadGitHubHasIssues,
+  pull: loadGitHubPull,
+  pullCommits: loadGitHubPullCommits,
+  pullContext: loadGitHubPullContext,
   pulls: loadGitHubPulls,
   runs: loadGitHubRuns,
 }
@@ -171,9 +200,11 @@ function initialData(repo: Repo): RepositoryData {
   return {
     repo,
     currentBranch: repo.defaultBranch,
+    workCounts: loadingResource(),
     documents: loadingResource(),
     branches: loadingResource(),
     commits: loadingResource(),
+    commitCount: loadingResource(),
     issues: { open: loadingResource(), closed: loadingResource() },
     pulls: { open: loadingResource(), closed: loadingResource() },
     runs: loadingResource(),
@@ -207,10 +238,14 @@ export function createRepositorySession(loaders: RepositoryLoaders = defaultLoad
   const confirmIssueWrite = (key: string) => issueWriteRevision.set(key, (issueWriteRevision.get(key) ?? 0) + 1)
   let repositoryScope = 0
   const issueListGeneration: Record<ListState, number> = { open: 0, closed: 0 }
+  const [pullDetail, setPullDetail] = createSignal<PullDetailState>()
+  let pullGeneration = 0
   let issueGeneration = 0
+  let issueReferencesGeneration = 0
   let commitGeneration = 0
   let repositoryGeneration = 0
   let branchGeneration = 0
+  let commitCountGeneration = 0
   const generation = () => repositoryGeneration
 
   const fetchDocument = async (
@@ -275,6 +310,22 @@ export function createRepositorySession(loaders: RepositoryLoaders = defaultLoad
         ...current,
         data: { ...current.data, branches: failedResource(error, current.data.branches.value) },
       }))
+    }
+  }
+
+  const fetchCommitCount = async (repository: string, branch: string, request: number) => {
+    const countRequest = ++commitCountGeneration
+    try {
+      const value = await loaders.commitCount(repository, branch)
+      updateReady(setState, request, generation, repository, (current) =>
+        countRequest !== commitCountGeneration || current.data.currentBranch !== branch ? current : ({
+          ...current, data: { ...current.data, commitCount: { status: "ready", value } },
+        }))
+    } catch (error) {
+      updateReady(setState, request, generation, repository, (current) =>
+        countRequest !== commitCountGeneration || current.data.currentBranch !== branch ? current : ({
+          ...current, data: { ...current.data, commitCount: failedResource(error, current.data.commitCount.value) },
+        }))
     }
   }
 
@@ -361,6 +412,21 @@ export function createRepositorySession(loaders: RepositoryLoaders = defaultLoad
     }
   }
 
+  let workCountsGeneration = 0
+  const fetchWorkCounts = async (repository: string, request: number) => {
+    const countRequest = ++workCountsGeneration
+    try {
+      const value = await loaders.workCounts(repository)
+      updateReady(setState, request, generation, repository, (current) => countRequest !== workCountsGeneration ? current : ({
+        ...current, data: { ...current.data, workCounts: { status: "ready", value } },
+      }))
+    } catch (error) {
+      updateReady(setState, request, generation, repository, (current) => countRequest !== workCountsGeneration ? current : ({
+        ...current, data: { ...current.data, workCounts: failedResource(error, current.data.workCounts.value) },
+      }))
+    }
+  }
+
   const loadResources = async (
     repository: string,
     branch: string,
@@ -369,9 +435,11 @@ export function createRepositorySession(loaders: RepositoryLoaders = defaultLoad
     previous?: RepositoryData,
   ) => {
     await Promise.all([
+      fetchWorkCounts(repository, request),
       fetchDocuments(repository, repo, branch, request),
       fetchBranches(repository, repo.defaultBranch, request, previous?.branches.value?.page),
       fetchCommits(repository, branch, request, previous?.commits.value?.page),
+      fetchCommitCount(repository, branch, request),
       fetchIssues(repository, "open", request, previous?.issues.open.value?.page),
       fetchIssues(repository, "closed", request, previous?.issues.closed.value?.page),
       fetchPulls(repository, "open", request, previous?.pulls.open.value?.page),
@@ -443,6 +511,160 @@ export function createRepositorySession(loaders: RepositoryLoaders = defaultLoad
     }
   }
 
+  const clearPull = () => {
+    ++pullGeneration
+    setPullDetail(undefined)
+  }
+
+  const fetchPullComments = async (
+    repository: string,
+    number: number,
+    request: number,
+    pageCount: number,
+    previous?: Paginated<IssueComment>,
+  ) => {
+    try {
+      const value = await loadPageSet(pageCount, (page) => loaders.issueComments(repository, number, page), (comment) => comment.id)
+      if (request !== pullGeneration) return
+      setPullDetail((current) => current?.number === number
+        ? { ...current, comments: { status: "ready", value } } : current)
+    } catch (error) {
+      if (request !== pullGeneration) return
+      setPullDetail((current) => current?.number === number
+        ? { ...current, comments: failedResource(error, previous) } : current)
+    }
+  }
+
+  const fetchPullReferences = async (repository: string, number: number, request: number, previous?: IssueReference[]) => {
+    try {
+      const timeline = loaders.issueTimeline
+        ? await loaders.issueTimeline(repository, number)
+        : { references: await loaders.issueReferences(repository, number), events: [] }
+      if (request !== pullGeneration) return
+      setPullDetail((current) => current?.number === number
+        ? { ...current, references: { status: "ready", value: timeline.references }, events: timeline.events } : current)
+    } catch (error) {
+      if (request !== pullGeneration) return
+      setPullDetail((current) => current?.number === number ? { ...current, references: failedResource(error, previous) } : current)
+    }
+  }
+
+  const fetchPullCommits = async (repository: string, number: number, request: number, previous?: CommitSummary[]) => {
+    try {
+      const value = await loaders.pullCommits(repository, number)
+      if (request !== pullGeneration) return
+      setPullDetail((current) => current?.number === number ? { ...current, commits: { status: "ready", value } } : current)
+    } catch (error) {
+      if (request !== pullGeneration) return
+      setPullDetail((current) => current?.number === number ? { ...current, commits: failedResource(error, previous) } : current)
+    }
+  }
+
+  const fetchPullContext = async (repository: string, number: number, request: number, previous?: PullContext) => {
+    try {
+      const value = await loaders.pullContext(repository, number)
+      if (request !== pullGeneration) return
+      setPullDetail((current) => current?.number === number ? { ...current, context: { status: "ready", value } } : current)
+    } catch (error) {
+      if (request !== pullGeneration) return
+      setPullDetail((current) => current?.number === number ? { ...current, context: failedResource(error, previous) } : current)
+    }
+  }
+
+  const retryPullContext = async () => {
+    const current = state()
+    const detail = pullDetail()
+    if (current.status !== "ready" || detail?.resource.status !== "ready" || detail.context.status === "loading") return
+    setPullDetail({ ...detail, context: loadingResource(detail.context.value) })
+    return fetchPullContext(current.repository, detail.number, pullGeneration, detail.context.value)
+  }
+
+  const retryPullCommits = async () => {
+    const current = state()
+    const detail = pullDetail()
+    if (current.status !== "ready" || detail?.resource.status !== "ready" || detail.commits.status === "loading") return
+    setPullDetail({ ...detail, commits: loadingResource(detail.commits.value) })
+    return fetchPullCommits(current.repository, detail.number, pullGeneration, detail.commits.value)
+  }
+
+  const retryPullReferences = async () => {
+    const current = state()
+    const detail = pullDetail()
+    if (current.status !== "ready" || !detail?.resource.value || detail.resource.status === "loading"
+      || detail.references.status === "loading") return
+    setPullDetail({ ...detail, references: loadingResource(detail.references.value) })
+    return fetchPullReferences(current.repository, detail.number, pullGeneration, detail.references.value)
+  }
+
+  const loadPull = async (number: number) => {
+    const current = state()
+    const previous = pullDetail()
+    if (current.status !== "ready" || (previous?.number === number
+      && (previous.resource.status === "loading" || previous.comments.status === "loading"
+        || previous.references.status === "loading" || previous.commits.status === "loading" || previous.context.status === "loading"))) return
+    const repository = current.repository
+    const request = ++pullGeneration
+    const value = previous?.number === number ? previous.resource.value : undefined
+    const comments = previous?.number === number ? previous.comments.value : undefined
+    const references = previous?.number === number ? previous.references.value : undefined
+    const commits = previous?.number === number ? previous.commits.value : undefined
+    const context = previous?.number === number ? previous.context.value : undefined
+    const events = previous?.number === number ? previous.events ?? [] : []
+    setPullDetail({ number, resource: loadingResource(value), comments: loadingResource(comments),
+      references: loadingResource(references), events, commits: loadingResource(commits), context: loadingResource(context) })
+    try {
+      const pull = await (loaders.pull ?? loadGitHubPull)(repository, number)
+      if (request !== pullGeneration) return
+      setPullDetail({ number, resource: { status: "ready", value: pull },
+        comments: pull.commentCount === 0
+          ? { status: "ready", value: { items: [], page: 1, hasMore: false } } : loadingResource(comments),
+        references: loadingResource(references), events,
+        commits: pull.commitCount === 0 ? { status: "ready", value: [] } : loadingResource(commits), context: loadingResource(context) })
+      await Promise.all([
+        pull.commentCount > 0 ? fetchPullComments(repository, number, request, comments?.page ?? 1, comments) : Promise.resolve(),
+        fetchPullReferences(repository, number, request, references),
+        pull.commitCount > 0 ? fetchPullCommits(repository, number, request, commits) : Promise.resolve(),
+        fetchPullContext(repository, number, request, context),
+      ])
+    } catch (error) {
+      if (request === pullGeneration) setPullDetail({ number, resource: failedResource(error, value),
+        comments: previous?.number === number ? previous.comments : { status: "ready", value: { items: [], page: 1, hasMore: false } },
+        references: previous?.number === number ? previous.references : { status: "ready", value: [] },
+        events, commits: previous?.number === number ? previous.commits : { status: "ready", value: [] },
+        context: previous?.number === number ? previous.context : failedResource<PullContext>(error) })
+    }
+  }
+
+  const loadMorePullComments = async () => {
+    const current = state()
+    const detail = pullDetail()
+    if (current.status !== "ready" || !detail?.resource.value || detail.resource.status === "loading"
+      || detail.comments.status === "loading") return
+    const { number } = detail
+    const value = detail.comments.value
+    const request = pullGeneration
+    const reload = value === undefined || (detail.comments.status === "error" && detail.comments.phase === "load")
+    if (!reload && !value?.hasMore) return
+    setPullDetail({ ...detail, comments: loadingResource(value, reload ? "load" : "pagination") })
+    if (reload) return fetchPullComments(current.repository, number, request, value?.page ?? 1, value)
+    try {
+      const next = await loaders.issueComments(current.repository, number, value!.page + 1)
+      if (request !== pullGeneration) return
+      const ids = new Set(value!.items.map((comment) => comment.id))
+      const items = next.items.filter((comment) => {
+        if (ids.has(comment.id)) return false
+        ids.add(comment.id)
+        return true
+      })
+      setPullDetail((latest) => latest?.number === number ? {
+        ...latest, comments: { status: "ready", value: page({ items: [...value!.items, ...items], hasMore: next.hasMore }, value!.page + 1) },
+      } : latest)
+    } catch (error) {
+      if (request === pullGeneration) setPullDetail((latest) => latest?.number === number
+        ? { ...latest, comments: failedResource(error, value, "pagination") } : latest)
+    }
+  }
+
   const clearIssue = () => {
     ++issueGeneration
     setIssueDetail(undefined)
@@ -484,12 +706,16 @@ export function createRepositorySession(loaders: RepositoryLoaders = defaultLoad
   }
 
   const fetchIssueReferences = async (repository: string, number: number, request: number, previous?: IssueReference[]) => {
+    const referenceRequest = ++issueReferencesGeneration
     try {
-      const value = await loaders.issueReferences(repository, number)
-      if (request !== issueGeneration) return
-      setIssueDetail((current) => current?.number === number ? { ...current, references: { status: "ready", value } } : current)
+      const timeline = loaders.issueTimeline
+        ? await loaders.issueTimeline(repository, number)
+        : { references: await loaders.issueReferences(repository, number), events: [] }
+      if (request !== issueGeneration || referenceRequest !== issueReferencesGeneration) return
+      setIssueDetail((current) => current?.number === number
+        ? { ...current, references: { status: "ready", value: timeline.references }, events: timeline.events } : current)
     } catch (error) {
-      if (request !== issueGeneration) return
+      if (request !== issueGeneration || referenceRequest !== issueReferencesGeneration) return
       setIssueDetail((current) => current?.number === number ? { ...current, references: failedResource(error, previous) } : current)
     }
   }
@@ -513,7 +739,8 @@ export function createRepositorySession(loaders: RepositoryLoaders = defaultLoad
     const value = previous?.number === number ? previous.resource.value : undefined
     let comments = previous?.number === number ? previous.comments.value : undefined
     const references = previous?.number === number ? previous.references.value : undefined
-    setIssueDetail({ number, resource: loadingResource(value), comments: loadingResource(comments), references: loadingResource(references) })
+    let events = previous?.number === number ? previous.events ?? [] : []
+    setIssueDetail({ number, resource: loadingResource(value), comments: loadingResource(comments), references: loadingResource(references), events })
     try {
       const key = issueKey(repository, number)
       let revision = issueWriteRevision.get(key)
@@ -528,11 +755,12 @@ export function createRepositorySession(loaders: RepositoryLoaders = defaultLoad
         if (request !== issueGeneration) return
       }
       comments = issueDetail()?.comments.value ?? comments
-      setIssueDetail({ number, resource: { status: "ready", value: issue }, comments: loadingResource(comments), references: loadingResource(references) })
+      events = issueDetail()?.events ?? events
+      setIssueDetail({ number, resource: { status: "ready", value: issue }, comments: loadingResource(comments), references: loadingResource(references), events })
       const hasComments = issue.commentCount > 0 || (postedComments.get(issueKey(repository, number))?.length ?? 0) > 0
       if (!hasComments) {
         setIssueDetail({ number, resource: { status: "ready", value: issue },
-          comments: { status: "ready", value: { items: [], page: 1, hasMore: false } }, references: loadingResource(references) })
+          comments: { status: "ready", value: { items: [], page: 1, hasMore: false } }, references: loadingResource(references), events })
       }
       await Promise.all([
         hasComments ? fetchIssueComments(repository, number, request, comments?.page ?? 1, comments) : Promise.resolve(),
@@ -542,7 +770,8 @@ export function createRepositorySession(loaders: RepositoryLoaders = defaultLoad
       if (request === issueGeneration) setIssueDetail((latest) => ({ number, resource: failedResource(error, latest?.resource.value ?? value),
         comments: previous?.number === number ? { ...previous.comments, ...(latest?.comments.value ? { value: latest.comments.value } : {}) }
           : { status: "ready", value: latest?.comments.value ?? { items: [], page: 1, hasMore: false } },
-        references: previous?.number === number ? previous.references : { status: "ready", value: [] } }))
+        references: previous?.number === number ? previous.references : { status: "ready", value: [] },
+        events: latest?.events ?? events }))
     }
   }
 
@@ -615,7 +844,11 @@ export function createRepositorySession(loaders: RepositoryLoaders = defaultLoad
     const stillHere = () => scope === repositoryScope && state().repository === repository
     if (!stillHere()) return
     setIssueDetail((latest) => latest?.number === number
-      ? { ...latest, resource: { status: "ready", value: updated } } : latest)
+      ? { ...latest, resource: { status: "ready", value: updated }, references: loadingResource(latest.references.value) } : latest)
+    if (issueDetail()?.number === number) {
+      // Refresh state events without clearing the existing timeline or treating a read failure as a failed write.
+      void fetchIssueReferences(repository, number, issueGeneration, issueDetail()?.references.value)
+    }
     setState((latest) => {
       if (latest.status !== "ready" || latest.repository !== repository) return latest
       const lists = { ...latest.data.issues }
@@ -638,6 +871,7 @@ export function createRepositorySession(loaders: RepositoryLoaders = defaultLoad
       const request = repositoryGeneration
       void fetchIssues(repository, "open", request, latest.data.issues.open.value?.page)
       void fetchIssues(repository, "closed", request, latest.data.issues.closed.value?.page)
+      void fetchWorkCounts(repository, request)
       void loaders.metadata(repository).then((repo) => {
         if (stillHere()) updateReady(setState, request, generation, repository, (state) => ({
           ...state, data: { ...state.data, repo },
@@ -724,6 +958,7 @@ export function createRepositorySession(loaders: RepositoryLoaders = defaultLoad
     ++repositoryScope
     clearCommit()
     clearIssue()
+    clearPull()
     const request = ++repositoryGeneration
     ++branchGeneration
     setState({ status: "loading", repository })
@@ -764,9 +999,11 @@ export function createRepositorySession(loaders: RepositoryLoaders = defaultLoad
             data: {
               ...latest.data,
               repo,
+              workCounts: loadingResource(latest.data.workCounts.value),
               documents: loadingResource(latest.data.documents.value),
               branches: loadingResource(latest.data.branches.value),
               commits: loadingResource(latest.data.commits.value),
+              commitCount: loadingResource(latest.data.commitCount.value),
               issues: {
                 open: loadingResource(latest.data.issues.open.value),
                 closed: loadingResource(latest.data.issues.closed.value),
@@ -903,10 +1140,14 @@ export function createRepositorySession(loaders: RepositoryLoaders = defaultLoad
             currentBranch: branch,
             documents: { status: "ready", value: documents },
             commits: { status: "ready", value: page(commits) },
+            commitCount: loadingResource(),
           },
           operations: { ...latest.operations, branch: idle() },
         }
       })
+      if (repositoryRequest === repositoryGeneration && request === branchGeneration) {
+        await fetchCommitCount(repository, branch, repositoryRequest)
+      }
     } catch (error) {
       setState((latest) => {
         if (repositoryRequest !== repositoryGeneration || request !== branchGeneration
@@ -1126,6 +1367,13 @@ export function createRepositorySession(loaders: RepositoryLoaders = defaultLoad
     loadCommit,
     loadMoreCommitFiles,
     clearCommit,
+    pullDetail,
+    loadPull,
+    loadMorePullComments,
+    retryPullReferences,
+    retryPullCommits,
+    retryPullContext,
+    clearPull,
     issueDetail,
     loadIssue,
     loadMoreIssueComments,

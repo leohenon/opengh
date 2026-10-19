@@ -1,8 +1,8 @@
 import { describe, expect, test } from "bun:test"
-import type { CommitDetail, CommitSummary, IssueDetail, IssueComment, RepositoryDocument } from "../src/models"
+import type { CommitDetail, CommitSummary, IssueDetail, IssueComment, IssueTimeline, RepositoryDocument } from "../src/models"
 import type { RepositoryLoaders } from "../src/repository-session"
 import { createRepositorySession } from "../src/repository-session"
-import { commitDetailFixture, githubDataFixture, issueDetailFixture, issueCommentsFixture, issuePullReferenceFixture } from "./fixtures/github-data"
+import { commitDetailFixture, githubDataFixture, issueDetailFixture, issueCommentsFixture, issuePullReferenceFixture, pullContextFixture } from "./fixtures/github-data"
 
 function deferred<T>() {
   let resolve!: (value: T) => void
@@ -17,6 +17,8 @@ function deferred<T>() {
 function loaders(overrides: Partial<RepositoryLoaders> = {}): RepositoryLoaders {
   return {
     metadata: async () => structuredClone(githubDataFixture.repo),
+    workCounts: async () => ({ issues: 61, pulls: 24 }),
+    commitCount: async () => 4,
     documents: async (repo, branch) => githubDataFixture.documents.value!.map(({ resource, ...source }) => ({
       ...source, id: `${repo.nameWithOwner}:${source.path}`, repository: repo.nameWithOwner, ref: branch,
     })),
@@ -29,6 +31,8 @@ function loaders(overrides: Partial<RepositoryLoaders> = {}): RepositoryLoaders 
     issueReferences: async () => [],
     issues: async (_repository, state) => ({ items: structuredClone(githubDataFixture.issues[state].value!.items), hasMore: false }),
     pulls: async (_repository, state) => ({ items: structuredClone(githubDataFixture.pulls[state].value!.items), hasMore: false }),
+    pullCommits: async () => structuredClone(githubDataFixture.commits.value!.items),
+    pullContext: async () => structuredClone(pullContextFixture),
     runs: async () => ({ items: structuredClone(githubDataFixture.runs.value!.items), hasMore: false }),
     ...overrides,
   }
@@ -41,6 +45,146 @@ function ready(session: ReturnType<typeof createRepositorySession>) {
 }
 
 describe("repository session", () => {
+  test("loads branch commit totals independently, preserves them during pagination, and refreshes them", async () => {
+    const pending = deferred<number>()
+    const calls: string[] = []
+    let fail = false
+    let total = 1284
+    const session = createRepositorySession(loaders({
+      commitCount: async (_repository, branch) => {
+        calls.push(branch)
+        if (fail) throw new Error("Count offline")
+        return calls.length === 1 ? pending.promise : total
+      },
+      commits: async (_repository, _branch, page = 1) => ({
+        items: [{ ...commitDetailFixture, sha: `sha-${page}` }], hasMore: page === 1,
+      }),
+    }))
+    const load = session.load("owner/repo")
+    await Bun.sleep(0)
+    expect(ready(session).data.commits.status).toBe("ready")
+    expect(ready(session).data.commitCount).toEqual({ status: "loading", phase: "load" })
+    pending.resolve(1284)
+    await load
+    expect(ready(session).data.commitCount.value).toBe(1284)
+    await session.loadMoreCommits()
+    expect(ready(session).data.commits.value?.items).toHaveLength(2)
+    expect(ready(session).data.commitCount.value).toBe(1284)
+    expect(calls).toEqual(["main"])
+    fail = true
+    await session.refresh()
+    expect(ready(session).data.commitCount).toEqual({
+      status: "error", phase: "load", message: "Count offline", value: 1284,
+    })
+    fail = false
+    total = 1285
+    await session.refresh()
+    expect(ready(session).data.commitCount).toEqual({ status: "ready", value: 1285 })
+  })
+
+  test("clears the previous branch commit total and ignores late branch and repository counts", async () => {
+    const next = deferred<number>()
+    const other = deferred<number>()
+    const session = createRepositorySession(loaders({
+      metadata: async (repository) => ({ ...githubDataFixture.repo, nameWithOwner: repository }),
+      commitCount: async (repository, branch) => {
+        if (repository === "owner/other") return other.promise
+        return branch === "feature/next" ? next.promise : 1284
+      },
+    }))
+    await session.load("owner/repo")
+    const switching = session.switchBranch("feature/next")
+    await Bun.sleep(0)
+    expect(ready(session).data.currentBranch).toBe("feature/next")
+    expect(ready(session).data.commitCount).toEqual({ status: "loading", phase: "load" })
+    await session.switchBranch("main")
+    next.resolve(12)
+    await switching
+    expect(ready(session).data.commitCount.value).toBe(1284)
+    const loading = session.load("owner/other")
+    await Bun.sleep(0)
+    await session.load("owner/new")
+    other.resolve(99)
+    await loading
+    expect(ready(session).repository).toBe("owner/new")
+    expect(ready(session).data.commitCount.value).toBe(1284)
+  })
+
+  test("a failed commit total does not fail the list or branch switch", async () => {
+    const session = createRepositorySession(loaders({
+      commitCount: async () => { throw new Error("Count unavailable") },
+    }))
+    await session.load("owner/repo")
+    expect(ready(session).data.commits.status).toBe("ready")
+    expect(ready(session).data.commitCount).toEqual({ status: "error", phase: "load", message: "Count unavailable" })
+    await session.switchBranch("next")
+    expect(ready(session).data.currentBranch).toBe("next")
+    expect(ready(session).operations.branch.status).toBe("idle")
+    expect(ready(session).data.commits.status).toBe("ready")
+    expect(ready(session).data.commitCount.status).toBe("error")
+  })
+
+  test("loads true open totals independently and retains them across refresh failures", async () => {
+    const pending = deferred<{ issues: number; pulls: number }>()
+    let fail = false
+    let calls = 0
+    const session = createRepositorySession(loaders({
+      workCounts: async () => {
+        calls++
+        if (fail) throw new Error("Counts offline")
+        return calls === 1 ? pending.promise : { issues: 0, pulls: 1200 }
+      },
+    }))
+    const loading = session.load("owner/repo")
+    await Bun.sleep(0)
+    expect(ready(session).data.workCounts).toEqual({ status: "loading", phase: "load" })
+    expect(ready(session).data.issues.open.status).toBe("ready")
+    pending.resolve({ issues: 2450, pulls: 1200 })
+    await loading
+    expect(ready(session).data.workCounts.value).toEqual({ issues: 2450, pulls: 1200 })
+    await session.loadMoreIssues("open")
+    expect(calls).toBe(1)
+    fail = true
+    await session.refresh()
+    expect(ready(session).data.workCounts).toEqual({
+      status: "error", phase: "load", message: "Counts offline", value: { issues: 2450, pulls: 1200 },
+    })
+    fail = false
+    await session.refresh()
+    expect(ready(session).data.workCounts).toEqual({ status: "ready", value: { issues: 0, pulls: 1200 } })
+  })
+
+  test("does not leak late count responses into another repository", async () => {
+    const pending = deferred<{ issues: number; pulls: number }>()
+    const session = createRepositorySession(loaders({
+      metadata: async (repository) => ({ ...githubDataFixture.repo, nameWithOwner: repository }),
+      workCounts: async (repository) => repository === "owner/old" ? pending.promise : { issues: 0, pulls: 0 },
+    }))
+    const old = session.load("owner/old")
+    await Bun.sleep(0)
+    await session.load("owner/new")
+    pending.resolve({ issues: 999, pulls: 999 })
+    await old
+    expect(ready(session).repository).toBe("owner/new")
+    expect(ready(session).data.workCounts.value).toEqual({ issues: 0, pulls: 0 })
+  })
+
+  test("refreshes totals after a confirmed issue state change", async () => {
+    let open = 61
+    const session = createRepositorySession(loaders({
+      workCounts: async () => ({ issues: open, pulls: 24 }),
+      updateIssueState: async (_repository, _number, state) => {
+        open = state === "closed" ? 60 : 61
+        return { ...issueDetailFixture, state }
+      },
+    }))
+    await session.load("owner/repo")
+    await session.loadIssue(issueDetailFixture.number)
+    await session.submitIssueAction(issueDetailFixture.number, "close")
+    await Bun.sleep(0)
+    expect(ready(session).data.workCounts.value).toEqual({ issues: 60, pulls: 24 })
+  })
+
   test("confirms empty PR-only issue pages without scanning every PR page", async () => {
     const checked: string[] = []
     const session = createRepositorySession(loaders({
@@ -50,6 +194,112 @@ describe("repository session", () => {
     await session.load("owner/repo")
     expect(checked).toEqual(["open"])
     expect(ready(session).data.issues.open).toMatchObject({ status: "ready", value: { items: [], hasMore: false, page: 1 } })
+  })
+
+  test("issue actions refresh the shared timeline without letting an older read overwrite closure events", async () => {
+    const pending = deferred<IssueTimeline>()
+    const closedAt = "2026-10-19T12:00:00Z"
+    let issue: IssueDetail = { ...issueDetailFixture, commentCount: 0 }
+    let timelineCalls = 0
+    const closed: IssueTimeline = { references: [], events: [
+      { kind: "state", event: "closed", id: "state:closed", actor: "maintainer", createdAt: closedAt },
+    ] }
+    const session = createRepositorySession(loaders({
+      issue: async () => issue,
+      issueTimeline: async () => ++timelineCalls === 1 ? pending.promise : closed,
+      issues: async (_repository, state) => ({ items: issue.state === state ? [issue] : [], hasMore: false }),
+      updateIssueState: async (_repository, _number, state) => {
+        issue = { ...issue, state, stateReason: "completed", closedAt }
+        return issue
+      },
+    }))
+    await session.load("anomalyco/opentui")
+    const loadingIssue = session.loadIssue(issue.number)
+    await Promise.resolve()
+    expect(session.issueDetail()?.resource.status).toBe("ready")
+    await session.submitIssueAction(issue.number, "close")
+    await Promise.resolve()
+    expect(timelineCalls).toBe(2)
+    expect(session.issueDetail()?.events).toEqual(closed.events)
+    pending.resolve({ references: [], events: [
+      { kind: "state", event: "reopened", id: "state:old", actor: "earlier-reader", createdAt: "2026-10-18T12:00:00Z" },
+    ] })
+    await loadingIssue
+    expect(session.issueDetail()?.resource.value?.state).toBe("closed")
+    expect(session.issueDetail()?.events).toEqual(closed.events)
+  })
+
+  test("pull discussion retries independently, retains loaded pages, and rejects cleared results", async () => {
+    const summary = githubDataFixture.pulls.open.value!.items[0]!
+    const pages: number[] = []
+    const held = deferred<{ items: IssueComment[]; hasMore: boolean }>()
+    let holdComments = false
+    let failPagination = true
+    let failReferences = true
+    let failCommits = true
+    let failContext = true
+    let detailCalls = 0
+    const session = createRepositorySession(loaders({
+      pull: async (_repository, number) => {
+        detailCalls++
+        return { ...summary, number, url: `https://github.com/anomalyco/opentui/pull/${number}`,
+          body: "Keep focus during layout changes.", updatedAt: summary.createdAt,
+          baseBranch: "main", headBranch: "fix/focus", additions: 18, deletions: 7,
+          changedFiles: 2, commitCount: 3, commentCount: 2, reviewCommentCount: 0,
+          labels: [], assignees: [], reviewers: [], mergeable: null, mergeableState: "unknown" }
+      },
+      pullCommits: async () => {
+        if (failCommits) throw new Error("Commits offline")
+        return githubDataFixture.commits.value!.items.slice(0, 3)
+      },
+      pullContext: async () => {
+        if (failContext) throw new Error("PR context offline")
+        return pullContextFixture
+      },
+      issueComments: async (_repository, _number, page = 1) => {
+        pages.push(page)
+        if (holdComments) return held.promise
+        if (page === 2 && failPagination) throw new Error("Comments offline")
+        return { items: [issueCommentsFixture[page - 1]!], hasMore: page === 1 }
+      },
+      issueReferences: async () => {
+        if (failReferences) throw new Error("References offline")
+        return [issuePullReferenceFixture]
+      },
+    }))
+    await session.load("anomalyco/opentui")
+    await session.loadPull(summary.number)
+    expect(session.pullDetail()?.resource.status).toBe("ready")
+    expect(session.pullDetail()?.commits.status).toBe("error")
+    expect(session.pullDetail()?.context.status).toBe("error")
+    failContext = false
+    await session.retryPullContext()
+    expect(session.pullDetail()?.context).toEqual({ status: "ready", value: pullContextFixture })
+    failCommits = false
+    await session.retryPullCommits()
+    expect(session.pullDetail()?.commits.value).toEqual(githubDataFixture.commits.value!.items.slice(0, 3))
+    expect(session.pullDetail()?.comments).toMatchObject({ status: "ready", value: { page: 1, hasMore: true } })
+    expect(session.pullDetail()?.references.status).toBe("error")
+    failReferences = false
+    await session.retryPullReferences()
+    expect(session.pullDetail()?.references).toEqual({ status: "ready", value: [issuePullReferenceFixture] })
+    expect(detailCalls).toBe(1)
+    await session.loadMorePullComments()
+    expect(session.pullDetail()?.comments).toMatchObject({ status: "error", phase: "pagination", value: { page: 1 } })
+    failPagination = false
+    await session.loadMorePullComments()
+    expect(session.pullDetail()?.comments.value?.items).toEqual(issueCommentsFixture)
+    await session.loadPull(summary.number)
+    expect(session.pullDetail()?.comments.value?.page).toBe(2)
+    expect(session.pullDetail()?.comments.value?.items).toEqual(issueCommentsFixture)
+    expect(pages).toEqual([1, 2, 2, 1, 2])
+    holdComments = true
+    const pending = session.loadPull(summary.number)
+    await Promise.resolve()
+    session.clearPull()
+    held.resolve({ items: issueCommentsFixture, hasMore: false })
+    await pending
+    expect(session.pullDetail()).toBeUndefined()
   })
 
   test("issue details load on demand and reject results after back or repository replacement", async () => {

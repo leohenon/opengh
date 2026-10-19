@@ -2,6 +2,7 @@ import { TextAttributes } from "@opentui/core"
 import { For, Show } from "solid-js"
 import type { Repo } from "../../models"
 import type { Page } from "../../navigation"
+import type { RepositoryData } from "../../repository-state"
 import { useTheme } from "../theme"
 
 function RepositoryName(props: { repo: Repo }) {
@@ -20,6 +21,7 @@ export function Header(props: {
   repo: Repo
   page: Page
   compact?: boolean
+  workCounts?: RepositoryData["workCounts"]
   tabs: ReadonlyArray<{ page: Page; label: string }>
 }) {
   const { colors } = useTheme()
@@ -36,7 +38,13 @@ export function Header(props: {
           <For each={props.tabs}>
             {(tab, index) => {
               const active = () => props.page === tab.page
-              const label = () => `${index() + 1} ${tab.label}`
+              const label = () => {
+                const prefix = `${index() + 1} ${tab.label}`
+                if (tab.page !== "issues" && tab.page !== "pulls") return prefix
+                const count = props.workCounts?.value?.[tab.page]
+                const placeholder = props.workCounts?.status === "error" ? "—" : "…"
+                return `${prefix} (${count ?? placeholder})`
+              }
               return (
                 <box height={props.compact ? 1 : 2} flexDirection="column">
                   <text

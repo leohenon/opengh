@@ -24,7 +24,7 @@ test("commit tabs retain detail state and Escape restores the list after resizin
   const opened: string[] = []
   let refreshes = 0
   let moreFiles = 0
-  let copies = 0
+  const copies: string[] = []
   const view = await testRender(() => (
     <App
       config={{ ...defaultConfig, showStatusBarHints: true }}
@@ -45,7 +45,7 @@ test("commit tabs retain detail state and Escape restores the list after resizin
     />
   ), { width: 120, height: 28, useThread: false })
   active.push(view)
-  view.renderer.copyToClipboardOSC52 = () => { copies++; return true }
+  view.renderer.copyToClipboardOSC52 = (value) => { copies.push(value); return true }
   await view.flush()
   view.mockInput.pressKey("2")
   await view.flush()
@@ -107,8 +107,8 @@ test("commit tabs retain detail state and Escape restores the list after resizin
   await Bun.sleep(30)
   await view.flush()
   expect(detail()).toBe(retained)
-  expect(refreshes).toBe(1)
-  expect(copies).toBe(0)
+  expect(refreshes).toBe(0) // The active PR detail owns refresh; it must not refresh the hidden commit/repository.
+  expect(copies).toEqual([`${githubDataFixture.repo.url}/pull/421`])
   expect(moreFiles).toBe(0)
   view.mockInput.pressKey("2")
   await view.flush()
@@ -121,12 +121,12 @@ test("commit tabs retain detail state and Escape restores the list after resizin
   expect(view.captureCharFrame()).toBe(listFrame)
 })
 
-test("overview and commit shortcuts open GitHub and copy the active URL or SHA", async () => {
+test("overview, commit, and PR shortcuts open GitHub and copy the active URL or SHA", async () => {
   const sha = commitDetailFixture.sha
   const [detail, setDetail] = createSignal<CommitDetailState>()
   let loads = 0
   let more = 0
-  let browserSha: string | undefined = ""
+  let browserSha: string | number | undefined = ""
   let browserFails = false
   let copiedSha = ""
   let nativeClipboard = true
@@ -148,7 +148,6 @@ test("overview and commit shortcuts open GitHub and copy the active URL or SHA",
       onLoadMoreCommitFiles={async () => { more++ }}
       onOpenInBrowser={async (value) => {
         if (browserFails) throw new Error("Browser unavailable")
-        if (typeof value === "number") throw new Error("Unexpected issue browser action")
         browserSha = value
       }}
       onCloseCommit={() => setDetail(undefined)}
@@ -209,8 +208,8 @@ test("overview and commit shortcuts open GitHub and copy the active URL or SHA",
   view.mockInput.pressKey("o")
   view.mockInput.pressKey("y")
   await view.flush()
-  expect(browserSha).toBe("")
-  expect(copiedSha).toBe("")
+  expect<string | number | undefined>(browserSha).toBe(421)
+  expect(copiedSha).toBe(`${githubDataFixture.repo.url}/pull/421`)
   view.mockInput.pressKey("2")
   view.mockInput.pressKey("g")
   view.mockInput.pressEnter()

@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import { createGitHubClient } from "../src/github/client"
+import { currentPullReviews } from "../src/ui/pull-reviews"
 import type { GitHubTransport } from "../src/github/transport"
 
 type Responses = Record<string, unknown>
@@ -19,6 +20,28 @@ function transport(responses: Responses = {}, textResponse: string | Error = "RE
 }
 
 describe("GitHub client", () => {
+  test("loads PR commits in API order across pages without exceeding GitHub's 250-commit limit", async () => {
+    const paths: string[] = []
+    const client = createGitHubClient({
+      async json<T>(path: string) {
+        paths.push(path)
+        const page = Number(new URL(`https://api.github.com/${path}`).searchParams.get("page"))
+        if (page > 3) throw new Error("Unexpected commit page")
+        return Array.from({ length: page === 3 ? 50 : 100 }, (_, index) => {
+          const number = (page - 1) * 100 + index
+          return { sha: number.toString(16).padStart(40, "0"), author: number === 0 ? null : { login: "octocat" },
+            commit: { message: `Commit ${number}\n\nFull body`, author: { name: "Local Author", date: "2026-01-01T00:00:00Z" } } }
+        }) as T
+      },
+      async text() { return "" },
+    })
+    const commits = await client.pullCommits("owner/repo", 42)
+    expect(paths).toEqual([1, 2, 3].map((page) => `repos/owner/repo/pulls/42/commits?per_page=100&page=${page}`))
+    expect(commits).toHaveLength(250)
+    expect(commits[0]).toMatchObject({ sha: "0".repeat(40), message: "Commit 0", author: "Local Author" })
+    expect(commits.at(-1)?.message).toBe("Commit 249")
+  })
+
   test("maps repository metadata", async () => {
     const client = createGitHubClient(transport({
       "repos/owner/repo": {
@@ -42,19 +65,105 @@ describe("GitHub client", () => {
     expect(repo.language).toBe("Unknown")
   })
 
-  test("preserves complete commit SHAs", async () => {
+  test("preserves complete commit SHAs and distinguishes authored and committed dates", async () => {
     const sha = "a".repeat(40)
     const path = "repos/owner/repo/commits?per_page=30&page=1&sha=main"
     const client = createGitHubClient(transport({
       [path]: [{
         sha,
         author: { login: "octocat" },
-        commit: { message: "title\n\nbody", author: { name: "Octo Cat", date: "2026-01-01T00:00:00Z" } },
+        commit: { message: "title\n\nbody", author: { name: "Octo Cat", date: "2026-01-01T00:00:00Z" }, committer: { name: "Octo Cat", date: "2026-01-02T00:00:00Z" } },
       }],
     }))
     const result = await client.commits("owner/repo", "main")
     expect(result.items[0]?.sha).toBe(sha)
     expect(result.items[0]?.message).toBe("title")
+    expect(result.items[0]?.date).toBe("2026-01-01T00:00:00Z")
+    expect(result.items[0]?.committedAt).toBe("2026-01-02T00:00:00Z")
+  })
+
+  test("loads exact branch commit totals beyond page size using qualified heads, not colliding tags", async () => {
+    const calls: { query: string; variables: Record<string, string> }[] = []
+    const totals: Record<string, number> = { "refs/heads/main": 2345, "refs/heads/feature/detail": 1234, "refs/heads/v1.0": 456, "refs/heads/refs/heads/topic": 789 }
+    const client = createGitHubClient({
+      ...transport(),
+      async json<T>(): Promise<T> { throw new Error("REST must not be used for commit counts") },
+      async graphql<T>(query: string, variables: Record<string, string>) {
+        calls.push({ query, variables })
+        // A tag named v1.0 would resolve differently if the branch were not qualified.
+        const totalCount = totals[variables.ref!] ?? 1
+        return { data: { repository: { ref: { target: { __typename: "Commit", history: { totalCount } } } } } } as T
+      },
+    })
+    for (const branch of ["main", "feature/detail", "v1.0", "refs/heads/topic"]) {
+      expect(await client.commitCount("owner/repo", branch)).toBe(totals[`refs/heads/${branch}`]!)
+    }
+    expect(calls).toHaveLength(4)
+    expect(calls.map(({ variables }) => variables)).toEqual([
+      { owner: "owner", name: "repo", ref: "refs/heads/main" },
+      { owner: "owner", name: "repo", ref: "refs/heads/feature/detail" },
+      { owner: "owner", name: "repo", ref: "refs/heads/v1.0" },
+      { owner: "owner", name: "repo", ref: "refs/heads/refs/heads/topic" },
+    ])
+    expect(calls[0]?.query).toContain("repository(owner: $owner, name: $name)")
+    expect(calls[0]?.query).toContain("ref(qualifiedName: $ref)")
+    expect(calls[0]?.query).toContain("... on Commit { history { totalCount } }")
+  })
+
+  test("accepts a verified zero commit total", async () => {
+    const client = createGitHubClient({ ...transport(), async graphql<T>() {
+      return { data: { repository: { ref: { target: { __typename: "Commit", history: { totalCount: 0 } } } } } } as T
+    } })
+    expect(await client.commitCount("owner/repo", "main")).toBe(0)
+  })
+
+  test("validates commit count inputs before querying and requires GraphQL", async () => {
+    let calls = 0
+    const client = createGitHubClient({ ...transport(), async graphql<T>(): Promise<T> {
+      calls++
+      throw new Error("Unexpected query")
+    } })
+    for (const repository of ["", "owner", "/repo", "owner/", "owner/repo/extra", "owner /repo", "owner/repo?x=1", "./repo", "owner/.."]) {
+      await expect(client.commitCount(repository, "main")).rejects.toThrow("Invalid repository")
+    }
+    for (const branch of ["", " \t\n"]) {
+      await expect(client.commitCount("owner/repo", branch)).rejects.toThrow("must not be blank")
+    }
+    expect(calls).toBe(0)
+    await expect(createGitHubClient(transport()).commitCount("owner/repo", "main"))
+      .rejects.toThrow("Commit count for owner/repo branch main could not be verified")
+  })
+
+  test("rejects missing or non-Commit targets and invalid commit counts without substituting zero", async () => {
+    let response: unknown
+    const client = createGitHubClient({ ...transport(), async graphql<T>() { return response as T } })
+    for (const value of [undefined, null, {}, { data: null }, { data: {} }, { data: { repository: null } },
+      { data: { repository: {} } }, { data: { repository: { ref: null } } },
+      ...[undefined, null, {}, { __typename: "Tag" }, { __typename: "Tree", history: { totalCount: 1 } },
+        { history: { totalCount: 1 } }, { __typename: "Commit" }, { __typename: "Commit", history: null },
+        ...[undefined, null, -1, 1.5, "2", true, NaN, Infinity, Number.MAX_SAFE_INTEGER + 1].map((totalCount) =>
+          ({ __typename: "Commit", history: { totalCount } })),
+      ].map((target) => ({ data: { repository: { ref: { target } } } })),
+    ]) {
+      response = value
+      await expect(client.commitCount("owner/repo", "main")).rejects.toThrow("could not be verified")
+    }
+  })
+
+  test("rejects GraphQL commit count errors even with partial data and propagates transport failures", async () => {
+    const data = { repository: { ref: { target: { __typename: "Commit", history: { totalCount: 2 } } } } }
+    let response: unknown = { data, errors: [{ message: "Access denied" }, { message: "History unavailable" }] }
+    const client = createGitHubClient({ ...transport(), async graphql<T>() { return response as T } })
+    await expect(client.commitCount("owner/repo", "main")).rejects.toThrow("Access denied · History unavailable")
+    for (const errors of [[{}], [null], { message: "Malformed errors" }]) {
+      response = { data, errors }
+      await expect(client.commitCount("owner/repo", "main")).rejects.toThrow("could not be verified")
+    }
+    response = { data, errors: [] }
+    expect(await client.commitCount("owner/repo", "main")).toBe(2)
+    const error = new Error("GraphQL unavailable")
+    const failing = createGitHubClient({ ...transport(), async graphql<T>(): Promise<T> { throw error } })
+    await expect(failing.commitCount("owner/repo", "main")).rejects.toBe(error)
   })
 
   test("maps commit details and respects the file pagination cap", async () => {
@@ -102,6 +211,7 @@ describe("GitHub client", () => {
       fullMessage,
       author: "Local Author",
       date,
+      committedAt: date,
       committer: { name: "Local Committer", date },
       additions: 300,
       deletions: 200,
@@ -146,6 +256,77 @@ describe("GitHub client", () => {
     }))
     const result = await client.issues("owner/repo", "open")
     expect(result.items.map((issue) => issue.number)).toEqual([1])
+  })
+
+  test("loads separate open issue and PR totals beyond pagination in one GraphQL query", async () => {
+    const calls: { query: string; variables: Record<string, string> }[] = []
+    const client = createGitHubClient({
+      ...transport(),
+      async json<T>(): Promise<T> { throw new Error("REST must not be used for work counts") },
+      async graphql<T>(query: string, variables: Record<string, string>) {
+        calls.push({ query, variables })
+        return { data: { repository: { issues: { totalCount: 2345 }, pullRequests: { totalCount: 1234 } } } } as T
+      },
+    })
+    expect(await client.workCounts("owner/repo")).toEqual({ issues: 2345, pulls: 1234 })
+    expect(calls).toHaveLength(1)
+    expect(calls[0]?.variables).toEqual({ owner: "owner", name: "repo" })
+    expect(calls[0]?.query).toContain("repository(owner: $owner, name: $name)")
+    expect(calls[0]?.query).toContain("issues(states: OPEN) { totalCount }")
+    expect(calls[0]?.query).toContain("pullRequests(states: OPEN) { totalCount }")
+  })
+
+  test("accepts zero open work counts", async () => {
+    const client = createGitHubClient({ ...transport(), async graphql<T>() {
+      return { data: { repository: { issues: { totalCount: 0 }, pullRequests: { totalCount: 0 } } } } as T
+    } })
+    expect(await client.workCounts("owner/repo")).toEqual({ issues: 0, pulls: 0 })
+  })
+
+  test("rejects invalid repositories before requesting work counts and requires GraphQL", async () => {
+    let calls = 0
+    const client = createGitHubClient({ ...transport(), async graphql<T>(): Promise<T> {
+      calls++
+      throw new Error("Unexpected query")
+    } })
+    for (const repository of ["", "owner", "/repo", "owner/", "owner/repo/extra", "owner /repo", "owner/repo?x=1", "./repo", "owner/.."]) {
+      await expect(client.workCounts(repository)).rejects.toThrow("Invalid repository")
+    }
+    expect(calls).toBe(0)
+    await expect(createGitHubClient(transport()).workCounts("owner/repo"))
+      .rejects.toThrow("Open issue and pull request counts could not be verified")
+  })
+
+  test("rejects missing, null, and invalid work counts rather than substituting zero", async () => {
+    const valid = { totalCount: 1 }
+    let response: unknown
+    const client = createGitHubClient({ ...transport(), async graphql<T>() { return response as T } })
+    for (const value of [undefined, null, {}, { data: null }, { data: {} }, { data: { repository: null } }]) {
+      response = value
+      await expect(client.workCounts("owner/repo")).rejects.toThrow("could not be verified")
+    }
+    for (const field of ["issues", "pullRequests"]) {
+      for (const connection of [undefined, null, {}, ...[null, -1, 1.5, "2", true, NaN, Infinity, Number.MAX_SAFE_INTEGER + 1].map((totalCount) => ({ totalCount }))]) {
+        response = { data: { repository: { issues: valid, pullRequests: valid, [field]: connection } } }
+        await expect(client.workCounts("owner/repo")).rejects.toThrow("could not be verified")
+      }
+    }
+  })
+
+  test("rejects GraphQL work count errors even with partial data and propagates transport failures", async () => {
+    let response: unknown = {
+      data: { repository: { issues: { totalCount: 2 }, pullRequests: { totalCount: 3 } } },
+      errors: [{ message: "Access denied" }, { message: "Count unavailable" }],
+    }
+    const client = createGitHubClient({ ...transport(), async graphql<T>() { return response as T } })
+    await expect(client.workCounts("owner/repo")).rejects.toThrow("Access denied · Count unavailable")
+    for (const errors of [[{}], [null], { message: "Malformed errors" }]) {
+      response = { errors }
+      await expect(client.workCounts("owner/repo")).rejects.toThrow("could not be verified")
+    }
+    const error = new Error("GraphQL unavailable")
+    const failing = createGitHubClient({ ...transport(), async graphql<T>(): Promise<T> { throw error } })
+    await expect(failing.workCounts("owner/repo")).rejects.toBe(error)
   })
 
   test("verifies regular-issue availability with exact counts rather than PR-inclusive REST pages", async () => {
@@ -396,6 +577,158 @@ describe("GitHub client", () => {
 })
 
 describe("GitHub issue references", () => {
+  test("maps committed timeline entries using event or committer time, never old author dates", async () => {
+    const path = "repos/owner/repo/issues/42/timeline?per_page=100&page=1"
+    const first = { event: "committed", sha: "a".repeat(40), message: "First commit\n\nBody",
+      author: { name: "Original Author", date: "2010-01-01T00:00:00Z" },
+      committer: { name: "Rebaser", date: "2026-10-05T12:00:00Z" } }
+    const second = { ...first, sha: "b".repeat(40), created_at: "2026-10-05T13:00:00Z" }
+    const client = createGitHubClient(transport({ [path]: [first, second, first,
+      { ...first, sha: "c".repeat(40), committer: null }, { ...first, sha: "invalid" },
+    ] }))
+    const timeline = await client.issueTimeline("owner/repo", 42)
+    const commits = timeline.events.filter((event) => event.kind === "commit-added")
+    expect(commits).toHaveLength(2)
+    expect(commits[0]).toMatchObject({ sha: first.sha, message: "First commit", author: "Original Author", createdAt: first.committer.date, timelineIndex: 0 })
+    expect(commits[1]).toMatchObject({ sha: second.sha, createdAt: second.created_at, timelineIndex: 1 })
+    expect(commits[0]?.url).toBe(`https://github.com/owner/repo/commit/${first.sha}`)
+  })
+
+  test("maps submitted reviews, dismissals, draft changes, and repeated user/team review requests", async () => {
+    const path = "repos/owner/repo/issues/42/timeline?per_page=100&page=1"
+    const actor = { login: "maintainer" }
+    const review = (id: number, login: string, state: string, hour: number) => ({ id, event: "reviewed", user: { login }, state,
+      submitted_at: `2026-01-01T${hour}:00:00Z`, body: `**${state}**`, author_association: "MEMBER",
+      html_url: `https://github.com/owner/repo/pull/42#pullrequestreview-${id}`, commit_id: "a".repeat(40) })
+    const request = (id: number, event: string, hour: number, team = false) => ({ id, event, actor,
+      created_at: `2026-01-01T${hour}:00:00Z`, ...(team ? { requested_team: { name: "Maintainers", slug: "maintainers" } } : { requested_reviewer: { login: "bob" } }) })
+    const client = createGitHubClient(transport({ [path]: [
+      review(1, "alice", "APPROVED", 10), review(2, "bob", "changes_requested", 11), review(3, "bob", "COMMENTED", 15),
+      { ...review(4, "alice", "PENDING", 16), submitted_at: null },
+      { id: 20, event: "review_dismissed", actor, created_at: "2026-01-01T12:00:00Z",
+        dismissed_review: { review_id: "1", state: "approved", dismissal_message: "The patch changed." } },
+      { id: 21, event: "convert_to_draft", actor, created_at: "2026-01-01T12:30:00Z" },
+      { id: 22, event: "ready_for_review", actor, created_at: "2026-01-01T12:45:00Z" },
+      request(30, "review_requested", 10), request(31, "review_request_removed", 12), request(32, "review_requested", 14),
+      request(33, "review_requested", 10, true), request(34, "review_request_removed", 12, true), request(35, "review_requested", 14, true),
+    ] }))
+    const timeline = await client.issueTimeline("owner/repo", 42)
+    const reviews = timeline.events.filter((event) => event.kind === "review")
+    expect(reviews).toHaveLength(3)
+    expect(reviews[0]).toMatchObject({ actor: "alice", state: "dismissed", originalState: "approved", body: "**APPROVED**", createdAt: "2026-01-01T10:00:00Z" })
+    expect(timeline.events.find((event) => event.kind === "review-dismissed")).toMatchObject({ actor: "maintainer", reviewer: "alice", reviewId: 1, body: "The patch changed." })
+    expect(timeline.events.filter((event) => event.kind === "draft").map((event) => event.event)).toEqual(["convert_to_draft", "ready_for_review"])
+    const repeats = timeline.events.filter((event) => event.kind === "review-request" && event.event === "review_requested" && event.reRequested)
+    expect(repeats).toHaveLength(2)
+    expect(currentPullReviews(timeline.events).find((event) => event.actor === "bob")?.state).toBe("changes_requested")
+    expect(currentPullReviews(timeline.events).find((event) => event.actor === "alice")?.state).toBe("dismissed")
+  })
+
+  test("maps force pushes chronologically with exact commit pairs and retains events when details are unavailable", async () => {
+    const before = "a".repeat(40)
+    const after = "b".repeat(40)
+    const path = "repos/owner/repo/issues/42/timeline?per_page=100&page=1"
+    const firstPush = { id: 11, node_id: "F1", event: "head_ref_force_pushed", actor: { login: "alice" }, created_at: "2026-01-01T12:00:00Z" }
+    const stub = transport({ [path]: [
+      { id: 1, node_id: "C1", event: "closed", actor: { login: "bob" }, created_at: "2026-01-03T12:00:00Z" },
+      { ...firstPush, id: 12, node_id: "F2", actor: null, created_at: "2026-01-02T12:00:00Z" },
+      firstPush, firstPush,
+    ] })
+    let queries = 0
+    const client = createGitHubClient({ ...stub, async graphql<T>(query: string) {
+      queries++
+      expect(query).toContain("ClosedEvent")
+      expect(query).toContain("HeadRefForcePushedEvent")
+      return { data: { nodes: [
+        { id: "C1", closer: null },
+        { id: "F2", beforeCommit: { oid: before, url: `https://evil.invalid/commit/${before}` }, afterCommit: null },
+        { id: "F1", beforeCommit: { oid: before, url: `https://github.com/owner/repo/commit/${before}` },
+          afterCommit: { oid: after, url: `https://github.com/owner/repo/commit/${after}` } },
+      ] } } as T
+    } })
+    const timeline = await client.issueTimeline("owner/repo", 42)
+    expect(queries).toBe(1)
+    expect(timeline.events.map((event) => event.kind)).toEqual(["force-push", "force-push", "state"])
+    expect(timeline.events[0]).toMatchObject({ kind: "force-push", event: "head_ref_force_pushed", actor: "alice", createdAt: firstPush.created_at,
+      beforeCommit: { sha: before, url: `https://github.com/owner/repo/commit/${before}` },
+      afterCommit: { sha: after, url: `https://github.com/owner/repo/commit/${after}` } })
+    const pushes = timeline.events.filter((event) => event.kind === "force-push")
+    expect(pushes[1]).toMatchObject({ kind: "force-push", actor: "ghost" })
+    expect(pushes[1]?.beforeCommit).toBeUndefined()
+    expect(pushes[1]?.afterCommit).toBeUndefined()
+    const failing = createGitHubClient({ ...stub, async graphql<T>(): Promise<T> { throw new Error("GraphQL unavailable") } })
+    const fallback = await failing.issueTimeline("owner/repo", 42)
+    expect(fallback.events).toHaveLength(3)
+    expect(fallback.events[0]).toMatchObject({ kind: "force-push", actor: "alice", createdAt: firstPush.created_at })
+    expect(fallback.events.filter((event) => event.kind === "force-push")[0]?.beforeCommit).toBeUndefined()
+  })
+
+  test("attributes closures to exact GraphQL event nodes, never to a nearby PR reference", async () => {
+    const sha = "f".repeat(40)
+    const path = "repos/owner/repo/issues/42/timeline?per_page=100&page=1"
+    const stub = transport({ [path]: [
+      ...["C1", "C2", "C3", "C4"].map((node_id, index) => ({ id: index + 1, node_id, event: "closed",
+        actor: { login: "alice" }, created_at: `2026-01-0${index + 1}T12:00:00Z` })),
+      { event: "cross-referenced", actor: { login: "bob" }, created_at: "2026-01-02T12:00:00Z",
+        source: { issue: { number: 99, title: "A related PR, not the closer", state: "closed",
+          html_url: "https://github.com/owner/repo/pull/99", repository: { full_name: "owner/repo" },
+          pull_request: { merged_at: "2026-01-02T12:00:00Z" } } } },
+    ] })
+    let queries = 0
+    const client = createGitHubClient({ ...stub, async graphql<T>(query: string) {
+      queries++
+      expect(query).toContain("ClosedEvent")
+      for (const id of ["C1", "C2", "C3", "C4"]) expect(query).toContain(id)
+      return { data: { nodes: [
+        { id: "C2", closer: null },
+        { id: "C3", closer: { __typename: "Commit", oid: sha, messageHeadline: "Close with a commit",
+          url: `https://github.com/other/repo/commit/${sha}`, repository: { nameWithOwner: "other/repo" } } },
+        { id: "C1", closer: { __typename: "PullRequest", number: 4, title: "The actual fix",
+          url: "https://github.com/owner/repo/pull/4", repository: { nameWithOwner: "owner/repo" } } },
+        { id: "C4", closer: { __typename: "ProjectV2" } },
+      ] } } as T
+    } })
+    const timeline = await client.issueTimeline("owner/repo", 42)
+    const stateEvents = timeline.events.filter((event) => event.kind === "state")
+    expect(queries).toBe(1)
+    expect(stateEvents[0]?.closer).toEqual({ kind: "pull", number: 4, title: "The actual fix",
+      url: "https://github.com/owner/repo/pull/4", repository: "owner/repo" })
+    expect(stateEvents[1]?.closer).toBeUndefined()
+    expect(stateEvents[2]?.closer).toMatchObject({ kind: "commit", sha, repository: "other/repo" })
+    expect(stateEvents[3]?.closer).toBeUndefined()
+    expect(timeline.references[0]).toMatchObject({ kind: "pull", number: 99 })
+    const failing = createGitHubClient({ ...stub, async graphql<T>(): Promise<T> { throw new Error("GraphQL unavailable") } })
+    const fallback = await failing.issueTimeline("owner/repo", 42)
+    expect(fallback.events).toHaveLength(4)
+    expect(fallback.events.every((event) => event.kind !== "state" || event.closer === undefined)).toBe(true)
+    expect(fallback.references).toHaveLength(1)
+  })
+
+  test("retains closure actors and times, reopening history, and a single merged event across pages", async () => {
+    const path = "repos/owner/repo/issues/42/timeline?per_page=100&page="
+    const closed = { id: 1, event: "closed", actor: { login: "alice" }, created_at: "2026-01-01T12:00:00Z" }
+    const reopened = { id: 2, event: "reopened", actor: null, created_at: "2026-01-02T12:00:00Z" }
+    const merged = { id: 4, event: "merged", actor: { login: "bob" }, created_at: "2026-01-03T12:00:00+00:00" }
+    const calls: string[] = []
+    const stub = transport({
+      [`${path}1`]: [closed, reopened, ...Array.from({ length: 98 }, () => ({ event: "commented" }))],
+      [`${path}2`]: [closed, { ...closed, id: 3, created_at: "2026-01-03T12:00:00Z" }, merged,
+        { ...closed, id: 5, created_at: "invalid" }, { ...closed, id: 6, created_at: null }],
+    })
+    const client = createGitHubClient({ ...stub, async json<T>(endpoint: string) {
+      calls.push(endpoint)
+      return stub.json<T>(endpoint)
+    } })
+    const timeline = await client.issueTimeline("owner/repo", 42)
+    expect(timeline.references).toEqual([])
+    expect(timeline.events.filter((entry) => entry.kind === "state").map(({ event, actor, createdAt }) => ({ event, actor, createdAt }))).toEqual([
+      { event: "closed", actor: "alice", createdAt: closed.created_at },
+      { event: "reopened", actor: "ghost", createdAt: reopened.created_at },
+      { event: "merged", actor: "bob", createdAt: merged.created_at },
+    ])
+    expect(calls).toEqual([`${path}1`, `${path}2`])
+  })
+
   test("maps timeline mentions without comments or PR hydration", async () => {
     const createdAt = "2026-10-11T06:18:45Z"
     const source = {
