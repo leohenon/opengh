@@ -1,5 +1,5 @@
 import { TextAttributes } from "@opentui/core"
-import { createSignal } from "solid-js"
+import { createSignal, Show } from "solid-js"
 import { normalizeRepository } from "../../repository-name"
 import { StatusBar } from "../components/status-bar"
 import { SearchablePicker } from "../components/searchable-picker"
@@ -10,6 +10,7 @@ export function SwitchRepositoryScreen(props: {
   current?: string
   showScrollbar?: boolean
   showStatusBarHints: boolean
+  renderStatusBar?: boolean
   onOpen: (repository: string) => void
   onClose: () => void
 }) {
@@ -24,7 +25,6 @@ export function SwitchRepositoryScreen(props: {
   return (
     <>
       <SearchablePicker
-        hideCloseHint
         placement="center"
         width={80}
         height={7 + Math.max(1, Math.min(20, props.recent.length)) + (error() ? 1 : 0)}
@@ -55,9 +55,11 @@ export function SwitchRepositoryScreen(props: {
           )
         }}
       </SearchablePicker>
-      <box position="absolute" left={0} bottom={0} width="100%" height={1} zIndex={101}>
-        <StatusBar hint={props.showStatusBarHints ? "enter open · esc back" : undefined} />
-      </box>
+      <Show when={props.renderStatusBar !== false && props.showStatusBarHints}>
+        <box position="absolute" left={0} bottom={0} width="100%" height={1} zIndex={101}>
+          <StatusBar hint="↑/↓ select · enter open · esc close" />
+        </box>
+      </Show>
     </>
   )
 }

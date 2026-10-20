@@ -8,7 +8,6 @@ type Match = number | undefined
 
 export function SearchablePicker<T>(props: {
   title: string
-  hideCloseHint?: boolean
   placeholder: string
   items: readonly T[]
   itemKey: (item: T) => string | number
@@ -108,7 +107,7 @@ export function SearchablePicker<T>(props: {
         <box flexShrink={0} paddingLeft={4} paddingRight={4}>
           <box height={1} flexDirection="row" justifyContent="space-between">
             <text fg={colors.text} attributes={TextAttributes.BOLD}>{props.title}</text>
-            <text fg={colors.muted}>{props.hideCloseHint ? props.titleMeta : props.titleMeta ? `${props.titleMeta} · esc` : "esc"}</text>
+            <text fg={colors.muted}>{props.titleMeta}</text>
           </box>
           <box height={2} flexShrink={0} paddingTop={1}>
             <input

@@ -1,3 +1,4 @@
+import { useTerminalDimensions } from "@opentui/solid"
 import { Show } from "solid-js"
 import { useTheme } from "../theme"
 import { LoadingText } from "./loading-text"
@@ -25,6 +26,13 @@ const loadingMessages: Record<StatusKind, string> = {
 
 export function StatusBar(props: { kind?: StatusKind; detail?: string; hint?: string; zIndex?: number }) {
   const { colors } = useTheme()
+  const dimensions = useTerminalDimensions()
+  const hint = () => {
+    const parts = (props.hint ?? "").split(" · ")
+    // Drop lower-priority shortcuts rather than clipping or renaming their labels.
+    while (parts.length && Bun.stringWidth(parts.join(" · ")) > dimensions().width - 4) parts.pop()
+    return parts.join(" · ")
+  }
   const loadingMessage = () => {
     if (!props.kind) return undefined
     if (props.kind === "loading-resource" && props.detail) return `Loading ${props.detail}…`
@@ -32,17 +40,19 @@ export function StatusBar(props: { kind?: StatusKind; detail?: string; hint?: st
   }
 
   return (
-    <box
-      height={1}
-      flexShrink={0}
-      zIndex={props.zIndex ?? 0}
-      paddingLeft={2}
-      paddingRight={2}
-      backgroundColor={colors.canvas}
-    >
-      <Show when={loadingMessage()} fallback={<text height={1} wrapMode="none" fg={colors.muted}>{props.hint ?? ""}</text>}>
-        {(message) => <LoadingText text={message()} />}
-      </Show>
-    </box>
+    <Show when={loadingMessage() || props.hint}>
+      <box
+        height={1}
+        flexShrink={0}
+        zIndex={props.zIndex ?? 0}
+        paddingLeft={2}
+        paddingRight={2}
+        backgroundColor={colors.canvas}
+      >
+        <Show when={loadingMessage()} fallback={<text height={1} wrapMode="none" fg={colors.muted}>{hint()}</text>}>
+          {(message) => <LoadingText text={message()} />}
+        </Show>
+      </box>
+    </Show>
   )
 }

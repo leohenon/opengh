@@ -70,6 +70,7 @@ export function IssueActionDialog(props: {
   onSubmit(): void
   onDiscard(): void
   onHintChange(hint: string | undefined): void
+  onConfirmationChange?: (confirming: boolean) => void
   onClose(): void
 }) {
   const { colors, theme } = useTheme()
@@ -112,11 +113,12 @@ export function IssueActionDialog(props: {
   }
 
   createEffect(() => props.onHintChange(confirmSubmit() ? "enter confirm · esc back"
-    : retry() ? "ctrl+d discard · esc back"
+    : retry() ? "ctrl+s retry · ctrl+d discard · esc back"
     : props.kind === "duplicate" ? "enter review · esc back"
     : (props.kind === "close" ? "tab change reason" : "tab preview")
-      + " · ctrl+d discard · esc keep draft"))
-  onCleanup(() => props.onHintChange(undefined))
+      + " · ctrl+s submit · ctrl+d discard · esc keep draft"))
+  createEffect(() => props.onConfirmationChange?.(confirmSubmit()))
+  onCleanup(() => { props.onHintChange(undefined); props.onConfirmationChange?.(false) })
 
   // Echoed typing must not replace the buffer (and reset its cursor/selection).
   createEffect(() => {
@@ -181,9 +183,6 @@ export function IssueActionDialog(props: {
         <box flexGrow={1} minHeight={0} paddingX={2} paddingBottom={1} flexDirection="column">
           <box height={1} flexShrink={0} flexDirection="row" justifyContent="space-between">
             <text fg={colors.text} attributes={TextAttributes.BOLD}>{title()}</text>
-            <Show when={!pending()}>
-              <text fg={colors.muted}>ctrl+s {retry() ? "retry" : "submit"}</text>
-            </Show>
           </box>
           <Show when={props.locked && props.kind !== "duplicate"}>
             <text flexShrink={0} fg={colors.yellow}>Locked thread — commenting depends on your GitHub permissions.</text>

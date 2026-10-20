@@ -110,6 +110,9 @@ export function App(props: AppProps) {
   const [commandAction, setCommandAction] = createSignal<CommandAction>()
   const [issueAction, setIssueAction] = createSignal<{ number: number; kind: IssueActionKind }>()
   const [issueActionHint, setIssueActionHint] = createSignal<string>()
+  const [commandHint, setCommandHint] = createSignal<string>()
+  const [confirmationPopup, setConfirmationPopup] = createSignal(false)
+  const [settingsHint, setSettingsHint] = createSignal<string>()
   const [revealActivity, setRevealActivity] = createSignal<{ number: number; id: number }>()
   const emptyIssueAction: IssueActionState = { body: "", reason: "completed", operation: { status: "idle" } }
   let revealId = 0
@@ -558,23 +561,29 @@ export function App(props: AppProps) {
   const shortcutHint = () => {
     if (!config().showStatusBarHints) return undefined
     if (overlay() === "issue-action") return issueActionHint()
-    if (overlay() === "issue-actions") return "↑/↓ select · enter open · esc cancel"
+    if (overlay() === "issue-actions") return "↑/↓ select · enter open · esc close"
+    if (overlay() === "help") return "esc close"
+    if (overlay() === "settings") return settingsHint()
+    if (overlay() === "command") return commandHint()
+    if (overlay() === "branch-picker") return "↑/↓ select · enter open · esc close"
+    if (overlay() === "issue-references") return "↑/↓ select · enter open · tab switch tabs · y copy URL · esc close"
+    if (overlay() === "switch-repo") return "↑/↓ select · enter open · esc close"
     const common = (props.onSwitchRepository ? " · s switch repo" : "") + " · ? help"
     if (diffTarget()) {
       const files = diffFocus()[page()] === "files"
-      const horizontal = files ? "h/l ←/→ tabs" : "h/l ←/→ pan"
+      const horizontal = files ? "←/→ tabs" : "←/→ pan"
       const next = files ? "diff" : "files"
-      if (dimensions().width < 80) return `esc back · ${horizontal} · tab ${next} · ? help`
-      return `esc back · ${horizontal} · j/k ${files ? "files" : "scroll"} · tab ${next} · b files · [ ] hunks`
+      if (dimensions().width < 80) return `esc back · ${horizontal} · tab focus ${next} · ? help`
+      return `esc back · ${horizontal} · ↑/↓ ${files ? "files" : "scroll"} · tab focus ${next} · b toggle files · [ ] hunks`
         + (diffResource().status === "error" ? " · enter file list" : " · t layout · w wrap") + " · ? help"
     }
     if (activeCommitSha()) {
       const retry = commitResource().status === "error"
       const more = commitResource().value?.files.hasMore
       if (dimensions().width < 60 && (retry || more)) return "esc back · D diff"
-        + (retry ? " · r retry" : " · enter more") + common
-      return "esc back · D diff · o GitHub · y SHA"
-        + (retry ? " · r retry" : more ? " · enter more files" : "")
+        + (retry ? " · r retry" : " · enter load more") + common
+      return "esc back · D diff · o GitHub · y copy SHA"
+        + (retry ? " · r retry" : more ? " · enter load more" : "")
         + common
     }
     if (activeIssueNumber()) {
@@ -584,12 +593,12 @@ export function App(props: AppProps) {
       const actions = (canActOnIssue("comment") ? " · c comment" : "") + (hasIssueActions() ? " · a actions" : "")
       const hintWidth = dimensions().width - actions.length
       if (dimensions().width < 64) return "esc back" + actions
-        + (!actions ? retry ? " · r retry" : more ? " · enter more" : references ? " · p references" : " · o GitHub" : "")
+        + (!actions ? retry ? " · r retry" : more ? " · enter load more" : references ? " · p references" : " · o GitHub" : "")
         + common
       return "esc back" + actions
-        + (retry ? ` · r retry ${statusDetail()}` : more ? " · enter more comments" : "")
+        + (retry ? " · r retry" : more ? " · enter load more" : "")
         + (references && hintWidth >= 64 ? " · p references" : "")
-        + (hintWidth >= 100 || !retry && !more && hintWidth >= 64 ? " · o GitHub · y URL" : "")
+        + (hintWidth >= 100 || !retry && !more && hintWidth >= 64 ? " · o GitHub · y copy URL" : "")
         + common
     }
     if (activePullNumber()) {
@@ -597,22 +606,22 @@ export function App(props: AppProps) {
       const more = pullDetail().comments.value?.hasMore
       const references = pullMenuItems().length
       if (dimensions().width < 64) return "esc back · D diff"
-        + (retry ? " · r retry" : more ? " · enter more" : references ? " · p references" : " · o GitHub") + common
+        + (retry ? " · r retry" : more ? " · enter load more" : references ? " · p references" : " · o GitHub") + common
       return "esc back · D diff"
-        + (retry ? ` · r retry ${statusDetail()}` : more ? " · enter more comments" : "")
+        + (retry ? " · r retry" : more ? " · enter load more" : "")
         + (references ? " · p references" : "")
-        + (dimensions().width >= 100 || !retry && !more ? " · o GitHub · y URL" : "") + common
+        + (dimensions().width >= 100 || !retry && !more ? " · o GitHub · y copy URL" : "") + common
     }
-    if (page() === "pulls") return (dimensions().width >= 45 ? "enter open" : "enter") + " · D diff · o GitHub · y URL"
+    if (page() === "pulls") return "↑/↓ select · enter open · D diff · o GitHub · y copy URL"
       + (dimensions().width >= 60 ? " · tab open/closed" : "") + common
-    if (page() === "issues") return (dimensions().width >= 45 ? "enter open" : "enter") + " · o GitHub · y URL"
+    if (page() === "issues") return "↑/↓ select · enter open · o GitHub · y copy URL"
       + (dimensions().width >= 60 ? " · tab open/closed" : "") + common
-    if (page() === "commits") return (dimensions().width >= 45 ? "enter open" : "enter") + " · D diff · o GitHub · y SHA"
+    if (page() === "commits") return "↑/↓ select · enter open · D diff · o GitHub · y copy SHA"
       + (dimensions().width >= 60 ? " · tab branch" : "")
       + common
-    if (page() === "overview") return "o GitHub · y URL" + (canClone() ? " · x clone" : "")
+    if (page() === "overview") return "o GitHub · y copy URL" + (canClone() ? " · x clone" : "")
       + common
-    return props.onSwitchRepository ? "s switch repo · ? help" : undefined
+    return props.onSwitchRepository ? "s switch repo · ? help" : "? help"
   }
 
   // Global handlers run before focused inputs; overlay checks must precede page shortcuts.
@@ -901,8 +910,10 @@ export function App(props: AppProps) {
           </box>}
         </Show>}
       </For>
-      <StatusBar kind={status()} detail={statusDetail()} hint={shortcutHint()}
-        zIndex={overlay() === "issue-action" || overlay() === "issue-actions" ? 350 : 0} />
+      <Show when={!confirmationPopup()}>
+        <StatusBar kind={status()} detail={statusDetail()} hint={shortcutHint()}
+          zIndex={overlay() && (config().showStatusBarHints || status()) ? 350 : 0} />
+      </Show>
       <Show when={toast()} keyed>
         {(current) => (
           <Toast
@@ -916,6 +927,7 @@ export function App(props: AppProps) {
       </Show>
       <Show when={overlay() === "switch-repo"}>
         <SwitchRepositoryScreen
+          renderStatusBar={false}
           recent={props.recentRepositories ?? []}
           showStatusBarHints={config().showStatusBarHints}
           current={data().repo.nameWithOwner}
@@ -930,6 +942,8 @@ export function App(props: AppProps) {
       <Show when={overlay() === "command" && commandAction()} keyed>
         {(action) => <CommandDialog
           action={action}
+          onHintChange={setCommandHint}
+          onConfirmationChange={setConfirmationPopup}
           onRun={props.onRunCommand!}
           onCaptureCancel={props.onCommandCaptureCancel}
           onCopy={props.onCopyToClipboard}
@@ -973,6 +987,7 @@ export function App(props: AppProps) {
           onSubmit={() => void submitIssueAction()}
           onDiscard={() => props.onDiscardIssueDraft?.(action.number)}
           onHintChange={setIssueActionHint}
+          onConfirmationChange={setConfirmationPopup}
           onClose={() => { setOverlay(); setIssueAction() }}
         />}
       </Show>
@@ -987,6 +1002,7 @@ export function App(props: AppProps) {
       </Show>
       <Show when={overlay() === "settings"}>
         <Settings
+          onHintChange={setSettingsHint}
           config={config()}
           saving={props.configSaving}
           loadError={props.configError}

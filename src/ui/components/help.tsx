@@ -149,7 +149,6 @@ export function Help(props: {
           <text fg={colors.text} attributes={TextAttributes.BOLD}>
             Help
           </text>
-          <text fg={colors.muted}>esc</text>
         </box>
 
         <box height={1} flexShrink={0} />

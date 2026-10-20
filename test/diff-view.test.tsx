@@ -136,7 +136,7 @@ test("numbered tabs retain independent diff viewers, geometry and scroll until E
     setup.mockInput.pressKey("2")
     setup.mockInput.pressKey("D")
     await settle()
-    expect(setup.captureCharFrame()).toContain("h/l ←/→ tabs")
+    expect(setup.captureCharFrame()).toContain("←/→ tabs")
     setup.mockInput.pressArrow("right")
     await settle()
     expect(setup.captureCharFrame()).toContain("Open (4)")
@@ -150,7 +150,7 @@ test("numbered tabs retain independent diff viewers, geometry and scroll until E
     setup.mockInput.pressArrow("right")
     await settle()
     expect(setup.captureCharFrame()).toContain("Files (2)")
-    expect(setup.captureCharFrame()).toContain("h/l ←/→ tabs")
+    expect(setup.captureCharFrame()).toContain("←/→ tabs")
     setup.mockInput.pressKey("j") // Select the second changed file.
     setup.mockInput.pressEnter()
     setup.mockInput.pressKey("t") // Unified, rather than the wide-screen default.
@@ -256,11 +256,11 @@ test("D embeds diffs from commit and PR lists/details without losing their origi
     expect(requested.at(-1)).toEqual({ kind: "commit", sha: secondCommit.sha })
     expect(setup.captureCharFrame()).toContain("newValue")
     expect(setup.captureCharFrame()).toContain("example.ts")
-    expect(setup.captureCharFrame()).toContain("h/l ←/→ tabs")
+    expect(setup.captureCharFrame()).toContain("←/→ tabs")
     input.pressTab() // Focus code while keeping the sidebar open.
     await settle()
     expect(setup.captureCharFrame()).toContain("Files (1)")
-    expect(setup.captureCharFrame()).toContain("h/l ←/→ pan")
+    expect(setup.captureCharFrame()).toContain("←/→ pan")
     const unpanned = setup.captureCharFrame()
     input.pressArrow("right")
     await settle()

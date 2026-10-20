@@ -29,7 +29,7 @@ test("issue action overlays isolate input and confirm comments, closing, reopeni
     showStatusBarHints: false,
     showScrollbars: false,
   });
-  const hint = "tab preview · ctrl+d discard · esc keep draft";
+  const hint = "tab preview · ctrl+s submit · ctrl+d discard · esc keep draft";
   const [detail, setDetail] = createSignal<IssueDetailState>({
     number,
     resource: { status: "ready", value: issueDetailFixture },
@@ -161,12 +161,12 @@ test("issue action overlays isolate input and confirm comments, closing, reopeni
     expect(
       lines[tabRow - 1]!.slice(tabColumn).trimStart().startsWith(`#${number}`),
     ).toBe(true);
-    expect(lines[tabRow - 1]).toContain("ctrl+s submit");
-    expect(statusLine()).toBe("");
+    expect(view.captureCharFrame()).not.toContain("ctrl+s submit");
+    expect(view.captureCharFrame()).not.toContain(hint);
     setConfig((current) => ({ ...current, showStatusBarHints: true }));
     await settle();
     expect(statusLine()).toBe(hint);
-    expect(statusLine()).not.toContain("ctrl+s");
+    expect(statusLine()).toContain("ctrl+s submit");
     expect(view.captureCharFrame()).not.toContain("ctrl+enter");
     expect(view.captureCharFrame().split(hint)).toHaveLength(2);
     expect(submitted).toEqual([]);
@@ -211,11 +211,12 @@ test("issue action overlays isolate input and confirm comments, closing, reopeni
     await settle();
     expect(submitted).toEqual([]);
     expect(view.captureCharFrame()).toContain(`Post comment to #${number}?`);
-    expect(statusLine()).toBe("enter confirm · esc back");
+    expect(statusLine()).not.toContain("enter confirm");
+    expect(view.captureCharFrame().split("enter confirm · esc back")).toHaveLength(2);
     setConfig((current) => ({ ...current, showStatusBarHints: false }));
     await settle();
-    expect(statusLine()).toBe("");
     expect(view.captureCharFrame()).toContain("enter confirm · esc back");
+    expect(statusLine()).not.toContain("enter confirm");
     view.mockInput.pressEscape();
     await settle();
     expect(view.captureCharFrame()).not.toContain(
@@ -255,7 +256,7 @@ test("issue action overlays isolate input and confirm comments, closing, reopeni
     view.mockInput.pressKey("a");
     await settle();
     expect(view.captureCharFrame()).toContain("Close issue");
-    expect(statusLine()).toBe("↑/↓ select · enter open · esc cancel");
+    expect(statusLine()).toBe("↑/↓ select · enter open · esc close");
     expect(view.captureCharFrame()).toContain("Mark as duplicate");
     expect(view.captureCharFrame()).not.toContain("Add comment");
     expect(view.captureCharFrame()).not.toContain("Open on GitHub");

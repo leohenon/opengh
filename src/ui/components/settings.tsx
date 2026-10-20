@@ -1,6 +1,6 @@
 import { TextAttributes } from "@opentui/core"
 import { useKeyboard, useTerminalDimensions } from "@opentui/solid"
-import { createSignal, Show } from "solid-js"
+import { createEffect, createSignal, onCleanup, Show } from "solid-js"
 import type { Config } from "../../config"
 import { useTheme } from "../theme"
 import { Popup } from "./popup"
@@ -16,6 +16,7 @@ export function Settings(props: {
   saving?: boolean
   loadError?: string
   onChange: (config: Config) => Promise<void>
+  onHintChange?: (hint: string | undefined) => void
   onClose: () => void
 }) {
   const dimensions = useTerminalDimensions()
@@ -29,6 +30,10 @@ export function Settings(props: {
   const rowHeight = () => dimensions().height < 29 ? 2 : 3
   const popupHeight = () => settingOrder.length * rowHeight() + 11
   const split = () => dimensions().width >= 110
+  createEffect(() => props.onHintChange?.(screen() === "themes"
+    ? "↑/↓ select · enter confirm · esc back"
+    : "↑/↓ select · ←/→ change · enter " + (selected() === "theme" ? "open" : "change") + " · esc close"))
+  onCleanup(() => props.onHintChange?.(undefined))
   const scrollbarValue = () => props.config.showScrollbars ? "on" : "off"
 
   const moveSetting = (delta: number) => {
@@ -218,7 +223,7 @@ export function Settings(props: {
           >
             <box height={1} flexShrink={0} flexDirection="row" justifyContent="space-between">
               <text fg={colors.text} attributes={TextAttributes.BOLD}>Settings</text>
-              <Show when={!split()}><text fg={colors.muted}>{busy() ? "Saving…" : "esc"}</text></Show>
+              <Show when={busy()}><text fg={colors.muted}>Saving…</text></Show>
             </box>
             <box height={1} flexShrink={0} />
             <text fg={colors.muted}>Appearance</text>
@@ -251,7 +256,7 @@ export function Settings(props: {
             >
               <box height={1} flexShrink={0} flexDirection="row" justifyContent="space-between">
                 <text fg={colors.blue} attributes={TextAttributes.BOLD}>{detail().title}</text>
-                <text fg={colors.muted}>{busy() ? "Saving…" : "esc"}</text>
+                <Show when={busy()}><text fg={colors.muted}>Saving…</text></Show>
               </box>
               <box height={1} flexShrink={0} />
               <text fg={colors.text} wrapMode="word">{detail().description}</text>

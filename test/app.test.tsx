@@ -174,14 +174,22 @@ describe("opengh TUI", () => {
     expect(statusLine()).toBe("");
     setConfig({ ...defaultConfig, showStatusBarHints: true, hideDocumentsTab: false, compactHeader: false, iconStyle: "unicode" });
     await view.flush();
-    expect(statusLine()).toBe("o GitHub · y URL · ? help");
+    expect(statusLine()).toBe("o GitHub · y copy URL · ? help");
 
+    view.mockInput.pressKey("?");
+    await view.flush();
+    expect(statusLine()).toBe("esc close");
+    view.mockInput.pressEscape();
+    await Bun.sleep(30);
     view.mockInput.pressKey(",");
+    await view.flush();
+    expect(statusLine()).toBe("↑/↓ select · ←/→ change · enter open · esc close");
     for (let i = 0; i < 4; i++) view.mockInput.pressKey("j");
     view.mockInput.pressEnter();
     await view.flush();
     expect(view.captureCharFrame()).toContain("Status bar hints");
     expect(config().showStatusBarHints).toBe(false);
+    expect(statusLine()).toBe("");
     view.mockInput.pressEscape();
     await Bun.sleep(30);
     for (const key of ["1", "2", "3", "4", "5"]) {
@@ -204,7 +212,7 @@ describe("opengh TUI", () => {
     setOperations(repositoryOperationsFixture);
     setConfig({ ...defaultConfig, showStatusBarHints: true, hideDocumentsTab: false, compactHeader: false, iconStyle: "unicode" });
     await view.flush();
-    expect(statusLine()).toBe("esc back · D diff · o GitHub · y SHA · ? help");
+    expect(statusLine()).toBe("esc back · D diff · o GitHub · y copy SHA · ? help");
   });
 
   test("renders repository metadata while the README loads", async () => {

@@ -1,6 +1,6 @@
 import type { ScrollBoxRenderable } from "@opentui/core"
 import { useKeyboard, useRenderer } from "@opentui/solid"
-import { createSignal, onCleanup, onMount, Show } from "solid-js"
+import { createEffect, createSignal, onCleanup, onMount, Show } from "solid-js"
 import { plainCommandOutput, type CommandSpec, type CommandTask } from "../../command-actions"
 import { Popup } from "./popup"
 import { useTheme } from "../theme"
@@ -12,6 +12,8 @@ export function CommandDialog(props: {
   onRun(spec: CommandSpec, output: (chunk: string) => void, signal: AbortSignal): Promise<CommandTask>
   onCopy?: (output: string) => Promise<boolean>
   onCaptureCancel?: (cancel: (() => void) | undefined) => void
+  onHintChange?: (hint: string | undefined) => void
+  onConfirmationChange?: (confirming: boolean) => void
   onClose(): void
 }) {
   const { colors } = useTheme()
@@ -27,6 +29,12 @@ export function CommandDialog(props: {
   let disposed = false
   let scroll: ScrollBoxRenderable | undefined
   const running = () => phase() === "Running" || phase() === "Cancelling"
+  const hint = () => phase() === "Preview"
+    ? (props.action.destination !== undefined && !editing() ? "e edit path · " : "") + "enter confirm · esc close"
+    : running() ? "↑/↓ scroll · y copy output · ctrl+c cancel" : "↑/↓ scroll · y copy output · esc close"
+  createEffect(() => props.onHintChange?.(hint()))
+  createEffect(() => props.onConfirmationChange?.(phase() === "Preview"))
+  onCleanup(() => { props.onHintChange?.(undefined); props.onConfirmationChange?.(false) })
   const preview = () => {
     try { return props.action.command(destination()) } catch { return undefined }
   }
@@ -105,7 +113,7 @@ export function CommandDialog(props: {
         </Show>
         <Show when={notice()}><text height={1} flexShrink={0} fg={colors.muted}>{notice()}</text></Show>
         <Show when={phase() === "Preview"}>
-          <text height={1} flexShrink={0} fg={colors.muted}>{props.action.destination !== undefined && !editing() ? "e edit path · enter confirm" : "enter confirm"}</text>
+          <text height={1} flexShrink={0} fg={colors.muted}>{hint()}</text>
         </Show>
       </box>
     </Popup>
