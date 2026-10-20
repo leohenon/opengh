@@ -11,7 +11,7 @@ test("the final timeline connector stops at the icon and extends again when anot
         <text flexShrink={0}>{"First\nSecond\nThird\nFourth\nFifth"}</text>
       </TimelineEntry>
     </TimelineItem>
-  ), { width: 30, height: 9, useThread: false })
+  ), { width: 30, height: 9 })
   const connector = (row: number) => view.captureCharFrame().split("\n")[row]![1]
   try {
     await view.flush()

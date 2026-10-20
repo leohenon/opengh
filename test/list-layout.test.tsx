@@ -20,7 +20,7 @@ test("list rows truncate the right edge and resize without horizontal overflow",
   data.runs.value!.items[0]!.name = metadata
   const view = await testRender(() => (
     <App data={data} operations={repositoryOperationsFixture} config={{ ...defaultConfig, showScrollbars: true }} />
-  ), { width: 100, height: 26, useThread: false })
+  ), { width: 100, height: 26 })
   try {
     await view.flush()
     for (const width of [100, 40, 26, 59, 60, 100]) {

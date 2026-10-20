@@ -20,7 +20,7 @@ export function ListLine(props: {
       flexShrink={0}
       overflow="hidden"
     >
-      <text width="100%" height={1} wrapMode="none" fg={props.fg} attributes={props.attributes}>
+      <text width="100%" height={1} wrapMode="none" truncate fg={props.fg} attributes={props.attributes}>
         {props.children(width())}
       </text>
     </box>

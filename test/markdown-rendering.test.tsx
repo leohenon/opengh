@@ -59,7 +59,7 @@ https://example.com/log
 
 End.`)
   const [theme, setTheme] = createSignal("github")
-  const view = await testRender(() => <ThemeProvider name={theme()}><MarkdownSample content={content()} /></ThemeProvider>, { width: 120, height: 60, useThread: false })
+  const view = await testRender(() => <ThemeProvider name={theme()}><MarkdownSample content={content()} /></ThemeProvider>, { width: 120, height: 60 })
   try {
     await settle(view)
     for (const width of [120, 40, 120]) {
@@ -181,7 +181,7 @@ test("references, image captions, nested fences, and plain-text documents keep t
   const view = await testRender(() => <ThemeProvider name="github"><MarkdownSample
     content={content()} plainText={plainText()}
     context={{ repositoryUrl: "https://github.com/qdrant/qdrant", ref: "dev", path: "README.md" }}
-  /></ThemeProvider>, { width: 120, height: 60, useThread: false })
+  /></ThemeProvider>, { width: 120, height: 60 })
   try {
     for (const width of [120, 40]) {
       view.resize(width, 60)

@@ -22,6 +22,7 @@ export function CommitsScreen(props: {
   onOpenCommit?: (commit: CommitSummary) => void
   onOpenCommitInBrowser?: (commit: CommitSummary) => void
   onCopyCommitSha?: (commit: CommitSummary) => void
+  onDiff?: (commit: CommitSummary) => void
 }) {
   const { colors } = useTheme()
   const icons = useIcons()
@@ -70,6 +71,7 @@ export function CommitsScreen(props: {
             onActivate={props.onOpenCommit}
             onOpenInBrowser={props.onOpenCommitInBrowser}
             onCopy={props.onCopyCommitSha}
+            onDiff={props.onDiff}
           >
             {(commit, active) => (
               <>

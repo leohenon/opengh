@@ -44,7 +44,7 @@ test("issue details retain scrolling and restore selection while hidden tabs sta
       onCopyToClipboard={async (value) => { copied = value; return true }}
       onLoadCommit={async () => { commitLoads++ }}
     />
-  ), { width: 120, height: 32, useThread: false })
+  ), { width: 120, height: 32 })
   active.push(view)
   await settle(view)
   view.mockInput.pressKey("3")
@@ -143,7 +143,7 @@ test("issue and comment failures retry separately, with honest empty states", as
         setDetail((current) => ({ ...current!, comments: { status: "ready", value: { items: [], page: 1, hasMore: false } } }))
       }}
     />
-  ), { width: 100, height: 32, useThread: false })
+  ), { width: 100, height: 32 })
   active.push(view)
   await settle(view)
   view.mockInput.pressKey("3")
@@ -193,7 +193,7 @@ test("zero-comment issues still show PR mentions and open the correct source rep
       onOpenInBrowser={async (target, repository) => { opened = { target, repository } }}
       onCopyToClipboard={async (value) => { copied = value; return true }}
     />
-  ), { width: 120, height: 36, useThread: false })
+  ), { width: 120, height: 36 })
   active.push(view)
   await settle(view)
   view.mockInput.pressKey("3")
@@ -279,7 +279,7 @@ test("issue and commit refreshes keep one indicator and ignore repeated refresh 
         setCommit({ sha, resource: { status: "ready", value: commitDetailFixture } })
       }}
     />
-  ), { width: 120, height: 40, useThread: false })
+  ), { width: 120, height: 40 })
   active.push(view)
   try {
     await settle(view)
@@ -352,7 +352,7 @@ test("mixed references render chronologically and the references menu includes i
       }}
       onOpenInBrowser={async (target, repository) => { opened = { target, repository } }}
     />
-  ), { width: 120, height: 40, useThread: false })
+  ), { width: 120, height: 40 })
   active.push(view)
   await settle(view)
   view.mockInput.pressKey("3")

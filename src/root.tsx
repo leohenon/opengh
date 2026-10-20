@@ -30,7 +30,7 @@ export type RootServices = {
   loadConfig(): Promise<Config>
   saveConfig(config: Config): Promise<void>
   createRepositorySession(): RepositorySession
-  openGitHub(repository: string, target?: string | number): Promise<void>
+  openGitHub(repository: string, target?: string | number, view?: "diff"): Promise<void>
   copyToHostClipboard(value: string): Promise<boolean>
   resolveLocalRepository: typeof resolveLocalRepository
   runCommand: typeof runCommand
@@ -197,6 +197,9 @@ export function Root(props: {
               onBranchChange={(branch) => void session.switchBranch(branch)}
               onLoadMoreBranches={session.loadMoreBranches}
               onLoadMoreCommits={session.loadMoreCommits}
+              diff={session.diff?.()}
+              onLoadDiff={session.loadDiff}
+              onCloseDiff={session.clearDiff}
               commitDetail={session.commitDetail()}
               onLoadCommit={session.loadCommit}
               onLoadMoreCommitFiles={session.loadMoreCommitFiles}
@@ -218,7 +221,7 @@ export function Root(props: {
               onRetryPullCommits={session.retryPullCommits}
               onRetryPullContext={session.retryPullContext}
               onClosePull={session.clearPull}
-              onOpenInBrowser={(target, repository) => services.openGitHub(repository ?? repositoryName, target)}
+              onOpenInBrowser={(target, repository, view) => services.openGitHub(repository ?? repositoryName, target, view)}
               onCopyToClipboard={services.copyToHostClipboard}
               onLoadMoreRuns={session.loadMoreRuns}
               onLoadMoreIssues={session.loadMoreIssues}

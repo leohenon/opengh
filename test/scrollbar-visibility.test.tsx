@@ -15,7 +15,7 @@ test("scrollbars follow overflow, resizing, and the global preference", async ()
         <text>{Array.from({ length: rows() }, (_, index) => `Row ${index}`).join("\n")}</text>
       </scrollbox>
     )
-  }, { width: 24, height: 8, useThread: false })
+  }, { width: 24, height: 8 })
   try {
     await view.flush()
     expect(scroll.verticalScrollBar.visible).toBe(false)

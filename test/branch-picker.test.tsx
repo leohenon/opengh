@@ -29,7 +29,7 @@ describe("BranchPicker", () => {
           onClose={() => {}}
         />
       ),
-      { width: 100, height: 28, useThread: false },
+      { width: 100, height: 28 },
     )
     active.push(view)
     await view.flush()
@@ -63,7 +63,7 @@ describe("BranchPicker", () => {
           onClose={() => {}}
         />
       ),
-      { width: 100, height: 28, useThread: false },
+      { width: 100, height: 28 },
     )
     active.push(view)
     await view.flush()
@@ -118,7 +118,7 @@ describe("BranchPicker", () => {
           onClose={() => {}}
         />
       ),
-      { width: 100, height: 28, useThread: false },
+      { width: 100, height: 28 },
     )
     active.push(view)
     await view.flush()
@@ -149,7 +149,7 @@ describe("BranchPicker", () => {
           onClose={() => {}}
         />
       ),
-      { width: 100, height: 28, useThread: false },
+      { width: 100, height: 28 },
     )
     active.push(view)
     await view.flush()
@@ -180,7 +180,7 @@ describe("BranchPicker", () => {
           onClose={() => {}}
         />
       ),
-      { width: 100, height: 28, useThread: false },
+      { width: 100, height: 28 },
     )
     active.push(view)
     await view.flush()

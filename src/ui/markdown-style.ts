@@ -1,9 +1,9 @@
-import { SyntaxStyle } from "@opentui/core"
+import { SyntaxStyle, type CliRenderer } from "@opentui/core"
 import { useRenderer } from "@opentui/solid"
 import { createMemo, onCleanup } from "solid-js"
 import type { AppColors, ResolvedTheme } from "../theme"
 
-function createMarkdownStyle(colors: AppColors, theme: ResolvedTheme) {
+function createMarkdownStyle(colors: AppColors, theme: ResolvedTheme, owner: CliRenderer["nativeScene"]) {
   return SyntaxStyle.fromStyles({
     default: { fg: theme.markdownText },
     conceal: { fg: colors.muted },
@@ -41,7 +41,7 @@ function createMarkdownStyle(colors: AppColors, theme: ResolvedTheme) {
     boolean: { fg: theme.syntaxNumber },
     operator: { fg: theme.syntaxOperator },
     punctuation: { fg: theme.syntaxPunctuation },
-  })
+  }, owner)
 }
 
 export function createReactiveMarkdownStyle(colors: AppColors, theme: ResolvedTheme) {
@@ -55,7 +55,7 @@ export function createReactiveMarkdownStyle(colors: AppColors, theme: ResolvedTh
   }
   const style = createMemo(() => {
     const previous = current
-    current = createMarkdownStyle(colors, theme)
+    current = createMarkdownStyle(colors, theme, renderer.nativeScene)
     if (previous) release(previous)
     return current
   })

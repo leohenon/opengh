@@ -27,7 +27,7 @@ test("command overlay isolates destination input and retains logs; Ctrl+C cancel
         return { cancel: () => { complete({ exitCode: 143, cancelled: true }) }, result: new Promise((done) => { complete = done }) }
       }}
     />
-  }, { width: 100, height: 32, useThread: false, exitOnCtrlC: false })
+  }, { width: 100, height: 32, exitOnCtrlC: false })
   try {
     await view.flush()
     view.mockInput.pressKey("x")

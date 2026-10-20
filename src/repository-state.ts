@@ -1,5 +1,7 @@
 import type {
   CommitDetail,
+  DiffContent,
+  DiffTarget,
   CommitSummary,
   IssueSummary,
   IssueDetail,
@@ -27,6 +29,11 @@ export type ResourceState<T> =
 
 export type RepositoryDocumentState = RepositoryDocument & {
   resource: ResourceState<string>
+}
+
+export type DiffState = {
+  target: DiffTarget
+  resource: ResourceState<DiffContent>
 }
 
 export type CommitDetailState = {

@@ -24,8 +24,11 @@ import {
   markGitHubIssueDuplicate,
 } from "./github/client"
 import { GitHubApiError } from "./github/transport"
+import { loadGitHubDiff } from "./github/diff"
 import type {
   CommitDetail,
+  DiffContent,
+  DiffTarget,
   CommitSummary,
   IssueSummary,
   IssueDetail,
@@ -46,6 +49,7 @@ import type {
 } from "./models"
 import type {
   CommitDetailState,
+  DiffState,
   IssueDetailState,
   IssueActionState,
   OperationState,
@@ -61,6 +65,7 @@ import type {
 type Page<T> = { items: T[]; hasMore: boolean }
 
 export type RepositoryLoaders = {
+  diff?(repository: string, target: DiffTarget, signal: AbortSignal, filesOnly?: boolean): Promise<DiffContent>
   metadata(repository: string): Promise<Repo>
   workCounts(repository: string): Promise<{ issues: number; pulls: number }>
   documents(repo: Repo, branch: string): Promise<RepositoryDocument[]>
@@ -87,6 +92,9 @@ export type RepositoryLoaders = {
 
 export type RepositorySession = {
   state: Accessor<RepositoryState>
+  diff?: Accessor<DiffState | undefined>
+  loadDiff?(target: DiffTarget, filesOnly?: boolean): Promise<void>
+  clearDiff?(): void
   commitDetail: Accessor<CommitDetailState | undefined>
   loadCommit(sha: string): Promise<void>
   loadMoreCommitFiles(): Promise<void>
@@ -121,6 +129,7 @@ export type RepositorySession = {
 }
 
 const defaultLoaders: RepositoryLoaders = {
+  diff: loadGitHubDiff,
   metadata: loadGitHubMetadata,
   workCounts: loadGitHubWorkCounts,
   documents: loadGitHubDocuments,
@@ -229,6 +238,33 @@ function updateReady(
 export function createRepositorySession(loaders: RepositoryLoaders = defaultLoaders): RepositorySession {
   const [state, setState] = createSignal<RepositoryState>({ status: "loading", repository: "" })
   const [commitDetail, setCommitDetail] = createSignal<CommitDetailState>()
+  const [diff, setDiff] = createSignal<DiffState>()
+  let diffGeneration = 0
+  let diffAbort: AbortController | undefined
+  const clearDiff = () => {
+    ++diffGeneration
+    diffAbort?.abort()
+    diffAbort = undefined
+    setDiff(undefined)
+  }
+  const loadDiff = async (target: DiffTarget, filesOnly = false) => {
+    const current = state()
+    if (current.status !== "ready") return
+    diffAbort?.abort()
+    const controller = new AbortController()
+    diffAbort = controller
+    const request = ++diffGeneration
+    setDiff({ target, resource: loadingResource<DiffContent>() })
+    try {
+      if (!loaders.diff) throw new Error("Diff loading is unavailable")
+      const value = await loaders.diff(current.repository, target, controller.signal, filesOnly)
+      if (request === diffGeneration && !controller.signal.aborted)
+        setDiff({ target, resource: { status: "ready", value } })
+    } catch (error) {
+      if (request === diffGeneration && !controller.signal.aborted)
+        setDiff({ target, resource: failedResource<DiffContent>(error) })
+    }
+  }
   const [issueDetail, setIssueDetail] = createSignal<IssueDetailState>()
   const [issueActions, setIssueActions] = createSignal<Record<string, IssueActionState>>({})
   const emptyIssueAction: IssueActionState = { body: "", reason: "completed", operation: idle() }
@@ -955,6 +991,7 @@ export function createRepositorySession(loaders: RepositoryLoaders = defaultLoad
   }
 
   const load = async (repository: string) => {
+    clearDiff()
     ++repositoryScope
     clearCommit()
     clearIssue()
@@ -1363,6 +1400,9 @@ export function createRepositorySession(loaders: RepositoryLoaders = defaultLoad
 
   return {
     state,
+    diff,
+    loadDiff,
+    clearDiff,
     commitDetail,
     loadCommit,
     loadMoreCommitFiles,

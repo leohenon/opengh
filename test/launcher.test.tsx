@@ -16,7 +16,6 @@ describe("repository launcher", () => {
     const view = await testRender(() => <LoadingRepository repository="cli/cli" />, {
       width: 80,
       height: 24,
-      useThread: false,
     })
     active.push(view)
     await view.flush()
@@ -41,7 +40,7 @@ describe("repository launcher", () => {
           onQuit={() => quits++}
         />
       ),
-      { width: 80, height: 24, useThread: false },
+      { width: 80, height: 24 },
     )
     active.push(view)
     await view.flush()
@@ -63,7 +62,7 @@ describe("repository launcher", () => {
     let opened = ""
     const view = await testRender(
       () => <RepositoryPicker recent={[]} onOpen={(repository) => opened = repository} />,
-      { width: 80, height: 24, useThread: false },
+      { width: 80, height: 24 },
     )
     active.push(view)
     await view.flush()
@@ -82,7 +81,7 @@ describe("repository launcher", () => {
     const recent = Array.from({ length: 30 }, (_, index) => `owner/repository-${index + 1}`)
     const view = await testRender(
       () => <RepositoryPicker recent={recent} onOpen={(repository) => opened = repository} />,
-      { width: 100, height: 40, useThread: false },
+      { width: 100, height: 40 },
     )
     active.push(view)
     await view.flush()
@@ -99,7 +98,7 @@ describe("repository launcher", () => {
     let opened = ""
     const view = await testRender(
       () => <RepositoryPicker recent={["anomalyco/opentui", "cli/cli"]} onOpen={(repository) => opened = repository} />,
-      { width: 80, height: 24, useThread: false },
+      { width: 80, height: 24 },
     )
     active.push(view)
     await view.flush()
@@ -114,7 +113,7 @@ describe("repository launcher", () => {
     let opened = ""
     const view = await testRender(
       () => <RepositoryPicker recent={["anomalyco/opentui"]} onOpen={(repository) => opened = repository} />,
-      { width: 80, height: 24, useThread: false },
+      { width: 80, height: 24 },
     )
     active.push(view)
     await view.flush()
@@ -127,7 +126,7 @@ describe("repository launcher", () => {
   test("shows validation errors directly beneath the input", async () => {
     const view = await testRender(
       () => <RepositoryPicker recent={[]} onOpen={() => {}} />,
-      { width: 80, height: 24, useThread: false },
+      { width: 80, height: 24 },
     )
     active.push(view)
     await view.flush()

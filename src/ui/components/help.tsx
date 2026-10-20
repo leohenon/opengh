@@ -34,7 +34,7 @@ function Shortcut(props: { keys: string; keyWidth: number; children: JSX.Element
 }
 
 export function Help(props: {
-  view: Page | "commit" | "issue" | "pull";
+  view: Page | "commit" | "issue" | "pull" | "diff";
   tabCount: number;
   hasDocumentTabs?: boolean;
   hasMoreFiles?: boolean;
@@ -58,6 +58,7 @@ export function Help(props: {
         ];
       case "commits":
         return [
+          { keys: "D", description: "view diff" },
           { keys: "Enter", description: "open commit" },
           { keys: "Tab", description: "choose branch" },
           { keys: "o", description: "open on GitHub" },
@@ -65,6 +66,7 @@ export function Help(props: {
         ];
       case "commit":
         return [
+          { keys: "D", description: "view diff" },
           { keys: "Esc", description: "back to commits" },
           { keys: "o", description: "open on GitHub" },
           { keys: "y", description: "copy commit SHA" },
@@ -89,6 +91,7 @@ export function Help(props: {
         ];
       case "pulls":
         return [
+          { keys: "D", description: "view diff" },
           { keys: "Enter", description: "open pull request" },
           { keys: "Tab", description: "toggle open/closed" },
           { keys: "o", description: "open on GitHub" },
@@ -96,20 +99,34 @@ export function Help(props: {
         ];
       case "pull":
         return [
+          { keys: "D", description: "view diff" },
           { keys: "Esc", description: "back to pull requests" },
           { keys: "o", description: "open on GitHub" },
           { keys: "y", description: "copy pull request URL" },
           ...(props.hasReferences ? [{ keys: "p", description: "open references" }] : []),
           ...(props.hasMoreComments ? [{ keys: "Enter", description: "load more comments" }] : []),
         ];
+      case "diff":
       case "actions":
         return [];
     }
   });
   const shortcuts = createMemo(() => {
+    if (props.view === "diff") return [
+      { keys: "Esc", description: "back to previous view" },
+      { keys: "Tab", description: "focus files / diff" },
+      { keys: "b", description: "toggle file sidebar" },
+      { keys: "Enter", description: "focus diff / load file list on error" },
+      { keys: "[ and ]", description: "previous / next hunk" },
+      { keys: "h/l, ←/→", description: "scroll code horizontally" },
+      { keys: "t", description: "toggle split / unified" },
+      { keys: "w", description: "toggle line wrapping" },
+      { keys: "o", description: "open diff on GitHub" },
+      ...commonShortcuts,
+    ];
     const tabs = `1–${props.tabCount}, h/l, ←/→`;
     const entries = [...(props.command ? [{ keys: "x", description: props.command }] : []), ...viewShortcuts(), { keys: tabs, description: "switch tabs" }, ...commonShortcuts];
-    const order = ["Enter", "Tab", "Tab / ⇧Tab", "Esc", tabs, "j/k, ↑/↓", "u/d", "g/G", "c", "a", "o", "y", "x", "p", "r", "s", ",", "?", "q / C-c"];
+    const order = ["Enter", "Tab", "Tab / ⇧Tab", "Esc", tabs, "j/k, ↑/↓", "u/d", "g/G", "D", "c", "a", "o", "y", "x", "p", "r", "s", ",", "?", "q / C-c"];
     return order.flatMap((keys) => entries.filter((shortcut) => shortcut.keys === keys));
   });
   const height = () => shortcuts().length + 4;

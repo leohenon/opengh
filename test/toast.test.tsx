@@ -20,7 +20,7 @@ describe("Toast", () => {
           </Show>
         </box>
       ),
-      { width: 80, height: 24, useThread: false },
+      { width: 80, height: 24 },
     )
     active.push(view)
     await view.flush()

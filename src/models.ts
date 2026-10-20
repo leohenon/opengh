@@ -304,6 +304,14 @@ export type CommitDetail = CommitSummary & {
   filesTruncated: boolean
 }
 
+export type DiffTarget =
+  | { kind: "commit"; sha: string }
+  | { kind: "pull"; number: number }
+
+export type DiffContent =
+  | { kind: "patch"; patch: string }
+  | { kind: "files"; files: CommitFile[]; truncated: boolean }
+
 export type Paginated<T> = {
   items: T[]
   page: number

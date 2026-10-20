@@ -1,6 +1,7 @@
 import { createCliRenderer } from "@opentui/core"
 import { render } from "@opentui/solid"
 import { Root } from "./root"
+import { initializeHunk } from "./ui/hunk-host"
 import { stopGitHubProcesses } from "./github/process"
 import { stopClipboardProcesses } from "./clipboard"
 import { saveConfig } from "./config"
@@ -26,8 +27,9 @@ const renderer = await createCliRenderer({
   exitOnCtrlC: false,
   useMouse: false,
   onDestroy: () => {
-    // Unlike the destroy event, this runs after terminal restoration and native cleanup.
+    // Host cleanup can finish before native teardown and terminal output settle.
     void Promise.allSettled([
+      renderer.closed,
       stopGitHubProcesses(),
       stopClipboardProcesses(),
       ...pendingSaves,
@@ -36,6 +38,7 @@ const renderer = await createCliRenderer({
 })
 
 try {
+  initializeHunk(renderer)
   await render(() => (
     <Root
       repositoryArgument={repositoryArgument}

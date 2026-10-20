@@ -21,7 +21,7 @@ describe("ThemePicker", () => {
           onSelect={async (theme) => { selected = theme }}
         />
       ),
-      { width: 80, height: 45, useThread: false },
+      { width: 80, height: 45 },
     )
     active.push(view)
     await view.flush()
@@ -50,7 +50,7 @@ describe("ThemePicker", () => {
           onSelect={async () => { throw new Error("Theme config is read-only") }}
         />
       ),
-      { width: 80, height: 20, useThread: false },
+      { width: 80, height: 20 },
     )
     active.push(view)
     await view.flush()

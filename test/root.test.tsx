@@ -83,7 +83,7 @@ describe("application root", () => {
           }}
         />
       ),
-      { width: 80, height: 24, useThread: false },
+      { width: 80, height: 24 },
     )
     active.push(view)
     await view.flush()
@@ -121,7 +121,7 @@ describe("application root", () => {
           }}
         />
       ),
-      { width: 80, height: 24, useThread: false },
+      { width: 80, height: 24 },
     )
     active.push(view)
     await Bun.sleep(0)
@@ -165,7 +165,7 @@ describe("application root", () => {
           }}
         />
       ),
-      { width: 120, height: 32, useThread: false },
+      { width: 120, height: 32 },
     )
     active.push(view)
     await Bun.sleep(0)

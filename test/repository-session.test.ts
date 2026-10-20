@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import type { CommitDetail, CommitSummary, IssueDetail, IssueComment, IssueTimeline, RepositoryDocument } from "../src/models"
+import type { DiffContent, CommitDetail, CommitSummary, IssueDetail, IssueComment, IssueTimeline, RepositoryDocument } from "../src/models"
 import type { RepositoryLoaders } from "../src/repository-session"
 import { createRepositorySession } from "../src/repository-session"
 import { commitDetailFixture, githubDataFixture, issueDetailFixture, issueCommentsFixture, issuePullReferenceFixture, pullContextFixture } from "./fixtures/github-data"
@@ -45,6 +45,30 @@ function ready(session: ReturnType<typeof createRepositorySession>) {
 }
 
 describe("repository session", () => {
+  test("closing or replacing a diff aborts its request and rejects late results", async () => {
+    const first = deferred<DiffContent>()
+    const signals: AbortSignal[] = []
+    const session = createRepositorySession(loaders({
+      diff: async (_repository, target, signal) => {
+        signals.push(signal)
+        return target.kind === "commit" ? first.promise : { kind: "patch", patch: "PR diff" }
+      },
+    }))
+    await session.load("owner/repo")
+    const pending = session.loadDiff!({ kind: "commit", sha: "abc" })
+    await session.loadDiff!({ kind: "pull", number: 42 })
+    expect(signals[0]?.aborted).toBe(true)
+    first.resolve({ kind: "patch", patch: "Old diff" })
+    await pending
+    expect(session.diff!()?.target).toEqual({ kind: "pull", number: 42 })
+    expect(session.diff!()?.resource.value).toEqual({ kind: "patch", patch: "PR diff" })
+    session.clearDiff!()
+    expect(signals[1]?.aborted).toBe(true)
+    expect(session.diff!()).toBeUndefined()
+    await session.loadDiff!({ kind: "pull", number: 42 })
+    await session.load("owner/other")
+    expect(session.diff!()).toBeUndefined()
+  })
   test("loads branch commit totals independently, preserves them during pagination, and refreshes them", async () => {
     const pending = deferred<number>()
     const calls: string[] = []

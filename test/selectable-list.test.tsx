@@ -25,7 +25,7 @@ describe("SelectableList", () => {
           {(item) => <text>{item().label}</text>}
         </SelectableList>
       </box>
-    ), { width: 50, height: 17, useThread: false })
+    ), { width: 50, height: 17 })
     active.push(view)
     await view.flush()
 

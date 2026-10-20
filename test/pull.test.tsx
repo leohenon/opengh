@@ -51,7 +51,7 @@ test("pull request details map GitHub data and preserve list navigation across n
       onCopyToClipboard={async (value) => { copied = value; return true }}
       onOpenInBrowser={async (target) => { opened.push(target) }}
     />
-  ), { width: 120, height: 64, useThread: false })
+  ), { width: 120, height: 64 })
   const settle = async () => {
     await view.flush()
     await Bun.sleep(60) // Markdown content renders asynchronously.

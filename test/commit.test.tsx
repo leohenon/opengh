@@ -43,7 +43,7 @@ test("commit tabs retain detail state and Escape restores the list after resizin
       onRefresh={() => { refreshes++ }}
       onLoadMoreCommitFiles={async () => { moreFiles++ }}
     />
-  ), { width: 120, height: 28, useThread: false })
+  ), { width: 120, height: 28 })
   active.push(view)
   view.renderer.copyToClipboardOSC52 = (value) => { copies.push(value); return true }
   await view.flush()
@@ -79,7 +79,7 @@ test("commit tabs retain detail state and Escape restores the list after resizin
   view.resize(40, 22)
   view.mockInput.pressKey("g")
   await view.flush()
-  expect(view.captureCharFrame()).toContain("esc back · o GitHub · y SHA")
+  expect(view.captureCharFrame()).toContain("esc back · D diff · o GitHub · y SHA")
   expect(view.captureCharFrame()).toContain("Commit 18")
   view.resize(120, 28)
   await view.flush()
@@ -158,7 +158,7 @@ test("overview, commit, and PR shortcuts open GitHub and copy the active URL or 
         return true
       }}
     />
-  ), { width: 100, height: 28, useThread: false })
+  ), { width: 100, height: 28 })
   active.push(view)
   view.renderer.copyToClipboardOSC52 = (value) => { terminalCopies++; copiedSha = value; return true }
   await view.flush()
@@ -175,7 +175,7 @@ test("overview, commit, and PR shortcuts open GitHub and copy the active URL or 
 
   view.mockInput.pressKey("2")
   await view.flush()
-  expect(view.captureCharFrame()).toContain("enter open · o GitHub · y SHA")
+  expect(view.captureCharFrame()).toContain("enter open · D diff · o GitHub · y SHA")
   expect(view.captureCharFrame()).toContain("? help")
   view.mockInput.pressKey("j")
   view.mockInput.pressKey("y")

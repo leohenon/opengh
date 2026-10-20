@@ -22,6 +22,7 @@ export function WorkScreen(props: {
   onOpen?: (entry: IssueSummary | PullRequestSummary) => void
   onOpenInBrowser?: (entry: IssueSummary | PullRequestSummary) => void
   onCopy?: (entry: IssueSummary | PullRequestSummary) => void
+  onDiff?: (entry: IssueSummary | PullRequestSummary) => void
 }) {
   const { colors } = useTheme()
   const icons = useIcons()
@@ -69,6 +70,7 @@ export function WorkScreen(props: {
             onActivate={props.onOpen}
             onOpenInBrowser={props.onOpenInBrowser}
             onCopy={props.onCopy}
+            onDiff={props.kind === "pull" ? props.onDiff : undefined}
           >
             {(entry, active) => (
               <>

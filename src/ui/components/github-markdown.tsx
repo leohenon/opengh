@@ -41,9 +41,15 @@ export function GitHubMarkdown(props: { content: string; syntaxStyle: SyntaxStyl
         width: "100%", minWidth: 0, flexShrink: 0, flexDirection: "column",
         paddingX: codePadding, paddingY: 1, backgroundColor: background,
       })
-      // Margin getters are incomplete in 0.4.5; copy Yoga values before reparenting.
-      for (const edge of [Yoga.Edge.Top, Yoga.Edge.Right, Yoga.Edge.Bottom, Yoga.Edge.Left]) {
-        panel.getLayoutNode().setMargin(edge, source.getLayoutNode().getMargin(edge))
+      // Preserve authored margins, including percentages and auto, before reparenting.
+      for (const [edge, property] of [
+        [Yoga.Edge.Top, "marginTop"], [Yoga.Edge.Right, "marginRight"],
+        [Yoga.Edge.Bottom, "marginBottom"], [Yoga.Edge.Left, "marginLeft"],
+      ] as const) {
+        const margin = source.getMargin(edge)
+        panel[property] = margin.unit === Yoga.Unit.Auto ? "auto"
+          : margin.unit === Yoga.Unit.Percent ? `${margin.value}%`
+          : margin.unit === Yoga.Unit.Point ? margin.value : 0
       }
       source.marginTop = 0
       source.marginRight = 0

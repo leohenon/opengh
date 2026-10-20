@@ -28,7 +28,7 @@ test("shows all unique references without hints and restores each tab's selectio
   const view = await testRender(() => (
     <IssueReferencesPicker references={references} currentIssue={currentIssue} showScrollbar={false}
       onOpen={(item) => { opened = item }} onCopy={(item) => { copied = item }} />
-  ), { width: 100, height: 28, useThread: false })
+  ), { width: 100, height: 28 })
   try {
     await view.flush()
     const initial = view.captureCharFrame()

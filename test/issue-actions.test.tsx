@@ -123,7 +123,7 @@ test("issue action overlays isolate input and confirm comments, closing, reopeni
         }}
       />
     ),
-    { width: 100, height: 32, useThread: false },
+    { width: 100, height: 32 },
   );
   const settle = async () => {
     await view.flush();

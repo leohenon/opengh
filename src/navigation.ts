@@ -1,3 +1,5 @@
+import type { DiffTarget } from "./models"
+
 export type Page = "overview" | "commits" | "issues" | "pulls" | "actions"
 
 // Detail routes identify entities, never selected row positions.
@@ -10,6 +12,7 @@ export type DetailTarget =
 export type NavigationState = {
   page: Page
   details?: Partial<Record<Page, DetailTarget>>
+  diff?: DiffTarget
 }
 
 const detailPage: Record<DetailTarget["kind"], Page> = {
@@ -20,7 +23,8 @@ const detailPage: Record<DetailTarget["kind"], Page> = {
 }
 
 export function navigate(state: NavigationState, page: Page): NavigationState {
-  return { ...state, page }
+  const { diff, ...origin } = state
+  return { ...origin, page }
 }
 
 export function openDetail(state: NavigationState, detail: DetailTarget): NavigationState {
@@ -28,7 +32,15 @@ export function openDetail(state: NavigationState, detail: DetailTarget): Naviga
   return { page, details: { ...state.details, [page]: detail } }
 }
 
+export function openDiff(state: NavigationState, diff: DiffTarget): NavigationState {
+  return { ...state, diff }
+}
+
 export function back(state: NavigationState): NavigationState {
+  if (state.diff) {
+    const { diff, ...origin } = state
+    return origin
+  }
   if (!state.details?.[state.page]) return state
   const details = { ...state.details }
   delete details[state.page]

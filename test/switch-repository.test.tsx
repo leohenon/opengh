@@ -49,7 +49,7 @@ test("repository switch popup isolates input, preserves cancelled navigation, an
     createRepositorySession: () => createRepositorySession(loaders),
     openGitHub: async () => { browser++ },
     runCommand: () => ({ cancel: () => finishCommand({ exitCode: 143, cancelled: true }), result: new Promise<CommandResult>((resolve) => { finishCommand = resolve }) }),
-  }} />, { width: 120, height: 32, useThread: false, exitOnCtrlC: false })
+  }} />, { width: 120, height: 32, exitOnCtrlC: false })
   const settle = async () => { await Bun.sleep(0); await view.flush() }
   const escape = async () => { view.mockInput.pressEscape(); await Bun.sleep(30); await view.flush() }
   const switchPage = async () => {

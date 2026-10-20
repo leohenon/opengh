@@ -22,6 +22,8 @@ export function SelectableList<T>(props: {
   onActivate?: (item: T) => void
   onOpenInBrowser?: (item: T) => void
   onCopy?: (item: T) => void
+  onDiff?: (item: T) => void
+  onSelect?: (item: T) => void
   children: (item: Accessor<T>, active: Accessor<boolean>) => JSX.Element
 }) {
   const { colors } = useTheme()
@@ -54,6 +56,7 @@ export function SelectableList<T>(props: {
     const item = props.items[selectedIndex]
     if (!item) return
     setSelectedKey(props.itemKey(item))
+    props.onSelect?.(item)
   }
 
   const move = (delta: number) => {
@@ -67,7 +70,8 @@ export function SelectableList<T>(props: {
     const activate = event.name === "return" || event.name === "enter" ? props.onActivate
       : event.ctrl || event.meta ? undefined
       : event.name === "o" ? props.onOpenInBrowser
-      : event.name === "y" ? props.onCopy : undefined
+      : event.name === "y" ? props.onCopy
+      : (event.name === "D" || (event.name === "d" && event.shift)) ? props.onDiff : undefined
     if (activate) {
       const item = props.items[indexOfSelection()]
       if (item) {
@@ -77,7 +81,7 @@ export function SelectableList<T>(props: {
     } else if (event.name === "up" || event.name === "k") move(-1)
     else if (event.name === "down" || event.name === "j") move(1)
     else if (event.name === "u") move(-halfPage())
-    else if (event.name === "d") move(halfPage())
+    else if (event.name === "d" && !event.shift) move(halfPage())
     else if (event.name === "G" || (event.name === "g" && event.shift)) selectIndex(props.items.length - 1)
     else if (event.name === "g") selectIndex(0)
   })

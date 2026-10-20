@@ -4,10 +4,11 @@ import { createEffect, createMemo, createSignal, onCleanup, Show } from "solid-j
 import { defaultConfig, type Config } from "../config"
 import { cloneCommand, cloneDestination, matchesLocalRepository, type LocalRepository, type CommandSpec, type CommandTask } from "../command-actions"
 import { CommandDialog, type CommandAction } from "./components/command-dialog"
-import type { CommitDetail, IssueActionKind, IssueActionResult, ListState } from "../models"
-import { back, navigate, openDetail, type NavigationState, type Page } from "../navigation"
+import type { CommitDetail, DiffContent, DiffTarget, IssueActionKind, IssueActionResult, ListState } from "../models"
+import { back, navigate, openDetail, openDiff, type NavigationState, type Page } from "../navigation"
 import type {
   CommitDetailState,
+  DiffState,
   IssueDetailState,
   IssueActionState,
   PullDetailState,
@@ -29,6 +30,7 @@ import { CommitsScreen } from "./pages/commits"
 import { IssueScreen } from "./pages/issue"
 import { PullScreen } from "./pages/pull"
 import { CommitScreen } from "./pages/commit"
+import { DiffScreen } from "./pages/diff"
 import { OverviewScreen } from "./pages/overview"
 import { WorkScreen } from "./pages/work"
 import { SwitchRepositoryScreen } from "./pages/switch-repository"
@@ -61,6 +63,9 @@ export type AppProps = {
   onBranchChange?: (branch: string) => void
   onLoadMoreBranches?: () => Promise<void>
   onLoadMoreCommits?: () => Promise<void>
+  diff?: DiffState
+  onLoadDiff?: (target: DiffTarget, filesOnly?: boolean) => Promise<void>
+  onCloseDiff?: () => void
   commitDetail?: CommitDetailState
   onLoadCommit?: (sha: string) => Promise<void>
   onLoadMoreCommitFiles?: () => Promise<void>
@@ -82,7 +87,7 @@ export type AppProps = {
   onRetryPullCommits?: () => Promise<void>
   onRetryPullContext?: () => Promise<void>
   onClosePull?: () => void
-  onOpenInBrowser?: (target?: string | number, repository?: string) => Promise<void>
+  onOpenInBrowser?: (target?: string | number, repository?: string, view?: "diff") => Promise<void>
   onCopyToClipboard?: (value: string) => Promise<boolean>
   onLoadMoreRuns?: () => Promise<void>
   onLoadMoreIssues?: (state: ListState) => Promise<void>
@@ -119,6 +124,19 @@ export function App(props: AppProps) {
   const data = () => typeof props.data === "function" ? props.data() : props.data
   const operations = () => typeof props.operations === "function" ? props.operations() : props.operations
   const page = () => navigation().page
+  const diffTarget = () => navigation().diff
+  const diffResource = createMemo<ResourceState<DiffContent>>(() => {
+    const target = diffTarget()
+    const loaded = props.diff
+    const matches = target?.kind === "commit" ? loaded?.target.kind === "commit" && loaded.target.sha === target.sha
+      : target?.kind === "pull" && loaded?.target.kind === "pull" && loaded.target.number === target.number
+    return matches && loaded ? loaded.resource : { status: "loading", phase: "load" }
+  })
+  const viewDiff = (target: DiffTarget) => {
+    setNavigation((state) => openDiff(state, target))
+    void props.onLoadDiff?.(target)
+  }
+  const closeDiff = () => { setNavigation(back); props.onCloseDiff?.() }
   const commitSha = createMemo(() => {
     const detail = navigation().details?.commits
     return detail?.kind === "commit" ? detail.sha : undefined
@@ -274,6 +292,7 @@ export function App(props: AppProps) {
   const currentOverviewDocument = createMemo(() => overviewDocuments().find((document) => document.id === overviewDocument())
     ?? overviewDocuments()[0])
   const activeResource = (): ResourceState<unknown> | undefined => {
+    if (diffTarget()) return diffResource()
     if (activeCommitSha()) return commitResource()
     if (activePullNumber()) {
       const part = pullDetailPart()
@@ -332,6 +351,7 @@ export function App(props: AppProps) {
     return undefined
   }
   const statusDetail = () => {
+    if (diffTarget()) return "diff"
     if (activeCommitSha()) return "commit"
     if (activePullNumber()) return pullDetailPart() === "pull" ? "pull request" : pullDetailPart() === "context" ? "PR details" : pullDetailPart()
     if (activeIssueNumber()) return issueDetailPart()
@@ -355,6 +375,7 @@ export function App(props: AppProps) {
     return undefined
   }
   const activeResourceSource = () => {
+    if (diffTarget()) return `resource:diff:${JSON.stringify(diffTarget())}`
     if (activeCommitSha()) return `resource:commit:${commitSha()}`
     if (activePullNumber()) return `resource:pull:${pullNumber()}:${pullDetailPart()}`
     if (activeIssueNumber()) return `resource:issue:${issueNumber()}:${issueDetailPart()}`
@@ -468,7 +489,7 @@ export function App(props: AppProps) {
     }
   })
 
-  onCleanup(() => { props.onCloseCommit?.(); props.onCloseIssue?.(); props.onClosePull?.() })
+  onCleanup(() => { props.onCloseDiff?.(); props.onCloseCommit?.(); props.onCloseIssue?.(); props.onClosePull?.() })
 
   const closeDetail = () => {
     const detail = navigation().details?.[page()]
@@ -477,7 +498,10 @@ export function App(props: AppProps) {
     if (detail?.kind === "issue") { props.onCloseIssue?.(); setRevealActivity() }
     if (detail?.kind === "pull") props.onClosePull?.()
   }
-  const selectPage = (next: Page) => setNavigation((state) => navigate(state, next))
+  const selectPage = (next: Page) => {
+    if (diffTarget()) props.onCloseDiff?.()
+    setNavigation((state) => navigate(state, next))
+  }
   const movePage = (delta: number) => {
     const available = visibleTabs()
     const current = Math.max(0, available.findIndex((tab) => tab.page === page()))
@@ -492,13 +516,13 @@ export function App(props: AppProps) {
   }
   const quit = () => props.onQuit ? props.onQuit() : renderer.destroy()
   let openingBrowser = false
-  const openInBrowser = async (target?: string | number, repository?: string) => {
+  const openInBrowser = async (target?: string | number, repository?: string, view?: "diff") => {
     if (openingBrowser || !props.onOpenInBrowser) return
     openingBrowser = true
     const origin = navigation()
     const label = typeof target === "number" ? `${repository ? repository + "#" : "#"}${target}` : target?.slice(0, 7) ?? data().repo.nameWithOwner
     try {
-      await props.onOpenInBrowser(target, repository)
+      await props.onOpenInBrowser(target, repository, view)
       if (!renderer.isDestroyed && navigation() === origin)
         setToast({ id: ++toastId, title: "Opened on GitHub", message: label, duration: 2000, tone: "success" })
     } catch (error) {
@@ -533,12 +557,15 @@ export function App(props: AppProps) {
     if (overlay() === "issue-action") return issueActionHint()
     if (overlay() === "issue-actions") return "↑/↓ select · enter open · esc cancel"
     const common = (props.onSwitchRepository ? " · s switch repo" : "") + " · ? help"
+    if (diffTarget()) return dimensions().width < 80 ? "esc back · tab focus · b files · ? help"
+      : "esc back · tab focus · b files · [ prev hunk · ] next hunk · t layout · w wrap · r refresh"
+        + (diffResource().status === "error" ? " · enter file list" : "") + " · ? help"
     if (activeCommitSha()) {
       const retry = commitResource().status === "error"
       const more = commitResource().value?.files.hasMore
-      if (dimensions().width < 60 && (retry || more)) return "esc back"
+      if (dimensions().width < 60 && (retry || more)) return "esc back · D diff"
         + (retry ? " · r retry" : " · enter more") + common
-      return "esc back · o GitHub · y SHA"
+      return "esc back · D diff · o GitHub · y SHA"
         + (retry ? " · r retry" : more ? " · enter more files" : "")
         + common
     }
@@ -561,18 +588,18 @@ export function App(props: AppProps) {
       const retry = activeResource()?.status === "error"
       const more = pullDetail().comments.value?.hasMore
       const references = pullMenuItems().length
-      if (dimensions().width < 64) return "esc back"
+      if (dimensions().width < 64) return "esc back · D diff"
         + (retry ? " · r retry" : more ? " · enter more" : references ? " · p references" : " · o GitHub") + common
-      return "esc back"
+      return "esc back · D diff"
         + (retry ? ` · r retry ${statusDetail()}` : more ? " · enter more comments" : "")
         + (references ? " · p references" : "")
         + (dimensions().width >= 100 || !retry && !more ? " · o GitHub · y URL" : "") + common
     }
-    if (page() === "pulls") return (dimensions().width >= 45 ? "enter open" : "enter") + " · o GitHub · y URL"
+    if (page() === "pulls") return (dimensions().width >= 45 ? "enter open" : "enter") + " · D diff · o GitHub · y URL"
       + (dimensions().width >= 60 ? " · tab open/closed" : "") + common
     if (page() === "issues") return (dimensions().width >= 45 ? "enter open" : "enter") + " · o GitHub · y URL"
       + (dimensions().width >= 60 ? " · tab open/closed" : "") + common
-    if (page() === "commits") return (dimensions().width >= 45 ? "enter open" : "enter") + " · o GitHub · y SHA"
+    if (page() === "commits") return (dimensions().width >= 45 ? "enter open" : "enter") + " · D diff · o GitHub · y SHA"
       + (dimensions().width >= 60 ? " · tab branch" : "")
       + common
     if (page() === "overview") return "o GitHub · y URL" + (canClone() ? " · x clone" : "")
@@ -604,6 +631,20 @@ export function App(props: AppProps) {
     }
     if (event.name === "?") return setOverlay("help")
     if (event.name === "," || event.sequence === ",") return setOverlay("settings")
+    const diff = diffTarget()
+    if (diff) {
+      if (escape) { event.stopPropagation(); closeDiff(); return }
+      if (event.ctrl || event.meta) return
+      if (event.name === "o") void openInBrowser(diff.kind === "pull" ? diff.number : diff.sha, undefined, "diff")
+      else if (event.name === "r" && diffResource().status !== "loading") void props.onLoadDiff?.(diff)
+      else if ((event.name === "return" || event.name === "enter") && diffResource().status === "error")
+        void props.onLoadDiff?.(diff, true)
+      else if (event.name >= "1" && event.name <= "5") {
+        const tab = visibleTabs()[Number(event.name) - 1]
+        if (tab) selectPage(tab.page)
+      }
+      return
+    }
     if (escape && navigation().details?.[page()]) {
       event.stopPropagation()
       return closeDetail()
@@ -618,7 +659,8 @@ export function App(props: AppProps) {
     const sha = activeCommitSha()
     if (sha) {
       if (event.ctrl || event.meta) return
-      if (event.name === "o") void openInBrowser(sha)
+      if ((event.name === "D" || (event.name === "d" && event.shift))) viewDiff({ kind: "commit", sha })
+      else if (event.name === "o") void openInBrowser(sha)
       else if (event.name === "y") void copyToClipboard(sha, "SHA")
       else if (event.name === "return" || event.name === "enter") void props.onLoadMoreCommitFiles?.()
       else if (event.name === "r") {
@@ -644,7 +686,8 @@ export function App(props: AppProps) {
     const pull = activePullNumber()
     if (pull) {
       if (event.ctrl || event.meta) return
-      if (event.name === "o") void openInBrowser(pull)
+      if ((event.name === "D" || (event.name === "d" && event.shift))) viewDiff({ kind: "pull", number: pull })
+      else if (event.name === "o") void openInBrowser(pull)
       else if (event.name === "y") void copyToClipboard(pullUrl(pull), "URL")
       else if (event.name === "p" && pullMenuItems().length) setOverlay("issue-references")
       else if (event.name === "return" || event.name === "enter") void props.onLoadMorePullComments?.()
@@ -698,6 +741,7 @@ export function App(props: AppProps) {
     <IconProvider style={config().iconStyle}>
     <box width={dimensions().width} height={dimensions().height} flexDirection="column" backgroundColor={colors.canvas}>
       <Header repo={data().repo} page={page()} tabs={visibleTabs()} workCounts={data().workCounts} compact={config().compactHeader} />
+      <box visible={!diffTarget()} flexGrow={1} minHeight={0} flexDirection="column">
       <box visible={page() === "overview"} flexGrow={1} minHeight={0}>
           <OverviewScreen
             repo={data().repo}
@@ -716,7 +760,7 @@ export function App(props: AppProps) {
             commitCount={data().commitCount}
             currentBranch={data().currentBranch}
             active={page() === "commits" && !commitSha()}
-            interactive={overlay() === undefined}
+            interactive={!diffTarget() && overlay() === undefined}
             showScrollbar={config().showScrollbars}
             onOpenCommit={(commit) => {
               setNavigation((state) => openDetail(state, { kind: "commit", sha: commit.sha }))
@@ -724,6 +768,7 @@ export function App(props: AppProps) {
             }}
             onOpenCommitInBrowser={(commit) => void openInBrowser(commit.sha)}
             onCopyCommitSha={(commit) => void copyToClipboard(commit.sha, "SHA")}
+            onDiff={(commit) => viewDiff({ kind: "commit", sha: commit.sha })}
             onEndReached={() => {
               const commits = data().commits
               if (commits.status === "ready" && commits.value.hasMore) void props.onLoadMoreCommits?.()
@@ -737,7 +782,7 @@ export function App(props: AppProps) {
             counts={issueCounts()}
             resource={issues()}
             active={page() === "issues" && !issueNumber()}
-            interactive={overlay() === undefined}
+            interactive={!diffTarget() && overlay() === undefined}
             showScrollbar={config().showScrollbars}
             onOpen={(issue) => {
               setNavigation((state) => openDetail(state, { kind: "issue", number: issue.number }))
@@ -758,7 +803,7 @@ export function App(props: AppProps) {
             counts={pullCounts()}
             resource={pulls()}
             active={page() === "pulls" && !pullNumber()}
-            interactive={overlay() === undefined}
+            interactive={!diffTarget() && overlay() === undefined}
             showScrollbar={config().showScrollbars}
             onOpen={(pull) => {
               setNavigation((state) => openDetail(state, { kind: "pull", number: pull.number }))
@@ -766,6 +811,7 @@ export function App(props: AppProps) {
             }}
             onOpenInBrowser={(pull) => void openInBrowser(pull.number)}
             onCopy={(pull) => void copyToClipboard(pullUrl(pull.number), "URL")}
+            onDiff={(pull) => viewDiff({ kind: "pull", number: pull.number })}
             onEndReached={() => {
               const resource = pulls()
               if (resource.status === "ready" && resource.value.hasMore) void props.onLoadMorePulls?.(pullState())
@@ -777,7 +823,7 @@ export function App(props: AppProps) {
             <ActionsScreen
               runs={data().runs}
               active={page() === "actions"}
-              interactive={overlay() === undefined}
+              interactive={!diffTarget() && overlay() === undefined}
               showScrollbar={config().showScrollbars}
               onEndReached={() => {
                 const runs = data().runs
@@ -792,7 +838,7 @@ export function App(props: AppProps) {
             <CommitScreen
               sha={sha}
               resource={commitResource()}
-              interactive={page() === "commits" && overlay() === undefined}
+              interactive={!diffTarget() && page() === "commits" && overlay() === undefined}
               showScrollbar={config().showScrollbars}
               detailLayout={config().detailLayout}
             />
@@ -807,7 +853,7 @@ export function App(props: AppProps) {
               detail={issueDetail()}
               revealActivity={revealActivity()?.number === number ? revealActivity()?.id : undefined}
               defaultBranch={data().repo.defaultBranch}
-              interactive={page() === "issues" && overlay() === undefined}
+              interactive={!diffTarget() && page() === "issues" && overlay() === undefined}
               showScrollbar={config().showScrollbars}
               detailLayout={config().detailLayout}
             />
@@ -821,12 +867,17 @@ export function App(props: AppProps) {
               number={number}
               detail={pullDetail()}
               defaultBranch={data().repo.defaultBranch}
-              interactive={page() === "pulls" && overlay() === undefined}
+              interactive={!diffTarget() && page() === "pulls" && overlay() === undefined}
               showScrollbar={config().showScrollbars}
               detailLayout={config().detailLayout}
             />
           </box>
         )}
+      </Show>
+      </box>
+      <Show when={diffTarget()} keyed>
+        {(target) => <DiffScreen target={target} resource={diffResource()} interactive={overlay() === undefined}
+          showScrollbar={config().showScrollbars} onLoadFiles={() => void props.onLoadDiff?.(target, true)} />}
       </Show>
       <StatusBar kind={status()} detail={statusDetail()} hint={shortcutHint()}
         zIndex={overlay() === "issue-action" || overlay() === "issue-actions" ? 350 : 0} />
@@ -865,7 +916,7 @@ export function App(props: AppProps) {
       </Show>
       <Show when={overlay() === "help"}>
         <Help
-          view={activeCommitSha() ? "commit" : activeIssueNumber() ? "issue" : activePullNumber() ? "pull" : page()}
+          view={diffTarget() ? "diff" : activeCommitSha() ? "commit" : activeIssueNumber() ? "issue" : activePullNumber() ? "pull" : page()}
           tabCount={visibleTabs().length}
           hasDocumentTabs={overviewDocuments().length > 1}
           hasMoreFiles={commitResource().value?.files.hasMore}

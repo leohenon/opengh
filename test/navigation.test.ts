@@ -1,7 +1,15 @@
 import { describe, expect, test } from "bun:test"
-import { back, navigate, openDetail, type NavigationState } from "../src/navigation"
+import { back, navigate, openDetail, openDiff, type NavigationState } from "../src/navigation"
 
 describe("navigation", () => {
+  test("diff back preserves the origin detail; switching tabs dismisses only the diff", () => {
+    const origin = openDetail({ page: "commits" }, { kind: "commit", sha: "abc" })
+    const diff = openDiff(origin, { kind: "commit", sha: "abc" })
+    expect(back(diff)).toEqual(origin)
+    expect(navigate(diff, "pulls")).toEqual({ ...origin, page: "pulls" })
+    const pulls: NavigationState = { page: "pulls" }
+    expect(back(openDiff(pulls, { kind: "pull", number: 42 }))).toEqual(pulls)
+  })
   test("page navigation retains each tab's detail", () => {
     const state = openDetail({ page: "overview" }, { kind: "commit", sha: "abc" })
     const issues = openDetail(navigate(state, "issues"), { kind: "issue", number: 42 })

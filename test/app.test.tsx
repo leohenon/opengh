@@ -50,7 +50,7 @@ async function setup() {
         onBranchChange={(value) => (branch = value)}
       />
     ),
-    { width: 120, height: 32, useThread: false },
+    { width: 120, height: 32 },
   );
   active.push(view);
   await view.flush();
@@ -74,7 +74,7 @@ describe("opengh TUI", () => {
       commitCount: { status: "loading", phase: "load" },
     });
     const view = await testRender(() => <App data={data} operations={repositoryOperationsFixture} />,
-      { width: 120, height: 32, useThread: false });
+      { width: 120, height: 32 });
     active.push(view);
     view.mockInput.pressKey("2");
     await view.flush();
@@ -118,7 +118,7 @@ describe("opengh TUI", () => {
     const [config, setConfig] = createSignal({ ...defaultConfig });
     const view = await testRender(() => (
       <App data={data} operations={repositoryOperationsFixture} config={config()} />
-    ), { width: 140, height: 32, useThread: false });
+    ), { width: 140, height: 32 });
     active.push(view);
     const header = () => view.captureCharFrame().split("\n").slice(0, config().compactHeader ? 1 : 5).join("\n");
     await view.flush();
@@ -165,7 +165,7 @@ describe("opengh TUI", () => {
           commitDetail={{ sha: commitDetailFixture.sha, resource: { status: "ready", value: commitDetailFixture } }}
         />
       ),
-      { width: 120, height: 32, useThread: false },
+      { width: 120, height: 32 },
     );
     active.push(view);
     view.renderer.copyToClipboardOSC52 = (value) => { copied = value; return true; };
@@ -204,7 +204,7 @@ describe("opengh TUI", () => {
     setOperations(repositoryOperationsFixture);
     setConfig({ ...defaultConfig, showStatusBarHints: true, hideDocumentsTab: false, compactHeader: false, iconStyle: "unicode" });
     await view.flush();
-    expect(statusLine()).toBe("esc back · o GitHub · y SHA · ? help");
+    expect(statusLine()).toBe("esc back · D diff · o GitHub · y SHA · ? help");
   });
 
   test("renders repository metadata while the README loads", async () => {
@@ -217,7 +217,7 @@ describe("opengh TUI", () => {
           onQuit={() => {}}
         />
       ),
-      { width: 120, height: 32, useThread: false },
+      { width: 120, height: 32 },
     );
     active.push(view);
     await view.flush();
@@ -238,7 +238,7 @@ describe("opengh TUI", () => {
     const data = withDocumentResources({ "README.md": { status: "ready", value: "" } });
     const view = await testRender(
       () => <App data={data} operations={repositoryOperationsFixture} onQuit={() => {}} />,
-      { width: 120, height: 32, useThread: false },
+      { width: 120, height: 32 },
     );
     active.push(view);
 
@@ -287,7 +287,7 @@ describe("opengh TUI", () => {
       { ...merged, number: 403, title: "Closed PR", merged: false },
     ];
     const view = await testRender(() => <App data={data} operations={repositoryOperationsFixture} config={{ ...defaultConfig, hideDocumentsTab: false, compactHeader: false, iconStyle: "nerd" }} />,
-      { width: 100, height: 26, useThread: false });
+      { width: 100, height: 26 });
     active.push(view);
     const colors = appColors(resolveTheme(defaultConfig.theme));
     const iconColor = (icon: string) => view.captureSpans().lines.flatMap((line) => line.spans)
@@ -323,7 +323,7 @@ describe("opengh TUI", () => {
     }));
     const view = await testRender(() => <App data={{ ...githubDataFixture,
       runs: { status: "ready", value: { items: [...completed, ...pending], page: 1, hasMore: false } },
-    }} operations={repositoryOperationsFixture} config={{ ...defaultConfig, hideDocumentsTab: false, compactHeader: false, iconStyle: "nerd" }} />, { width: 120, height: 44, useThread: false });
+    }} operations={repositoryOperationsFixture} config={{ ...defaultConfig, hideDocumentsTab: false, compactHeader: false, iconStyle: "nerd" }} />, { width: 120, height: 44 });
     active.push(view);
     await view.flush();
     view.mockInput.pressKey("5");
@@ -361,7 +361,7 @@ describe("opengh TUI", () => {
     const [operations, setOperations] = createSignal(repositoryOperationsFixture);
     const view = await testRender(() => (
       <App data={data} operations={operations} />
-    ), { width: 120, height: 32, useThread: false });
+    ), { width: 120, height: 32 });
     active.push(view);
     const header = () => view.captureCharFrame().split("\n").slice(0, 5).join("\n");
     await view.flush();
@@ -478,7 +478,7 @@ describe("opengh TUI", () => {
           }}
         />
       ),
-      { width: 120, height: 32, useThread: false },
+      { width: 120, height: 32 },
     );
     active.push(view);
     await view.flush();
@@ -509,7 +509,7 @@ describe("opengh TUI", () => {
     );
     const view = await testRender(
       () => <App data={data} operations={operations} onQuit={() => {}} />,
-      { width: 100, height: 20, useThread: false },
+      { width: 100, height: 20 },
     );
     active.push(view);
     await view.flush();
@@ -580,7 +580,7 @@ describe("opengh TUI", () => {
           })
         }}
       />
-    ), { width: 100, height: 20, useThread: false })
+    ), { width: 100, height: 20 })
     active.push(view)
     await view.flush()
     view.mockInput.pressKey("3")
@@ -605,7 +605,7 @@ describe("opengh TUI", () => {
     };
     const view = await testRender(
       () => <App data={data} operations={repositoryOperationsFixture} onQuit={() => {}} />,
-      { width: 120, height: 32, useThread: false },
+      { width: 120, height: 32 },
     );
     active.push(view);
     await view.flush();
@@ -625,7 +625,7 @@ describe("opengh TUI", () => {
     };
     const view = await testRender(
       () => <App data={data} operations={repositoryOperationsFixture} onQuit={() => {}} />,
-      { width: 76, height: 24, useThread: false },
+      { width: 76, height: 24 },
     );
     active.push(view);
     await view.flush();
@@ -658,7 +658,7 @@ describe("opengh TUI", () => {
           onRetryResource={(resource) => (retry = resource.kind === "document" ? resource.id : resource.kind)}
         />
       ),
-      { width: 120, height: 32, useThread: false },
+      { width: 120, height: 32 },
     );
     active.push(view);
     await view.flush();
@@ -720,7 +720,7 @@ describe("opengh TUI", () => {
           }))
         }}
       />
-    ), { width: 120, height: 32, useThread: false })
+    ), { width: 120, height: 32 })
     active.push(view)
     await view.flush()
     expect(loads).toBe(0)
@@ -747,7 +747,7 @@ describe("opengh TUI", () => {
     };
     const view = await testRender(
       () => <App data={data} operations={repositoryOperationsFixture} onQuit={() => {}} />,
-      { width: 120, height: 32, useThread: false },
+      { width: 120, height: 32 },
     );
     active.push(view);
     await view.flush();
@@ -776,7 +776,7 @@ describe("opengh TUI", () => {
     const [current, setCurrent] = createSignal(data)
     const view = await testRender(
       () => <App data={current} operations={repositoryOperationsFixture} onQuit={() => {}} />,
-      { width: 120, height: 32, useThread: false },
+      { width: 120, height: 32 },
     )
     active.push(view)
     await view.flush()
@@ -866,7 +866,7 @@ describe("opengh TUI", () => {
           }}
         />
       ),
-      { width: 120, height: 32, useThread: false },
+      { width: 120, height: 32 },
     );
     active.push(view);
     await view.flush();
@@ -961,7 +961,7 @@ describe("opengh TUI", () => {
           <ThemedApp />
         </ThemeProvider>
       ),
-      { width: 120, height: 32, useThread: false },
+      { width: 120, height: 32 },
     );
     active.push(view);
     await view.flush();
@@ -1004,7 +1004,7 @@ describe("opengh TUI", () => {
           <ThemedApp />
         </ThemeProvider>
       ),
-      { width: 120, height: 32, useThread: false },
+      { width: 120, height: 32 },
     );
     active.push(view);
     await view.flush();
@@ -1034,7 +1034,7 @@ describe("opengh TUI", () => {
           onConfigChange={async () => { throw new Error("Config directory is read-only") }}
         />
       ),
-      { width: 120, height: 32, useThread: false },
+      { width: 120, height: 32 },
     );
     active.push(view);
     await view.flush();
@@ -1099,7 +1099,7 @@ describe("opengh TUI", () => {
           onRefresh={() => refresh++}
         />
       ),
-      { width: 120, height: 32, useThread: false },
+      { width: 120, height: 32 },
     );
     active.push(view);
     await view.flush();
@@ -1125,7 +1125,7 @@ describe("opengh TUI", () => {
     };
     const view = await testRender(
       () => <App data={data} operations={repositoryOperationsFixture} onQuit={() => {}} />,
-      { width: 120, height: 32, useThread: false },
+      { width: 120, height: 32 },
     );
     active.push(view);
     await view.flush();
@@ -1145,7 +1145,7 @@ describe("opengh TUI", () => {
     });
     const view = await testRender(() => (
       <App data={githubDataFixture} operations={repositoryOperationsFixture} commitDetail={detail()} />
-    ), { width: 100, height: 28, useThread: false });
+    ), { width: 100, height: 28 });
     active.push(view);
     await view.flush();
     const cases = [
@@ -1219,7 +1219,7 @@ describe("opengh TUI", () => {
     const [operations, setOperations] = createSignal(structuredClone(repositoryOperationsFixture));
     const view = await testRender(
       () => <App data={githubDataFixture} operations={operations} onQuit={() => {}} />,
-      { width: 120, height: 32, useThread: false },
+      { width: 120, height: 32 },
     );
     active.push(view);
     await view.flush();
@@ -1245,7 +1245,7 @@ describe("opengh TUI", () => {
     };
     const view = await testRender(
       () => <App data={data} operations={repositoryOperationsFixture} config={{ ...defaultConfig, hideDocumentsTab: false, compactHeader: false, iconStyle: "nerd" }} onQuit={() => {}} />,
-      { width: 120, height: 32, useThread: false },
+      { width: 120, height: 32 },
     );
     active.push(view);
     await view.flush();
@@ -1271,7 +1271,7 @@ describe("opengh TUI", () => {
           onQuit={() => {}}
         />
       ),
-      { width: 76, height: 24, useThread: false },
+      { width: 76, height: 24 },
     );
     active.push(view);
     await view.flush();
@@ -1295,7 +1295,7 @@ describe("opengh TUI", () => {
     });
     const view = await testRender(
       () => <App data={githubDataFixture} operations={repositoryOperationsFixture} config={config()} />,
-      { width: 76, height: 24, useThread: false },
+      { width: 76, height: 24 },
     );
     active.push(view);
     await view.flush();
@@ -1316,7 +1316,7 @@ test("compact header uses one row with tabs left and repository right", async ()
       <Header repo={githubDataFixture.repo} page="overview" tabs={[{ page: "overview", label: "Overview" }]} compact={compact()} />
       <text>Page content</text>
     </box>
-  ), { width: 100, height: 12, useThread: false });
+  ), { width: 100, height: 12 });
   active.push(view);
   await view.flush();
   expect(view.captureCharFrame().split("\n")[5]).toContain("Page content");
