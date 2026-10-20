@@ -765,6 +765,7 @@ export function App(props: AppProps) {
             hideDocumentsTab={config().hideDocumentsTab}
             showScrollbar={config().showScrollbars}
             aboutSidebar={config().aboutSidebar}
+            detailLayout={config().detailLayout}
             scrollRef={(value) => (overviewScroll = value)}
           />
         </box>

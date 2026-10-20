@@ -83,11 +83,12 @@ export function CommitScreen(props: {
             {(commit) => (
               <>
                 <text width="100%" flexShrink={0} marginTop={1} fg={colors.muted}>
-                  {icons().user} <b><span style={{ fg: colors.text }}>{commit().author}</span></b> committed {ago(commit().date)} · {props.sha.slice(0, 7)}
+                  {icons().user} <b><span style={{ fg: colors.text }}>{commit().author}</span></b> authored {ago(commit().date)} · {props.sha.slice(0, 7)}
                 </text>
                 <Show when={commit().committer && (commit().committer!.name !== commit().author || commit().committer!.date !== commit().date)}>
                   <text width="100%" flexShrink={0} fg={colors.muted}>
-                    {icons().user} Committer <b><span style={{ fg: colors.text }}>{commit().committer?.name}</span></b> · {ago(commit().committer!.date)}
+                    {icons().user} Committer <b><span style={{ fg: colors.text }}>{commit().committer?.name}</span></b>
+                    <Show when={ago(commit().committer!.date) !== ago(commit().date)}> · {ago(commit().committer!.date)}</Show>
                   </text>
                 </Show>
               </>

@@ -7,7 +7,7 @@ import "../markdown-parsers"
 import { useTheme } from "../theme"
 
 // One prose renderer for repository documents, issue descriptions, and comments.
-export function GitHubMarkdown(props: { content: string; syntaxStyle: SyntaxStyle; preserveImages?: boolean; codePanels?: boolean; backgroundColor?: string; context?: GitHubMarkdownContext; plainText?: boolean }) {
+export function GitHubMarkdown(props: { content: string; syntaxStyle: SyntaxStyle; preserveImages?: boolean; codePanels?: boolean; backgroundColor?: string; context?: GitHubMarkdownContext; plainText?: boolean; wide?: boolean }) {
   const renderer = useRenderer()
   const { colors, theme } = useTheme()
   const content = createMemo(() => props.plainText ? props.content : normalizeGitHubMarkdown(props.content, { preserveImages: props.preserveImages, codePanels: props.codePanels, context: props.context }))
@@ -20,6 +20,7 @@ export function GitHubMarkdown(props: { content: string; syntaxStyle: SyntaxStyl
     borderColor: colors.border,
   }))
   const renderNode = createMemo<MarkdownOptions["renderNode"]>(() => {
+    const contentWidth = props.wide ? "100%" : 96
     const background = colors.panel
     const canvas = props.backgroundColor ?? colors.canvas
     const muted = colors.muted
@@ -135,14 +136,14 @@ export function GitHubMarkdown(props: { content: string; syntaxStyle: SyntaxStyl
       if (!block) return undefined
       block.marginTop = 0
       block.marginBottom = 0
-      if (token.type === "code" && panels && block instanceof CodeRenderable) return codePanel(block, token.lang ?? "text")
+      if (token.type === "code" && panels && block instanceof CodeRenderable) block = codePanel(block, token.lang ?? "text")
       // Do not interpret markdown-language fence contents as prose.
       if (token.type !== "code") decorateProse(block, token.type === "list")
-      const prose = token.type !== "code" && token.type !== "table" && token.type !== "hr"
+      const readable = token.type !== "table" && token.type !== "hr"
       const section = token.type === "heading" && token.depth <= 2
       const wrapper = new BoxRenderable(renderer, {
         width: "100%", minWidth: 0, flexShrink: 0, flexDirection: "column", marginTop: 0,
-        ...(prose ? { maxWidth: 96, alignSelf: "flex-start" } : {}),
+        ...(readable ? { maxWidth: contentWidth, alignSelf: "flex-start" } : {}),
         ...(section ? { border: ["bottom"], borderColor: border } : {}),
       })
       // Native top-level layout owns inter-block spacing and list indentation.
@@ -160,7 +161,7 @@ export function GitHubMarkdown(props: { content: string; syntaxStyle: SyntaxStyl
         bg={props.backgroundColor ?? colors.canvas}
         wrapMode="word"
         width="100%"
-        maxWidth={96}
+        maxWidth={props.wide ? "100%" : 96}
         minWidth={0}
         flexShrink={0}
       />

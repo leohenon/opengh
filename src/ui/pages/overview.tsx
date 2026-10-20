@@ -1,11 +1,12 @@
 import { TextAttributes, type ScrollBoxRenderable } from "@opentui/core"
 import { useTerminalDimensions } from "@opentui/solid"
 import { createMemo, For, onCleanup, Show } from "solid-js"
-import type { AboutSidebar } from "../../config"
+import { defaultConfig, type AboutSidebar, type DetailLayout } from "../../config"
 import type { Repo } from "../../models"
 import type { RepositoryDocumentState, ResourceState } from "../../repository-state"
 import { ResourceStateView } from "../components/resource-state"
 import { count } from "../format"
+import { detailContentWidth } from "../detail-layout"
 import { GitHubMarkdown } from "../components/github-markdown"
 import { createReactiveMarkdownStyle } from "../markdown-style"
 import { useTheme } from "../theme"
@@ -38,9 +39,11 @@ export function OverviewScreen(props: {
   hideDocumentsTab?: boolean
   showScrollbar: boolean
   aboutSidebar: AboutSidebar
+  detailLayout?: DetailLayout
   scrollRef: (value: ScrollBoxRenderable | undefined) => void
 }) {
   const dimensions = useTerminalDimensions()
+  const centered = () => (props.detailLayout ?? defaultConfig.detailLayout) === "centered"
   const { colors, theme } = useTheme()
   const icons = useIcons()
   const bindScrollbar = createScrollbarVisibility(() => props.showScrollbar)
@@ -170,13 +173,17 @@ export function OverviewScreen(props: {
                       paddingX={2}
                       paddingY={1}
                       scrollY
+                      contentOptions={{ alignItems: centered() ? "center" : "stretch" }}
                     >
-                      <GitHubMarkdown
-                        content={documentResource().value ?? ""}
-                        syntaxStyle={markdownStyle()}
-                        context={markdownContext()}
-                        plainText={plainDocument()}
-                      />
+                      <box width="100%" maxWidth={detailContentWidth(props.detailLayout)} minWidth={0} flexShrink={0} flexDirection="column">
+                        <GitHubMarkdown
+                          content={documentResource().value ?? ""}
+                          syntaxStyle={markdownStyle()}
+                          context={markdownContext()}
+                          plainText={plainDocument()}
+                          wide={!centered()}
+                        />
+                      </box>
                     </scrollbox>
                   )
                 }}

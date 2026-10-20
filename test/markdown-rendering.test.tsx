@@ -3,6 +3,9 @@ import { CodeRenderable, type Renderable } from "@opentui/core"
 import type { GitHubMarkdownContext } from "../src/ui/github-markdown"
 import { testRender } from "@opentui/solid"
 import { createSignal } from "solid-js"
+import type { AboutSidebar, DetailLayout } from "../src/config"
+import { githubDataFixture, repositoryDocumentsFixture } from "./fixtures/github-data"
+import { OverviewScreen } from "../src/ui/pages/overview"
 import { GitHubMarkdown } from "../src/ui/components/github-markdown"
 import { createReactiveMarkdownStyle } from "../src/ui/markdown-style"
 import { ThemeProvider, useTheme } from "../src/ui/theme"
@@ -144,7 +147,7 @@ fn main() { println!("qdrant"); }
       const prose = codes.find((block) => block.content.includes("A readable prose"))!
       expect(prose.width).toBe(Math.min(width, 96))
       const python = codes.find((block) => block.filetype === "python")!
-      expect(python.parent!.width).toBe(width)
+      expect(python.parent!.width).toBe(Math.min(width, 96))
       const spans = view.captureSpans().lines.flatMap((line) => line.spans)
       const keyword = spans.find((span) => span.text.trim() === "from")!
       const string = spans.find((span) => span.text.includes("localhost"))!
@@ -256,6 +259,48 @@ Inline code: \`\\~20\`
     expect(frame).toContain(String.raw`Inline code: \~20`)
     expect(frame).toContain("<!-- literal code comment -->")
     expect(codeBlocks(view.renderer.root).find((block) => block.filetype === "text")?.plainText).toContain(String.raw`\~20 minutes`)
+  } finally {
+    view.renderer.destroy()
+  }
+}, 15_000)
+
+
+test("overview layout centers documents or uses available width independently of the About sidebar", async () => {
+  const [layout, setLayout] = createSignal<DetailLayout>("centered")
+  const [sidebar, setSidebar] = createSignal<AboutSidebar>("hide")
+  const documents = [{ ...repositoryDocumentsFixture[0]!, resource: {
+    status: "ready" as const, value: "Overview prose.\n\n```text\nexample code\n```",
+  } }]
+  const view = await testRender(() => <ThemeProvider name="github"><OverviewScreen
+    repo={githubDataFixture.repo} documents={{ status: "ready", value: documents }}
+    detailLayout={layout()} aboutSidebar={sidebar()} showScrollbar={false} scrollRef={() => {}}
+  /></ThemeProvider>, { width: 160, height: 30 })
+  try {
+    for (const about of ["hide", "show"] as const) {
+      setSidebar(about)
+      setLayout("centered")
+      await settle(view)
+      const prose = () => codeBlocks(view.renderer.root).find((block) => block.content.includes("Overview prose"))!
+      const panel = () => codeBlocks(view.renderer.root).find((block) => block.filetype === "text")!.parent!
+      expect(prose().width).toBe(96)
+      expect(panel().width).toBe(96)
+      const centeredX = prose().screenX
+      setLayout("wide")
+      await settle(view)
+      expect(prose().width).toBeGreaterThan(96)
+      expect(panel().width).toBe(prose().width)
+      expect(prose().screenX).toBeLessThan(centeredX)
+      expect(view.captureCharFrame().includes("About")).toBe(about === "show")
+    }
+    view.resize(76, 30)
+    setSidebar("hide")
+    for (const mode of ["centered", "wide"] as const) {
+      setLayout(mode)
+      await settle(view)
+      const prose = codeBlocks(view.renderer.root).find((block) => block.content.includes("Overview prose"))!
+      expect(prose.width).toBeLessThanOrEqual(76)
+      expect(view.captureCharFrame()).toContain("example code")
+    }
   } finally {
     view.renderer.destroy()
   }

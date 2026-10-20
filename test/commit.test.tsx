@@ -57,7 +57,7 @@ test("commit tabs retain detail state and Escape restores the list after resizin
   await view.flush()
   expect(opened).toEqual([commits[18]!.sha])
   expect(view.captureCharFrame()).toContain("A full commit message body.")
-  expect(view.captureCharFrame()).toContain("max committed")
+  expect(view.captureCharFrame()).toContain("max authored")
   expect(view.captureCharFrame()).not.toContain("2026-04-14 06:41:00 UTC")
   expect(view.captureCharFrame()).toContain("Committer web-flow")
   expect(view.captureCharFrame()).toContain("Files changed · 30 files")
