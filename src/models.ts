@@ -39,6 +39,7 @@ export type IssueDetail = IssueSummary & {
   closedAt?: string
   stateReason?: string
   locked: boolean
+  permissions?: Record<IssueActionKind, boolean>
   labels: string[]
   assignees: string[]
   milestone?: { title: string; dueAt?: string }

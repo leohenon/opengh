@@ -12,15 +12,19 @@ import { Popup } from "./popup"
 export function IssueActionsMenu(props: {
   number: number
   state: "open" | "closed"
+  permissions?: Partial<Record<IssueActionKind, boolean>>
   onSelect(kind: Exclude<IssueActionKind, "comment">): void
   onClose(): void
 }) {
   const { colors } = useTheme()
   const [selected, setSelected] = createSignal(0)
-  const items = createMemo<{ kind: Exclude<IssueActionKind, "comment">; label: string }[]>(() => props.state === "open" ? [
-    { kind: "close", label: "Close issue…" },
-    { kind: "duplicate", label: "Mark as duplicate…" },
-  ] : [{ kind: "reopen", label: "Reopen issue…" }])
+  const items = createMemo(() => {
+    const actions: { kind: Exclude<IssueActionKind, "comment">; label: string }[] = props.state === "open" ? [
+      { kind: "close", label: "Close issue…" },
+      { kind: "duplicate", label: "Mark as duplicate…" },
+    ] : [{ kind: "reopen", label: "Reopen issue…" }]
+    return actions.filter((item) => props.permissions?.[item.kind])
+  })
   const active = () => Math.min(selected(), items().length - 1)
   useKeyboard((event) => {
     event.preventDefault()
@@ -28,7 +32,10 @@ export function IssueActionsMenu(props: {
     if (event.name === "escape") props.onClose()
     else if (event.name === "up" || event.name === "k") setSelected(Math.max(0, active() - 1))
     else if (event.name === "down" || event.name === "j") setSelected(Math.min(items().length - 1, active() + 1))
-    else if (event.name === "return" || event.name === "enter") props.onSelect(items()[active()]!.kind)
+    else if (event.name === "return" || event.name === "enter") {
+      const item = items()[active()]
+      if (item) props.onSelect(item.kind)
+    }
   })
   return (
     <Popup width={52} height={items().length + 4} placement="center" zIndex={250}>

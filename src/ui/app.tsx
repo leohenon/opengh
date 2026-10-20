@@ -170,22 +170,23 @@ export function App(props: AppProps) {
   }
   const issueUrl = (number: number) => props.issueDetail?.number === number && props.issueDetail.resource.value
     ? props.issueDetail.resource.value.url : `${data().repo.url}/issues/${number}`
-  const canActOnIssue = () => {
+  const canActOnIssue = (kind: IssueActionKind) => {
     const number = activeIssueNumber()
-    return Boolean(number && props.onSubmitIssueAction && issueDetail().resource.value
+    return Boolean(number && props.onSubmitIssueAction && issueDetail().resource.value?.permissions?.[kind]
       && issueDetail().resource.status !== "loading"
       && props.getIssueAction?.(number).operation.status !== "loading")
   }
+  const hasIssueActions = () => canActOnIssue(issueDetail().resource.value?.state === "closed" ? "reopen" : "close") || canActOnIssue("duplicate")
   const openIssueAction = (kind: IssueActionKind) => {
     const number = activeIssueNumber()
-    if (!number || !canActOnIssue() || props.getIssueAction?.(number).operation.status === "loading") return
+    if (!number || !canActOnIssue(kind) || props.getIssueAction?.(number).operation.status === "loading") return
     props.onPrepareIssueAction?.(number, kind)
     setIssueAction({ number, kind })
     setOverlay("issue-action")
   }
   const submitIssueAction = async () => {
     const action = issueAction()
-    if (!action || !props.onSubmitIssueAction || action.number !== activeIssueNumber() || !canActOnIssue()) return
+    if (!action || !props.onSubmitIssueAction || action.number !== activeIssueNumber() || !canActOnIssue(action.kind)) return
     const repository = data().repo.nameWithOwner
     const retry = props.getIssueAction?.(action.number).retry
     try {
@@ -580,7 +581,7 @@ export function App(props: AppProps) {
       const retry = activeResource()?.status === "error"
       const more = issueDetail().comments.value?.hasMore
       const references = issueMenuItems().length
-      const actions = canActOnIssue() ? " · c comment · a actions" : ""
+      const actions = (canActOnIssue("comment") ? " · c comment" : "") + (hasIssueActions() ? " · a actions" : "")
       const hintWidth = dimensions().width - actions.length
       if (dimensions().width < 64) return "esc back" + actions
         + (!actions ? retry ? " · r retry" : more ? " · enter more" : references ? " · p references" : " · o GitHub" : "")
@@ -689,8 +690,8 @@ export function App(props: AppProps) {
       if (event.ctrl || event.meta) return
       if (event.name === "o") void openInBrowser(number)
       else if (event.name === "y") void copyToClipboard(issueUrl(number), "URL")
-      else if (event.name === "c" && canActOnIssue()) { event.stopPropagation(); openIssueAction("comment") }
-      else if (event.name === "a" && canActOnIssue()) { event.stopPropagation(); setOverlay("issue-actions") }
+      else if (event.name === "c" && canActOnIssue("comment")) { event.stopPropagation(); openIssueAction("comment") }
+      else if (event.name === "a" && hasIssueActions()) { event.stopPropagation(); setOverlay("issue-actions") }
       else if (event.name === "p" && issueMenuItems().length) setOverlay("issue-references")
       else if (event.name === "return" || event.name === "enter") void props.onLoadMoreIssueComments?.()
       else if (event.name === "r") void refreshIssue(number)
@@ -942,15 +943,16 @@ export function App(props: AppProps) {
           hasMoreFiles={commitResource().value?.files.hasMore}
           hasMoreComments={activePullNumber() ? pullDetail().comments.value?.hasMore : issueDetail().comments.value?.hasMore}
           hasReferences={activeMenuItems().length > 0}
-          canComment={canActOnIssue()}
-          hasIssueActions={canActOnIssue()}
+          canComment={canActOnIssue("comment")}
+          hasIssueActions={hasIssueActions()}
           command={page() === "overview" && canClone() ? "clone repository" : undefined}
         />
       </Show>
-      <Show when={overlay() === "issue-actions" && activeIssueNumber()}>
+      <Show when={overlay() === "issue-actions" && activeIssueNumber() && hasIssueActions()}>
         <IssueActionsMenu
           number={activeIssueNumber()!}
           state={issueDetail().resource.value?.state ?? "open"}
+          permissions={issueDetail().resource.value?.permissions}
           onSelect={openIssueAction}
           onClose={() => setOverlay()}
         />

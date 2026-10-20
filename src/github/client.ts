@@ -461,9 +461,41 @@ export function createGitHubClient(transport: GitHubTransport) {
     return count > 0
   }
 
+  const withIssuePermissions = async (repository: string, number: number, detail: IssueDetail): Promise<IssueDetail> => {
+    // Unknown permissions must not expose actions; reading the issue still works.
+    if (!transport.graphql || !Number.isSafeInteger(number) || number <= 0) return detail
+    const [owner, name] = repository.split("/")
+    try {
+      const response = await transport.graphql<{
+        data?: { repository?: {
+          isArchived: boolean
+          viewerPermission: string | null
+          issue?: { viewerCanClose: boolean; viewerCanReopen: boolean } | null
+        } | null }
+        errors?: unknown[]
+      }>(
+        `query($owner: String!, $name: String!) { repository(owner: $owner, name: $name) { isArchived viewerPermission issue(number: ${number}) { viewerCanClose viewerCanReopen } } }`,
+        { owner: owner!, name: name! },
+      )
+      const repo = response.data?.repository
+      if (response.errors?.length || !repo?.issue) return detail
+      const writable = repo.isArchived === false
+      const maintainer = ["WRITE", "MAINTAIN", "ADMIN"].includes(repo.viewerPermission ?? "")
+      detail.permissions = {
+        comment: writable && (!detail.locked || maintainer),
+        close: writable && repo.issue.viewerCanClose === true,
+        reopen: writable && repo.issue.viewerCanReopen === true,
+        duplicate: writable && maintainer && repo.issue.viewerCanClose === true,
+      }
+    } catch {
+      // Permission lookup failures must not prevent read-only browsing.
+    }
+    return detail
+  }
+
   const issue = async (repository: string, number: number): Promise<IssueDetail> => {
     const item = await transport.json<IssueDetailResponse>(`repos/${repository}/issues/${number}`)
-    return issueDetail(item)
+    return withIssuePermissions(repository, number, issueDetail(item))
   }
 
   const issueComments = async (repository: string, number: number, page = 1): Promise<Page<IssueComment>> => {
@@ -496,7 +528,7 @@ export function createGitHubClient(transport: GitHubTransport) {
       `repos/${repository}/issues/${number}`, "PATCH",
       { state, ...(state === "closed" ? { state_reason: reason ?? "completed" } : {}) },
     )
-    return issueDetail(item)
+    return withIssuePermissions(repository, number, issueDetail(item))
   }
 
   const markIssueDuplicate = async (
@@ -525,7 +557,7 @@ export function createGitHubClient(transport: GitHubTransport) {
     if (detail.number !== number || detail.state !== "closed" || detail.stateReason !== "duplicate") {
       throw new Error(`GitHub did not confirm closing issue #${number} as duplicate; the requested update may have been ignored.`)
     }
-    return detail
+    return withIssuePermissions(repository, number, detail)
   }
 
   const issueTimeline = async (repository: string, number: number): Promise<IssueTimeline> => {

@@ -393,6 +393,38 @@ describe("GitHub client", () => {
     await expect(client.issue("owner/repo", 45)).rejects.toThrow("is a pull request")
   })
 
+  test("loads viewer issue permissions and fails closed when lookup fails", async () => {
+    const rest = transport({
+      "repos/owner/repo/issues/42": {
+        number: 42, state: "open", title: "Issue", user: { login: "author" },
+        created_at: "2026-01-01T00:00:00Z", updated_at: "2026-01-01T00:00:00Z",
+        html_url: "https://github.com/owner/repo/issues/42", body: "", locked: true,
+        closed_at: null, state_reason: null, labels: [], assignees: [], milestone: null, comments: 0,
+      },
+    })
+    let permission = "READ"
+    let archived = false
+    let failed = false
+    const client = createGitHubClient({ ...rest, async graphql<T>(_query: string, variables: Record<string, string>) {
+      expect(variables).toEqual({ owner: "owner", name: "repo" })
+      expect(_query).toContain("issue(number: 42)")
+      if (failed) throw new Error("unavailable")
+      return { data: { repository: { isArchived: archived, viewerPermission: permission,
+        issue: { viewerCanClose: true, viewerCanReopen: false } } } } as T
+    } })
+    expect((await client.issue("owner/repo", 42)).permissions).toEqual({
+      comment: false, close: true, reopen: false, duplicate: false,
+    })
+    permission = "WRITE"
+    expect((await client.issue("owner/repo", 42)).permissions).toEqual({
+      comment: true, close: true, reopen: false, duplicate: true,
+    })
+    archived = true
+    expect(Object.values((await client.issue("owner/repo", 42)).permissions!)).toEqual([false, false, false, false])
+    failed = true
+    expect((await client.issue("owner/repo", 42)).permissions).toBeUndefined()
+  })
+
   test("maps issue comments with full IDs and raw bodies through the terminal page", async () => {
     const createdAt = "2026-01-01T00:00:00Z"
     const updatedAt = "2026-01-02T00:00:00Z"

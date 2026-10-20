@@ -345,3 +345,48 @@ test("issue action overlays isolate input and confirm comments, closing, reopeni
     view.renderer.destroy();
   }
 });
+
+test("issue shortcuts and hints hide actions without viewer permission", async () => {
+  const [permissions, setPermissions] = createSignal({ comment: true, close: false, reopen: false, duplicate: false });
+  const selected: string[] = [];
+  const view = await testRender(() => <App
+    data={githubDataFixture}
+    operations={repositoryOperationsFixture}
+    config={{ ...defaultConfig, showStatusBarHints: true }}
+    issueDetail={{
+      number: issueDetailFixture.number,
+      resource: { status: "ready", value: { ...issueDetailFixture, permissions: permissions() } },
+      comments: { status: "ready", value: { items: [], page: 1, hasMore: false } },
+      references: { status: "ready", value: [] },
+    }}
+    onLoadIssue={async () => {}}
+    onPrepareIssueAction={(_number, kind) => selected.push(kind)}
+    onSubmitIssueAction={async () => ({})}
+  />, { width: 100, height: 32 });
+  const settle = async () => { await view.flush(); await Bun.sleep(40); await view.flush(); };
+  try {
+    view.mockInput.pressKey("3");
+    view.mockInput.pressEnter();
+    await settle();
+    expect(view.captureCharFrame()).toContain("c comment");
+    expect(view.captureCharFrame()).not.toContain("a actions");
+    view.mockInput.pressKey("a");
+    await settle();
+    expect(view.captureCharFrame()).not.toContain("Close issue…");
+    view.mockInput.pressKey("c");
+    await settle();
+    expect(selected).toEqual(["comment"]);
+    view.mockInput.pressEscape();
+    setPermissions({ comment: false, close: true, reopen: false, duplicate: false });
+    await settle();
+    expect(view.captureCharFrame()).not.toContain("c comment");
+    view.mockInput.pressKey("c");
+    view.mockInput.pressKey("a");
+    await settle();
+    expect(selected).toEqual(["comment"]);
+    expect(view.captureCharFrame()).toContain("Close issue…");
+    expect(view.captureCharFrame()).not.toContain("Mark as duplicate…");
+  } finally {
+    view.renderer.destroy();
+  }
+});

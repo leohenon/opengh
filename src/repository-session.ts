@@ -940,6 +940,9 @@ export function createRepositorySession(loaders: RepositoryLoaders = defaultLoad
     const stillHere = () => scope === repositoryScope && state().repository === repository
     updateAction(key, (draft) => ({ ...draft, operation: loading() }))
     try {
+      if (!issue.permissions?.[kind]) throw new Error("You do not have permission to perform this issue action.")
+      if (!action.retry && kind !== "duplicate" && action.body.trim() && !issue.permissions.comment)
+        throw new Error("You do not have permission to comment on this issue.")
       if (kind === "duplicate") {
         if (issue.state !== "open") throw new Error("Reopen the issue before marking it as a duplicate.")
         const match = action.duplicateTarget?.trim().match(/^#?([1-9]\d*)$/)
