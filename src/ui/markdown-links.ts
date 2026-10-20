@@ -34,8 +34,13 @@ export function compactMarkdownLinks(block: CodeRenderable) {
       const start = node.position?.start.offset
       const end = node.position?.end.offset
       if (start === undefined || end === undefined) return
-      for (const match of source.slice(start, end).matchAll(/▧/g))
+      const text = source.slice(start, end)
+      for (const match of text.matchAll(/▧/g))
         markers.push([start + match.index!, start + match.index! + 1, "markup.image.marker"])
+      // Tree-sitter leaves backslash escapes visible in prose. Parse text nodes
+      // only, so inline code and fenced examples keep their literal backslashes.
+      for (const match of text.matchAll(/\\[!"#$%&'()*+,\-./:;<=>?@[\]\\^_`{|}~]/g))
+        markers.push([start + match.index!, start + match.index! + 1, "conceal", { conceal: "", isInjection: true }])
     })
     visit(tree, "link", (node) => {
       const start = node.position?.start.offset

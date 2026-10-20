@@ -91,6 +91,11 @@ function isPresentationGroup(element: Element) {
 
 function terminalMedia(options: { preserveImages?: boolean } = {}) {
   return (tree: Root) => {
+    visit(tree, "comment", (_node, index, parent) => {
+      if (index === undefined || !parent) return
+      parent.children.splice(index, 1)
+      return index
+    })
     const presentationGroups = new WeakSet<Element>()
     visit(tree, "element", (element) => {
       if (!isPresentationGroup(element)) return

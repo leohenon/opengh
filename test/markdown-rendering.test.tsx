@@ -222,3 +222,41 @@ test("references, image captions, nested fences, and plain-text documents keep t
     view.renderer.destroy()
   }
 }, 15_000)
+
+test("review comments stay hidden and prose escapes render without changing code", async () => {
+  const view = await testRender(() => <ThemeProvider name="github"><MarkdownSample content={`<!-- walkthrough_start -->
+## Walkthrough
+
+Review <!-- inline marker --> summary.
+
+- Adds a feature.
+  <!-- change_assessment_start
+  hidden metadata -->
+
+  **Estimated effort:** \\~20 minutes; \\*literal\\* punctuation.
+
+<!-- walkthrough_end -->
+
+Inline code: \`\\~20\`
+
+\`\`\`text
+<!-- literal code comment -->
+\\~20 minutes
+\`\`\``} /></ThemeProvider>, { width: 100, height: 35 })
+  try {
+    await settle(view)
+    const frame = view.captureCharFrame()
+    expect(frame).toContain("Walkthrough")
+    expect(frame).not.toContain("walkthrough_start")
+    expect(frame).not.toContain("walkthrough_end")
+    expect(frame).not.toContain("inline marker")
+    expect(frame).not.toContain("hidden metadata")
+    expect(frame).not.toContain("change_assessment_start")
+    expect(frame).toContain("Estimated effort: ~20 minutes; *literal* punctuation.")
+    expect(frame).toContain(String.raw`Inline code: \~20`)
+    expect(frame).toContain("<!-- literal code comment -->")
+    expect(codeBlocks(view.renderer.root).find((block) => block.filetype === "text")?.plainText).toContain(String.raw`\~20 minutes`)
+  } finally {
+    view.renderer.destroy()
+  }
+}, 15_000)
