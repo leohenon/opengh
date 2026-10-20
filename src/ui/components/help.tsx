@@ -113,16 +113,20 @@ export function Help(props: {
   });
   const shortcuts = createMemo(() => {
     if (props.view === "diff") return [
-      { keys: "Esc", description: "back to previous view" },
-      { keys: "Tab", description: "focus files / diff" },
-      { keys: "b", description: "toggle file sidebar" },
-      { keys: "Enter", description: "focus diff / load file list on error" },
+      { keys: "Esc", description: "close diff; return to origin" },
+      { keys: "Tab", description: "switch files / diff focus" },
+      { keys: "b", description: "toggle sidebar; hide → diff focus" },
+      { keys: "Enter", description: "files → diff; error → file list" },
+      { keys: `1–${props.tabCount}`, description: "switch tabs; retain diff state" },
       { keys: "[ and ]", description: "previous / next hunk" },
-      { keys: "h/l, ←/→", description: "scroll code horizontally" },
+      { keys: "h/l, ←/→", description: "files: tabs; diff: horizontal pan" },
+      { keys: "j/k, ↑/↓", description: "files: select; diff: scroll" },
+      { keys: "u/d", description: "half-page in the focused pane" },
+      { keys: "g/G", description: "files: first/last; diff: top/end" },
       { keys: "t", description: "toggle split / unified" },
       { keys: "w", description: "toggle line wrapping" },
       { keys: "o", description: "open diff on GitHub" },
-      ...commonShortcuts,
+      ...commonShortcuts.filter(({ keys }) => keys !== "j/k, ↑/↓" && keys !== "u/d" && keys !== "g/G"),
     ];
     const tabs = `1–${props.tabCount}, h/l, ←/→`;
     const entries = [...(props.command ? [{ keys: "x", description: props.command }] : []), ...viewShortcuts(), { keys: tabs, description: "switch tabs" }, ...commonShortcuts];

@@ -12,7 +12,7 @@ export type DetailTarget =
 export type NavigationState = {
   page: Page
   details?: Partial<Record<Page, DetailTarget>>
-  diff?: DiffTarget
+  diffs?: Partial<Record<Page, DiffTarget>>
 }
 
 const detailPage: Record<DetailTarget["kind"], Page> = {
@@ -22,27 +22,32 @@ const detailPage: Record<DetailTarget["kind"], Page> = {
   run: "actions",
 }
 
+function withoutDiff(state: NavigationState, page: Page): NavigationState {
+  if (!state.diffs?.[page]) return state
+  const { diffs, ...origin } = state
+  const remaining = { ...diffs }
+  delete remaining[page]
+  return Object.keys(remaining).length ? { ...origin, diffs: remaining } : origin
+}
+
 export function navigate(state: NavigationState, page: Page): NavigationState {
-  const { diff, ...origin } = state
-  return { ...origin, page }
+  return { ...state, page }
 }
 
 export function openDetail(state: NavigationState, detail: DetailTarget): NavigationState {
   const page = detailPage[detail.kind]
-  return { page, details: { ...state.details, [page]: detail } }
+  return { ...withoutDiff(state, page), page, details: { ...state.details, [page]: detail } }
 }
 
 export function openDiff(state: NavigationState, diff: DiffTarget): NavigationState {
-  return { ...state, diff }
+  return { ...state, diffs: { ...state.diffs, [state.page]: diff } }
 }
 
 export function back(state: NavigationState): NavigationState {
-  if (state.diff) {
-    const { diff, ...origin } = state
-    return origin
-  }
+  if (state.diffs?.[state.page]) return withoutDiff(state, state.page)
   if (!state.details?.[state.page]) return state
-  const details = { ...state.details }
-  delete details[state.page]
-  return Object.keys(details).length ? { ...state, details } : { page: state.page }
+  const { details, ...origin } = state
+  const remaining = { ...details }
+  delete remaining[state.page]
+  return Object.keys(remaining).length ? { ...origin, details: remaining } : origin
 }

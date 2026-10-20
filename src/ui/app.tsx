@@ -1,6 +1,6 @@
 import type { ScrollBoxRenderable } from "@opentui/core"
 import { useKeyboard, useRenderer, useTerminalDimensions } from "@opentui/solid"
-import { createEffect, createMemo, createSignal, onCleanup, Show } from "solid-js"
+import { createEffect, createMemo, createSignal, For, onCleanup, Show } from "solid-js"
 import { defaultConfig, type Config } from "../config"
 import { cloneCommand, cloneDestination, matchesLocalRepository, type LocalRepository, type CommandSpec, type CommandTask } from "../command-actions"
 import { CommandDialog, type CommandAction } from "./components/command-dialog"
@@ -30,7 +30,7 @@ import { CommitsScreen } from "./pages/commits"
 import { IssueScreen } from "./pages/issue"
 import { PullScreen } from "./pages/pull"
 import { CommitScreen } from "./pages/commit"
-import { DiffScreen } from "./pages/diff"
+import { DiffScreen, type DiffFocus } from "./pages/diff"
 import { OverviewScreen } from "./pages/overview"
 import { WorkScreen } from "./pages/work"
 import { SwitchRepositoryScreen } from "./pages/switch-repository"
@@ -63,9 +63,9 @@ export type AppProps = {
   onBranchChange?: (branch: string) => void
   onLoadMoreBranches?: () => Promise<void>
   onLoadMoreCommits?: () => Promise<void>
-  diff?: DiffState
+  diffs?: Partial<Record<DiffTarget["kind"], DiffState>>
   onLoadDiff?: (target: DiffTarget, filesOnly?: boolean) => Promise<void>
-  onCloseDiff?: () => void
+  onCloseDiff?: (target?: DiffTarget) => void
   commitDetail?: CommitDetailState
   onLoadCommit?: (sha: string) => Promise<void>
   onLoadMoreCommitFiles?: () => Promise<void>
@@ -104,6 +104,7 @@ export function App(props: AppProps) {
   const [pullState, setPullState] = createSignal<ListState>("open")
   const [pullRefresh, setPullRefresh] = createSignal<{ number: number }>()
   const [overviewDocument, setOverviewDocument] = createSignal<string>()
+  const [diffFocus, setDiffFocus] = createSignal<Partial<Record<Page, DiffFocus>>>({})
   const [overlay, setOverlay] = createSignal<Overlay>()
   const [toast, setToast] = createSignal<ToastState>()
   const [commandAction, setCommandAction] = createSignal<CommandAction>()
@@ -124,19 +125,23 @@ export function App(props: AppProps) {
   const data = () => typeof props.data === "function" ? props.data() : props.data
   const operations = () => typeof props.operations === "function" ? props.operations() : props.operations
   const page = () => navigation().page
-  const diffTarget = () => navigation().diff
-  const diffResource = createMemo<ResourceState<DiffContent>>(() => {
-    const target = diffTarget()
-    const loaded = props.diff
+  const diffTarget = () => navigation().diffs?.[page()]
+  const resourceForDiff = (target?: DiffTarget): ResourceState<DiffContent> => {
+    const loaded = target && props.diffs?.[target.kind]
     const matches = target?.kind === "commit" ? loaded?.target.kind === "commit" && loaded.target.sha === target.sha
       : target?.kind === "pull" && loaded?.target.kind === "pull" && loaded.target.number === target.number
     return matches && loaded ? loaded.resource : { status: "loading", phase: "load" }
-  })
+  }
+  const diffResource = createMemo(() => resourceForDiff(diffTarget()))
   const viewDiff = (target: DiffTarget) => {
     setNavigation((state) => openDiff(state, target))
     void props.onLoadDiff?.(target)
   }
-  const closeDiff = () => { setNavigation(back); props.onCloseDiff?.() }
+  const closeDiff = () => {
+    const target = diffTarget()
+    setNavigation(back)
+    if (target) props.onCloseDiff?.(target)
+  }
   const commitSha = createMemo(() => {
     const detail = navigation().details?.commits
     return detail?.kind === "commit" ? detail.sha : undefined
@@ -498,10 +503,7 @@ export function App(props: AppProps) {
     if (detail?.kind === "issue") { props.onCloseIssue?.(); setRevealActivity() }
     if (detail?.kind === "pull") props.onClosePull?.()
   }
-  const selectPage = (next: Page) => {
-    if (diffTarget()) props.onCloseDiff?.()
-    setNavigation((state) => navigate(state, next))
-  }
+  const selectPage = (next: Page) => setNavigation((state) => navigate(state, next))
   const movePage = (delta: number) => {
     const available = visibleTabs()
     const current = Math.max(0, available.findIndex((tab) => tab.page === page()))
@@ -557,9 +559,14 @@ export function App(props: AppProps) {
     if (overlay() === "issue-action") return issueActionHint()
     if (overlay() === "issue-actions") return "↑/↓ select · enter open · esc cancel"
     const common = (props.onSwitchRepository ? " · s switch repo" : "") + " · ? help"
-    if (diffTarget()) return dimensions().width < 80 ? "esc back · tab focus · b files · ? help"
-      : "esc back · tab focus · b files · [ prev hunk · ] next hunk · t layout · w wrap · r refresh"
-        + (diffResource().status === "error" ? " · enter file list" : "") + " · ? help"
+    if (diffTarget()) {
+      const files = diffFocus()[page()] === "files"
+      const horizontal = files ? "h/l ←/→ tabs" : "h/l ←/→ pan"
+      const next = files ? "diff" : "files"
+      if (dimensions().width < 80) return `esc back · ${horizontal} · tab ${next} · ? help`
+      return `esc back · ${horizontal} · j/k ${files ? "files" : "scroll"} · tab ${next} · b files · [ ] hunks`
+        + (diffResource().status === "error" ? " · enter file list" : " · t layout · w wrap") + " · ? help"
+    }
     if (activeCommitSha()) {
       const retry = commitResource().status === "error"
       const more = commitResource().value?.files.hasMore
@@ -641,7 +648,7 @@ export function App(props: AppProps) {
         void props.onLoadDiff?.(diff, true)
       else if (event.name >= "1" && event.name <= "5") {
         const tab = visibleTabs()[Number(event.name) - 1]
-        if (tab) selectPage(tab.page)
+        if (tab) { event.stopPropagation(); selectPage(tab.page) }
       }
       return
     }
@@ -651,11 +658,17 @@ export function App(props: AppProps) {
     }
     if (event.name >= "1" && event.name <= "5") {
       const target = visibleTabs()[Number(event.name) - 1]
-      if (target) selectPage(target.page)
+      if (target) { event.stopPropagation(); selectPage(target.page) }
       return
     }
-    if (event.name === "left" || event.name === "h") return movePage(-1)
-    if (event.name === "right" || event.name === "l") return movePage(1)
+    if (event.name === "left" || event.name === "h") {
+      event.stopPropagation()
+      return movePage(-1)
+    }
+    if (event.name === "right" || event.name === "l") {
+      event.stopPropagation()
+      return movePage(1)
+    }
     const sha = activeCommitSha()
     if (sha) {
       if (event.ctrl || event.meta) return
@@ -875,10 +888,17 @@ export function App(props: AppProps) {
         )}
       </Show>
       </box>
-      <Show when={diffTarget()} keyed>
-        {(target) => <DiffScreen target={target} resource={diffResource()} interactive={overlay() === undefined}
-          showScrollbar={config().showScrollbars} onLoadFiles={() => void props.onLoadDiff?.(target, true)} />}
-      </Show>
+      <For each={["commits", "pulls"] as const}>
+        {(owner) => <Show when={navigation().diffs?.[owner]} keyed>
+          {(target) => <box id={`diff-view-${owner}`} visible={page() === owner} flexGrow={1} minHeight={0} flexDirection="column">
+            <DiffScreen target={target} resource={resourceForDiff(target)} active={page() === owner}
+              interactive={page() === owner && overlay() === undefined}
+              onMovePage={movePage}
+              onFocusChange={(focus) => setDiffFocus((current) => ({ ...current, [owner]: focus }))}
+              showScrollbar={config().showScrollbars} onLoadFiles={() => void props.onLoadDiff?.(target, true)} />
+          </box>}
+        </Show>}
+      </For>
       <StatusBar kind={status()} detail={statusDetail()} hint={shortcutHint()}
         zIndex={overlay() === "issue-action" || overlay() === "issue-actions" ? 350 : 0} />
       <Show when={toast()} keyed>

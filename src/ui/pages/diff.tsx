@@ -1,6 +1,6 @@
 import { BoxRenderable, type ScrollBoxRenderable } from "@opentui/core"
 import { useKeyboard, useRenderer, useTerminalDimensions } from "@opentui/solid"
-import { HUNK_DIFF_THEME_NAMES, type HunkDiffBodyProps } from "hunkdiff/opentui"
+import { HUNK_DIFF_THEME_NAMES, type HunkDiffBodyProps, type HunkDiffThemeName } from "hunkdiff/opentui"
 import { createEffect, createMemo, createSignal, on, onCleanup, onMount, Show } from "solid-js"
 import type { DiffContent, DiffTarget } from "../../models"
 import type { ResourceState } from "../../repository-state"
@@ -10,20 +10,40 @@ import { mountHunk } from "../hunk-host"
 import { createScrollbarVisibility } from "../scrollbar-visibility"
 import { useTheme } from "../theme"
 
+// opengh and Shiki use different IDs for some of the same theme families.
+const themeAliases: Partial<Record<string, HunkDiffThemeName>> = {
+  ayu: "ayu-dark", catppuccin: "catppuccin-mocha", everforest: "everforest-dark",
+  github: "github-dark-default", gruvbox: "gruvbox-dark-medium", kanagawa: "kanagawa-wave",
+  material: "material-theme", nightowl: "night-owl", "one-dark": "one-dark-pro",
+  opengh: "github-dark-default", palenight: "material-theme-palenight", rosepine: "rose-pine",
+  solarized: "solarized-dark", synthwave84: "synthwave-84", tokyonight: "tokyo-night",
+}
+
+export type DiffFocus = "files" | "diff"
+
 export function DiffScreen(props: {
   target: DiffTarget
   resource: ResourceState<DiffContent>
   interactive: boolean
+  active?: boolean
   showScrollbar: boolean
   onLoadFiles: () => void
+  onMovePage?: (delta: number) => void
+  onFocusChange?: (focus: DiffFocus) => void
 }) {
   const renderer = useRenderer()
   const dimensions = useTerminalDimensions()
+  const active = () => props.active !== false
   const { colors, selected: selectedTheme } = useTheme()
-  const parsed = createMemo<ReturnType<typeof parseDiff>>(() => props.resource.value ? parseDiff(props.resource.value) : { files: [] })
+  const content = createMemo(() => props.resource.value)
+  const parsed = createMemo<ReturnType<typeof parseDiff>>(() => {
+    const value = content()
+    return value ? parseDiff(value) : { files: [] }
+  })
   const [path, setPath] = createSignal<string>()
   const selected = createMemo(() => parsed().files.find((file) => file.path === path()) ?? parsed().files[0])
-  const [focus, setFocus] = createSignal<"files" | "diff">(dimensions().width < 80 ? "diff" : "files")
+  const [focus, setFocus] = createSignal<DiffFocus>(dimensions().width < 80 ? "diff" : "files")
+  createEffect(() => props.onFocusChange?.(focus()))
   const [sidebarHidden, setSidebarHidden] = createSignal(false)
   const [layout, setLayout] = createSignal<"split" | "unified">()
   const [wrap, setWrap] = createSignal(false)
@@ -39,7 +59,7 @@ export function DiffScreen(props: {
   const message = () => selected()?.message ?? (selected() && !selected()?.body ? "Patch unavailable for this file. Press r to retry or o to open GitHub." : undefined)
   const renderFile = () => message() ? undefined : selected()?.body
   const theme = createMemo(() => {
-    const matching = HUNK_DIFF_THEME_NAMES.find((name) => name === selectedTheme())
+    const matching = HUNK_DIFF_THEME_NAMES.find((name) => name === selectedTheme()) ?? themeAliases[selectedTheme()]
     if (matching) return matching
     const rgb = colors.canvas.match(/^#([\da-f]{2})([\da-f]{2})([\da-f]{2})/i)
     const brightness = rgb ? Number.parseInt(rgb[1]!, 16) * 0.299 + Number.parseInt(rgb[2]!, 16) * 0.587 + Number.parseInt(rgb[3]!, 16) * 0.114 : 0
@@ -50,20 +70,21 @@ export function DiffScreen(props: {
   let wrapper: BoxRenderable | undefined
   let pane: ReturnType<typeof mountHunk> | undefined
   let disposed = false
-  let pending: { file: DiffFile | undefined; index: number | null } | undefined
+  let rememberedScroll = 0
+  let pending: { file: DiffFile | undefined; index: number | null; scrollTop?: number } | undefined
   let waiting = false
 
   // Only navigation schedules a layout wait. Layout/commit callbacks never feed a reactive effect.
   const revealPending = () => {
-    if (!pending || waiting || disposed) return
+    if (!pending || waiting || disposed || !active()) return
     waiting = true
     void renderer.idle().then(() => {
       waiting = false
-      if (disposed || !pending || !scroll) return
+      if (disposed || !pending || !scroll || !active()) return
       const navigation = pending
       pending = undefined
       if (navigation.file !== selected()) return
-      if (navigation.index === null) scroll.scrollTo(0)
+      if (navigation.index === null) scroll.scrollTo(navigation.scrollTop ?? 0)
       else {
         const body = navigation.file?.body
         const anchor = body && host()?.findDescendantById(`diff-hunk:${body.id}:${navigation.index}`)
@@ -71,13 +92,24 @@ export function DiffScreen(props: {
       }
     }).catch(() => { waiting = false })
   }
-  const measure = () => setWidth(Math.max(1, scroll?.viewport.width ?? 1))
+  const measure = () => { if (active()) setWidth(Math.max(1, scroll?.viewport.width ?? 1)) }
 
   createEffect(on(selected, (file) => {
+    rememberedScroll = 0
     setHunk(0)
     setOffset(0)
     scroll?.scrollTo(0)
     pending = { file, index: null }
+  }))
+
+  createEffect(on(active, (visible) => {
+    if (!visible) {
+      rememberedScroll = scroll?.scrollTop ?? rememberedScroll
+      return
+    }
+    measure()
+    pending = { file: selected(), index: null, scrollTop: rememberedScroll }
+    revealPending()
   }))
 
   createEffect(() => {
@@ -86,7 +118,7 @@ export function DiffScreen(props: {
       file: renderFile(), width: width(), theme: theme(),
       canonicalLayout: layout() ?? (narrow() ? "unified" : "split"),
       wrapLines: wrap(), horizontalOffset: offset(), selectedHunkIndex: hunk(),
-      highlight: false, showLineNumbers: true, showHunkHeaders: true,
+      highlight: true, showLineNumbers: true, showHunkHeaders: true,
     }
     if (!container) return
     if (!bodyProps.file) { pane?.dispose(); pane = undefined; return }
@@ -124,7 +156,7 @@ export function DiffScreen(props: {
     else setHunk(index)
   }
   useKeyboard((event) => {
-    if (!props.interactive || event.ctrl || event.meta) return
+    if (!active() || !props.interactive || event.ctrl || event.meta) return
     if (event.name === "tab") {
       if (focus() === "diff") { setSidebarHidden(false); setFocus("files") }
       else setFocus("diff")
@@ -136,6 +168,11 @@ export function DiffScreen(props: {
       setSidebarHidden(hide)
       setFocus(hide ? "diff" : "files")
       event.stopPropagation()
+      return
+    }
+    if (focus() === "files" && (event.name === "h" || event.name === "left" || event.name === "l" || event.name === "right")) {
+      event.stopPropagation()
+      props.onMovePage?.(event.name === "h" || event.name === "left" ? -1 : 1)
       return
     }
     if ((event.name === "enter" || event.name === "return") && error()) {
@@ -167,8 +204,10 @@ export function DiffScreen(props: {
         <text flexGrow={1} minWidth={0} height={1} wrapMode="none" truncate fg={colors.text}>
           {selected()?.previousPath ? `${selected()!.previousPath} → ${selected()!.path}` : selected()?.path ?? "Diff"}
         </text>
-        <text flexShrink={0} fg={colors.green}> +{selected()?.additions ?? 0}</text>
-        <text flexShrink={0} fg={colors.red}> −{selected()?.deletions ?? 0}</text>
+        <Show when={selected()}>
+          <text flexShrink={0} fg={colors.green}> +{selected()?.additions ?? 0}</text>
+          <text flexShrink={0} fg={colors.red}> −{selected()?.deletions ?? 0}</text>
+        </Show>
       </box>
       <Show when={props.resource.status === "loading"}>
         <text height={1} flexShrink={0} fg={colors.muted}>Loading diff…</text>
@@ -187,11 +226,14 @@ export function DiffScreen(props: {
           width={narrow() ? "100%" : 30}
           flexShrink={0} minHeight={0} minWidth={0} flexDirection="column"
         >
-          <text height={1} fg={colors.muted}>Files ({parsed().files.length})</text>
+          <text height={1} fg={colors.muted}>
+            Files{props.resource.value !== undefined && !parsed().error ? ` (${parsed().files.length})` : ""}
+          </text>
           <SelectableList
             items={parsed().files} itemKey={(file) => file.path} resetKey={targetKey()}
-            active={props.interactive && focus() === "files" && !error()}
-            showScrollbar={props.showScrollbar} rowHeight={1} empty="No changed files."
+            active={active() && props.interactive && focus() === "files" && !error()}
+            showScrollbar={props.showScrollbar} rowHeight={1}
+            empty={props.resource.status === "ready" && !error() ? "No changed files." : ""}
             onSelect={(file) => setPath(file.path)}
             onActivate={(file) => { setPath(file.path); setFocus("diff") }}
           >
@@ -202,6 +244,7 @@ export function DiffScreen(props: {
           border={["left"]} borderColor={focus() === "diff" ? colors.blue : colors.border}
           flexGrow={1} minHeight={0} minWidth={0} flexDirection="column">
           <scrollbox
+            id="diff-body-scroll"
             ref={(value) => { scroll = value; bindScrollbar(value); value.viewport.on("resize", measure); measure() }}
             flexGrow={1} minHeight={0} minWidth={0} scrollY scrollX={false}
           >

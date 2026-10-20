@@ -1,0 +1,35 @@
+diff --git a/dist/npm/opentui/index.js b/dist/npm/opentui/index.js
+--- a/dist/npm/opentui/index.js
++++ b/dist/npm/opentui/index.js
+@@ -1614,8 +1614,12 @@
+ }
+ 
+ // packages/hunk/src/highlightWorkerClient.ts
++var configuredHighlightWorkerUrl;
++function configureHunkHighlightWorker(url) {
++  configuredHighlightWorkerUrl = url;
++}
+ function highlightWorkerUrl() {
+-  return new URL("./highlightWorkerEntry.js", import.meta.url);
++  return configuredHighlightWorkerUrl ?? new URL("./highlightWorkerEntry.js", import.meta.url);
+ }
+ function supportsHighlightWorkerOffload({
+   execPath = process.execPath,
+@@ -8310,6 +8314,7 @@
+   }, undefined, false, undefined, this);
+ }
+ export {
++  configureHunkHighlightWorker,
+   HUNK_DIFF_THEME_NAMES,
+   HunkDiffBody,
+   HunkDiffFileHeader,
+diff --git a/dist/npm/opentui/index.d.ts b/dist/npm/opentui/index.d.ts
+--- a/dist/npm/opentui/index.d.ts
++++ b/dist/npm/opentui/index.d.ts
+@@ -7,3 +7,6 @@
+ export { HunkReviewStream } from "./HunkReviewStream.js";
+ export { countHunkDiffStats, createHunkDiffFile, createHunkDiffFilesFromPatch } from "./model.js";
+ export type { CanonicalHunkDiffLayout, HunkDiffBodyProps, HunkDiffFile, HunkDiffFileHeaderProps, HunkDiffFileInput, HunkDiffLayout, LegacyHunkDiffLayout, HunkDiffSelection, HunkDiffStats, HunkDiffViewProps, HunkFileNavProps, HunkReviewStreamProps, } from "./types.js";
++
++/** Configure the missing npm worker entry before mounting any highlighted diffs. */
++export declare function configureHunkHighlightWorker(url: URL): void;

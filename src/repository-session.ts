@@ -92,9 +92,9 @@ export type RepositoryLoaders = {
 
 export type RepositorySession = {
   state: Accessor<RepositoryState>
-  diff?: Accessor<DiffState | undefined>
+  diffs?: Accessor<Partial<Record<DiffTarget["kind"], DiffState>>>
   loadDiff?(target: DiffTarget, filesOnly?: boolean): Promise<void>
-  clearDiff?(): void
+  clearDiff?(target?: DiffTarget): void
   commitDetail: Accessor<CommitDetailState | undefined>
   loadCommit(sha: string): Promise<void>
   loadMoreCommitFiles(): Promise<void>
@@ -238,31 +238,39 @@ function updateReady(
 export function createRepositorySession(loaders: RepositoryLoaders = defaultLoaders): RepositorySession {
   const [state, setState] = createSignal<RepositoryState>({ status: "loading", repository: "" })
   const [commitDetail, setCommitDetail] = createSignal<CommitDetailState>()
-  const [diff, setDiff] = createSignal<DiffState>()
-  let diffGeneration = 0
-  let diffAbort: AbortController | undefined
-  const clearDiff = () => {
-    ++diffGeneration
-    diffAbort?.abort()
-    diffAbort = undefined
-    setDiff(undefined)
+  const [diffs, setDiffs] = createSignal<Partial<Record<DiffTarget["kind"], DiffState>>>({})
+  const diffGeneration: Record<DiffTarget["kind"], number> = { commit: 0, pull: 0 }
+  const diffAbort: Partial<Record<DiffTarget["kind"], AbortController>> = {}
+  const clearDiff = (target?: DiffTarget) => {
+    const kinds = target ? [target.kind] : ["commit", "pull"] as const
+    for (const kind of kinds) {
+      ++diffGeneration[kind]
+      diffAbort[kind]?.abort()
+      delete diffAbort[kind]
+    }
+    setDiffs((current) => {
+      const next = { ...current }
+      for (const kind of kinds) delete next[kind]
+      return next
+    })
   }
   const loadDiff = async (target: DiffTarget, filesOnly = false) => {
     const current = state()
     if (current.status !== "ready") return
-    diffAbort?.abort()
+    const kind = target.kind
+    diffAbort[kind]?.abort()
     const controller = new AbortController()
-    diffAbort = controller
-    const request = ++diffGeneration
-    setDiff({ target, resource: loadingResource<DiffContent>() })
+    diffAbort[kind] = controller
+    const request = ++diffGeneration[kind]
+    setDiffs((current) => ({ ...current, [kind]: { target, resource: loadingResource<DiffContent>() } }))
     try {
       if (!loaders.diff) throw new Error("Diff loading is unavailable")
       const value = await loaders.diff(current.repository, target, controller.signal, filesOnly)
-      if (request === diffGeneration && !controller.signal.aborted)
-        setDiff({ target, resource: { status: "ready", value } })
+      if (request === diffGeneration[kind] && !controller.signal.aborted)
+        setDiffs((current) => ({ ...current, [kind]: { target, resource: { status: "ready", value } } }))
     } catch (error) {
-      if (request === diffGeneration && !controller.signal.aborted)
-        setDiff({ target, resource: failedResource<DiffContent>(error) })
+      if (request === diffGeneration[kind] && !controller.signal.aborted)
+        setDiffs((current) => ({ ...current, [kind]: { target, resource: failedResource<DiffContent>(error) } }))
     }
   }
   const [issueDetail, setIssueDetail] = createSignal<IssueDetailState>()
@@ -1400,7 +1408,7 @@ export function createRepositorySession(loaders: RepositoryLoaders = defaultLoad
 
   return {
     state,
-    diff,
+    diffs,
     loadDiff,
     clearDiff,
     commitDetail,

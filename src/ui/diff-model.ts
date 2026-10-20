@@ -1,4 +1,5 @@
 import { createHunkDiffFilesFromPatch, type HunkDiffFile } from "hunkdiff/opentui"
+import { getFiletypeFromFileName } from "@pierre/diffs"
 import type { DiffContent } from "../models"
 
 export type DiffFile = {
@@ -42,7 +43,7 @@ export function parseDiff(content: DiffContent): { files: DiffFile[]; notice?: s
         : "No text hunks were supplied for this file."
       return { path: body.path ?? metadata.name, previousPath: body.previousPath,
         additions: body.stats.additions, deletions: body.stats.deletions, status: metadata.type,
-        body: { ...body, isBinary }, message }
+        body: { ...body, isBinary, language: body.language ?? metadata.lang ?? getFiletypeFromFileName(body.path ?? metadata.name) }, message }
     })
     const notices: string[] = []
     if (/^diff --(?:cc|combined) /m.test(patch)) notices.push("Merge diff shown as a first-parent comparison, not a multi-parent view.")

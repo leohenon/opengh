@@ -1,7 +1,7 @@
 import { CliRenderEvents, type BoxRenderable, type CliRenderer } from "@opentui/core"
 import { createPortal, createRoot, flushSync } from "@opentui/react"
-import { createElement, useLayoutEffect, useSyncExternalStore } from "react"
-import { HunkDiffBody, type HunkDiffBodyProps } from "hunkdiff/opentui"
+import { createElement, Fragment, useLayoutEffect, useSyncExternalStore } from "react"
+import { configureHunkHighlightWorker, HunkDiffBody, type HunkDiffBodyProps } from "hunkdiff/opentui"
 
 type Pane = { host: BoxRenderable; props: HunkDiffBodyProps; id: number; onCommit?: () => void }
 type Bridge = { mount(host: BoxRenderable, props: HunkDiffBodyProps, onCommit?: () => void): {
@@ -18,43 +18,47 @@ export function initializeHunk(renderer: CliRenderer) {
   if (bridges.has(renderer)) return
   if (renderer.isDestroyed || renderer.root.getChildren().length)
     throw new Error("Hunk must be initialized before the Solid application mounts")
-  let pane: Pane | null = null
+  configureHunkHighlightWorker(new URL("./workers/hunk-highlight.js", import.meta.url))
+  let panes: Pane[] = []
   let nextId = 0
   const listeners = new Set<() => void>()
   const subscribe = (listener: () => void) => { listeners.add(listener); return () => { listeners.delete(listener) } }
-  const snapshot = () => pane
-  function Portal() {
+  const snapshot = () => panes
+  function PanePortal({ value }: { value: Pane }) {
+    useLayoutEffect(() => { value.onCommit?.() }, [value])
+    return createPortal(createElement(HunkDiffBody, value.props), value.host, null, String(value.id))
+  }
+  function Portals() {
     const value = useSyncExternalStore(subscribe, snapshot, snapshot)
-    useLayoutEffect(() => { value?.onCommit?.() }, [value])
-    return value ? createPortal(createElement(HunkDiffBody, { ...value.props, highlight: false }), value.host, null, String(value.id)) : null
+    return createElement(Fragment, null, ...value.map((pane) => createElement(PanePortal, { key: pane.id, value: pane })))
   }
   const root = createRoot(renderer)
-  flushSync(() => root.render(createElement(Portal)))
-  const publish = (value: Pane | null) => {
-    if (renderer.isDestroyed) { pane = null; return }
-    flushSync(() => { pane = value; for (const listener of listeners) listener() })
+  flushSync(() => root.render(createElement(Portals)))
+  const publish = (value: Pane[]) => {
+    if (renderer.isDestroyed) { panes = []; return }
+    flushSync(() => { panes = value; for (const listener of listeners) listener() })
   }
   renderer.once(CliRenderEvents.DESTROY, () => {
     // React's root already registers its own renderer-destroy cleanup.
-    pane = null
+    panes = []
     listeners.clear()
     bridges.delete(renderer)
   })
   bridges.set(renderer, {
     mount(host, props, onCommit) {
-      if (pane) throw new Error("A Hunk pane is already mounted")
       if (host.isDestroyed || renderer.isDestroyed) throw new Error("Cannot mount Hunk into a destroyed host")
       const id = ++nextId
-      publish({ host, props, id, onCommit })
+      publish([...panes, { host, props, id, onCommit }])
       let disposed = false
       return {
         update(props) {
-          if (!disposed && pane?.id === id && !host.isDestroyed) publish({ ...pane, props })
+          if (!disposed && !host.isDestroyed && panes.some((pane) => pane.id === id))
+            publish(panes.map((pane) => pane.id === id ? { ...pane, props } : pane))
         },
         dispose() {
           if (disposed) return
           disposed = true
-          if (pane?.id === id) publish(null)
+          if (panes.some((pane) => pane.id === id)) publish(panes.filter((pane) => pane.id !== id))
         },
       }
     },

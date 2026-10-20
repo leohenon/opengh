@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test"
-import type { BoxRenderable } from "@opentui/core"
+import { BoxRenderable } from "@opentui/core"
 import { createTestRenderer } from "@opentui/core/testing"
 import { render } from "@opentui/solid"
 import { createSignal, onCleanup, onMount, Show } from "solid-js"
@@ -21,7 +21,7 @@ test("Hunk portal preserves Solid siblings through updates, local remounts and r
     let box!: BoxRenderable
     onMount(() => {
       host = box
-      pane = mountHunk(renderer, box, { file: file("one.ts"), width: 90, canonicalLayout: "unified" }, () => commits++)
+      pane = mountHunk(renderer, box, { file: file("one.ts"), width: 90, canonicalLayout: "unified", highlight: false }, () => commits++)
     })
     onCleanup(() => {
       pane?.dispose()
@@ -37,14 +37,14 @@ test("Hunk portal preserves Solid siblings through updates, local remounts and r
     expect(setup.captureCharFrame()).toContain("new-one.ts")
     expect(setup.captureCharFrame()).toContain("Solid sibling")
     setLabel("Solid changed")
-    pane!.update({ file: file("two.ts"), width: 90, canonicalLayout: "split" })
+    pane!.update({ file: file("two.ts"), width: 90, canonicalLayout: "split", highlight: false })
     await setup.renderOnce()
     expect(setup.captureCharFrame()).toContain("new-two.ts")
     expect(setup.captureCharFrame()).not.toContain("new-one.ts")
     expect(setup.captureCharFrame()).toContain("Solid changed")
     expect(commits).toBeGreaterThanOrEqual(2)
     setup.resize(50, 20)
-    pane!.update({ file: file("two.ts"), width: 50, canonicalLayout: "unified" })
+    pane!.update({ file: file("two.ts"), width: 50, canonicalLayout: "unified", highlight: false })
     await setup.renderOnce()
     expect(setup.captureCharFrame()).toContain("new-two.ts")
     for (let index = 0; index < 3; index++) {
@@ -58,8 +58,19 @@ test("Hunk portal preserves Solid siblings through updates, local remounts and r
       expect(setup.captureCharFrame()).toContain("new-one.ts")
       expect(renderer.keyInput.listenerCount("keypress")).toBe(keyListeners)
     }
-    renderer.destroy()
+    const peerHost = new BoxRenderable(renderer, { width: 50, height: 3 })
+    renderer.root.add(peerHost)
+    const peer = mountHunk(renderer, peerHost, { file: file("peer.ts"), width: 50, highlight: false })
+    expect(peerHost.getChildrenCount()).toBeGreaterThan(0)
+    setVisible(false) // Disposing one portal must not remove another tab's rows.
+    await setup.renderOnce()
+    expect(peerHost.getChildrenCount()).toBeGreaterThan(0)
+    setVisible(true)
+    await setup.renderOnce()
+    expect(host!.getChildrenCount()).toBeGreaterThan(0)
+    renderer.destroy() // Both portals remain mounted for whole-renderer teardown.
     await renderer.closed
+    peer.dispose()
     expect(renderer.isDestroyed).toBe(true)
     expect(pane).toBeUndefined()
   } finally {

@@ -197,7 +197,7 @@ export function Root(props: {
               onBranchChange={(branch) => void session.switchBranch(branch)}
               onLoadMoreBranches={session.loadMoreBranches}
               onLoadMoreCommits={session.loadMoreCommits}
-              diff={session.diff?.()}
+              diffs={session.diffs?.()}
               onLoadDiff={session.loadDiff}
               onCloseDiff={session.clearDiff}
               commitDetail={session.commitDetail()}

@@ -45,29 +45,83 @@ function ready(session: ReturnType<typeof createRepositorySession>) {
 }
 
 describe("repository session", () => {
-  test("closing or replacing a diff aborts its request and rejects late results", async () => {
+  test("replacing a diff aborts only its same-kind request and rejects late results", async () => {
     const first = deferred<DiffContent>()
     const signals: AbortSignal[] = []
     const session = createRepositorySession(loaders({
       diff: async (_repository, target, signal) => {
         signals.push(signal)
-        return target.kind === "commit" ? first.promise : { kind: "patch", patch: "PR diff" }
+        return target.kind === "commit" && target.sha === "abc" ? first.promise : { kind: "patch", patch: "New diff" }
       },
     }))
     await session.load("owner/repo")
-    const pending = session.loadDiff!({ kind: "commit", sha: "abc" })
     await session.loadDiff!({ kind: "pull", number: 42 })
-    expect(signals[0]?.aborted).toBe(true)
+    const pending = session.loadDiff!({ kind: "commit", sha: "abc" })
+    await session.loadDiff!({ kind: "commit", sha: "def" })
+    expect(signals[0]?.aborted).toBe(false)
+    expect(signals[1]?.aborted).toBe(true)
     first.resolve({ kind: "patch", patch: "Old diff" })
     await pending
-    expect(session.diff!()?.target).toEqual({ kind: "pull", number: 42 })
-    expect(session.diff!()?.resource.value).toEqual({ kind: "patch", patch: "PR diff" })
-    session.clearDiff!()
+    expect(session.diffs!().commit?.target).toEqual({ kind: "commit", sha: "def" })
+    expect(session.diffs!().commit?.resource.value).toEqual({ kind: "patch", patch: "New diff" })
+    expect(session.diffs!().pull?.target).toEqual({ kind: "pull", number: 42 })
+  })
+
+  test("commit and pull diffs coexist and clearing one leaves the other intact", async () => {
+    const commit = deferred<DiffContent>()
+    const pull = deferred<DiffContent>()
+    const signals: AbortSignal[] = []
+    const session = createRepositorySession(loaders({
+      diff: async (_repository, target, signal) => {
+        signals.push(signal)
+        return target.kind === "commit" ? commit.promise : pull.promise
+      },
+    }))
+    await session.load("owner/repo")
+    const pendingCommit = session.loadDiff!({ kind: "commit", sha: "abc" })
+    const pendingPull = session.loadDiff!({ kind: "pull", number: 42 })
+    expect(signals.every((signal) => !signal.aborted)).toBe(true)
+    expect(session.diffs!().commit?.resource.status).toBe("loading")
+    expect(session.diffs!().pull?.resource.status).toBe("loading")
+    commit.resolve({ kind: "patch", patch: "Commit diff" })
+    await pendingCommit
+    session.clearDiff!({ kind: "pull", number: 42 })
+    expect(signals[0]?.aborted).toBe(false)
     expect(signals[1]?.aborted).toBe(true)
-    expect(session.diff!()).toBeUndefined()
-    await session.loadDiff!({ kind: "pull", number: 42 })
-    await session.load("owner/other")
-    expect(session.diff!()).toBeUndefined()
+    pull.resolve({ kind: "patch", patch: "Old PR diff" })
+    await pendingPull
+    expect(session.diffs!().pull).toBeUndefined()
+    expect(session.diffs!().commit?.resource.value).toEqual({ kind: "patch", patch: "Commit diff" })
+    await session.loadDiff!({ kind: "pull", number: 43 })
+    expect(session.diffs!().pull?.resource.status).toBe("ready")
+    session.clearDiff!({ kind: "commit", sha: "abc" })
+    expect(session.diffs!().commit).toBeUndefined()
+    expect(session.diffs!().pull?.target).toEqual({ kind: "pull", number: 43 })
+  })
+
+  test("clearing all diffs or replacing the repository aborts both slots and rejects late results", async () => {
+    for (const replaceRepository of [false, true]) {
+      const commit = deferred<DiffContent>()
+      const pull = deferred<DiffContent>()
+      const signals: AbortSignal[] = []
+      const session = createRepositorySession(loaders({
+        diff: async (_repository, target, signal) => {
+          signals.push(signal)
+          return target.kind === "commit" ? commit.promise : pull.promise
+        },
+      }))
+      await session.load("owner/repo")
+      const pendingCommit = session.loadDiff!({ kind: "commit", sha: "abc" })
+      const pendingPull = session.loadDiff!({ kind: "pull", number: 42 })
+      if (replaceRepository) await session.load("owner/other")
+      else session.clearDiff!()
+      expect(signals.every((signal) => signal.aborted)).toBe(true)
+      expect(session.diffs!()).toEqual({})
+      commit.resolve({ kind: "patch", patch: "Old commit diff" })
+      pull.reject(new Error("Old PR diff failed"))
+      await Promise.all([pendingCommit, pendingPull])
+      expect(session.diffs!()).toEqual({})
+    }
   })
   test("loads branch commit totals independently, preserves them during pagination, and refreshes them", async () => {
     const pending = deferred<number>()

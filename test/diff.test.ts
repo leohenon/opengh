@@ -64,6 +64,7 @@ Binary files a/image.png and b/image.png differ
   expect(parsed.error).toBeUndefined()
   expect(parsed.files).toHaveLength(4)
   expect(parsed.files[0]?.body?.metadata.hunks).toHaveLength(1)
+  expect(parsed.files[0]?.body?.language).toBe("typescript")
   expect(parsed.files[1]?.previousPath).toBe("old.txt")
   expect(parsed.files[1]?.message).toContain("Renamed")
   expect(parsed.files[2]?.message).toContain("100644 → 100755")
