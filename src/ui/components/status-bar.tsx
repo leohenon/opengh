@@ -41,20 +41,20 @@ export function StatusBar(props: { kind?: StatusKind; detail?: string; hint?: st
     return loadingMessages[props.kind]
   }
 
+  // Keep the footer row even with hints off, so loading feedback never resizes
+  // the viewport (a single line can change a list's capacity by a whole item).
   return (
-    <Show when={loadingMessage() || props.hint}>
-      <box
-        height={1}
-        flexShrink={0}
-        zIndex={props.zIndex ?? 0}
-        paddingLeft={2}
-        paddingRight={2}
-        backgroundColor={colors.canvas}
-      >
-        <Show when={loadingMessage()} fallback={<text height={1} wrapMode="none" fg={colors.muted}>{hint()}</text>}>
-          {(message) => <LoadingText text={message()} />}
-        </Show>
-      </box>
-    </Show>
+    <box
+      height={1}
+      flexShrink={0}
+      zIndex={props.zIndex ?? 0}
+      paddingLeft={2}
+      paddingRight={2}
+      backgroundColor={colors.canvas}
+    >
+      <Show when={loadingMessage()} fallback={<text height={1} wrapMode="none" fg={colors.muted}>{hint()}</text>}>
+        {(message) => <LoadingText text={message()} />}
+      </Show>
+    </box>
   )
 }

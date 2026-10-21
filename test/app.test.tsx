@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { testRender } from "@opentui/solid";
-import { RGBA } from "@opentui/core";
+import { RGBA, ScrollBoxRenderable, type Renderable } from "@opentui/core";
 import { createSignal } from "solid-js";
 import { App } from "../src/ui/app";
 import { Header } from "../src/ui/components/header";
@@ -1382,6 +1382,48 @@ test("remembered Actions waits for availability, falls back when absent, and doe
     } else {
       expect(view.captureCharFrame()).toContain("ScrollBox loses focus");
       expect(changes).not.toContain("actions");
+    }
+  }
+});
+
+
+test("pagination feedback does not resize the commit viewport or reveal an extra row", async () => {
+  const items = Array.from({ length: 100 }, (_, index) => ({
+    ...githubDataFixture.commits.value!.items[0]!, sha: String(index).padStart(40, "0"), message: `COMMIT ${index}`,
+  }));
+  const [data, setData] = createSignal<RepositoryData>({ ...githubDataFixture,
+    commits: { status: "ready", value: { items, page: 1, hasMore: true } },
+  });
+  const view = await testRender(() => <App data={data} operations={repositoryOperationsFixture}
+    config={{ ...defaultConfig, showStatusBarHints: false }} initialPage="commits"
+  />, { width: 76, height: 41 });
+  active.push(view);
+  const findList = (node: Renderable): ScrollBoxRenderable | undefined => {
+    if (node instanceof ScrollBoxRenderable && node.content.getChildren().length === items.length) return node;
+    for (const child of node.getChildren()) {
+      const found = findList(child);
+      if (found) return found;
+    }
+  };
+  await view.flush();
+  for (let index = 0; index < 10; index++) view.mockInput.pressKey("j");
+  await view.flush();
+  const list = findList(view.renderer.root)!;
+  const height = list.viewport.height;
+  const scroll = list.scrollTop;
+  const visibleRows = () => view.captureCharFrame().split("\n").filter((row) => /COMMIT \d/.test(row));
+  const before = visibleRows();
+  for (const loading of [true, false, true, false]) {
+    setData((current) => ({ ...current, commits: loading
+      ? { status: "loading", phase: "pagination", value: current.commits.value }
+      : { status: "ready", value: current.commits.value! },
+    }));
+    // Assert individual frames, not just the final settled layout.
+    for (let pass = 0; pass < 2; pass++) {
+      await view.renderOnce();
+      expect(list.viewport.height).toBe(height);
+      expect(list.scrollTop).toBe(scroll);
+      expect(visibleRows()).toEqual(before);
     }
   }
 });
