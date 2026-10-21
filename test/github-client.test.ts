@@ -905,3 +905,23 @@ describe("GitHub issue references", () => {
   })
 
 })
+
+test("workflow details map nullable fields and fetch jobs for the selected attempt", async () => {
+  const client = createGitHubClient(transport({
+    "repos/owner/repo/actions/runs/42": {
+      id: 42, name: "CI", display_title: "Build", status: "in_progress", conclusion: null,
+      created_at: "2026-04-14T09:02:00Z", updated_at: "2026-04-14T09:03:00Z", run_started_at: null,
+      html_url: "https://github.com/owner/repo/actions/runs/42", run_number: 10, run_attempt: 3,
+      event: "push", head_branch: null, head_sha: "abc", actor: null, path: ".github/workflows/ci.yml",
+    },
+    "repos/owner/repo/actions/runs/42/attempts/3/jobs?per_page=30&page=2": {
+      total_count: 61, jobs: [{ id: 7, name: "Test", status: "queued", conclusion: null,
+        started_at: null, completed_at: null, runner_name: null,
+        steps: [{ number: 1, name: "Setup", status: "queued", conclusion: null, started_at: null, completed_at: null }] }],
+    },
+  }))
+  expect(await client.run("owner/repo", 42)).toMatchObject({ id: 42, attempt: 3, branch: "", actor: "ghost", conclusion: "", startedAt: null })
+  const jobs = await client.runJobs("owner/repo", 42, 3, 2)
+  expect(jobs.hasMore).toBe(true)
+  expect(jobs.items[0]).toMatchObject({ id: 7, runner: "", conclusion: "", steps: [{ number: 1, conclusion: "" }] })
+})

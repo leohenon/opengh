@@ -34,7 +34,7 @@ function Shortcut(props: { keys: string; keyWidth: number; children: JSX.Element
 }
 
 export function Help(props: {
-  view: Page | "commit" | "issue" | "pull" | "diff";
+  view: Page | "run" | "commit" | "issue" | "pull" | "diff";
   tabCount: number;
   hasDocumentTabs?: boolean;
   hasMoreFiles?: boolean;
@@ -106,8 +106,20 @@ export function Help(props: {
           ...(props.hasReferences ? [{ keys: "p", description: "open references" }] : []),
           ...(props.hasMoreComments ? [{ keys: "Enter", description: "load more comments" }] : []),
         ];
-      case "diff":
       case "actions":
+        return [
+          { keys: "Enter", description: "open workflow run" },
+          { keys: "o", description: "open on GitHub" },
+          { keys: "y", description: "copy run URL" },
+        ];
+      case "run":
+        return [
+          { keys: "Esc", description: "back to workflow runs" },
+          { keys: "Enter", description: "load more jobs" },
+          { keys: "o", description: "open on GitHub" },
+          { keys: "y", description: "copy run URL" },
+        ];
+      case "diff":
         return [];
     }
   });

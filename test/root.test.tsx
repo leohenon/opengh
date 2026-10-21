@@ -27,6 +27,10 @@ function readySession() {
   const idle = async () => {}
   return {
     state,
+    runDetail: () => undefined,
+    loadRun: idle,
+    loadMoreRunJobs: idle,
+    clearRun: () => {},
     commitDetail: () => undefined,
     loadCommit: idle,
     loadMoreCommitFiles: idle,

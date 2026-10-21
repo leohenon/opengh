@@ -19,6 +19,8 @@ import {
   loadGitHubPullContext,
   loadGitHubPulls,
   loadGitHubRuns,
+  loadGitHubRun,
+  loadGitHubRunJobs,
   createGitHubIssueComment,
   updateGitHubIssueState,
   markGitHubIssueDuplicate,
@@ -46,9 +48,12 @@ import type {
   Repo,
   RepositoryDocument,
   WorkflowRunSummary,
+  WorkflowRunDetail,
+  WorkflowJob,
 } from "./models"
 import type {
   CommitDetailState,
+  RunDetailState,
   DiffState,
   IssueDetailState,
   IssueActionState,
@@ -87,6 +92,8 @@ export type RepositoryLoaders = {
   pullCommits(repository: string, number: number): Promise<CommitSummary[]>
   pullContext(repository: string, number: number): Promise<PullContext>
   pulls(repository: string, state: ListState, page?: number): Promise<Page<PullRequestSummary>>
+  run?(repository: string, id: number): Promise<WorkflowRunDetail>
+  runJobs?(repository: string, id: number, attempt: number, page?: number): Promise<Page<WorkflowJob>>
   runs(repository: string, page?: number): Promise<Page<WorkflowRunSummary>>
 }
 
@@ -95,6 +102,10 @@ export type RepositorySession = {
   diffs?: Accessor<Partial<Record<DiffTarget["kind"], DiffState>>>
   loadDiff?(target: DiffTarget, filesOnly?: boolean): Promise<void>
   clearDiff?(target?: DiffTarget): void
+  runDetail: Accessor<RunDetailState | undefined>
+  loadRun(id: number): Promise<void>
+  loadMoreRunJobs(): Promise<void>
+  clearRun(): void
   commitDetail: Accessor<CommitDetailState | undefined>
   loadCommit(sha: string): Promise<void>
   loadMoreCommitFiles(): Promise<void>
@@ -152,6 +163,8 @@ const defaultLoaders: RepositoryLoaders = {
   pullContext: loadGitHubPullContext,
   pulls: loadGitHubPulls,
   runs: loadGitHubRuns,
+  run: loadGitHubRun,
+  runJobs: loadGitHubRunJobs,
 }
 
 const idle = (): OperationState => ({ status: "idle" })
@@ -237,6 +250,8 @@ function updateReady(
 // Generations reject obsolete repository/branch results; reloads retain usable data.
 export function createRepositorySession(loaders: RepositoryLoaders = defaultLoaders): RepositorySession {
   const [state, setState] = createSignal<RepositoryState>({ status: "loading", repository: "" })
+  const [runDetail, setRunDetail] = createSignal<RunDetailState>()
+  let runGeneration = 0
   const [commitDetail, setCommitDetail] = createSignal<CommitDetailState>()
   const [diffs, setDiffs] = createSignal<Partial<Record<DiffTarget["kind"], DiffState>>>({})
   const diffGeneration: Record<DiffTarget["kind"], number> = { commit: 0, pull: 0 }
@@ -442,12 +457,19 @@ export function createRepositorySession(loaders: RepositoryLoaders = defaultLoad
   }
 
   const fetchRuns = async (repository: string, request: number, pageCount = 1) => {
+    const before = state()
+    const summaries = new Map(before.status === "ready" ? before.data.runs.value?.items.map((run) => [run.id, run]) : [])
     try {
       const result = await loadPageSet(pageCount, (page) => loaders.runs(repository, page), (item) => item.id)
-      updateReady(setState, request, generation, repository, (current) => ({
-        ...current,
-        data: { ...current.data, runs: { status: "ready", value: result } },
-      }))
+      updateReady(setState, request, generation, repository, (current) => {
+        const latest = new Map(current.data.runs.value?.items.map((run) => [run.id, run]))
+        // Detail responses received during this request are newer than its list snapshot.
+        const items = result.items.map((run) => {
+          const updated = latest.get(run.id)
+          return updated && updated !== summaries.get(run.id) ? updated : run
+        })
+        return { ...current, data: { ...current.data, runs: { status: "ready", value: { ...result, items } } } }
+      })
     } catch (error) {
       updateReady(setState, request, generation, repository, (current) => ({
         ...current,
@@ -490,6 +512,74 @@ export function createRepositorySession(loaders: RepositoryLoaders = defaultLoad
       fetchPulls(repository, "closed", request, previous?.pulls.closed.value?.page),
       fetchRuns(repository, request, previous?.runs.value?.page),
     ])
+  }
+
+  const clearRun = () => {
+    ++runGeneration
+    setRunDetail(undefined)
+  }
+
+  const loadRun = async (id: number) => {
+    const current = state()
+    const previous = runDetail()
+    if (current.status !== "ready" || (previous?.id === id && (previous.resource.status === "loading" || previous.jobs.status === "loading"))) return
+    const request = ++runGeneration
+    const retained = previous?.id === id ? previous : undefined
+    setRunDetail({ id, resource: loadingResource(retained?.resource.value), jobs: loadingResource(retained?.jobs.value) })
+    let run: WorkflowRunDetail
+    try {
+      if (!loaders.run) throw new Error("Workflow run details are unavailable")
+      run = await loaders.run(current.repository, id)
+      if (request !== runGeneration) return
+      setState((latest) => latest.status === "ready" && latest.repository === current.repository && latest.data.runs.value
+        ? { ...latest, data: { ...latest.data, runs: { ...latest.data.runs, value: {
+          ...latest.data.runs.value,
+          items: latest.data.runs.value.items.map((item) => item.id === id ? { ...item,
+            name: run.name, title: run.title, status: run.status, conclusion: run.conclusion, createdAt: run.createdAt,
+          } : item),
+        } } } }
+        : latest)
+    } catch (error) {
+      if (request === runGeneration) setRunDetail({
+        id, resource: failedResource(error, retained?.resource.value),
+        jobs: retained?.jobs ?? failedResource(error),
+      })
+      return
+    }
+    const sameAttempt = retained?.resource.value?.attempt === run.attempt
+    const jobs = sameAttempt ? retained?.jobs.value : undefined
+    setRunDetail({ id, resource: { status: "ready", value: run }, jobs: loadingResource(jobs) })
+    try {
+      if (!loaders.runJobs) throw new Error("Workflow jobs are unavailable")
+      const value = await loadPageSet(jobs?.page ?? 1,
+        (page) => loaders.runJobs!(current.repository, id, run.attempt, page), (job) => job.id)
+      if (request === runGeneration) setRunDetail({ id, resource: { status: "ready", value: run }, jobs: { status: "ready", value } })
+    } catch (error) {
+      if (request === runGeneration) setRunDetail({ id, resource: { status: "ready", value: run }, jobs: failedResource(error, jobs) })
+    }
+  }
+
+  const loadMoreRunJobs = async () => {
+    const current = state()
+    const detail = runDetail()
+    const run = detail?.resource.value
+    const jobs = detail?.jobs.value
+    if (current.status !== "ready" || !detail || !run || !jobs?.hasMore
+      || detail.resource.status !== "ready" || detail.jobs.status === "loading"
+      || (detail.jobs.status === "error" && detail.jobs.phase === "load") || !loaders.runJobs) return
+    const request = runGeneration
+    setRunDetail({ ...detail, jobs: loadingResource(jobs, "pagination") })
+    try {
+      const next = await loaders.runJobs(current.repository, detail.id, run.attempt, jobs.page + 1)
+      if (request !== runGeneration) return
+      const existing = new Set(jobs.items.map((job) => job.id))
+      setRunDetail({ ...detail, jobs: { status: "ready", value: {
+        ...next, page: jobs.page + 1,
+        items: [...jobs.items, ...next.items.filter((job) => !existing.has(job.id))],
+      } } })
+    } catch (error) {
+      if (request === runGeneration) setRunDetail({ ...detail, jobs: failedResource(error, jobs, "pagination") })
+    }
   }
 
   const clearCommit = () => {
@@ -1005,6 +1095,7 @@ export function createRepositorySession(loaders: RepositoryLoaders = defaultLoad
     clearDiff()
     ++repositoryScope
     clearCommit()
+    clearRun()
     clearIssue()
     clearPull()
     const request = ++repositoryGeneration
@@ -1414,6 +1505,10 @@ export function createRepositorySession(loaders: RepositoryLoaders = defaultLoad
     diffs,
     loadDiff,
     clearDiff,
+    runDetail,
+    loadRun,
+    loadMoreRunJobs,
+    clearRun,
     commitDetail,
     loadCommit,
     loadMoreCommitFiles,

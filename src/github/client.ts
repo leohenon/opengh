@@ -22,6 +22,8 @@ import type {
   PullRequestSummary,
   Repo,
   WorkflowRunSummary,
+  WorkflowRunDetail,
+  WorkflowJob,
 } from "../models"
 import { createGitHubDocuments } from "./documents"
 import { createGitHubPullContext } from "./pull-context"
@@ -180,6 +182,37 @@ type WorkflowRunResponse = {
   status: string
   conclusion: string | null
   created_at: string
+}
+
+type WorkflowRunDetailResponse = WorkflowRunResponse & {
+  html_url: string
+  run_number: number
+  run_attempt: number
+  event: string
+  head_branch: string | null
+  head_sha: string
+  actor: UserResponse
+  run_started_at: string | null
+  updated_at: string
+  path: string
+}
+
+type WorkflowJobResponse = {
+  id: number
+  name: string
+  status: string
+  conclusion: string | null
+  started_at: string | null
+  completed_at: string | null
+  runner_name: string | null
+  steps?: {
+    number: number
+    name: string
+    status: string
+    conclusion: string | null
+    started_at: string | null
+    completed_at: string | null
+  }[]
 }
 
 type WorkflowRunsResponse = {
@@ -886,7 +919,55 @@ export function createGitHubClient(transport: GitHubTransport) {
     return { items, hasMore: page * PAGE_SIZE < (response.total_count ?? items.length) }
   }
 
-  return { metadata, documents, document, branches, commits, commitCount, commit, issues, workCounts, hasIssues, issue, issueComments, createIssueComment, updateIssueState, markIssueDuplicate, issueReferences, issueTimeline, pulls, pull, pullCommits, pullContext, runs }
+  const run = async (repository: string, id: number): Promise<WorkflowRunDetail> => {
+    const item = await transport.json<WorkflowRunDetailResponse>(`repos/${repository}/actions/runs/${id}`)
+    return {
+      id: item.id,
+      name: item.name,
+      title: item.display_title,
+      status: item.status,
+      conclusion: item.conclusion ?? "",
+      createdAt: item.created_at,
+      url: item.html_url,
+      number: item.run_number,
+      attempt: item.run_attempt,
+      event: item.event,
+      branch: item.head_branch ?? "",
+      sha: item.head_sha,
+      actor: item.actor?.login ?? "ghost",
+      startedAt: item.run_started_at,
+      updatedAt: item.updated_at,
+      workflowPath: item.path,
+    }
+  }
+
+  const runJobs = async (repository: string, id: number, attempt: number, page = 1): Promise<Page<WorkflowJob>> => {
+    const response = await transport.json<{ total_count: number; jobs: WorkflowJobResponse[] }>(
+      `repos/${repository}/actions/runs/${id}/attempts/${attempt}/jobs?per_page=${PAGE_SIZE}&page=${page}`,
+    )
+    return {
+      items: response.jobs.map((job) => ({
+        id: job.id,
+        name: job.name,
+        status: job.status,
+        conclusion: job.conclusion ?? "",
+        startedAt: job.started_at,
+        completedAt: job.completed_at,
+        runner: job.runner_name ?? "",
+        steps: (job.steps ?? []).map((step) => ({
+          number: step.number,
+          name: step.name,
+          status: step.status,
+          conclusion: step.conclusion ?? "",
+          startedAt: step.started_at,
+          completedAt: step.completed_at,
+        })),
+      })),
+      hasMore: page * PAGE_SIZE < response.total_count,
+    }
+  }
+
+  return { metadata, documents, document, branches, commits, commitCount, commit, issues, workCounts, hasIssues, issue, issueComments, createIssueComment, updateIssueState, markIssueDuplicate, issueReferences, issueTimeline, pulls, pull, pullCommits, pullContext, runs, run, runJobs }
 }
 
 const client = createGitHubClient(githubTransport)
@@ -913,3 +994,6 @@ export const loadGitHubPullCommits = client.pullCommits
 export const loadGitHubPullContext = client.pullContext
 export const loadGitHubPulls = client.pulls
 export const loadGitHubRuns = client.runs
+
+export const loadGitHubRun = client.run
+export const loadGitHubRunJobs = client.runJobs

@@ -207,6 +207,10 @@ export function Root(props: {
               diffs={session.diffs?.()}
               onLoadDiff={session.loadDiff}
               onCloseDiff={session.clearDiff}
+              runDetail={session.runDetail()}
+              onLoadRun={session.loadRun}
+              onLoadMoreRunJobs={session.loadMoreRunJobs}
+              onCloseRun={session.clearRun}
               commitDetail={session.commitDetail()}
               onLoadCommit={session.loadCommit}
               onLoadMoreCommitFiles={session.loadMoreCommitFiles}

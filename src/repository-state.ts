@@ -18,6 +18,8 @@ import type {
   Repo,
   RepositoryDocument,
   WorkflowRunSummary,
+  WorkflowRunDetail,
+  WorkflowJob,
 } from "./models"
 
 export type ResourcePhase = "load" | "pagination"
@@ -34,6 +36,12 @@ export type RepositoryDocumentState = RepositoryDocument & {
 export type DiffState = {
   target: DiffTarget
   resource: ResourceState<DiffContent>
+}
+
+export type RunDetailState = {
+  id: number
+  resource: ResourceState<WorkflowRunDetail>
+  jobs: ResourceState<Paginated<WorkflowJob>>
 }
 
 export type CommitDetailState = {

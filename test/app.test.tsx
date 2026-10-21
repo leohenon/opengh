@@ -792,7 +792,7 @@ describe("opengh TUI", () => {
     await view.flush()
 
     const commits = view.captureCharFrame()
-    expect(commits).toContain(" main ▾")
+    expect(commits).toContain(" main ▾")
     expect(commits).not.toContain("100+")
     expect(commits).not.toContain("100 loaded")
 

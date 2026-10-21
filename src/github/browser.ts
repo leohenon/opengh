@@ -1,7 +1,10 @@
 import { spawnGitHub } from "./process"
 
 export async function openGitHub(repository: string, target?: string | number, view?: "diff"): Promise<void> {
-  const args = view === "diff" && typeof target === "number"
+  const runId = typeof target === "string" ? /^actions\/runs\/(\d+)$/.exec(target)?.[1] : undefined
+  const args = runId
+    ? ["run", "view", runId, "--web", "--repo", repository]
+    : view === "diff" && typeof target === "number"
     ? ["pr", "diff", String(target), "--web", "--repo", repository]
     : ["browse", ...(target !== undefined ? [String(target)] : []), "--repo", repository]
   const child = spawnGitHub(args)

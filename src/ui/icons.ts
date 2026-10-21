@@ -44,7 +44,7 @@ export const nerdIcons: IconSet = {
   workflow: workflowIcons,
   user: "\uf007",
   commit: "\uf417",
-  branch: "\ue0a0",
+  branch: "\uf418",
 }
 
 export const unicodeIcons: IconSet = {

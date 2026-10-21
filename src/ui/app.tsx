@@ -8,6 +8,7 @@ import type { CommitDetail, DiffContent, DiffTarget, IssueActionKind, IssueActio
 import { back, navigate, openDetail, openDiff, type NavigationState, type Page } from "../navigation"
 import type {
   CommitDetailState,
+  RunDetailState,
   DiffState,
   IssueDetailState,
   IssueActionState,
@@ -29,6 +30,7 @@ import { ActionsScreen } from "./pages/actions"
 import { CommitsScreen } from "./pages/commits"
 import { IssueScreen } from "./pages/issue"
 import { PullScreen } from "./pages/pull"
+import { RunScreen } from "./pages/run"
 import { CommitScreen } from "./pages/commit"
 import { DiffScreen, type DiffFocus } from "./pages/diff"
 import { OverviewScreen } from "./pages/overview"
@@ -66,6 +68,10 @@ export type AppProps = {
   diffs?: Partial<Record<DiffTarget["kind"], DiffState>>
   onLoadDiff?: (target: DiffTarget, filesOnly?: boolean) => Promise<void>
   onCloseDiff?: (target?: DiffTarget) => void
+  runDetail?: RunDetailState
+  onLoadRun?: (id: number) => Promise<void>
+  onLoadMoreRunJobs?: () => Promise<void>
+  onCloseRun?: () => void
   commitDetail?: CommitDetailState
   onLoadCommit?: (sha: string) => Promise<void>
   onLoadMoreCommitFiles?: () => Promise<void>
@@ -145,6 +151,16 @@ export function App(props: AppProps) {
     setNavigation(back)
     if (target) props.onCloseDiff?.(target)
   }
+  const runId = createMemo(() => {
+    const detail = navigation().details?.actions
+    return detail?.kind === "run" ? detail.id : undefined
+  })
+  const activeRunId = () => page() === "actions" ? runId() : undefined
+  const runDetail = createMemo<RunDetailState>(() => props.runDetail?.id === runId() && props.runDetail
+    ? props.runDetail
+    : { id: runId() ?? 0, resource: { status: "loading", phase: "load" }, jobs: { status: "loading", phase: "load" } })
+  const runDetailPart = () => runDetail().resource.status !== "ready" ? "resource" : "jobs"
+  const runUrl = (id: number) => `${data().repo.url}/actions/runs/${id}`
   const commitSha = createMemo(() => {
     const detail = navigation().details?.commits
     return detail?.kind === "commit" ? detail.sha : undefined
@@ -302,6 +318,7 @@ export function App(props: AppProps) {
     ?? overviewDocuments()[0])
   const activeResource = (): ResourceState<unknown> | undefined => {
     if (diffTarget()) return diffResource()
+    if (activeRunId()) return runDetail()[runDetailPart()]
     if (activeCommitSha()) return commitResource()
     if (activePullNumber()) {
       const part = pullDetailPart()
@@ -346,6 +363,7 @@ export function App(props: AppProps) {
     const resource = activeResource()
     if (resource?.status === "loading") {
       if (resource.phase === "pagination") return "loading-more"
+      if (activeRunId() && resource.value !== undefined) return "refreshing"
       if (activeCommitSha() && resource.value !== undefined) return "refreshing"
       if (activePullNumber() && pullResource().value) {
         if (pullRefresh()?.number === activePullNumber() || resource.value !== undefined) return "refreshing"
@@ -361,6 +379,7 @@ export function App(props: AppProps) {
   }
   const statusDetail = () => {
     if (diffTarget()) return "diff"
+    if (activeRunId()) return "workflow run"
     if (activeCommitSha()) return "commit"
     if (activePullNumber()) return pullDetailPart() === "pull" ? "pull request" : pullDetailPart() === "context" ? "PR details" : pullDetailPart()
     if (activeIssueNumber()) return issueDetailPart()
@@ -374,6 +393,7 @@ export function App(props: AppProps) {
   }
   const status = createMemo(statusKind)
   const paginationSource = () => {
+    if (activeRunId()) return `pagination:run:${runId()}`
     if (activeCommitSha()) return `pagination:commit:${commitSha()}`
     if (activeIssueNumber()) return `pagination:issue:${issueNumber()}`
     if (activePullNumber()) return `pagination:pull:${pullNumber()}`
@@ -385,6 +405,7 @@ export function App(props: AppProps) {
   }
   const activeResourceSource = () => {
     if (diffTarget()) return `resource:diff:${JSON.stringify(diffTarget())}`
+    if (activeRunId()) return `resource:run:${runId()}:${runDetailPart()}`
     if (activeCommitSha()) return `resource:commit:${commitSha()}`
     if (activePullNumber()) return `resource:pull:${pullNumber()}:${pullDetailPart()}`
     if (activeIssueNumber()) return `resource:issue:${issueNumber()}:${issueDetailPart()}`
@@ -412,6 +433,7 @@ export function App(props: AppProps) {
       ["pagination:pulls:open", current.pulls.open],
       ["pagination:pulls:closed", current.pulls.closed],
     ]
+    if (runId()) paginationResources.push([`pagination:run:${runId()}`, runDetail().jobs])
     if (commitSha()) paginationResources.push([`pagination:commit:${commitSha()}`, commitResource()])
     if (issueNumber()) paginationResources.push([`pagination:issue:${issueNumber()}`, issueDetail().comments])
     if (pullNumber()) paginationResources.push([`pagination:pull:${pullNumber()}`, pullDetail().comments])
@@ -423,6 +445,10 @@ export function App(props: AppProps) {
     if (resourceSource && active?.status === "error" && active.phase === "load" && active.value !== undefined)
       failures.set(resourceSource, active.message)
     for (const [source, message] of shownFailures) {
+      const pendingRunResource = source === `resource:run:${runId()}:resource` ? runDetail().resource
+        : source === `resource:run:${runId()}:jobs` || source === `pagination:run:${runId()}` ? runDetail().jobs : undefined
+      // Automatic retries should not re-notify the same failure every five seconds.
+      if (pendingRunResource?.status === "loading") continue
       if (failures.get(source) !== message) shownFailures.delete(source)
     }
 
@@ -498,11 +524,12 @@ export function App(props: AppProps) {
     }
   })
 
-  onCleanup(() => { props.onCloseDiff?.(); props.onCloseCommit?.(); props.onCloseIssue?.(); props.onClosePull?.() })
+  onCleanup(() => { props.onCloseDiff?.(); props.onCloseRun?.(); props.onCloseCommit?.(); props.onCloseIssue?.(); props.onClosePull?.() })
 
   const closeDetail = () => {
     const detail = navigation().details?.[page()]
     setNavigation(back)
+    if (detail?.kind === "run") props.onCloseRun?.()
     if (detail?.kind === "commit") props.onCloseCommit?.()
     if (detail?.kind === "issue") { props.onCloseIssue?.(); setRevealActivity() }
     if (detail?.kind === "pull") props.onClosePull?.()
@@ -577,6 +604,8 @@ export function App(props: AppProps) {
       return `esc back · ${horizontal} · ↑/↓ ${files ? "files" : "scroll"} · tab focus ${next} · b toggle files · [ ] hunks`
         + (diffResource().status === "error" ? " · enter file list" : " · t layout · w wrap") + " · ? help"
     }
+    if (activeRunId()) return "esc back · o GitHub · y copy URL"
+      + (activeResource()?.status === "error" ? " · r retry" : runDetail().jobs.value?.hasMore ? " · enter load more" : " · r refresh") + common
     if (activeCommitSha()) {
       const retry = commitResource().status === "error"
       const more = commitResource().value?.files.hasMore
@@ -612,6 +641,7 @@ export function App(props: AppProps) {
         + (references ? " · p references" : "")
         + (dimensions().width >= 100 || !retry && !more ? " · o GitHub · y copy URL" : "") + common
     }
+    if (page() === "actions") return "↑/↓ select · enter open · o GitHub · y copy URL" + common
     if (page() === "pulls") return "↑/↓ select · enter open · D diff · o GitHub · y copy URL"
       + (dimensions().width >= 60 ? " · tab open/closed" : "") + common
     if (page() === "issues") return "↑/↓ select · enter open · o GitHub · y copy URL"
@@ -678,6 +708,24 @@ export function App(props: AppProps) {
     if (event.name === "right" || event.name === "l") {
       event.stopPropagation()
       return movePage(1)
+    }
+    const run = activeRunId()
+    if (run) {
+      if (event.ctrl || event.meta) return
+      if (event.name === "r" || event.name === "return" || event.name === "enter") {
+        shownFailures.delete(`resource:run:${run}:resource`)
+        shownFailures.delete(`resource:run:${run}:jobs`)
+        shownFailures.delete(`pagination:run:${run}`)
+      }
+      if (event.name === "o") void openInBrowser(`actions/runs/${run}`)
+      else if (event.name === "y") void copyToClipboard(runUrl(run), "URL")
+      else if (event.name === "return" || event.name === "enter") void props.onLoadMoreRunJobs?.()
+      else if (event.name === "r") {
+        const jobs = runDetail().jobs
+        if (runDetail().resource.status === "ready" && jobs.status === "error" && jobs.phase === "pagination") void props.onLoadMoreRunJobs?.()
+        else void props.onLoadRun?.(run)
+      }
+      return
     }
     const sha = activeCommitSha()
     if (sha) {
@@ -843,10 +891,16 @@ export function App(props: AppProps) {
           />
         </box>
         <Show when={visibleTabs().some((tab) => tab.page === "actions")}>
-          <box visible={page() === "actions"} flexGrow={1} minHeight={0}>
+          <box visible={page() === "actions" && !runId()} flexGrow={1} minHeight={0}>
             <ActionsScreen
               runs={data().runs}
-              active={page() === "actions"}
+              onOpenRun={(run) => {
+                setNavigation((state) => openDetail(state, { kind: "run", id: run.id }))
+                void props.onLoadRun?.(run.id)
+              }}
+              onOpenRunInBrowser={(run) => void openInBrowser(`actions/runs/${run.id}`)}
+              onCopyRunUrl={(run) => void copyToClipboard(runUrl(run.id), "URL")}
+              active={page() === "actions" && !runId()}
               interactive={!diffTarget() && overlay() === undefined}
               showScrollbar={config().showScrollbars}
               onEndReached={() => {
@@ -856,6 +910,21 @@ export function App(props: AppProps) {
             />
           </box>
         </Show>
+      <Show when={runId()} keyed>
+        {(id) => (
+          <box visible={page() === "actions"} flexGrow={1} minHeight={0}>
+            <RunScreen
+              id={id}
+              detail={runDetail()}
+              active={page() === "actions"}
+              onRefresh={props.onLoadRun ? () => props.onLoadRun!(id) : undefined}
+              interactive={page() === "actions" && overlay() === undefined}
+              showScrollbar={config().showScrollbars}
+              detailLayout={config().detailLayout}
+            />
+          </box>
+        )}
+      </Show>
       <Show when={commitSha()} keyed>
         {(sha) => (
           <box visible={page() === "commits"} flexGrow={1} minHeight={0}>
@@ -952,7 +1021,7 @@ export function App(props: AppProps) {
       </Show>
       <Show when={overlay() === "help"}>
         <Help
-          view={diffTarget() ? "diff" : activeCommitSha() ? "commit" : activeIssueNumber() ? "issue" : activePullNumber() ? "pull" : page()}
+          view={diffTarget() ? "diff" : activeRunId() ? "run" : activeCommitSha() ? "commit" : activeIssueNumber() ? "issue" : activePullNumber() ? "pull" : page()}
           tabCount={visibleTabs().length}
           hasDocumentTabs={overviewDocuments().length > 1}
           hasMoreFiles={commitResource().value?.files.hasMore}

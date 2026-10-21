@@ -280,6 +280,39 @@ export type WorkflowRunSummary = {
   createdAt: string
 }
 
+export type WorkflowRunDetail = WorkflowRunSummary & {
+  url: string
+  number: number
+  attempt: number
+  event: string
+  branch: string
+  sha: string
+  actor: string
+  startedAt: string | null
+  updatedAt: string
+  workflowPath: string
+}
+
+export type WorkflowStep = {
+  number: number
+  name: string
+  status: string
+  conclusion: string
+  startedAt: string | null
+  completedAt: string | null
+}
+
+export type WorkflowJob = {
+  id: number
+  name: string
+  status: string
+  conclusion: string
+  startedAt: string | null
+  completedAt: string | null
+  runner: string
+  steps: WorkflowStep[]
+}
+
 export type CommitSummary = {
   sha: string
   message: string

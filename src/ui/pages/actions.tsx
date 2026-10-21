@@ -9,28 +9,9 @@ import { SelectableList } from "../components/selectable-list"
 import { ago, fitText } from "../format"
 import { useTheme } from "../theme"
 import { useIcons } from "../icon-style"
-import type { IconSet } from "../icons"
+import { runColor, runIcon, runState } from "../workflow-status"
 
 const spinnerFrames = ["◐", "◓", "◑", "◒"] as const
-
-function runIcon(run: WorkflowRunSummary, icons: IconSet["workflow"]) {
-  if (run.status !== "completed") return icons.clock
-  switch (run.conclusion) {
-    case "success": return icons.success
-    case "failure":
-    case "timed_out": return icons.failure
-    case "cancelled":
-    case "stale": return icons.cancelled
-    case "skipped": return icons.skipped
-    case "action_required": return icons.attention
-    default: return icons.neutral
-  }
-}
-
-function runState(run: WorkflowRunSummary) {
-  if (run.status !== "completed") return run.status.replaceAll("_", " ")
-  return run.conclusion.replaceAll("_", " ") || "completed"
-}
 
 export function ActionsScreen(props: {
   runs: ResourceState<Paginated<WorkflowRunSummary>>
@@ -38,6 +19,9 @@ export function ActionsScreen(props: {
   interactive: boolean
   showScrollbar: boolean
   onEndReached?: () => void
+  onOpenRun?: (run: WorkflowRunSummary) => void
+  onOpenRunInBrowser?: (run: WorkflowRunSummary) => void
+  onCopyRunUrl?: (run: WorkflowRunSummary) => void
 }) {
   const { colors } = useTheme()
   const icons = useIcons()
@@ -50,13 +34,6 @@ export function ActionsScreen(props: {
     const timer = setInterval(() => setFrame((value) => (value + 1) % spinnerFrames.length), 125)
     onCleanup(() => clearInterval(timer))
   })
-  const runColor = (run: WorkflowRunSummary) => {
-    if (run.status === "in_progress" || run.status === "waiting") return colors.yellow
-    if (run.status !== "completed") return colors.muted
-    if (run.conclusion === "success") return colors.green
-    if (run.conclusion === "failure" || run.conclusion === "timed_out") return colors.red
-    return run.conclusion === "action_required" ? colors.yellow : colors.muted
-  }
 
   return (
     <PageShell
@@ -79,11 +56,14 @@ export function ActionsScreen(props: {
             showScrollbar={props.showScrollbar}
             empty="No workflow runs"
             onEndReached={props.onEndReached}
+            onActivate={props.onOpenRun}
+            onOpenInBrowser={props.onOpenRunInBrowser}
+            onCopy={props.onCopyRunUrl}
           >
             {(run, active) => (
               <>
                 <box height={2} width={3} flexShrink={0} alignItems="flex-start">
-                  <text fg={runColor(run())}>{run().status === "in_progress" ? spinnerFrames[frame()] : runIcon(run(), icons().workflow)}</text>
+                  <text fg={runColor(run(), colors)}>{run().status === "in_progress" ? spinnerFrames[frame()] : runIcon(run(), icons().workflow)}</text>
                 </box>
                 <box height={2} flexGrow={1} flexBasis={0} minWidth={0} flexDirection="column" overflow="hidden">
                   <ListLine
@@ -99,7 +79,7 @@ export function ActionsScreen(props: {
                       const value = fitText(`${prefix}${state} · ${ago(run().createdAt)}`, width)
                       const stateStart = Math.min(prefix.length, value.length)
                       const stateEnd = Math.min(prefix.length + state.length, value.length)
-                      return <>{value.slice(0, stateStart)}<span style={{ fg: runColor(run()) }}>{value.slice(stateStart, stateEnd)}</span>{value.slice(stateEnd)}</>
+                      return <>{value.slice(0, stateStart)}<span style={{ fg: runColor(run(), colors) }}>{value.slice(stateStart, stateEnd)}</span>{value.slice(stateEnd)}</>
                     }}
                   </ListLine>
                 </box>

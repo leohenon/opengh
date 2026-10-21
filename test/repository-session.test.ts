@@ -1,3 +1,5 @@
+import { workflowJobFixture, workflowRunFixture } from "./fixtures/workflow-run"
+
 import { describe, expect, test } from "bun:test"
 import type { DiffContent, CommitDetail, CommitSummary, IssueDetail, IssueComment, IssueTimeline, RepositoryDocument } from "../src/models"
 import type { RepositoryLoaders } from "../src/repository-session"
@@ -1088,4 +1090,87 @@ describe("repository session", () => {
     expect(state.data.currentBranch).toBe("main")
     expect(state.operations.branch.status).toBe("error")
   })
+})
+
+test("run details paginate jobs, retain data on failure, and reset jobs for a new attempt", async () => {
+  let attempt = 2
+  let fail = false
+  const requested: number[] = []
+  const session = createRepositorySession(loaders({
+    run: async () => ({ ...workflowRunFixture, attempt }),
+    runJobs: async (_repository, _id, runAttempt, page = 1) => {
+      requested.push(runAttempt)
+      if (fail) throw new Error("Jobs unavailable")
+      return { items: [{ ...workflowJobFixture, id: page }], hasMore: page < 3 }
+    },
+  }))
+  await session.load("owner/repo")
+  await session.loadRun(9812)
+  expect(ready(session).data.runs.value?.items.find((run) => run.id === 9812)?.title).toBe(workflowRunFixture.title)
+  await session.loadMoreRunJobs()
+  expect(session.runDetail()?.jobs.value?.items.map((job) => job.id)).toEqual([1, 2])
+  fail = true
+  await session.loadRun(9812)
+  expect(session.runDetail()?.jobs.status).toBe("error")
+  expect(session.runDetail()?.jobs.value?.items).toHaveLength(2)
+  const requestsBeforePagination = requested.length
+  await session.loadMoreRunJobs()
+  expect(requested).toHaveLength(requestsBeforePagination)
+  expect(session.runDetail()?.jobs.status).toBe("error")
+  fail = false
+  await session.loadRun(9812)
+  expect(session.runDetail()?.jobs.status).toBe("ready")
+  expect(session.runDetail()?.jobs.value?.page).toBe(2)
+  attempt = 3
+  fail = false
+  await session.loadRun(9812)
+  expect(session.runDetail()?.jobs.value?.page).toBe(1)
+  expect(session.runDetail()?.jobs.value?.items).toHaveLength(1)
+  expect(requested.at(-1)).toBe(3)
+})
+
+test("closing a workflow detail rejects pending results", async () => {
+  const pending = deferred<typeof workflowRunFixture>()
+  const session = createRepositorySession(loaders({ run: async () => pending.promise }))
+  await session.load("owner/repo")
+  const loading = session.loadRun(9812)
+  session.clearRun()
+  pending.resolve(workflowRunFixture)
+  await loading
+  expect(session.runDetail()).toBeUndefined()
+})
+
+test("late run lists preserve newer detail responses without blocking subsequent list updates", async () => {
+  const pendingList = deferred<{ items: typeof workflowRunFixture[]; hasMore: boolean }>()
+  const listStarted = deferred<void>()
+  const pendingRun = deferred<typeof workflowRunFixture>()
+  let holdList = false
+  let runLoads = 0
+  const session = createRepositorySession(loaders({
+    runs: async () => {
+      if (holdList) {
+        listStarted.resolve()
+        return pendingList.promise
+      }
+      return { items: [{ ...workflowRunFixture, title: "Newer list title" }], hasMore: false }
+    },
+    run: async () => { runLoads++; return pendingRun.promise },
+    runJobs: async () => ({ items: [workflowJobFixture], hasMore: false }),
+  }))
+  await session.load("owner/repo")
+  holdList = true
+  const refresh = session.refresh()
+  await listStarted.promise
+  const detail = session.loadRun(9812)
+  await session.loadRun(9812)
+  expect(runLoads).toBe(1)
+  pendingRun.resolve(workflowRunFixture)
+  await detail
+  session.clearRun()
+  pendingList.resolve({ items: [{ ...workflowRunFixture, status: "in_progress", conclusion: "" }], hasMore: false })
+  await refresh
+  expect(ready(session).data.runs.value?.items[0]?.status).toBe("completed")
+  holdList = false
+  await session.refresh()
+  expect(ready(session).data.runs.value?.items[0]?.title).toBe("Newer list title")
 })
