@@ -1,6 +1,8 @@
 import { TextAttributes } from "@opentui/core"
 import { useTerminalDimensions } from "@opentui/solid"
 import { createMemo, For, Show } from "solid-js"
+import type { KeyAction } from "../../keybindings"
+import { useKeybindings } from "../keybindings"
 import type { Repo } from "../../models"
 import type { Page } from "../../navigation"
 import type { RepositoryData } from "../../repository-state"
@@ -30,10 +32,13 @@ export function Header(props: {
 }) {
   const { colors } = useTheme()
   const dimensions = useTerminalDimensions()
+  const keys = useKeybindings()
+  const tabKey = (index: number) => index < 5 ? keys.key(`navigation.tab${index + 1}` as KeyAction) : ""
+  const tabLabel = (index: number, label: string) => [tabKey(index), label].filter(Boolean).join(" ")
   const layout = createMemo(() => {
     const width = Math.max(0, dimensions().width - 4)
     const tabs = props.tabs.map((tab, index) => {
-      const label = `${index + 1} ${tab.label}`
+      const label = tabLabel(index, tab.label)
       if (props.showTabCounts === false || tab.page !== "issues" && tab.page !== "pulls") return { ...tab, label, counted: label }
       const count = props.workCounts?.value?.[tab.page]
       const placeholder = props.workCounts?.status === "error" ? "—" : "…"
@@ -71,9 +76,9 @@ export function Header(props: {
     // At exceptionally small widths, use a complete short name, never a partial tab.
     if (windowWidth(start, end) > available && visible[0]) {
       const shortLabels: Record<Page, string> = { overview: "Repo", commits: "Commits", issues: "Issues", pulls: "PRs", actions: "CI" }
-      visible[0] = { ...visible[0], label: `${active + 1} ${shortLabels[visible[0].page]}` }
+      visible[0] = { ...visible[0], label: tabLabel(active, shortLabels[visible[0].page]) }
       if (Bun.stringWidth(visible[0].label) + (start > 0 ? 2 : 0) + (end < labels.length ? 2 : 0) > available)
-        visible[0] = { ...visible[0], label: String(active + 1) }
+        visible[0] = { ...visible[0], label: tabKey(active) || shortLabels[visible[0].page] }
     }
     return { tabs: visible, before: start > 0, after: end < labels.length, repository }
   })

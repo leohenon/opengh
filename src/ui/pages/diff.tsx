@@ -1,5 +1,6 @@
 import { BoxRenderable, type ScrollBoxRenderable } from "@opentui/core"
-import { useKeyboard, useRenderer, useTerminalDimensions } from "@opentui/solid"
+import { useRenderer, useTerminalDimensions } from "@opentui/solid"
+import { useKeyActions } from "../keybindings"
 import { HUNK_DIFF_THEME_NAMES, type HunkDiffBodyProps, type HunkDiffThemeName } from "hunkdiff/opentui"
 import { createEffect, createMemo, createSignal, on, onCleanup, onMount, Show } from "solid-js"
 import type { DiffContent, DiffTarget } from "../../models"
@@ -64,7 +65,7 @@ export function DiffScreen(props: {
   const targetKey = () => props.target.kind === "commit" ? props.target.sha : `PR #${props.target.number}`
   const label = () => props.target.kind === "commit" ? props.target.sha.slice(0, 7) : `PR #${props.target.number}`
   const error = () => props.resource.status === "error" ? props.resource.message : parsed().error
-  const message = () => selected()?.message ?? (selected() && !selected()?.body ? "Patch unavailable for this file. Press r to retry or o to open GitHub." : undefined)
+  const message = () => selected()?.message ?? (selected() && !selected()?.body ? "Patch unavailable for this file." : undefined)
   const renderFile = () => message() ? undefined : selected()?.body
   const theme = createMemo(() => {
     if (mode() === "light") return lightThemeAliases[selectedTheme()] ?? "github-light-default"
@@ -160,47 +161,58 @@ export function DiffScreen(props: {
     if (index === hunk()) revealPending()
     else setHunk(index)
   }
-  useKeyboard((event) => {
-    if (!active() || !props.interactive || event.ctrl || event.meta) return
-    if (event.name === "tab") {
+  const interactive = () => active() && props.interactive
+  const scrollBody = (callback: (body: ScrollBoxRenderable) => void) => {
+    if (focus() !== "diff" || !scroll) return false
+    callback(scroll)
+  }
+  const keys = useKeyActions({
+    "diff.focus": () => {
       if (focus() === "diff") { setSidebarHidden(false); setFocus("files") }
       else setFocus("diff")
-      event.stopPropagation()
-      return
-    }
-    if (event.name === "b") {
+    },
+    "diff.toggleFiles": () => {
       const hide = showFiles()
       setSidebarHidden(hide)
       setFocus(hide ? "diff" : "files")
-      event.stopPropagation()
-      return
-    }
-    if (focus() === "files" && (event.name === "h" || event.name === "left" || event.name === "l" || event.name === "right")) {
-      event.stopPropagation()
-      props.onMovePage?.(event.name === "h" || event.name === "left" ? -1 : 1)
-      return
-    }
-    if ((event.name === "enter" || event.name === "return") && error()) {
+    },
+    "navigation.activate": () => {
+      if (!error()) return false
       props.onLoadFiles()
-      event.stopPropagation()
-      return
-    }
-    if (event.name === "t") setLayout((value) => (value ?? (narrow() ? "unified" : "split")) === "split" ? "unified" : "split")
-    else if (event.name === "w") setWrap((value) => !value)
-    else if (event.name === "[" || event.sequence === "[") { setFocus("diff"); jump(-1) }
-    else if (event.name === "]" || event.sequence === "]") { setFocus("diff"); jump(1) }
-    else if (focus() !== "diff" || !scroll) return
-    else if (event.name === "h" || event.name === "left") setOffset((value) => Math.max(0, value - 4))
-    else if (event.name === "l" || event.name === "right") setOffset((value) => value + 4)
-    else if (event.name === "up" || event.name === "k") scroll.scrollBy(-1)
-    else if (event.name === "down" || event.name === "j") scroll.scrollBy(1)
-    else if (event.name === "u") scroll.scrollBy(-Math.max(1, Math.floor(scroll.viewport.height / 2)))
-    else if (event.name === "d") scroll.scrollBy(Math.max(1, Math.floor(scroll.viewport.height / 2)))
-    else if (event.name === "G" || (event.name === "g" && event.shift)) scroll.scrollTo(Math.max(0, scroll.scrollHeight - scroll.viewport.height))
-    else if (event.name === "g") scroll.scrollTo(0)
-    else return
-    event.stopPropagation()
-  })
+    },
+    "diff.toggleLayout": () => { setLayout((value) => (value ?? (narrow() ? "unified" : "split")) === "split" ? "unified" : "split") },
+    "diff.toggleWrap": () => { setWrap((value) => !value) },
+    "diff.previousHunk": () => {
+      if (!renderFile()?.metadata.hunks.length) return false
+      setFocus("diff"); jump(-1)
+    },
+    "diff.nextHunk": () => {
+      if (!renderFile()?.metadata.hunks.length) return false
+      setFocus("diff"); jump(1)
+    },
+    "navigation.up": () => scrollBody((body) => body.scrollBy(-1)),
+    "navigation.down": () => scrollBody((body) => body.scrollBy(1)),
+    "navigation.halfPageUp": () => scrollBody((body) => body.scrollBy(-Math.max(1, Math.floor(body.viewport.height / 2)))),
+    "navigation.halfPageDown": () => scrollBody((body) => body.scrollBy(Math.max(1, Math.floor(body.viewport.height / 2)))),
+    "navigation.pageUp": () => scrollBody((body) => body.scrollBy(-body.viewport.height)),
+    "navigation.pageDown": () => scrollBody((body) => body.scrollBy(body.viewport.height)),
+    "navigation.first": () => scrollBody((body) => body.scrollTo(0)),
+    "navigation.last": () => scrollBody((body) => body.scrollTo(Math.max(0, body.scrollHeight - body.viewport.height))),
+  }, { when: interactive, priority: 10 })
+  useKeyActions({
+    "navigation.previousTab": () => {
+      if (!props.onMovePage) return false
+      props.onMovePage(-1)
+    },
+    "navigation.nextTab": () => {
+      if (!props.onMovePage) return false
+      props.onMovePage(1)
+    },
+  }, { when: () => interactive() && focus() === "files", priority: 10 })
+  useKeyActions({
+    "diff.panLeft": () => { setOffset((value) => Math.max(0, value - 4)) },
+    "diff.panRight": () => { setOffset((value) => value + 4) },
+  }, { when: () => interactive() && focus() === "diff" && Boolean(scroll), priority: 10 })
 
   return (
     <box flexGrow={1} minHeight={0} minWidth={0} flexDirection="column" backgroundColor={colors.canvas}>
@@ -218,10 +230,10 @@ export function DiffScreen(props: {
         <text height={1} flexShrink={0} fg={colors.muted}>Loading diff…</text>
       </Show>
       <Show when={error()}>
-        <text width="100%" flexShrink={0} fg={colors.red}>{error()} · r retry · Enter file list</text>
+        <text width="100%" flexShrink={0} fg={colors.red}>{[error(), keys.hints(["view.refresh", "retry"], ["navigation.activate", "file list"], ["item.open", "GitHub"])].filter(Boolean).join(" · ")}</text>
       </Show>
       <Show when={parsed().notice}>
-        <text width="100%" flexShrink={0} fg={colors.muted}>{parsed().notice}</text>
+        <text width="100%" flexShrink={0} fg={colors.muted}>{[parsed().notice, props.resource.value?.kind === "files" ? keys.hint("view.refresh", "retry full diff") : ""].filter(Boolean).join(" · ")}</text>
       </Show>
       <box flexGrow={1} minHeight={0} minWidth={0} flexDirection="row">
         <box
@@ -236,7 +248,7 @@ export function DiffScreen(props: {
           </text>
           <SelectableList
             items={parsed().files} itemKey={(file) => file.path} resetKey={targetKey()}
-            active={active() && props.interactive && focus() === "files" && !error()}
+            active={active() && props.interactive && showFiles() && focus() === "files" && !error()}
             showScrollbar={props.showScrollbar} rowHeight={1}
             empty={props.resource.status === "ready" && !error() ? "No changed files." : ""}
             onSelect={(file) => setPath(file.path)}
@@ -254,7 +266,7 @@ export function DiffScreen(props: {
             flexGrow={1} minHeight={0} minWidth={0} scrollY scrollX={false}
           >
             <Show when={message()}>
-              <text width="100%" flexShrink={0} fg={colors.muted}>{message()}</text>
+              <text width="100%" flexShrink={0} fg={colors.muted}>{message()}{keys.hints(["view.refresh", "retry"], ["item.open", "open GitHub"]) ? ` · ${keys.hints(["view.refresh", "retry"], ["item.open", "open GitHub"])}` : ""}</text>
             </Show>
             <Show when={!selected() && props.resource.status === "ready" && !error()}>
               <text fg={colors.muted}>No changed files.</text>

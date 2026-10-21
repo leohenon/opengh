@@ -1,29 +1,35 @@
-import { TextAttributes } from "@opentui/core";
+import { TextAttributes, type ScrollBoxRenderable } from "@opentui/core";
 import { useTerminalDimensions } from "@opentui/solid";
 import { createMemo, For, type JSX } from "solid-js";
+import type { KeyAction } from "../../keybindings";
+import { useKeyActions, useKeybindings } from "../keybindings";
 import type { Page } from "../../navigation";
 import { useTheme } from "../theme";
 import { Popup } from "./popup";
 
-type ShortcutEntry = { keys: string; description: string };
+type ShortcutEntry = { actions: KeyAction[]; description: string };
+const entry = (action: KeyAction | KeyAction[], description: string): ShortcutEntry => ({ actions: typeof action === "string" ? [action] : action, description });
 
 const commonShortcuts: ShortcutEntry[] = [
-  { keys: "j/k, ↑/↓", description: "move / scroll" },
-  { keys: "u/d", description: "half-page up / down" },
-  { keys: "g/G", description: "jump to top / bottom" },
-  { keys: "r", description: "refresh / retry" },
-  { keys: "s", description: "switch repository" },
-  { keys: ",", description: "settings" },
-  { keys: "?", description: "toggle help" },
-  { keys: "q / C-c", description: "quit" },
+  entry(["navigation.down", "navigation.up"], "move / scroll"),
+  entry(["navigation.halfPageUp", "navigation.halfPageDown"], "half-page up / down"),
+  entry(["navigation.pageUp", "navigation.pageDown"], "page up / down"),
+  entry(["navigation.first", "navigation.last"], "jump to top / bottom"),
+  entry("view.refresh", "refresh / retry"),
+  entry("global.switchRepository", "switch repository"),
+  entry("global.reloadConfig", "reload configuration"),
+  entry("global.settings", "settings"),
+  entry("global.help", "toggle help"),
+  entry(["global.quit", "global.interrupt"], "quit"),
 ];
 
 function Shortcut(props: { keys: string; keyWidth: number; children: JSX.Element }) {
   const { colors } = useTheme();
 
+  const rows = () => Math.max(1, Math.ceil(Bun.stringWidth(props.keys) / Math.max(1, props.keyWidth - 2)));
   return (
-    <box height={1} flexShrink={0} flexDirection="row">
-      <text width={props.keyWidth} height={1} flexShrink={0} wrapMode="none" fg={colors.text}>
+    <box height={rows()} flexShrink={0} flexDirection="row" gap={2}>
+      <text width={Math.max(1, props.keyWidth - 2)} height={rows()} flexShrink={0} wrapMode="char" fg={colors.text}>
         {props.keys}
       </text>
       <text height={1} flexGrow={1} flexShrink={1} minWidth={0} wrapMode="none" fg={colors.muted}>
@@ -46,115 +52,141 @@ export function Help(props: {
 }) {
   const { colors } = useTheme();
   const dimensions = useTerminalDimensions();
+  const keys = useKeybindings();
   const compact = () => dimensions().width < 64;
-  const keyWidth = () => compact() ? 14 : 20;
+  let scroll: ScrollBoxRenderable | undefined;
+  useKeyActions({
+    "navigation.up": () => scroll?.scrollBy(-1),
+    "navigation.down": () => scroll?.scrollBy(1),
+    "navigation.halfPageUp": () => scroll?.scrollBy(-Math.max(1, Math.floor((scroll.viewport.height ?? 1) / 2))),
+    "navigation.halfPageDown": () => scroll?.scrollBy(Math.max(1, Math.floor((scroll.viewport.height ?? 1) / 2))),
+    "navigation.pageUp": () => scroll?.scrollBy(-scroll.viewport.height),
+    "navigation.pageDown": () => scroll?.scrollBy(scroll.viewport.height),
+    "navigation.first": () => scroll?.scrollTo(0),
+    "navigation.last": () => scroll?.scrollTo(scroll.scrollHeight),
+  }, { priority: 110 });
+
   const viewShortcuts = createMemo<ShortcutEntry[]>(() => {
     switch (props.view) {
       case "overview":
         return [
-          ...(props.hasDocumentTabs ? [{ keys: "Tab / ⇧Tab", description: "switch documents" }] : []),
-          { keys: "o", description: "open repo on GitHub" },
-          { keys: "y", description: "copy repo URL" },
+          ...(props.hasDocumentTabs ? [entry(["overview.nextDocument", "overview.previousDocument"], "switch documents")] : []),
+          entry("item.open", "open repo on GitHub"),
+          entry("item.copy", "copy repo URL"),
         ];
       case "commits":
         return [
-          { keys: "D", description: "view diff" },
-          { keys: "Enter", description: "open commit" },
-          { keys: "Tab", description: "choose branch" },
-          { keys: "o", description: "open on GitHub" },
-          { keys: "y", description: "copy commit SHA" },
+          entry("item.diff", "view diff"),
+          entry("navigation.activate", "open commit"),
+          entry("commits.chooseBranch", "choose branch"),
+          entry("item.open", "open on GitHub"),
+          entry("item.copy", "copy commit SHA"),
         ];
       case "commit":
         return [
-          { keys: "D", description: "view diff" },
-          { keys: "Esc", description: "back to commits" },
-          { keys: "o", description: "open on GitHub" },
-          { keys: "y", description: "copy commit SHA" },
-          ...(props.hasMoreFiles ? [{ keys: "Enter", description: "load more files" }] : []),
+          entry("item.diff", "view diff"),
+          entry("navigation.back", "back to commits"),
+          entry("item.open", "open on GitHub"),
+          entry("item.copy", "copy commit SHA"),
+          ...(props.hasMoreFiles ? [entry("navigation.activate", "load more files")] : []),
         ];
       case "issues":
         return [
-          { keys: "Enter", description: "open issue" },
-          { keys: "Tab", description: "toggle open/closed" },
-          { keys: "o", description: "open on GitHub" },
-          { keys: "y", description: "copy issue URL" },
+          entry("navigation.activate", "open issue"),
+          entry("work.toggleState", "toggle open/closed"),
+          entry("item.open", "open on GitHub"),
+          entry("item.copy", "copy issue URL"),
         ];
       case "issue":
         return [
-          { keys: "Esc", description: "back to issues" },
-          ...(props.canComment ? [{ keys: "c", description: "add comment" }] : []),
-          ...(props.hasIssueActions ? [{ keys: "a", description: "issue actions" }] : []),
-          { keys: "o", description: "open on GitHub" },
-          { keys: "y", description: "copy issue URL" },
-          ...(props.hasReferences ? [{ keys: "p", description: "open references" }] : []),
-          ...(props.hasMoreComments ? [{ keys: "Enter", description: "load more comments" }] : []),
+          entry("navigation.back", "back to issues"),
+          ...(props.canComment ? [entry("issue.comment", "add comment")] : []),
+          ...(props.hasIssueActions ? [entry("issue.actions", "issue actions")] : []),
+          entry("item.open", "open on GitHub"),
+          entry("item.copy", "copy issue URL"),
+          ...(props.hasReferences ? [entry("detail.references", "open references")] : []),
+          ...(props.hasMoreComments ? [entry("navigation.activate", "load more comments")] : []),
         ];
       case "pulls":
         return [
-          { keys: "D", description: "view diff" },
-          { keys: "Enter", description: "open pull request" },
-          { keys: "Tab", description: "toggle open/closed" },
-          { keys: "o", description: "open on GitHub" },
-          { keys: "y", description: "copy pull request URL" },
+          entry("item.diff", "view diff"),
+          entry("navigation.activate", "open pull request"),
+          entry("work.toggleState", "toggle open/closed"),
+          entry("item.open", "open on GitHub"),
+          entry("item.copy", "copy pull request URL"),
         ];
       case "pull":
         return [
-          { keys: "D", description: "view diff" },
-          { keys: "Esc", description: "back to pull requests" },
-          { keys: "o", description: "open on GitHub" },
-          { keys: "y", description: "copy pull request URL" },
-          ...(props.hasReferences ? [{ keys: "p", description: "open references" }] : []),
-          ...(props.hasMoreComments ? [{ keys: "Enter", description: "load more comments" }] : []),
+          entry("item.diff", "view diff"),
+          entry("navigation.back", "back to pull requests"),
+          entry("item.open", "open on GitHub"),
+          entry("item.copy", "copy pull request URL"),
+          ...(props.hasReferences ? [entry("detail.references", "open references")] : []),
+          ...(props.hasMoreComments ? [entry("navigation.activate", "load more comments")] : []),
         ];
       case "actions":
         return [
-          { keys: "Enter", description: "open workflow run" },
-          { keys: "o", description: "open on GitHub" },
-          { keys: "y", description: "copy run URL" },
+          entry("navigation.activate", "open workflow run"),
+          entry("item.open", "open on GitHub"),
+          entry("item.copy", "copy run URL"),
         ];
       case "run":
         return [
-          { keys: "Esc", description: "back to workflow runs" },
-          { keys: "Enter", description: "load more jobs" },
-          { keys: "o", description: "open on GitHub" },
-          { keys: "y", description: "copy run URL" },
+          entry("navigation.back", "back to workflow runs"),
+          entry("navigation.activate", "load more jobs"),
+          entry("item.open", "open on GitHub"),
+          entry("item.copy", "copy run URL"),
         ];
       case "diff":
         return [];
     }
   });
+  const tabActions = (): KeyAction[] => ["navigation.tab1", "navigation.tab2", "navigation.tab3", "navigation.tab4", "navigation.tab5"].slice(0, props.tabCount) as KeyAction[];
   const shortcuts = createMemo(() => {
-    if (props.view === "diff") return [
-      { keys: "Esc", description: "close diff; return to origin" },
-      { keys: "Tab", description: "switch files / diff focus" },
-      { keys: "b", description: "toggle sidebar; hide → diff focus" },
-      { keys: "Enter", description: "files → diff; error → file list" },
-      { keys: `1–${props.tabCount}`, description: "switch tabs; retain diff state" },
-      { keys: "[ and ]", description: "previous / next hunk" },
-      { keys: "h/l, ←/→", description: "files: tabs; diff: horizontal pan" },
-      { keys: "j/k, ↑/↓", description: "files: select; diff: scroll" },
-      { keys: "u/d", description: "half-page in the focused pane" },
-      { keys: "g/G", description: "files: first/last; diff: top/end" },
-      { keys: "t", description: "toggle split / unified" },
-      { keys: "w", description: "toggle line wrapping" },
-      { keys: "o", description: "open diff on GitHub" },
-      ...commonShortcuts.filter(({ keys }) => keys !== "j/k, ↑/↓" && keys !== "u/d" && keys !== "g/G"),
+    const entries = props.view === "diff" ? [
+      entry("navigation.back", "close diff; return to origin"),
+      entry("diff.focus", "switch files / diff focus"),
+      entry("diff.toggleFiles", "toggle sidebar; hide → diff focus"),
+      entry("navigation.activate", "files → diff; error → file list"),
+      entry(tabActions(), "switch tabs; retain diff state"),
+      entry(["diff.previousHunk", "diff.nextHunk"], "previous / next hunk"),
+      entry(["navigation.previousTab", "navigation.nextTab"], "files: switch tabs"),
+      entry(["diff.panLeft", "diff.panRight"], "diff: horizontal pan"),
+      entry("diff.toggleLayout", "toggle split / unified"),
+      entry("diff.toggleWrap", "toggle line wrapping"),
+      entry("item.open", "open diff on GitHub"),
+      ...commonShortcuts,
+    ] : [
+      ...viewShortcuts(),
+      entry([...tabActions(), "navigation.previousTab", "navigation.nextTab"], "switch tabs"),
+      ...(props.command ? [entry("command.clone", props.command)] : []),
+      ...commonShortcuts,
     ];
-    const tabs = `1–${props.tabCount}, h/l, ←/→`;
-    const entries = [...(props.command ? [{ keys: "x", description: props.command }] : []), ...viewShortcuts(), { keys: tabs, description: "switch tabs" }, ...commonShortcuts];
-    const order = ["Enter", "Tab", "Tab / ⇧Tab", "Esc", tabs, "j/k, ↑/↓", "u/d", "g/G", "D", "c", "a", "o", "y", "x", "p", "r", "s", ",", "?", "q / C-c"];
-    return order.flatMap((keys) => entries.filter((shortcut) => shortcut.keys === keys));
+    return entries.flatMap(({ actions, description }) => {
+      const label = [...new Set(actions.map((action) => keys.key(action, true)).filter(Boolean))].join(" / ");
+      return label ? [{ keys: label, description }] : [];
+    });
   });
-  const height = () => shortcuts().length + 4;
+  const padding = () => dimensions().width < 20 ? 0 : compact() ? 2 : 4;
+  const width = () => Math.max(1, Math.min(100, dimensions().width - 2,
+    Math.max(64, ...shortcuts().map((item) => Bun.stringWidth(item.keys) + Bun.stringWidth(item.description) + padding() * 2 + 3))));
+  const keyWidth = () => Math.min(
+    Math.max(1, Math.floor((width() - padding() * 2) * 0.55)),
+    Math.max(1, ...shortcuts().map((item) => Bun.stringWidth(item.keys) + 2)),
+  );
+  const height = () => Math.max(1, Math.min(
+    shortcuts().reduce((rows, item) => rows + Math.max(1, Math.ceil(Bun.stringWidth(item.keys) / Math.max(1, keyWidth() - 2))), 4),
+    dimensions().height - 2,
+  ));
 
   return (
-    <Popup width={64} height={height()} zIndex={200} placement="center">
+    <Popup width={width()} height={height()} zIndex={200} placement="center">
       <box
         flexGrow={1}
         minHeight={0}
         flexDirection="column"
-        paddingLeft={compact() ? 2 : 4}
-        paddingRight={compact() ? 2 : 4}
+        paddingLeft={padding()}
+        paddingRight={padding()}
         paddingBottom={1}
       >
         <box height={1} flexShrink={0} flexDirection="row" justifyContent="space-between">
@@ -164,11 +196,11 @@ export function Help(props: {
         </box>
 
         <box height={1} flexShrink={0} />
-        <box flexShrink={0} flexDirection="column">
+        <scrollbox ref={(value) => { scroll = value }} flexGrow={1} minHeight={0} scrollY>
           <For each={shortcuts()}>
             {(shortcut) => <Shortcut keys={shortcut.keys} keyWidth={keyWidth()}>{shortcut.description}</Shortcut>}
           </For>
-        </box>
+        </scrollbox>
       </box>
     </Popup>
   );

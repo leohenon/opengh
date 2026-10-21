@@ -1,9 +1,10 @@
 import type { ScrollBoxRenderable } from "@opentui/core"
-import { useKeyboard, useRenderer } from "@opentui/solid"
-import { createEffect, createSignal, onCleanup, onMount, Show } from "solid-js"
+import { useRenderer } from "@opentui/solid"
+import { createEffect, createSignal, onCleanup, Show } from "solid-js"
 import { plainCommandOutput, type CommandSpec, type CommandTask } from "../../command-actions"
 import { Popup } from "./popup"
 import { useTheme } from "../theme"
+import { KeyInput, useKeyActions, useKeybindings } from "../keybindings"
 
 export type CommandAction = { title: string; destination?: string; command(destination: string): CommandSpec }
 
@@ -18,6 +19,7 @@ export function CommandDialog(props: {
 }) {
   const { colors } = useTheme()
   const renderer = useRenderer()
+  const keys = useKeybindings()
   const [destination, setDestination] = createSignal(props.action.destination ?? "")
   const [phase, setPhase] = createSignal("Preview")
   const [output, setOutput] = createSignal("")
@@ -30,8 +32,8 @@ export function CommandDialog(props: {
   let scroll: ScrollBoxRenderable | undefined
   const running = () => phase() === "Running" || phase() === "Cancelling"
   const hint = () => phase() === "Preview"
-    ? (props.action.destination !== undefined && !editing() ? "e edit path · " : "") + "enter confirm · esc close"
-    : running() ? "↑/↓ scroll · y copy output · ctrl+c cancel" : "↑/↓ scroll · y copy output · esc close"
+    ? keys.hints(...(props.action.destination !== undefined && !editing() ? [["command.editPath", "edit path"] as const] : []), ["dialog.confirm", "confirm"], ["dialog.close", "close"])
+    : keys.hints([["navigation.up", "navigation.down"], "scroll"], ["command.copyOutput", "copy output"], [running() ? "global.interrupt" : "dialog.close", running() ? "cancel" : "close"])
   createEffect(() => props.onHintChange?.(hint()))
   createEffect(() => props.onConfirmationChange?.(phase() === "Preview"))
   onCleanup(() => { props.onHintChange?.(undefined); props.onConfirmationChange?.(false) })
@@ -46,7 +48,7 @@ export function CommandDialog(props: {
     setPhase("Cancelling")
     task?.cancel()
   }
-  onMount(() => props.onCaptureCancel?.(cancel))
+  createEffect(() => props.onCaptureCancel?.(running() ? cancel : undefined))
   onCleanup(() => { disposed = true; abort.abort(); task?.cancel(); props.onCaptureCancel?.(undefined) })
   const run = async () => {
     if (phase() !== "Preview") return
@@ -71,30 +73,30 @@ export function CommandDialog(props: {
       setNotice(copied ? "Output copied" : "Output sent to terminal clipboard (OSC 52)")
     } catch (error) { setNotice(String(error)) }
   }
-  useKeyboard((event) => {
-    if (event.ctrl && event.name === "c") { event.stopPropagation(); cancel(); return }
-    if (event.name === "escape" || event.name === "esc") {
-      event.stopPropagation()
-      if (!running()) props.onClose()
-      return
-    }
-    if (event.name === "return" || event.name === "enter") { event.stopPropagation(); void run(); return }
-    // While editing the destination, printable keys belong to the input, not the log viewer.
-    if (phase() === "Preview" && props.action.destination !== undefined) {
-      if (editing()) return
-      event.stopPropagation()
-      if (event.name === "e" && !event.ctrl && !event.meta) setEditing(true)
-      return
-    }
-    event.stopPropagation()
-    if (event.name === "y" && !event.ctrl && !event.meta) void copy()
-    else if (event.name === "up" || event.name === "k") scroll?.scrollBy(-1)
-    else if (event.name === "down" || event.name === "j") scroll?.scrollBy(1)
-    else if (event.name === "u" || event.name === "pageup") scroll?.scrollBy(-Math.max(1, Math.floor((scroll?.viewport.height ?? 1) / 2)))
-    else if (event.name === "d" || event.name === "pagedown") scroll?.scrollBy(Math.max(1, Math.floor((scroll?.viewport.height ?? 1) / 2)))
-    else if (event.name === "g" && !event.shift) scroll?.scrollTo(0)
-    else if (event.name === "G" || event.name === "g" && event.shift) scroll?.scrollTo(scroll.scrollHeight)
-  })
+  useKeyActions({
+    "dialog.close": () => props.onClose(),
+    "dialog.confirm": () => { void run() },
+    "command.editPath": () => {
+      if (editing() || props.action.destination === undefined) return false
+      setEditing(true)
+    },
+  }, { when: () => phase() === "Preview", priority: 100, modal: true })
+  const scrollPage = (direction: number, half = false) => {
+    scroll?.scrollBy(direction * Math.max(1, Math.floor((scroll?.viewport.height ?? 1) / (half ? 2 : 1))))
+  }
+  useKeyActions({
+    "global.interrupt": cancel,
+    "dialog.close": () => { if (!running()) props.onClose() },
+    "command.copyOutput": () => { void copy() },
+    "navigation.up": () => { scroll?.scrollBy(-1) },
+    "navigation.down": () => { scroll?.scrollBy(1) },
+    "navigation.halfPageUp": () => scrollPage(-1, true),
+    "navigation.halfPageDown": () => scrollPage(1, true),
+    "navigation.pageUp": () => scrollPage(-1),
+    "navigation.pageDown": () => scrollPage(1),
+    "navigation.first": () => { scroll?.scrollTo(0) },
+    "navigation.last": () => { if (scroll) scroll.scrollTo(scroll.scrollHeight) },
+  }, { when: () => phase() !== "Preview", priority: 100, modal: true })
   return (
     <Popup width={76} height={phase() === "Preview" ? 7 : 20} placement="center" zIndex={250}>
       <box flexGrow={1} minHeight={0} paddingLeft={2} paddingRight={2} paddingBottom={1} flexDirection="column">
@@ -102,7 +104,7 @@ export function CommandDialog(props: {
         <Show when={phase() === "Preview"}>
           <box height={2} flexShrink={0} paddingTop={1}>
             <Show when={editing()} fallback={<text fg={colors.muted}>{props.action.destination !== undefined ? `Into ${destination()}` : preview()?.cwd}</text>}>
-              <input value={destination()} onInput={setDestination} focused textColor={colors.text} focusedTextColor={colors.text} backgroundColor={colors.panel} focusedBackgroundColor={colors.panel} cursorColor={colors.blue} />
+              <KeyInput value={destination()} onInput={setDestination} focused textColor={colors.text} focusedTextColor={colors.text} backgroundColor={colors.panel} focusedBackgroundColor={colors.panel} cursorColor={colors.blue} />
             </Show>
           </box>
         </Show>

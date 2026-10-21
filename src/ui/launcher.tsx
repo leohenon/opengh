@@ -1,6 +1,5 @@
 import { TextAttributes } from "@opentui/core";
 import {
-  useKeyboard,
   useRenderer,
   useTerminalDimensions,
 } from "@opentui/solid";
@@ -9,6 +8,7 @@ import { normalizeRepository } from "../repository-name";
 import { LoadingText } from "./components/loading-text";
 import { Popup } from "./components/popup";
 import { SearchablePicker } from "./components/searchable-picker";
+import { useKeyActions, useKeybindings } from "./keybindings";
 import { useTheme } from "./theme";
 
 export function ResolvingRepository() {
@@ -38,11 +38,11 @@ export function ResolvingRepository() {
 export function LoadingRepository(props: { repository: string; onSwitchRepository?: () => void }) {
   const dimensions = useTerminalDimensions();
   const { colors } = useTheme();
-  useKeyboard((event) => {
-    if (event.name === "s" && !event.ctrl && !event.meta && !event.shift && props.onSwitchRepository) {
-      event.stopPropagation();
+  useKeyActions({
+    "global.switchRepository": () => {
+      if (!props.onSwitchRepository) return false;
       props.onSwitchRepository();
-    }
+    },
   });
   return (
     <box
@@ -74,13 +74,14 @@ export function RepositoryLoadError(props: {
   const { colors } = useTheme();
   const quit = () => props.onQuit ? props.onQuit() : renderer.destroy();
 
-  useKeyboard((event) => {
-    if (event.name === "r") return props.onRetry();
-    if (event.name === "s" && !event.ctrl && !event.meta && !event.shift && props.onSwitchRepository) {
-      event.stopPropagation();
-      return props.onSwitchRepository();
-    }
-    if (event.name === "q") quit();
+  const keys = useKeybindings();
+  useKeyActions({
+    "view.refresh": () => props.onRetry(),
+    "global.switchRepository": () => {
+      if (!props.onSwitchRepository) return false;
+      props.onSwitchRepository();
+    },
+    "global.quit": quit,
   });
 
   return (
@@ -98,7 +99,7 @@ export function RepositoryLoadError(props: {
           <text fg={colors.text} attributes={TextAttributes.BOLD}>Repository unavailable</text>
           <text fg={colors.text}>{props.repository}</text>
           <text flexGrow={1} minHeight={0} fg={colors.red} wrapMode="word">{props.message}</text>
-          <text fg={colors.muted}>{props.onSwitchRepository ? "r retry · s switch repo · q quit" : "r retry · q quit"}</text>
+          <text fg={colors.muted}>{keys.hints(["view.refresh", "retry"], ...(props.onSwitchRepository ? [["global.switchRepository", "switch repo"] as const] : []), ["global.quit", "quit"])}</text>
         </box>
       </Popup>
     </box>

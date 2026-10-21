@@ -1,5 +1,6 @@
 import { RGBA, rgbToHex, TextAttributes, type ScrollBoxRenderable } from "@opentui/core"
-import { useKeyboard, useTerminalDimensions } from "@opentui/solid"
+import { useTerminalDimensions } from "@opentui/solid"
+import { useKeyActions } from "../keybindings"
 import { createMemo, For, Show } from "solid-js"
 import { defaultConfig, type DetailLayout } from "../../config"
 import type { CommitDetail } from "../../models"
@@ -49,15 +50,16 @@ export function CommitScreen(props: {
   let scroll: ScrollBoxRenderable | undefined
   const bindScrollbar = createScrollbarVisibility(() => props.showScrollbar)
 
-  useKeyboard((event) => {
-    if (!props.interactive || !scroll || event.ctrl || event.meta) return
-    if (event.name === "up" || event.name === "k") scroll.scrollBy(-1)
-    else if (event.name === "down" || event.name === "j") scroll.scrollBy(1)
-    else if (event.name === "u") scroll.scrollBy(-Math.max(1, Math.floor(scroll.viewport.height / 2)))
-    else if (event.name === "d") scroll.scrollBy(Math.max(1, Math.floor(scroll.viewport.height / 2)))
-    else if (event.name === "G" || (event.name === "g" && event.shift)) scroll.scrollTo(Math.max(0, scroll.scrollHeight - scroll.viewport.height))
-    else if (event.name === "g") scroll.scrollTo(0)
-  })
+  useKeyActions({
+    "navigation.up": () => scroll!.scrollBy(-1),
+    "navigation.down": () => scroll!.scrollBy(1),
+    "navigation.halfPageUp": () => scroll!.scrollBy(-Math.max(1, Math.floor(scroll!.viewport.height / 2))),
+    "navigation.halfPageDown": () => scroll!.scrollBy(Math.max(1, Math.floor(scroll!.viewport.height / 2))),
+    "navigation.pageUp": () => scroll!.scrollBy(-scroll!.viewport.height),
+    "navigation.pageDown": () => scroll!.scrollBy(scroll!.viewport.height),
+    "navigation.last": () => scroll!.scrollTo(Math.max(0, scroll!.scrollHeight - scroll!.viewport.height)),
+    "navigation.first": () => scroll!.scrollTo(0),
+  }, { when: () => props.interactive && Boolean(scroll) })
 
   const fileColor = (status: string) => status === "added" ? colors.green
     : status === "removed" ? colors.red

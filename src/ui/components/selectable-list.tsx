@@ -1,5 +1,5 @@
 import type { BoxRenderable, ScrollBoxRenderable } from "@opentui/core"
-import { useKeyboard } from "@opentui/solid"
+import { useKeyActions } from "../keybindings"
 import { createEffect, createSignal, Index, onCleanup, Show, type Accessor, type JSX } from "solid-js"
 import { fitText } from "../format"
 import { scrollRowIntoView } from "../scroll-selection"
@@ -65,26 +65,25 @@ export function SelectableList<T>(props: {
   }
   const halfPage = () => Math.max(1, Math.floor(listHeight() / rowHeight() / 2))
 
-  useKeyboard((event) => {
-    if (!props.active) return
-    const activate = event.name === "return" || event.name === "enter" ? props.onActivate
-      : event.ctrl || event.meta ? undefined
-      : event.name === "o" ? props.onOpenInBrowser
-      : event.name === "y" ? props.onCopy
-      : (event.name === "D" || (event.name === "d" && event.shift)) ? props.onDiff : undefined
-    if (activate) {
-      const item = props.items[indexOfSelection()]
-      if (item) {
-        event.stopPropagation()
-        activate(item)
-      }
-    } else if (event.name === "up" || event.name === "k") move(-1)
-    else if (event.name === "down" || event.name === "j") move(1)
-    else if (event.name === "u") move(-halfPage())
-    else if (event.name === "d" && !event.shift) move(halfPage())
-    else if (event.name === "G" || (event.name === "g" && event.shift)) selectIndex(props.items.length - 1)
-    else if (event.name === "g") selectIndex(0)
-  })
+  const activate = (callback: ((item: T) => void) | undefined) => {
+    const item = props.items[indexOfSelection()]
+    if (!callback || item === undefined) return false
+    callback(item)
+  }
+  useKeyActions({
+    "navigation.up": () => move(-1),
+    "navigation.down": () => move(1),
+    "navigation.halfPageUp": () => move(-halfPage()),
+    "navigation.halfPageDown": () => move(halfPage()),
+    "navigation.pageUp": () => move(-Math.max(1, Math.floor(listHeight() / rowHeight()))),
+    "navigation.pageDown": () => move(Math.max(1, Math.floor(listHeight() / rowHeight()))),
+    "navigation.first": () => selectIndex(0),
+    "navigation.last": () => selectIndex(props.items.length - 1),
+    "navigation.activate": () => activate(props.onActivate),
+    "item.open": () => activate(props.onOpenInBrowser),
+    "item.copy": () => activate(props.onCopy),
+    "item.diff": () => activate(props.onDiff),
+  }, { when: () => props.active })
 
   createEffect(() => {
     const items = props.items

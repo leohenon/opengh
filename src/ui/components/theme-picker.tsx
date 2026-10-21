@@ -1,7 +1,8 @@
-import { TextAttributes, type KeyEvent, type ScrollBoxRenderable } from "@opentui/core"
+import { TextAttributes, type ScrollBoxRenderable } from "@opentui/core"
 import { createEffect, createMemo, createSignal, For, Show } from "solid-js"
 import { defaultTheme, themeNames, type ThemeName } from "../../theme"
 import { useTheme } from "../theme"
+import { KeyInput, useKeyActions } from "../keybindings"
 
 function fuzzyScore(value: string, query: string) {
   const target = value.toLowerCase()
@@ -73,18 +74,13 @@ export function ThemePicker(props: {
     }
   }
 
-  const handleKey = (event: KeyEvent) => {
-    if (busy()) {
-      event.preventDefault()
-      event.stopPropagation()
-      return
-    }
-    if (event.name === "escape" || event.name === "esc" || event.raw === "\u001b" || event.sequence === "\u001b")
-      return props.onCancel()
-    if (event.name === "up") return move(-1)
-    if (event.name === "down") return move(1)
-    if (event.name === "return" || event.name === "enter") void choose()
-  }
+  useKeyActions({}, { when: busy, priority: 200, modal: true })
+  useKeyActions({
+    "dialog.close": () => props.onCancel(),
+    "picker.up": () => move(-1),
+    "picker.down": () => move(1),
+    "picker.accept": () => { void choose() },
+  }, { when: () => !busy(), priority: 100, modal: true })
 
   return (
     <box flexGrow={1} minHeight={0} flexDirection="column" paddingLeft={4} paddingRight={4} paddingBottom={1}>
@@ -92,7 +88,7 @@ export function ThemePicker(props: {
         <text fg={colors.text} attributes={TextAttributes.BOLD}>Themes</text>
       </box>
       <box height={2} flexShrink={0} paddingTop={1}>
-        <input
+        <KeyInput
           width="100%"
           focused={!busy()}
           value={query()}
@@ -106,7 +102,6 @@ export function ThemePicker(props: {
             setQuery(value)
             setError("")
           }}
-          onKeyDown={handleKey}
         />
       </box>
       <box height={1} flexShrink={0} />

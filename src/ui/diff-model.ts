@@ -18,13 +18,13 @@ const MAX_PATCH_LINES = 100_000
 export function parseDiff(content: DiffContent): { files: DiffFile[]; notice?: string; error?: string } {
   if (content.kind === "files") return {
     files: content.files,
-    notice: "File list only — patches unavailable. Press r to retry the full diff."
+    notice: "File list only — patches unavailable."
       + (content.truncated ? " GitHub's 3,000-file limit was reached; this list may be incomplete." : ""),
   }
   const { patch } = content
   if (!patch.trim()) return { files: [] }
   if (patch.split("\n").length > MAX_PATCH_LINES) return {
-    files: [], error: "Diff exceeds the 100,000-line parsing limit. Press Enter to load the file list or o to open GitHub.",
+    files: [], error: "Diff exceeds the 100,000-line parsing limit.",
   }
   try {
     const parsed = createHunkDiffFilesFromPatch(patch)
@@ -34,7 +34,7 @@ export function parseDiff(content: DiffContent): { files: DiffFile[]; notice?: s
       const isBinary = /^Binary files(?: .*)? differ\r?$/m.test(body.patch ?? "") || /^GIT binary patch\r?$/m.test(body.patch ?? "")
       const tooLarge = metadata.additionLines.length + metadata.deletionLines.length > MAX_FILE_LINES
       const message = isBinary ? "Binary file — no text diff is available."
-        : tooLarge ? "File exceeds the 8,000-line rendering limit. Open it on GitHub with o."
+        : tooLarge ? "File exceeds the 8,000-line rendering limit."
         : metadata.hunks.length ? undefined
         : metadata.prevMode && metadata.mode && metadata.prevMode !== metadata.mode ? `Mode changed: ${metadata.prevMode} → ${metadata.mode}`
         : metadata.type === "rename-pure" ? "Renamed without text changes."
@@ -51,6 +51,6 @@ export function parseDiff(content: DiffContent): { files: DiffFile[]; notice?: s
     if (sections !== parsed.length) notices.push("Some diff sections could not be rendered; open GitHub for the complete changeset.")
     return { files, notice: notices.join(" ") || undefined }
   } catch (error) {
-    return { files: [], error: `Cannot render this diff: ${error instanceof Error ? error.message : "Invalid patch"}. Press Enter for the file list or o for GitHub.` }
+    return { files: [], error: `Cannot render this diff: ${error instanceof Error ? error.message : "Invalid patch"}.` }
   }
 }

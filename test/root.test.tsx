@@ -2,10 +2,11 @@ import { afterEach, describe, expect, test } from "bun:test"
 import { testRender } from "@opentui/solid"
 import { createSignal } from "solid-js"
 import { defaultConfig, type Config } from "../src/config"
+import type { IssueDetailState } from "../src/repository-state"
 import type { RepositoryState } from "../src/repository-state"
 import { Root } from "../src/root"
 import { GitHubApiError } from "../src/github/transport"
-import { githubDataFixture, repositoryOperationsFixture } from "./fixtures/github-data"
+import { githubDataFixture, repositoryOperationsFixture, issueDetailFixture, issuePullReferenceFixture } from "./fixtures/github-data"
 
 const active: Array<{ renderer: { destroy(): void; isDestroyed: boolean } }> = []
 afterEach(() => {
@@ -355,4 +356,164 @@ test("failed tab saves remain pending and are retried on exit without writing un
     expect(updates).toEqual([{ "cli/cli": "commits" }, { "cli/cli": "commits" }])
     expect(view.renderer.isDestroyed).toBe(true)
   } finally { if (!view.renderer.isDestroyed) view.renderer.destroy() }
+})
+
+test("reloads bindings in place, keeps the last valid config on failure, and remaps interrupt in inputs", async () => {
+  let next: Config = { ...defaultConfig, showStatusBarHints: true, keybindings: { "global.interrupt": ["ctrl+x"] } }
+  let invalid = false
+  const view = await testRender(() => <Root cwd="/unused" services={{
+    resolveRepository: async () => undefined,
+    loadRecentRepositories: async () => ["cli/cli"],
+    rememberRepository: async () => {},
+    loadRepositoryTabs: async () => ({}), saveRepositoryTabs: async () => {},
+    resolveLocalRepository: async () => undefined,
+    createRepositorySession: readySession,
+    loadConfig: async () => { if (invalid) throw new Error("Invalid binding"); return next },
+  }} />, { width: 120, height: 32, exitOnCtrlC: false })
+  active.push(view)
+  await Bun.sleep(0)
+  await view.flush()
+  view.mockInput.pressCtrlC()
+  expect(view.renderer.isDestroyed).toBe(false)
+  view.mockInput.pressKey("r", { ctrl: true })
+  await Bun.sleep(0)
+  await view.flush()
+  expect(view.captureCharFrame()).toContain("Config reloaded")
+  next = { ...next, keybindings: { ...next.keybindings, "picker.accept": ["f2"], "global.help": ["f1"] } }
+  view.mockInput.pressKey("r", { ctrl: true })
+  await Bun.sleep(0)
+  await view.flush()
+  expect(view.captureCharFrame()).toContain("Config reloaded")
+  view.mockInput.pressEnter()
+  await view.flush()
+  expect(view.captureCharFrame()).toContain("Open a GitHub repository")
+  view.mockInput.pressKey("F2")
+  await Bun.sleep(0)
+  await view.flush()
+  expect(view.captureCharFrame()).toContain("f1 help")
+  invalid = true
+  view.mockInput.pressKey("r", { ctrl: true })
+  await Bun.sleep(0)
+  await view.flush()
+  expect(view.captureCharFrame()).toContain("Config reload failed")
+  expect(view.captureCharFrame()).not.toContain("Invalid binding")
+  expect(view.captureCharFrame()).not.toContain("Config reloaded")
+  expect(view.captureCharFrame()).toContain("f1 help")
+  view.mockInput.pressKey("F1")
+  await view.flush()
+  expect(view.captureCharFrame()).toContain("Help")
+  view.mockInput.pressKey("x", { ctrl: true })
+  expect(view.renderer.isDestroyed).toBe(true)
+})
+
+
+test("references isolate Root quit while preserving remapped list actions and dismissal", async () => {
+  let copied = ""
+  const session = readySession()
+  const issueDetail: IssueDetailState = {
+    number: issueDetailFixture.number, resource: { status: "ready", value: issueDetailFixture },
+    comments: { status: "ready", value: { items: [], page: 1, hasMore: false } },
+    references: { status: "ready", value: [issuePullReferenceFixture] },
+  }
+  const view = await testRender(() => <Root cwd="/unused" services={{
+    resolveRepository: async () => "cli/cli", loadRecentRepositories: async () => [], rememberRepository: async () => {},
+    loadRepositoryTabs: async () => ({}), saveRepositoryTabs: async () => {}, resolveLocalRepository: async () => undefined,
+    loadConfig: async () => ({ ...defaultConfig, keybindings: { "dialog.close": ["f4"], "item.copy": ["f3"] } }),
+    createRepositorySession: () => ({ ...session, issueDetail: () => issueDetail }),
+    copyToHostClipboard: async (value) => { copied = value; return true },
+  }} />, { width: 120, height: 32 })
+  active.push(view)
+  await Bun.sleep(0)
+  await view.flush()
+  view.mockInput.pressKey("3")
+  view.mockInput.pressEnter()
+  view.mockInput.pressKey("p")
+  await view.flush()
+  expect(view.captureCharFrame()).toContain("References")
+  view.mockInput.pressKey("q")
+  expect(view.renderer.isDestroyed).toBe(false)
+  view.mockInput.pressKey("F3")
+  await Bun.sleep(0)
+  expect(copied).toBe(issuePullReferenceFixture.url)
+  view.mockInput.pressKey("p")
+  await view.flush()
+  view.mockInput.pressKey("F4")
+  await view.flush()
+  expect(view.captureCharFrame()).not.toContain("PRs (1)")
+  view.mockInput.pressKey("q")
+  await Bun.sleep(0)
+  expect(view.renderer.isDestroyed).toBe(true)
+})
+
+test("settings cannot save or dismiss during a deferred config reload", async () => {
+  const reload = deferred<Config>()
+  let loads = 0
+  let saved: Config | undefined
+  const view = await testRender(() => <Root cwd="/unused" services={{
+    resolveRepository: async () => "cli/cli", loadRecentRepositories: async () => [], rememberRepository: async () => {},
+    loadRepositoryTabs: async () => ({}), saveRepositoryTabs: async () => {}, resolveLocalRepository: async () => undefined,
+    loadConfig: () => ++loads === 1 ? Promise.resolve({ ...defaultConfig }) : reload.promise,
+    saveConfig: async (value) => { saved = value }, createRepositorySession: readySession,
+  }} />, { width: 120, height: 32 })
+  active.push(view)
+  await Bun.sleep(0)
+  await view.flush()
+  view.mockInput.pressKey("r", { ctrl: true })
+  view.mockInput.pressKey(",")
+  view.mockInput.pressArrow("down")
+  view.mockInput.pressEnter()
+  view.mockInput.pressEscape()
+  await Bun.sleep(30)
+  await view.flush()
+  expect(saved).toBeUndefined()
+  expect(view.captureCharFrame()).toContain("Settings")
+  expect(view.captureCharFrame()).not.toContain("Search themes")
+  reload.resolve({ ...defaultConfig, keybindings: { "global.help": ["f1"] } })
+  await Bun.sleep(0)
+  await view.flush()
+  expect(view.captureCharFrame()).toContain("Config reloaded")
+  view.mockInput.pressArrow("down")
+  view.mockInput.pressEnter()
+  await Bun.sleep(0)
+  expect(saved?.colorMode).toBe("dark")
+  expect(saved?.keybindings).toEqual({ "global.help": ["f1"] })
+})
+
+test("remapped interrupt cancels commands without quitting, then quits after command completion", async () => {
+  const result = deferred<{ exitCode: number; cancelled: boolean }>()
+  let cancelled = 0
+  let copied = ""
+  const view = await testRender(() => <Root cwd="/unused" services={{
+    resolveRepository: async () => "cli/cli", loadRecentRepositories: async () => [], rememberRepository: async () => {},
+    loadRepositoryTabs: async () => ({}), saveRepositoryTabs: async () => {}, resolveLocalRepository: async () => undefined,
+    loadConfig: async () => ({ ...defaultConfig, keybindings: {
+      "global.interrupt": ["ctrl+x"], "command.clone": ["f2"], "dialog.confirm": ["f3"], "command.copyOutput": ["f5"],
+    } }),
+    runCommand: (_spec, output) => {
+      output("command output\n")
+      return { result: result.promise, cancel: () => { cancelled++; result.resolve({ exitCode: 143, cancelled: true }) } }
+    },
+    copyToHostClipboard: async (value) => { copied = value; return true }, createRepositorySession: readySession,
+  }} />, { width: 120, height: 32, exitOnCtrlC: false })
+  active.push(view)
+  await Bun.sleep(0)
+  await view.flush()
+  view.mockInput.pressKey("F2")
+  view.mockInput.pressKey("F3")
+  await Bun.sleep(0)
+  await view.flush()
+  expect(view.captureCharFrame()).toContain("Running")
+  view.mockInput.pressCtrlC()
+  expect(cancelled).toBe(0)
+  view.mockInput.pressKey("x", { ctrl: true })
+  await Bun.sleep(0)
+  await view.flush()
+  expect(cancelled).toBe(1)
+  expect(view.renderer.isDestroyed).toBe(false)
+  expect(view.captureCharFrame()).toContain("Cancelled (exit 143)")
+  view.mockInput.pressKey("F5")
+  await Bun.sleep(0)
+  expect(copied).toBe("command output\n")
+  view.mockInput.pressKey("x", { ctrl: true })
+  expect(view.renderer.isDestroyed).toBe(true)
 })

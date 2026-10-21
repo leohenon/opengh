@@ -1,11 +1,12 @@
 import { TextAttributes, type ScrollBoxRenderable } from "@opentui/core"
-import { useKeyboard, usePaste, useTerminalDimensions } from "@opentui/solid"
+import { usePaste, useTerminalDimensions } from "@opentui/solid"
 import { createEffect, createMemo, createSignal, Index, onCleanup, Show } from "solid-js"
 import type { Paginated } from "../../models"
 import type { IssueActionState, ResourceState } from "../../repository-state"
 import { createScrollbarVisibility } from "../scrollbar-visibility"
 import { useTheme } from "../theme"
 import { Popup } from "./popup"
+import { KeyInput, useKeyActions, useKeybindings } from "../keybindings"
 
 export function IssueAssigneesPicker(props: {
   number: number
@@ -20,6 +21,7 @@ export function IssueAssigneesPicker(props: {
 }) {
   const { colors } = useTheme()
   const dimensions = useTerminalDimensions()
+  const keys = useKeybindings()
   const [selectionError, setSelectionError] = createSignal<string>()
   const [query, setQuery] = createSignal("")
   const [active, setActive] = createSignal(0)
@@ -68,24 +70,20 @@ export function IssueAssigneesPicker(props: {
     filtered()
     list?.scrollChildIntoView(`assignee-row-${currentRow()}`)
   })
-  createEffect(() => props.onHintChange(pending() ? "Saving assignees…" : "↑/↓ navigate · enter toggle · ctrl+s save · esc cancel"))
+  createEffect(() => props.onHintChange(pending() ? "Saving assignees…" : keys.hints([["picker.up", "picker.down"], "navigate"], ["picker.accept", "toggle"], ["dialog.submit", "save"], ["dialog.close", "cancel"])))
   onCleanup(() => props.onHintChange(undefined))
   usePaste((event) => {
     if (pending()) { event.preventDefault(); event.stopPropagation() }
   })
-  useKeyboard((event) => {
-    const consume = () => { event.preventDefault(); event.stopPropagation() }
-    if (pending()) { consume(); return }
-    if (event.name === "escape" || event.name === "esc") { consume(); props.onClose() }
-    else if (event.ctrl && event.name === "s") { consume(); props.onSubmit() }
-    else if (event.name === "up" || event.name === "down") {
-      consume()
-      setActive(Math.max(0, Math.min(rowCount() - 1, currentRow() + (event.name === "up" ? -1 : 1))))
-    } else if (event.name === "return" || event.name === "enter") {
-      consume()
-      activate()
-    } else if (event.name === "tab") consume()
-  })
+  const move = (delta: number) => { setActive(Math.max(0, Math.min(rowCount() - 1, currentRow() + delta))) }
+  useKeyActions({}, { when: pending, priority: 200, modal: true })
+  useKeyActions({
+    "dialog.close": () => props.onClose(),
+    "dialog.submit": () => props.onSubmit(),
+    "picker.up": () => move(-1),
+    "picker.down": () => move(1),
+    "picker.accept": activate,
+  }, { when: () => !pending(), priority: 100, modal: true })
 
   const error = () => [
     selectionError(),
@@ -105,7 +103,7 @@ export function IssueAssigneesPicker(props: {
         <box flexShrink={0} paddingX={4} flexDirection="column">
           <text height={1} fg={colors.text} attributes={TextAttributes.BOLD}>Assignees · #{props.number}</text>
           <box height={2} flexShrink={0} paddingTop={1}>
-            <input flexGrow={1} minWidth={0} focused={!pending()} value={query()}
+            <KeyInput flexGrow={1} minWidth={0} focused={!pending()} value={query()}
               placeholderColor={colors.muted} textColor={colors.text} focusedTextColor={colors.text} cursorColor={colors.blue}
               focusedBackgroundColor={colors.panel}
               onInput={(value) => { if (!pending()) { setQuery(value); setActive(0) } }} />

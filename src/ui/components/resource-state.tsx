@@ -1,5 +1,6 @@
 import { Show, type Accessor, type JSX } from "solid-js"
 import type { ResourceState } from "../../repository-state"
+import { useKeybindings } from "../keybindings"
 import { useTheme } from "../theme"
 import { LoadingText } from "./loading-text"
 
@@ -8,6 +9,7 @@ export function ResourceStateView<T>(props: {
   children: (value: Accessor<T>) => JSX.Element
 }) {
   const { colors } = useTheme()
+  const keys = useKeybindings()
   const value = () => props.resource.value === undefined
     ? undefined
     : { current: props.resource.value as T }
@@ -22,7 +24,7 @@ export function ResourceStateView<T>(props: {
             fallback={<LoadingText text="Loading…" />}
           >
             <text fg={colors.red}>
-              × {props.resource.status === "error" ? props.resource.message : "Load failed"} · r to retry
+              × {props.resource.status === "error" ? props.resource.message : "Load failed"}{keys.hint("view.refresh", "to retry") ? ` · ${keys.hint("view.refresh", "to retry")}` : ""}
             </text>
           </Show>
         </box>

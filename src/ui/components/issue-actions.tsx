@@ -1,5 +1,5 @@
 import { TextAttributes, type ScrollBoxRenderable, type TextareaRenderable } from "@opentui/core"
-import { useKeyboard, usePaste } from "@opentui/solid"
+import { usePaste } from "@opentui/solid"
 import { createEffect, createMemo, createSignal, Index, onCleanup, Show, untrack } from "solid-js"
 import type { IssueActionKind, IssueCloseReason } from "../../models"
 import type { IssueActionState } from "../../repository-state"
@@ -8,6 +8,7 @@ import { useTheme } from "../theme"
 import { createScrollbarVisibility } from "../scrollbar-visibility"
 import { GitHubMarkdown } from "./github-markdown"
 import { Popup } from "./popup"
+import { KeyInput, KeyTextarea, useKeyActions, useKeybindings } from "../keybindings"
 
 export function IssueActionsMenu(props: {
   number: number
@@ -27,17 +28,15 @@ export function IssueActionsMenu(props: {
     return actions.filter((item) => props.permissions?.[item.kind])
   })
   const active = () => Math.min(selected(), items().length - 1)
-  useKeyboard((event) => {
-    event.preventDefault()
-    event.stopPropagation()
-    if (event.name === "escape") props.onClose()
-    else if (event.name === "up" || event.name === "k") setSelected(Math.max(0, active() - 1))
-    else if (event.name === "down" || event.name === "j") setSelected(Math.min(items().length - 1, active() + 1))
-    else if (event.name === "return" || event.name === "enter") {
+  useKeyActions({
+    "dialog.close": () => props.onClose(),
+    "navigation.up": () => { setSelected(Math.max(0, active() - 1)) },
+    "navigation.down": () => { setSelected(Math.min(items().length - 1, active() + 1)) },
+    "navigation.activate": () => {
       const item = items()[active()]
       if (item) props.onSelect(item.kind)
-    }
-  })
+    },
+  }, { priority: 100, modal: true })
   return (
     <Popup width={52} height={items().length + 4} placement="center" zIndex={250}>
       <box flexGrow={1} minHeight={0} paddingX={2} paddingBottom={1} flexDirection="column">
@@ -75,6 +74,7 @@ export function IssueActionDialog(props: {
   onClose(): void
 }) {
   const { colors, theme } = useTheme()
+  const keys = useKeybindings()
   const markdownStyle = createReactiveMarkdownStyle(colors, theme)
   const [body, setBody] = createSignal(props.state.body)
   const [preview, setPreview] = createSignal(false)
@@ -113,11 +113,11 @@ export function IssueActionDialog(props: {
     if (!pending() && !retry() && !confirmSubmit()) props.onReasonChange(reason)
   }
 
-  createEffect(() => props.onHintChange(confirmSubmit() ? "enter confirm · esc back"
-    : retry() ? "ctrl+s retry · ctrl+d discard · esc back"
-    : props.kind === "duplicate" ? "enter review · esc back"
-    : (props.kind === "close" ? "tab change reason" : "tab preview")
-      + " · ctrl+s submit · ctrl+d discard · esc keep draft"))
+  createEffect(() => props.onHintChange(pending() ? "Saving…"
+    : confirmSubmit() ? keys.hints(["dialog.confirm", "confirm"], ["dialog.close", "back"])
+    : retry() ? keys.hints(["dialog.submit", "retry"], ["dialog.discard", "discard"], ["dialog.close", "back"])
+    : props.kind === "duplicate" ? keys.hints([["dialog.confirm", "dialog.submit"], "review"], ["dialog.discard", "discard"], ["dialog.close", "back"])
+    : keys.hints([props.kind === "close" ? "dialog.changeReason" : "dialog.togglePreview", props.kind === "close" ? "change reason" : "preview"], ["dialog.submit", "submit"], ["dialog.discard", "discard"], ["dialog.close", "keep draft"])))
   createEffect(() => props.onConfirmationChange?.(confirmSubmit()))
   onCleanup(() => { props.onHintChange(undefined); props.onConfirmationChange?.(false) })
 
@@ -131,48 +131,52 @@ export function IssueActionDialog(props: {
   usePaste((event) => {
     if (!writing()) { event.preventDefault(); event.stopPropagation() }
   })
-  useKeyboard((event) => {
-    const consume = () => { event.preventDefault(); event.stopPropagation() }
-    const enter = event.name === "return" || event.name === "enter"
-    if (pending()) { consume(); return }
-    if (confirmSubmit()) {
-      consume()
-      if (event.name === "escape") setConfirmSubmit(false)
-      else if (enter && !event.ctrl && !event.meta && canSubmit()) {
+  useKeyActions({}, { when: pending, priority: 200, modal: true })
+  useKeyActions({
+    "dialog.close": () => { setConfirmSubmit(false) },
+    "dialog.confirm": () => {
+      if (canSubmit()) {
         setConfirmSubmit(false)
         props.onSubmit()
       }
-      return
-    }
-    if (event.name === "escape") { consume(); props.onClose(); return }
-    if (event.ctrl && event.name === "s") {
-      consume(); requestSubmit(); return
-    }
-    if (props.kind === "duplicate" && enter && !event.ctrl && !event.meta) { consume(); requestSubmit(); return }
-    if (event.ctrl && event.name === "d") {
-      consume()
+    },
+  }, { when: () => confirmSubmit() && !pending(), priority: 150, modal: true })
+  useKeyActions({
+    "dialog.close": () => props.onClose(),
+    "dialog.submit": requestSubmit,
+    "dialog.discard": () => {
       if (props.kind === "duplicate") props.onDuplicateTargetChange("")
       else props.onDiscard()
-      return
-    }
-    if (event.name === "tab") {
-      consume()
-      if (!retry()) {
-        if (props.kind === "close") changeReason(props.state.reason === "completed" ? "not_planned" : "completed")
-        else if (hasPreview()) setPreview((value) => !value)
-      }
-      return
-    }
-    if (retry()) { consume(); return }
-    if (previewing()) {
-      consume()
-      if (event.name === "up" || event.name === "k") previewScroll?.scrollBy(-1)
-      else if (event.name === "down" || event.name === "j") previewScroll?.scrollBy(1)
-      else if (event.name === "pageup") previewScroll?.scrollBy(-Math.max(1, previewScroll?.viewport.height ?? 1))
-      else if (event.name === "pagedown") previewScroll?.scrollBy(Math.max(1, previewScroll?.viewport.height ?? 1))
-    }
-    // All other keys belong to the focused writer; App gates ambient shortcuts.
-  })
+    },
+  }, { when: () => !confirmSubmit() && !pending(), priority: 100, modal: true })
+  useKeyActions({
+    "dialog.confirm": () => {
+      if (props.kind !== "duplicate") return false
+      requestSubmit()
+    },
+    "dialog.changeReason": () => {
+      if (props.kind !== "close") return false
+      changeReason(props.state.reason === "completed" ? "not_planned" : "completed")
+    },
+    "dialog.togglePreview": () => {
+      if (!hasPreview()) return false
+      setPreview((value) => !value)
+    },
+  }, { when: writing, priority: 110 })
+  const scrollPreview = (direction: number, half = false) => {
+    previewScroll?.scrollBy(direction * Math.max(1, Math.floor((previewScroll?.viewport.height ?? 1) / (half ? 2 : 1))))
+  }
+  useKeyActions({
+    "dialog.togglePreview": () => { setPreview(false) },
+    "navigation.up": () => { previewScroll?.scrollBy(-1) },
+    "navigation.down": () => { previewScroll?.scrollBy(1) },
+    "navigation.halfPageUp": () => scrollPreview(-1, true),
+    "navigation.halfPageDown": () => scrollPreview(1, true),
+    "navigation.pageUp": () => scrollPreview(-1),
+    "navigation.pageDown": () => scrollPreview(1),
+    "navigation.first": () => { previewScroll?.scrollTo(0) },
+    "navigation.last": () => { if (previewScroll) previewScroll.scrollTo(previewScroll.scrollHeight) },
+  }, { when: () => previewing() && !confirmSubmit() && !pending() && !retry(), priority: 110 })
 
   return (
     <>
@@ -219,7 +223,7 @@ export function IssueActionDialog(props: {
           </Show>
           <Show when={props.kind === "duplicate"}>
             <box marginTop={1} flexShrink={0} flexDirection="column">
-              <input value={props.state.duplicateTarget ?? ""} placeholder="#123" maxLength={17}
+              <KeyInput value={props.state.duplicateTarget ?? ""} placeholder="#123" maxLength={17}
                 focused={writing()} textColor={colors.text} focusedTextColor={colors.text} backgroundColor={colors.panel}
                 focusedBackgroundColor={colors.panel} cursorColor={colors.blue}
                 onInput={(target) => {
@@ -230,7 +234,7 @@ export function IssueActionDialog(props: {
           </Show>
           <Show when={props.kind !== "duplicate"}>
             <box flexGrow={1} minHeight={0} marginTop={props.kind === "close" ? 1 : 0} flexDirection="column" overflow="hidden">
-              <textarea
+              <KeyTextarea
                 ref={(value) => { writer = value }}
                 initialValue={props.state.body}
                 visible={!previewing() && !retry()}
@@ -276,7 +280,7 @@ export function IssueActionDialog(props: {
               <text fg={colors.muted}>Reason: {props.state.reason === "completed" ? "Completed" : "Not planned"}</text>
             </Show>
             <box flexGrow={1} minHeight={0} />
-            <text height={1} flexShrink={0} fg={colors.muted}>enter confirm · esc back</text>
+            <text height={1} flexShrink={0} fg={colors.muted}>{keys.hints(["dialog.confirm", "confirm"], ["dialog.close", "back"])}</text>
           </box>
         </Popup>
       </Show>

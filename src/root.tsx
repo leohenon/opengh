@@ -1,4 +1,4 @@
-import { useKeyboard, useRenderer } from "@opentui/solid"
+import { useRenderer } from "@opentui/solid"
 import { createEffect, createMemo, createSignal, Match, onCleanup, onMount, Show, Switch } from "solid-js"
 import type { Page } from "./navigation"
 import { loadRepositoryTabs, saveRepositoryTabs, type RepositoryTabs } from "./repository-tabs"
@@ -12,6 +12,7 @@ import type { RepositoryState } from "./repository-state"
 import { App } from "./ui/app"
 import { ThemeProvider } from "./ui/theme"
 import { MotionProvider } from "./ui/motion"
+import { KeybindingsProvider, useKeyActions } from "./ui/keybindings"
 import { Toast } from "./ui/components/toast"
 import { SwitchRepositoryScreen } from "./ui/pages/switch-repository"
 import {
@@ -98,6 +99,9 @@ export function Root(props: {
   }
   onCleanup(() => { void flushRepositoryTabs() })
   const [configSaving, setConfigSaving] = createSignal(false)
+  const [configReloading, setConfigReloading] = createSignal(false)
+  const [configReloaded, setConfigReloaded] = createSignal(false)
+  const [configReloadFailed, setConfigReloadFailed] = createSignal(false)
   const [configError, setConfigError] = createSignal("")
   const [configWarningDismissed, setConfigWarningDismissed] = createSignal(false)
   const session = services.createRepositorySession()
@@ -114,17 +118,32 @@ export function Root(props: {
     else renderer.destroy()
   }
 
-  useKeyboard((event) => {
-    if (event.ctrl && event.name === "c") {
-      event.stopPropagation()
-      if (commandCancel) commandCancel()
-      else quit()
+  const reloadConfig = async () => {
+    if (view() === "resolving" || configSaving() || configReloading()) return
+    setConfigReloading(true)
+    setConfigReloaded(false)
+    try {
+      const next = await services.loadConfig()
+      if (renderer.isDestroyed) return
+      setConfig(next)
+      setConfigError("")
+      setConfigReloadFailed(false)
+      setConfigReloaded(true)
+    } catch (error) {
+      if (!renderer.isDestroyed) {
+        setConfigReloadFailed(true)
+        setConfigWarningDismissed(false)
+        setConfigError(`${error instanceof Error ? error.message : "Could not reload config"}. Previous settings remain active. Fix the file and reload configuration before saving settings.`)
+      }
+    } finally {
+      setConfigReloading(false)
     }
-  })
+  }
 
   // Root owns committed preferences and the cross-dialog save lock; theme previews stay in the UI.
   const updateConfig = async (next: Config) => {
     if (configSaving()) throw new Error("A settings save is already in progress")
+    if (configReloading()) throw new Error("A configuration reload is in progress")
     if (configError()) throw new Error(configError())
     setConfigSaving(true)
     try {
@@ -173,7 +192,7 @@ export function Root(props: {
       services.loadRepositoryTabs().catch(() => ({})),
       services.loadConfig().catch((error) => {
         const message = error instanceof Error ? error.message : "Could not load config"
-        setConfigError(`${message}. Fix or move the config file and restart before saving settings.`)
+        setConfigError(`${message}. Fix or move the config file and reload configuration before saving settings.`)
         return { ...defaultConfig }
       }),
     ]).then(([resolved, repositories, savedTabs, loadedConfig]) => {
@@ -191,6 +210,8 @@ export function Root(props: {
   })
 
   return (
+    <KeybindingsProvider overrides={config().keybindings}>
+    <RootShortcuts onInterrupt={() => commandCancel ? commandCancel() : quit()} onQuit={quit} onReload={() => void reloadConfig()} />
     <ThemeProvider name={config().theme} mode={config().colorMode}>
       <MotionProvider reduced={config().reducedMotion}>
       <Show
@@ -233,7 +254,7 @@ export function Root(props: {
               initialPage={repositoryTabs()[repositoryName.toLowerCase()]}
               onPageChange={(page) => rememberTab(repositoryName, page)}
               config={config()}
-              configSaving={configSaving()}
+              configSaving={configSaving() || configReloading()}
               configError={configError()}
               onConfigChange={updateConfig}
               cwd={props.cwd}
@@ -294,14 +315,34 @@ export function Root(props: {
         </Match>
         </Switch>
       </Show>
+      <Show when={configReloaded()}>
+        <Toast
+          title="Config reloaded"
+          message=""
+          tone="success"
+          duration={2000}
+          zIndex={400}
+          onDismiss={() => setConfigReloaded(false)}
+        />
+      </Show>
       <Show when={view() !== "resolving" && configError() && !configWarningDismissed()}>
         <Toast
-          title="Using default settings"
-          message={configError()}
+          title={configReloadFailed() ? "Config reload failed" : "Using default settings"}
+          message={configReloadFailed() ? "" : configError()}
           onDismiss={() => setConfigWarningDismissed(true)}
         />
       </Show>
       </MotionProvider>
     </ThemeProvider>
+    </KeybindingsProvider>
   )
+}
+
+function RootShortcuts(props: { onInterrupt(): void; onQuit(): void; onReload(): void }) {
+  useKeyActions({
+    "global.interrupt": () => props.onInterrupt(),
+    "global.reloadConfig": () => props.onReload(),
+  }, { priority: 1000 })
+  useKeyActions({ "global.quit": () => props.onQuit() }, { priority: -100 })
+  return null
 }

@@ -1,7 +1,9 @@
 import type { ScrollBoxRenderable } from "@opentui/core"
-import { useKeyboard, useRenderer, useTerminalDimensions } from "@opentui/solid"
+import { useRenderer, useTerminalDimensions } from "@opentui/solid"
 import { createEffect, createMemo, createSignal, For, on, onCleanup, Show } from "solid-js"
 import { defaultConfig, type Config } from "../config"
+import type { HintEntry } from "../keybindings"
+import { KeybindingsBoundary, useKeyActions, useKeybindings } from "./keybindings"
 import { cloneCommand, cloneDestination, matchesLocalRepository, type LocalRepository, type CommandSpec, type CommandTask } from "../command-actions"
 import { CommandDialog, type CommandAction } from "./components/command-dialog"
 import type { CommitDetail, DiffContent, DiffTarget, IssueActionKind, IssueActionResult, Paginated, ListState } from "../models"
@@ -108,6 +110,10 @@ export type AppProps = {
 }
 
 export function App(props: AppProps) {
+  return <KeybindingsBoundary overrides={props.config?.keybindings}><AppContent {...props} /></KeybindingsBoundary>
+}
+
+function AppContent(props: AppProps) {
   const renderer = useRenderer()
   const { colors } = useTheme()
   const dimensions = useTerminalDimensions()
@@ -601,228 +607,215 @@ export function App(props: AppProps) {
       copying = false
     }
   }
+  const keys = useKeybindings()
   const shortcutHint = () => {
     if (!config().showStatusBarHints) return undefined
+    const hint = (...entries: HintEntry[]) => keys.hints(...entries)
+    const select: HintEntry = [["navigation.up", "navigation.down"], "select"]
+    const open: HintEntry = ["navigation.activate", "open"]
+    const back: HintEntry = ["navigation.back", "back"]
+    const github: HintEntry = ["item.open", "GitHub"]
+    const copy: HintEntry = ["item.copy", activeCommitSha() || page() === "commits" ? "copy SHA" : "copy URL"]
+    const diff: HintEntry = ["item.diff", "diff"]
+    const help: HintEntry = ["global.help", "help"]
+    const close: HintEntry = ["dialog.close", "close"]
+    const picker: HintEntry[] = [[["picker.up", "picker.down"], "select"], ["picker.accept", "open"], close]
     if (overlay() === "issue-action") return issueActionHint()
-    if (overlay() === "issue-actions") return "↑/↓ select · enter open · esc close"
-    if (overlay() === "help") return "esc close"
+    if (overlay() === "issue-actions") return hint(select, open, close)
+    if (overlay() === "help") return hint(close)
     if (overlay() === "settings") return settingsHint()
     if (overlay() === "command") return commandHint()
-    if (overlay() === "branch-picker") return "↑/↓ select · enter open · esc close"
-    if (overlay() === "issue-references") return "↑/↓ select · enter open · tab switch tabs · y copy URL · esc close"
-    if (overlay() === "switch-repo") return "↑/↓ select · enter open · esc close"
-    const common = (props.onSwitchRepository ? " · s switch repo" : "") + " · ? help"
+    if (overlay() === "branch-picker" || overlay() === "switch-repo") return hint(...picker)
+    if (overlay() === "issue-references") return hint(select, open, ["references.switchTab", "switch tabs"], copy, close)
+    const common: HintEntry[] = [...(props.onSwitchRepository ? [["global.switchRepository", "switch repo"] as const] : []), help]
     if (diffTarget()) {
       const files = diffFocus()[page()] === "files"
-      const horizontal = files ? "←/→ tabs" : "←/→ pan"
-      const next = files ? "diff" : "files"
-      if (dimensions().width < 80) return `esc back · ${horizontal} · tab focus ${next} · ? help`
-      return `esc back · ${horizontal} · ↑/↓ ${files ? "files" : "scroll"} · tab focus ${next} · b toggle files · [ ] hunks`
-        + (diffResource().status === "error" ? " · enter file list" : " · t layout · w wrap") + " · ? help"
+      const horizontal: HintEntry = [files ? ["navigation.previousTab", "navigation.nextTab"] : ["diff.panLeft", "diff.panRight"], files ? "tabs" : "pan"]
+      const focus: HintEntry = ["diff.focus", `focus ${files ? "diff" : "files"}`]
+      if (dimensions().width < 80) return hint(back, horizontal, focus, help)
+      return hint(back, horizontal, [["navigation.up", "navigation.down"], files ? "files" : "scroll"], focus,
+        ["diff.toggleFiles", "toggle files"], [["diff.previousHunk", "diff.nextHunk"], "hunks"],
+        ...(diffResource().status === "error" ? [["navigation.activate", "file list"] as const]
+          : [["diff.toggleLayout", "layout"], ["diff.toggleWrap", "wrap"]] as const), help)
     }
-    if (activeRunId()) return "esc back · o GitHub · y copy URL"
-      + (activeResource()?.status === "error" ? " · r retry" : runDetail().jobs.value?.hasMore ? " · enter load more" : " · r refresh") + common
+    if (activeRunId()) return hint(back, github, copy,
+      activeResource()?.status === "error" ? ["view.refresh", "retry"]
+        : runDetail().jobs.value?.hasMore ? ["navigation.activate", "load more"] : ["view.refresh", "refresh"], ...common)
     if (activeCommitSha()) {
       const retry = commitResource().status === "error"
       const more = commitResource().value?.files.hasMore
-      if (dimensions().width < 60 && (retry || more)) return "esc back · D diff"
-        + (retry ? " · r retry" : " · enter load more") + common
-      return "esc back · D diff · o GitHub · y copy SHA"
-        + (retry ? " · r retry" : more ? " · enter load more" : "")
-        + common
+      const load: HintEntry[] = retry ? [["view.refresh", "retry"]] : more ? [["navigation.activate", "load more"]] : []
+      return hint(back, diff, ...(dimensions().width < 60 && (retry || more) ? [] : [github, copy]), ...load, ...common)
     }
     if (activeIssueNumber()) {
       const retry = activeResource()?.status === "error"
       const more = issueDetail().comments.value?.hasMore
       const references = issueMenuItems().length
-      const actions = (canActOnIssue("comment") ? " · c comment" : "") + (hasIssueActions() ? " · a actions" : "")
-      const hintWidth = dimensions().width - actions.length
-      if (dimensions().width < 64) return "esc back" + actions
-        + (!actions ? retry ? " · r retry" : more ? " · enter load more" : references ? " · p references" : " · o GitHub" : "")
-        + common
-      return "esc back" + actions
-        + (retry ? " · r retry" : more ? " · enter load more" : "")
-        + (references && hintWidth >= 64 ? " · p references" : "")
-        + (hintWidth >= 100 || !retry && !more && hintWidth >= 64 ? " · o GitHub · y copy URL" : "")
-        + common
+      const actions: HintEntry[] = [...(canActOnIssue("comment") ? [["issue.comment", "comment"] as const] : []),
+        ...(hasIssueActions() ? [["issue.actions", "actions"] as const] : [])]
+      const hintWidth = dimensions().width - hint(...actions).length
+      if (dimensions().width < 64) return hint(back, ...actions,
+        ...(!actions.length ? [retry ? ["view.refresh", "retry"] : more ? ["navigation.activate", "load more"]
+          : references ? ["detail.references", "references"] : github] as HintEntry[] : []), ...common)
+      return hint(back, ...actions, ...(retry ? [["view.refresh", "retry"] as const] : more ? [["navigation.activate", "load more"] as const] : []),
+        ...(references && hintWidth >= 64 ? [["detail.references", "references"] as const] : []),
+        ...(hintWidth >= 100 || !retry && !more && hintWidth >= 64 ? [github, copy] : []), ...common)
     }
     if (activePullNumber()) {
       const retry = activeResource()?.status === "error"
       const more = pullDetail().comments.value?.hasMore
       const references = pullMenuItems().length
-      if (dimensions().width < 64) return "esc back · D diff"
-        + (retry ? " · r retry" : more ? " · enter load more" : references ? " · p references" : " · o GitHub") + common
-      return "esc back · D diff"
-        + (retry ? " · r retry" : more ? " · enter load more" : "")
-        + (references ? " · p references" : "")
-        + (dimensions().width >= 100 || !retry && !more ? " · o GitHub · y copy URL" : "") + common
+      if (dimensions().width < 64) return hint(back, diff,
+        retry ? ["view.refresh", "retry"] : more ? ["navigation.activate", "load more"]
+          : references ? ["detail.references", "references"] : github, ...common)
+      return hint(back, diff, ...(retry ? [["view.refresh", "retry"] as const] : more ? [["navigation.activate", "load more"] as const] : []),
+        ...(references ? [["detail.references", "references"] as const] : []),
+        ...(dimensions().width >= 100 || !retry && !more ? [github, copy] : []), ...common)
     }
-    if (page() === "actions") return "↑/↓ select · enter open · o GitHub · y copy URL" + common
-    if (page() === "pulls") return "↑/↓ select · enter open · D diff · o GitHub · y copy URL"
-      + (dimensions().width >= 60 ? " · tab open/closed" : "") + common
-    if (page() === "issues") return "↑/↓ select · enter open · o GitHub · y copy URL"
-      + (dimensions().width >= 60 ? " · tab open/closed" : "") + common
-    if (page() === "commits") return "↑/↓ select · enter open · D diff · o GitHub · y copy SHA"
-      + (dimensions().width >= 60 ? " · tab branch" : "")
-      + common
-    if (page() === "overview") return "o GitHub · y copy URL" + (canClone() ? " · x clone" : "")
-      + common
-    return props.onSwitchRepository ? "s switch repo · ? help" : "? help"
+    if (page() === "actions") return hint(select, open, github, copy, ...common)
+    if (page() === "pulls" || page() === "issues") return hint(select, open, ...(page() === "pulls" ? [diff] : []), github, copy,
+      ...(dimensions().width >= 60 ? [["work.toggleState", "open/closed"] as const] : []), ...common)
+    if (page() === "commits") return hint(select, open, diff, github, copy,
+      ...(dimensions().width >= 60 ? [["commits.chooseBranch", "branch"] as const] : []), ...common)
+    if (page() === "overview") return hint(github, copy, ...(canClone() ? [["command.clone", "clone"] as const] : []), ...common)
+    return hint(...common)
   }
 
-  // Global handlers run before focused inputs; overlay checks must precede page shortcuts.
-  // Hidden tabs remain mounted, so their lists must also gate interaction explicitly.
-  useKeyboard((event) => {
-    const escape = event.name === "escape" || event.name === "esc" || event.raw === "\u001b" || event.sequence === "\u001b"
-    if (overlay() === "branch-picker" || overlay() === "issue-references") {
-      if (escape) setOverlay()
-      return
-    }
-    if (overlay() === "settings" || overlay() === "command" || overlay() === "switch-repo"
-      || overlay() === "issue-actions" || overlay() === "issue-action") return
-    if (event.name === "q") return quit()
-    if (overlay() === "help") {
-      if (event.name === "?" || escape) setOverlay()
-      return
-    }
-    if (event.name === "s" && !event.ctrl && !event.meta && !event.shift && !event.super && !event.hyper && !event.option && props.onSwitchRepository) {
-      event.preventDefault()
-      event.stopPropagation()
+  useKeyActions({
+    "dialog.close": () => setOverlay(),
+    "global.help": () => setOverlay(),
+    "global.quit": quit,
+  }, { when: () => overlay() === "help", priority: 100, modal: true })
+  // References use an ordinary list (priority 0). Block ambient keys below it,
+  // including Root's quit fallback, without intercepting selection or copy/open.
+  useKeyActions({ "dialog.close": () => setOverlay() }, {
+    when: () => overlay() === "issue-references", priority: -1, modal: true,
+  })
+
+  const selectTab = (index: number) => {
+    const tab = visibleTabs()[index]
+    if (!tab) return false
+    selectPage(tab.page)
+  }
+  const clearRunFailures = (run: number) => {
+    shownFailures.delete(`resource:run:${run}:resource`)
+    shownFailures.delete(`resource:run:${run}:jobs`)
+    shownFailures.delete(`pagination:run:${run}`)
+  }
+  // Page/list handlers run before this ambient layer. Every matched key is consumed once.
+  useKeyActions({
+    "global.quit": quit,
+    "global.help": () => setOverlay("help"),
+    "global.settings": () => setOverlay("settings"),
+    "global.switchRepository": () => {
+      if (!props.onSwitchRepository) return false
       setOverlay("switch-repo")
       void props.onRefreshRecentRepositories?.().catch(() => {})
-      return
-    }
-    if (event.name === "?") return setOverlay("help")
-    if (event.name === "," || event.sequence === ",") return setOverlay("settings")
-    const diff = diffTarget()
-    if (diff) {
-      if (escape) { event.stopPropagation(); closeDiff(); return }
-      if (event.ctrl || event.meta) return
-      if (event.name === "o") void openInBrowser(diff.kind === "pull" ? diff.number : diff.sha, undefined, "diff")
-      else if (event.name === "r" && diffResource().status !== "loading") void props.onLoadDiff?.(diff)
-      else if ((event.name === "return" || event.name === "enter") && diffResource().status === "error")
+    },
+    "navigation.back": () => {
+      if (diffTarget()) closeDiff()
+      else if (navigation().details?.[page()]) closeDetail()
+      else return false
+    },
+    "navigation.tab1": () => selectTab(0),
+    "navigation.tab2": () => selectTab(1),
+    "navigation.tab3": () => selectTab(2),
+    "navigation.tab4": () => selectTab(3),
+    "navigation.tab5": () => selectTab(4),
+    "navigation.previousTab": () => { if (diffTarget()) return false; movePage(-1) },
+    "navigation.nextTab": () => { if (diffTarget()) return false; movePage(1) },
+    "item.open": () => {
+      const diff = diffTarget()
+      if (diff) void openInBrowser(diff.kind === "pull" ? diff.number : diff.sha, undefined, "diff")
+      else if (activeRunId()) void openInBrowser(`actions/runs/${activeRunId()}`)
+      else if (activeCommitSha()) void openInBrowser(activeCommitSha())
+      else if (activeIssueNumber() || activePullNumber()) void openInBrowser(activeIssueNumber() ?? activePullNumber())
+      else if (page() === "overview") void openInBrowser()
+      else return false
+    },
+    "item.copy": () => {
+      if (diffTarget()) return false
+      if (activeRunId()) void copyToClipboard(runUrl(activeRunId()!), "URL")
+      else if (activeCommitSha()) void copyToClipboard(activeCommitSha()!, "SHA")
+      else if (activeIssueNumber()) void copyToClipboard(issueUrl(activeIssueNumber()!), "URL")
+      else if (activePullNumber()) void copyToClipboard(pullUrl(activePullNumber()!), "URL")
+      else if (page() === "overview") void copyToClipboard(data().repo.url, "URL")
+      else return false
+    },
+    "item.diff": () => {
+      if (diffTarget()) return false
+      if (activeCommitSha()) viewDiff({ kind: "commit", sha: activeCommitSha()! })
+      else if (activePullNumber()) viewDiff({ kind: "pull", number: activePullNumber()! })
+      else return false
+    },
+    "navigation.activate": () => {
+      const diff = diffTarget()
+      if (diff) {
+        if (diffResource().status !== "error") return false
         void props.onLoadDiff?.(diff, true)
-      else if (event.name >= "1" && event.name <= "5") {
-        const tab = visibleTabs()[Number(event.name) - 1]
-        if (tab) { event.stopPropagation(); selectPage(tab.page) }
-      }
-      return
-    }
-    if (escape && navigation().details?.[page()]) {
-      event.stopPropagation()
-      return closeDetail()
-    }
-    if (event.name >= "1" && event.name <= "5") {
-      const target = visibleTabs()[Number(event.name) - 1]
-      if (target) { event.stopPropagation(); selectPage(target.page) }
-      return
-    }
-    if (event.name === "left" || event.name === "h") {
-      event.stopPropagation()
-      return movePage(-1)
-    }
-    if (event.name === "right" || event.name === "l") {
-      event.stopPropagation()
-      return movePage(1)
-    }
-    const run = activeRunId()
-    if (run) {
-      if (event.ctrl || event.meta) return
-      if (event.name === "r" || event.name === "return" || event.name === "enter") {
-        shownFailures.delete(`resource:run:${run}:resource`)
-        shownFailures.delete(`resource:run:${run}:jobs`)
-        shownFailures.delete(`pagination:run:${run}`)
-      }
-      if (event.name === "o") void openInBrowser(`actions/runs/${run}`)
-      else if (event.name === "y") void copyToClipboard(runUrl(run), "URL")
-      else if (event.name === "return" || event.name === "enter") void props.onLoadMoreRunJobs?.()
-      else if (event.name === "r") {
+      } else if (activeRunId()) { clearRunFailures(activeRunId()!); void props.onLoadMoreRunJobs?.() }
+      else if (activeCommitSha()) void props.onLoadMoreCommitFiles?.()
+      else if (activeIssueNumber()) void props.onLoadMoreIssueComments?.()
+      else if (activePullNumber()) void props.onLoadMorePullComments?.()
+      else return false
+    },
+    "view.refresh": () => {
+      const diff = diffTarget()
+      if (diff) { if (diffResource().status !== "loading") void props.onLoadDiff?.(diff); return }
+      const run = activeRunId()
+      if (run) {
+        clearRunFailures(run)
         const jobs = runDetail().jobs
         if (runDetail().resource.status === "ready" && jobs.status === "error" && jobs.phase === "pagination") void props.onLoadMoreRunJobs?.()
         else void props.onLoadRun?.(run)
-      }
-      return
-    }
-    const sha = activeCommitSha()
-    if (sha) {
-      if (event.ctrl || event.meta) return
-      if ((event.name === "D" || (event.name === "d" && event.shift))) viewDiff({ kind: "commit", sha })
-      else if (event.name === "o") void openInBrowser(sha)
-      else if (event.name === "y") void copyToClipboard(sha, "SHA")
-      else if (event.name === "return" || event.name === "enter") void props.onLoadMoreCommitFiles?.()
-      else if (event.name === "r") {
+      } else if (activeCommitSha()) {
         const resource = commitResource()
         if (resource.status === "loading") return
         if (resource.status === "error" && resource.phase === "pagination") void props.onLoadMoreCommitFiles?.()
-        else void props.onLoadCommit?.(sha)
+        else void props.onLoadCommit?.(activeCommitSha()!)
+      } else if (activeIssueNumber()) void refreshIssue(activeIssueNumber()!)
+      else if (activePullNumber()) void refreshPull(activePullNumber()!)
+      else {
+        const resource = activeResource()
+        const target = retryTarget()
+        if (resource?.status === "error" && target) props.onRetryResource?.(target)
+        else props.onRefresh?.()
       }
-      return
-    }
-    const number = activeIssueNumber()
-    if (number) {
-      if (event.ctrl || event.meta) return
-      if (event.name === "o") void openInBrowser(number)
-      else if (event.name === "y") void copyToClipboard(issueUrl(number), "URL")
-      else if (event.name === "c" && canActOnIssue("comment")) { event.stopPropagation(); openIssueAction("comment") }
-      else if (event.name === "a" && hasIssueActions()) { event.stopPropagation(); setOverlay("issue-actions") }
-      else if (event.name === "p" && issueMenuItems().length) setOverlay("issue-references")
-      else if (event.name === "return" || event.name === "enter") void props.onLoadMoreIssueComments?.()
-      else if (event.name === "r") void refreshIssue(number)
-      return
-    }
-    const pull = activePullNumber()
-    if (pull) {
-      if (event.ctrl || event.meta) return
-      if ((event.name === "D" || (event.name === "d" && event.shift))) viewDiff({ kind: "pull", number: pull })
-      else if (event.name === "o") void openInBrowser(pull)
-      else if (event.name === "y") void copyToClipboard(pullUrl(pull), "URL")
-      else if (event.name === "p" && pullMenuItems().length) setOverlay("issue-references")
-      else if (event.name === "return" || event.name === "enter") void props.onLoadMorePullComments?.()
-      else if (event.name === "r") void refreshPull(pull)
-      return
-    }
-    if (page() === "overview" && !event.ctrl && !event.meta) {
-      if (event.name === "x" && canClone()) {
-        const repository = data().repo.nameWithOwner
-        return openCommand({ title: `Clone ${repository}`, destination: cloneDestination(repository.split("/")[1]!, props.cwd!), command: (destination) => cloneCommand(repository, destination, props.cwd!) })
-      }
-      if (event.name === "o") return void openInBrowser()
-      if (event.name === "y") return void copyToClipboard(data().repo.url, "URL")
-    }
-    if (event.name === "tab") {
-      if (page() === "overview") {
-        moveOverviewDocument(event.shift ? -1 : 1)
-      } else if (page() === "commits") {
-        const branches = data().branches
-        if (branches.status === "error" && branches.phase === "load") props.onRetryResource?.({ kind: "branches" })
-        if (branches.value) setOverlay("branch-picker")
-      } else if (page() === "issues") {
-        setIssueState((value) => value === "open" ? "closed" : "open")
-      } else if (page() === "pulls") {
-        setPullState((value) => value === "open" ? "closed" : "open")
-      }
-      return
-    }
-    if (page() === "overview" && (event.name === "G" || (event.name === "g" && event.shift))) {
-      if (overviewScroll) overviewScroll.scrollTo(Math.max(0, overviewScroll.scrollHeight - overviewScroll.viewport.height))
-      return
-    }
-    if (page() === "overview" && event.name === "g") return overviewScroll?.scrollTo(0)
-    if (page() === "overview" && event.name === "u")
-      return overviewScroll?.scrollBy(-Math.max(1, Math.floor((overviewScroll.viewport.height ?? 1) / 2)))
-    if (page() === "overview" && event.name === "d")
-      return overviewScroll?.scrollBy(Math.max(1, Math.floor((overviewScroll.viewport.height ?? 1) / 2)))
-    if ((event.name === "up" || event.name === "k") && page() === "overview")
-      return overviewScroll?.scrollBy(-1)
-    if ((event.name === "down" || event.name === "j") && page() === "overview")
-      return overviewScroll?.scrollBy(1)
-    if (event.name === "r") {
-      const resource = activeResource()
-      const target = retryTarget()
-      if (resource?.status === "error" && target) return props.onRetryResource?.(target)
-      return props.onRefresh?.()
-    }
-  })
+    },
+    "issue.comment": () => { if (!activeIssueNumber() || diffTarget() || !canActOnIssue("comment")) return false; openIssueAction("comment") },
+    "issue.actions": () => { if (!activeIssueNumber() || diffTarget() || !hasIssueActions()) return false; setOverlay("issue-actions") },
+    "detail.references": () => { if (diffTarget() || !(activeIssueNumber() || activePullNumber()) || !activeMenuItems().length) return false; setOverlay("issue-references") },
+    "command.clone": () => {
+      if (page() !== "overview" || !canClone()) return false
+      const repository = data().repo.nameWithOwner
+      openCommand({ title: `Clone ${repository}`, destination: cloneDestination(repository.split("/")[1]!, props.cwd!), command: (destination) => cloneCommand(repository, destination, props.cwd!) })
+    },
+    "commits.chooseBranch": () => {
+      if (page() !== "commits" || activeCommitSha() || diffTarget()) return false
+      const branches = data().branches
+      if (branches.status === "error" && branches.phase === "load") props.onRetryResource?.({ kind: "branches" })
+      if (branches.value) setOverlay("branch-picker")
+    },
+    "work.toggleState": () => {
+      if (diffTarget() || activeIssueNumber() || activePullNumber()) return false
+      if (page() === "issues") setIssueState((value) => value === "open" ? "closed" : "open")
+      else if (page() === "pulls") setPullState((value) => value === "open" ? "closed" : "open")
+      else return false
+    },
+    "overview.nextDocument": () => { if (page() !== "overview") return false; moveOverviewDocument(1) },
+    "overview.previousDocument": () => { if (page() !== "overview") return false; moveOverviewDocument(-1) },
+  }, { when: () => overlay() === undefined, priority: -10 })
+
+  useKeyActions({
+    "navigation.up": () => overviewScroll?.scrollBy(-1),
+    "navigation.down": () => overviewScroll?.scrollBy(1),
+    "navigation.halfPageUp": () => overviewScroll?.scrollBy(-Math.max(1, Math.floor((overviewScroll.viewport.height ?? 1) / 2))),
+    "navigation.halfPageDown": () => overviewScroll?.scrollBy(Math.max(1, Math.floor((overviewScroll.viewport.height ?? 1) / 2))),
+    "navigation.pageUp": () => overviewScroll?.scrollBy(-(overviewScroll.viewport.height ?? 1)),
+    "navigation.pageDown": () => overviewScroll?.scrollBy(overviewScroll.viewport.height ?? 1),
+    "navigation.first": () => overviewScroll?.scrollTo(0),
+    "navigation.last": () => overviewScroll?.scrollTo(Math.max(0, overviewScroll.scrollHeight - overviewScroll.viewport.height)),
+  }, { when: () => page() === "overview" && overlay() === undefined })
 
   return (
     <IconProvider style={config().iconStyle}>

@@ -1,6 +1,7 @@
 import { chmod, lstat, mkdir, realpath, rename, rm, stat, writeFile } from "node:fs/promises"
 import { dirname, join } from "node:path"
 import { configDirectory } from "./paths"
+import { normalizeKeybindings, type KeybindingOverrides } from "./keybindings"
 import { defaultTheme, isThemeName, type ThemeName } from "./theme"
 
 export type ColorMode = "system" | "dark" | "light"
@@ -23,6 +24,7 @@ export type Config = {
   compactHeader: boolean
   hideDocumentsTab: boolean
   showTabCounts: boolean
+  keybindings?: KeybindingOverrides
 }
 
 export const defaultConfig: Config = {
@@ -88,6 +90,7 @@ function normalizeConfig(value: unknown): Config {
     compactHeader: typeof input.compactHeader === "boolean" ? input.compactHeader : defaultConfig.compactHeader,
     hideDocumentsTab: typeof input.hideDocumentsTab === "boolean" ? input.hideDocumentsTab : defaultConfig.hideDocumentsTab,
     showTabCounts: typeof input.showTabCounts === "boolean" ? input.showTabCounts : defaultConfig.showTabCounts,
+    ...(input.keybindings === undefined ? {} : { keybindings: normalizeKeybindings(input.keybindings) }),
   }
 }
 
@@ -113,7 +116,8 @@ export async function saveConfig(config: Config, path = configPath()): Promise<v
     const mode = existing ? existing.mode & 0o777 : undefined
     await mkdir(dirname(destination), { recursive: true })
     temporary = `${destination}.${crypto.randomUUID()}.tmp`
-    await writeFile(temporary, JSON.stringify(config, null, 2) + "\n", { flag: "wx", mode })
+    const output = config.keybindings === undefined ? config : { ...config, keybindings: normalizeKeybindings(config.keybindings) }
+    await writeFile(temporary, JSON.stringify(output, null, 2) + "\n", { flag: "wx", mode })
     // Restore any permission bits masked by umask before replacing the existing file.
     if (mode !== undefined) await chmod(temporary, mode)
     await rename(temporary, destination)

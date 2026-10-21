@@ -1,5 +1,5 @@
 import { TextAttributes } from "@opentui/core"
-import { useKeyboard } from "@opentui/solid"
+import { useKeyActions } from "../keybindings"
 import { createMemo, createSignal, For } from "solid-js"
 import type { IssueReference } from "../../models"
 import { fitText } from "../format"
@@ -24,12 +24,9 @@ export function IssueReferencesPicker(props: {
   const issues = createMemo(() => items().filter((reference) => reference.kind === "issue"))
   const [tab, setTab] = createSignal<"pull" | "issue">(pulls().length ? "pull" : "issue")
 
-  useKeyboard((event) => {
-    if (event.name === "tab" || event.name === "left" || event.name === "right") {
-      event.stopPropagation()
-      setTab((current) => current === "pull" ? "issue" : "pull")
-    }
-  })
+  useKeyActions({
+    "references.switchTab": () => { setTab((current) => current === "pull" ? "issue" : "pull") },
+  }, { priority: 100 })
   return (
     <Popup width={80} height={20} zIndex={200} placement="center">
       <box flexGrow={1} minHeight={0} paddingLeft={2} paddingRight={2} paddingBottom={1}>

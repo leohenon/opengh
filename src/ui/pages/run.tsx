@@ -1,5 +1,5 @@
 import { TextAttributes, type ScrollBoxRenderable } from "@opentui/core"
-import { useKeyboard } from "@opentui/solid"
+import { useKeyActions } from "../keybindings"
 import { createEffect, createMemo, For, onCleanup, Show } from "solid-js"
 import { defaultConfig, type DetailLayout } from "../../config"
 import type { RunDetailState } from "../../repository-state"
@@ -51,15 +51,16 @@ export function RunScreen(props: {
     onCleanup(() => clearInterval(timer))
   })
 
-  useKeyboard((event) => {
-    if (!props.interactive || !scroll || event.ctrl || event.meta) return
-    if (event.name === "up" || event.name === "k") scroll.scrollBy(-1)
-    else if (event.name === "down" || event.name === "j") scroll.scrollBy(1)
-    else if (event.name === "u") scroll.scrollBy(-Math.max(1, Math.floor(scroll.viewport.height / 2)))
-    else if (event.name === "d") scroll.scrollBy(Math.max(1, Math.floor(scroll.viewport.height / 2)))
-    else if (event.name === "G" || (event.name === "g" && event.shift)) scroll.scrollTo(Math.max(0, scroll.scrollHeight - scroll.viewport.height))
-    else if (event.name === "g") scroll.scrollTo(0)
-  })
+  const keys = useKeyActions({
+    "navigation.up": () => scroll!.scrollBy(-1),
+    "navigation.down": () => scroll!.scrollBy(1),
+    "navigation.halfPageUp": () => scroll!.scrollBy(-Math.max(1, Math.floor(scroll!.viewport.height / 2))),
+    "navigation.halfPageDown": () => scroll!.scrollBy(Math.max(1, Math.floor(scroll!.viewport.height / 2))),
+    "navigation.pageUp": () => scroll!.scrollBy(-scroll!.viewport.height),
+    "navigation.pageDown": () => scroll!.scrollBy(scroll!.viewport.height),
+    "navigation.last": () => scroll!.scrollTo(Math.max(0, scroll!.scrollHeight - scroll!.viewport.height)),
+    "navigation.first": () => scroll!.scrollTo(0),
+  }, { when: () => props.interactive && Boolean(scroll) })
 
   return (
     <box flexGrow={1} minHeight={0} flexDirection="column" backgroundColor={colors.canvas} paddingX={2}>
@@ -104,7 +105,7 @@ export function RunScreen(props: {
               </Show>
               <Show when={props.detail.resource.status === "error"}>
                 <text width="100%" flexShrink={0} marginTop={1} fg={colors.red}>
-                  × {props.detail.resource.status === "error" ? props.detail.resource.message : ""} · r to retry
+                  × {props.detail.resource.status === "error" ? props.detail.resource.message : ""}{keys.hint("view.refresh", "retry") ? ` · ${keys.hint("view.refresh", "retry")}` : ""}
                 </text>
               </Show>
               <text width="100%" flexShrink={0} marginTop={1} fg={colors.text} attributes={TextAttributes.BOLD}>
@@ -140,11 +141,11 @@ export function RunScreen(props: {
                       </Show>
                       <Show when={props.detail.jobs.status === "error"}>
                         <text width="100%" flexShrink={0} marginTop={1} fg={colors.red}>
-                          × {props.detail.jobs.status === "error" ? props.detail.jobs.message : ""} · r to retry
+                          × {props.detail.jobs.status === "error" ? props.detail.jobs.message : ""}{keys.hint("view.refresh", "retry") ? ` · ${keys.hint("view.refresh", "retry")}` : ""}
                         </text>
                       </Show>
                       <Show when={jobs().hasMore}>
-                        <text width="100%" flexShrink={0} marginTop={1} fg={colors.muted}>Enter to load more jobs</text>
+                        <text width="100%" flexShrink={0} marginTop={1} fg={colors.muted}>{keys.hint("navigation.activate", "load more jobs")}</text>
                       </Show>
                     </box>
                   )}

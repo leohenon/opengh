@@ -92,7 +92,7 @@ describe("BranchPicker", () => {
       value: { items: ["main", "next"], page: 1, hasMore: true },
     })
     await view.flush()
-    expect(view.captureCharFrame()).toContain("Load failed — Enter to retry")
+    expect(view.captureCharFrame()).toContain("Load failed — enter to retry")
 
     view.mockInput.pressEnter()
     await view.flush()
@@ -125,7 +125,7 @@ describe("BranchPicker", () => {
 
     const frame = view.captureCharFrame()
     expect(frame).toContain("main")
-    expect(frame).toContain("Refresh failed — Enter to retry")
+    expect(frame).toContain("Refresh failed — enter to retry")
     expect(frame).toContain("enter")
 
     view.mockInput.pressArrow("down")
@@ -188,7 +188,7 @@ describe("BranchPicker", () => {
     await view.mockInput.typeText("zzz")
     await view.flush()
     const frame = view.captureCharFrame()
-    expect(frame).toContain("No matches loaded — Enter to load more")
+    expect(frame).toContain("No matches loaded — enter to load more")
     expect(frame).toContain("enter")
 
     view.mockInput.pressEnter()

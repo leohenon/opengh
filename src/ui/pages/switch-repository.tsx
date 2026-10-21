@@ -3,6 +3,7 @@ import { createSignal, Show } from "solid-js"
 import { normalizeRepository } from "../../repository-name"
 import { StatusBar } from "../components/status-bar"
 import { SearchablePicker } from "../components/searchable-picker"
+import { useKeybindings } from "../keybindings"
 import { useTheme } from "../theme"
 
 export function SwitchRepositoryScreen(props: {
@@ -14,6 +15,7 @@ export function SwitchRepositoryScreen(props: {
   onClose: () => void
 }) {
   const { colors } = useTheme()
+  const keys = useKeybindings()
   const [error, setError] = createSignal("")
   const submit = (query: string, selected?: string) => {
     const repository = normalizeRepository(query) ?? selected
@@ -56,7 +58,7 @@ export function SwitchRepositoryScreen(props: {
       </SearchablePicker>
       <Show when={props.renderStatusBar !== false && props.showStatusBarHints}>
         <box position="absolute" left={0} bottom={0} width="100%" height={1} zIndex={101}>
-          <StatusBar hint="↑/↓ select · enter open · esc close" />
+          <StatusBar hint={keys.hints([["picker.up", "picker.down"], "select"], ["picker.accept", "open"], ["dialog.close", "close"])} />
         </box>
       </Show>
     </>

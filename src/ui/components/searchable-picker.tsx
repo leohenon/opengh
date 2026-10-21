@@ -1,8 +1,9 @@
-import { TextAttributes, type KeyEvent, type ScrollBoxRenderable } from "@opentui/core"
+import { TextAttributes, type ScrollBoxRenderable } from "@opentui/core"
 import { createEffect, createMemo, createSignal, Index, Show, type JSX } from "solid-js"
 import { useTheme } from "../theme"
 import { createScrollbarVisibility } from "../scrollbar-visibility"
 import { Popup } from "./popup"
+import { KeyInput, useKeyActions } from "../keybindings"
 
 type Match = number | undefined
 
@@ -73,28 +74,16 @@ export function SearchablePicker<T>(props: {
     list?.scrollChildIntoView(`picker-row-${index}`)
   })
 
-  const handleKey = (event: KeyEvent) => {
-    const escape = event.name === "escape" || event.name === "esc" || event.raw === "\u001b" || event.sequence === "\u001b"
-    if (escape) {
-      event.preventDefault()
-      event.stopPropagation()
-      return props.onClose()
-    }
-    if (event.name === "up") {
-      event.preventDefault()
-      return move(-1)
-    }
-    if (event.name === "down") {
-      event.preventDefault()
-      return move(1)
-    }
-    if (event.name === "return" || event.name === "enter") {
-      event.preventDefault()
+  useKeyActions({
+    "dialog.close": () => props.onClose(),
+    "picker.up": () => move(-1),
+    "picker.down": () => move(1),
+    "picker.accept": () => {
       const item = items()[selected()]
       if (props.onSubmit) props.onSubmit(query(), item)
       else if (item) props.onSelect(item)
-    }
-  }
+    },
+  }, { priority: 100, modal: true })
 
   return (
     <Popup
@@ -110,7 +99,7 @@ export function SearchablePicker<T>(props: {
             <text fg={colors.muted}>{props.titleMeta}</text>
           </box>
           <box height={2} flexShrink={0} paddingTop={1}>
-            <input
+            <KeyInput
               width="100%"
               focused
               value={query()}
@@ -125,7 +114,6 @@ export function SearchablePicker<T>(props: {
                 setSelectedKey(undefined)
                 props.onQueryChange?.(value)
               }}
-              onKeyDown={handleKey}
             />
           </box>
           <Show when={props.error}>

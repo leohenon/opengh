@@ -3,6 +3,7 @@ import { createMemo, createSignal } from "solid-js"
 import type { Paginated } from "../../models"
 import type { ResourceState } from "../../repository-state"
 import { useTheme } from "../theme"
+import { useKeybindings } from "../keybindings"
 import { SearchablePicker } from "./searchable-picker"
 
 function fuzzyScore(value: string, query: string) {
@@ -37,6 +38,8 @@ export function BranchPicker(props: {
   onClose: () => void
 }) {
   const { colors } = useTheme()
+  const keys = useKeybindings()
+  const withHint = (message: string, label: string) => [message, keys.hint("picker.accept", label)].filter(Boolean).join(" — ")
   const [query, setQuery] = createSignal("")
   const source = createMemo(() => {
     const loaded = props.branches.value?.items ?? []
@@ -54,7 +57,7 @@ export function BranchPicker(props: {
       return {
         kind: "load",
         key: "load-more",
-        label: pagination ? "Load failed — Enter to retry" : "Refresh failed — Enter to retry",
+        label: withHint(pagination ? "Load failed" : "Refresh failed", "to retry"),
         action: pagination ? "load-more" : "retry",
       }
     }
@@ -64,7 +67,7 @@ export function BranchPicker(props: {
       return { kind: "load", key: "load-more", label }
     }
     const label = query().trim() && !hasBranchMatch()
-      ? "No matches loaded — Enter to load more"
+      ? withHint("No matches loaded", "to load more")
       : "Load more branches…"
     return { kind: "load", key: "load-more", label, action: "load-more" }
   }
@@ -111,10 +114,10 @@ export function BranchPicker(props: {
               {row.kind === "branch" ? row.branch : row.label}
             </text>
           </box>
-          <text width={10} flexShrink={0} fg={colors.green}>
+          <text width={Math.max(10, Bun.stringWidth(keys.key("picker.accept")))} flexShrink={0} fg={colors.green}>
             {row.kind === "branch" && row.branch === props.current
               ? "✓ current"
-              : row.kind === "load" && row.action ? "enter" : ""}
+              : row.kind === "load" && row.action ? keys.key("picker.accept") : ""}
           </text>
         </>
       )}

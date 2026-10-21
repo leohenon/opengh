@@ -1,10 +1,11 @@
 import { CliRenderEvents, TextAttributes, type ScrollBoxRenderable } from "@opentui/core"
-import { useKeyboard, useRenderer, useTerminalDimensions } from "@opentui/solid"
+import { useRenderer, useTerminalDimensions } from "@opentui/solid"
 import { createEffect, createSignal, For, on, onCleanup, Show } from "solid-js"
 import type { Config } from "../../config"
 import { useTheme } from "../theme"
 import { Popup } from "./popup"
 import { ThemePicker } from "./theme-picker"
+import { useKeyActions, useKeybindings } from "../keybindings"
 
 type Setting = "theme" | "color-mode" | "reduced-motion" | "markdown-style" | "scrollbars" | "about-sidebar" | "detail-layout" | "status-bar-hints" | "icon-style" | "compact-header" | "hide-documents-tab" | "tab-counts"
 
@@ -43,6 +44,7 @@ export function Settings(props: {
 }) {
   const renderer = useRenderer()
   const dimensions = useTerminalDimensions()
+  const keys = useKeybindings()
   const theme = useTheme()
   const { colors } = theme
   let settingsScroll: ScrollBoxRenderable | undefined
@@ -55,8 +57,8 @@ export function Settings(props: {
   const popupHeight = () => settingOrder.length * rowHeight() + 11 + (sectionOrder.length - 1) * 3
   const split = () => dimensions().width >= 110
   createEffect(() => props.onHintChange?.(screen() === "themes"
-    ? "↑/↓ select · enter confirm · esc back"
-    : "↑/↓ select · ←/→ change · enter " + (selected() === "theme" ? "open" : "change") + " · esc close"))
+    ? keys.hints([["picker.up", "picker.down"], "select"], ["picker.accept", "confirm"], ["dialog.close", "back"])
+    : keys.hints([["navigation.up", "navigation.down"], "select"], [["settings.previousValue", "settings.nextValue"], "change"], ["navigation.activate", selected() === "theme" ? "open" : "change"], ["dialog.close", "close"])))
   onCleanup(() => props.onHintChange?.(undefined))
   const revealSetting = () => {
     if (selected() === settingOrder[0]) settingsScroll?.scrollTo(0)
@@ -160,47 +162,31 @@ export function Settings(props: {
     setScreen("themes")
   }
 
-  useKeyboard((event) => {
-    if (screen() === "themes") return
-    if (busy()) {
-      event.preventDefault()
-      event.stopPropagation()
-      return
+  const changeSetting = (direction: number) => {
+    switch (selected()) {
+      case "theme": openThemes(); break
+      case "color-mode": void changeColorMode(direction); break
+      case "reduced-motion": void toggleBoolean("reducedMotion"); break
+      case "markdown-style": void changeMarkdownStyle(); break
+      case "scrollbars": void toggleBoolean("showScrollbars"); break
+      case "tab-counts": void toggleBoolean("showTabCounts"); break
+      case "hide-documents-tab": void toggleBoolean("hideDocumentsTab"); break
+      case "compact-header": void toggleBoolean("compactHeader"); break
+      case "status-bar-hints": void toggleBoolean("showStatusBarHints"); break
+      case "about-sidebar": void changeSidebar(direction); break
+      case "detail-layout": void changeDetailLayout(); break
+      case "icon-style": void changeIconStyle(); break
     }
-    const enter = event.name === "return" || event.name === "enter"
-      || event.raw === "\r" || event.raw === "\n" || event.sequence === "\r" || event.sequence === "\n"
-    if (event.name === "escape" || event.name === "esc" || event.raw === "\u001b" || event.sequence === "\u001b")
-      return props.onClose()
-    if (event.name === "up" || event.name === "k") return moveSetting(-1)
-    if (event.name === "down" || event.name === "j") return moveSetting(1)
-    if (selected() === "theme" && (event.name === "left" || event.name === "right" || enter)) {
-      event.preventDefault()
-      event.stopPropagation()
-      return openThemes()
-    }
-    if (selected() === "color-mode" && (event.name === "left" || event.name === "right" || enter))
-      return void changeColorMode(event.name === "left" ? -1 : 1)
-    if (selected() === "reduced-motion" && (event.name === "left" || event.name === "right" || enter))
-      return void toggleBoolean("reducedMotion")
-    if (selected() === "markdown-style" && (event.name === "left" || event.name === "right" || enter))
-      return void changeMarkdownStyle()
-    if (selected() === "scrollbars" && (event.name === "left" || event.name === "right" || enter))
-      return void toggleBoolean("showScrollbars")
-    if (selected() === "tab-counts" && (event.name === "left" || event.name === "right" || enter))
-      return void toggleBoolean("showTabCounts")
-    if (selected() === "hide-documents-tab" && (event.name === "left" || event.name === "right" || enter))
-      return void toggleBoolean("hideDocumentsTab")
-    if (selected() === "compact-header" && (event.name === "left" || event.name === "right" || enter))
-      return void toggleBoolean("compactHeader")
-    if (selected() === "status-bar-hints" && (event.name === "left" || event.name === "right" || enter))
-      return void toggleBoolean("showStatusBarHints")
-    if (selected() === "about-sidebar" && (event.name === "left" || event.name === "right" || enter))
-      return void changeSidebar(event.name === "left" ? -1 : 1)
-    if (selected() === "detail-layout" && (event.name === "left" || event.name === "right" || enter))
-      return void changeDetailLayout()
-    if (selected() === "icon-style" && (event.name === "left" || event.name === "right" || enter))
-      void changeIconStyle()
-  })
+  }
+  useKeyActions({}, { when: () => screen() === "settings" && busy(), priority: 200, modal: true })
+  useKeyActions({
+    "dialog.close": () => props.onClose(),
+    "navigation.up": () => moveSetting(-1),
+    "navigation.down": () => moveSetting(1),
+    "settings.previousValue": () => changeSetting(-1),
+    "settings.nextValue": () => changeSetting(1),
+    "navigation.activate": () => changeSetting(1),
+  }, { when: () => screen() === "settings" && !busy(), priority: 100, modal: true })
 
   const settingRow = (setting: Setting) => {
     const definition = settingDefinitions[setting]
@@ -249,7 +235,7 @@ export function Settings(props: {
     }
     if (selected() === "hide-documents-tab") return {
       title: "Document tabs",
-      description: "Show the document tab strip on Overview. When off, documents remain visible, and Tab still cycles between them.",
+      description: "Show the document tab strip on Overview. When off, documents remain visible." + (keys.key("overview.nextDocument") ? ` Use ${keys.key("overview.nextDocument")} to cycle between them.` : ""),
     }
     if (selected() === "compact-header") return {
       title: "Compact header",

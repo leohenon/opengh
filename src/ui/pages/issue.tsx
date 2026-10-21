@@ -1,5 +1,6 @@
 import { RGBA, rgbToHex, TextAttributes, type ScrollBoxRenderable } from "@opentui/core"
-import { useKeyboard, useRenderer, useTerminalDimensions } from "@opentui/solid"
+import { useRenderer, useTerminalDimensions } from "@opentui/solid"
+import { useKeyActions } from "../keybindings"
 import { createEffect, createMemo, For, onCleanup, Show } from "solid-js"
 import { defaultConfig, type DetailLayout } from "../../config"
 import type { IssueDetail, IssueReference } from "../../models"
@@ -123,15 +124,16 @@ export function IssueScreen(props: {
     onCleanup(() => renderer.off("frame", revealActivity))
   })
 
-  useKeyboard((event) => {
-    if (!props.interactive || !scroll || event.ctrl || event.meta) return
-    if (event.name === "up" || event.name === "k") scroll.scrollBy(-1)
-    else if (event.name === "down" || event.name === "j") scroll.scrollBy(1)
-    else if (event.name === "u") scroll.scrollBy(-Math.max(1, Math.floor(scroll.viewport.height / 2)))
-    else if (event.name === "d") scroll.scrollBy(Math.max(1, Math.floor(scroll.viewport.height / 2)))
-    else if (event.name === "G" || (event.name === "g" && event.shift)) scroll.scrollTo(Math.max(0, scroll.scrollHeight - scroll.viewport.height))
-    else if (event.name === "g") scroll.scrollTo(0)
-  })
+  useKeyActions({
+    "navigation.up": () => scroll!.scrollBy(-1),
+    "navigation.down": () => scroll!.scrollBy(1),
+    "navigation.halfPageUp": () => scroll!.scrollBy(-Math.max(1, Math.floor(scroll!.viewport.height / 2))),
+    "navigation.halfPageDown": () => scroll!.scrollBy(Math.max(1, Math.floor(scroll!.viewport.height / 2))),
+    "navigation.pageUp": () => scroll!.scrollBy(-scroll!.viewport.height),
+    "navigation.pageDown": () => scroll!.scrollBy(scroll!.viewport.height),
+    "navigation.last": () => scroll!.scrollTo(Math.max(0, scroll!.scrollHeight - scroll!.viewport.height)),
+    "navigation.first": () => scroll!.scrollTo(0),
+  }, { when: () => props.interactive && Boolean(scroll) })
 
   return (
     <box flexGrow={1} minHeight={0} flexDirection="column" backgroundColor={colors.canvas} paddingX={2}>

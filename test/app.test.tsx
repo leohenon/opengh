@@ -1297,7 +1297,7 @@ describe("opengh TUI", () => {
       expect(frame).not.toContain("Help ·");
       expect(frame).toContain(shortcut!);
       expect(frame).toContain("half-page up / down");
-      expect(frame).toContain("q / C-c");
+      expect(frame).toContain("q / ctrl+c");
       if (key !== "1") expect(frame).not.toContain("copy repo URL");
       if (key !== "2") expect(frame).not.toContain("choose branch");
       if (key === "3" || key === "4" || key === "5") expect(frame).not.toContain("copy commit SHA");
@@ -1329,15 +1329,15 @@ describe("opengh TUI", () => {
     await view.flush();
     const help = view.captureCharFrame();
     expect(help).toContain("Help");
-    expect(help).toContain("u/d");
+    expect(help).toContain("u / d");
     expect(help).toContain("half-page up / down");
-    expect(help).toContain("Tab");
+    expect(help).toContain("tab");
     expect(help).toContain("switch documents");
     expect(help).toContain("settings");
     expect(help).not.toContain("Navigation");
     expect(help).not.toContain("Current view");
     expect(help).not.toContain("Application");
-    expect(help).toContain("q / C-c");
+    expect(help).toContain("q / ctrl+c");
     expect(help).toContain("quit");
     expect(help).toContain("README");
     view.mockInput.pressKey("?");

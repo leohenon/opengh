@@ -9,6 +9,22 @@ afterEach(() => {
 })
 
 describe("Toast", () => {
+  test("fits a short title without a minimum width and stays within the terminal", async () => {
+    const view = await testRender(
+      () => <Toast title="Config reloaded" message="" onDismiss={() => {}} />,
+      { width: 80, height: 24 },
+    )
+    active.push(view)
+    await view.flush()
+    const toast = view.renderer.root.getChildren().find((child) => child.zIndex === 150)
+    expect(toast?.width).toBe(20)
+    expect(view.captureCharFrame()).toContain("Config reloaded")
+
+    view.resize(18, 12)
+    await view.flush()
+    expect(toast?.width).toBe(14)
+  })
+
   test("appears without a backdrop and dismisses after its duration", async () => {
     const [visible, setVisible] = createSignal(true)
     const view = await testRender(

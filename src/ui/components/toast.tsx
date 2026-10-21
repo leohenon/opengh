@@ -6,13 +6,14 @@ export function Toast(props: {
   title: string
   message: string
   duration?: number
+  zIndex?: number
   tone?: "error" | "success" | "info"
   onDismiss: () => void
 }) {
   const dimensions = useTerminalDimensions()
   const { colors } = useTheme()
-  const contentWidth = () => props.title.length + props.message.length + 8
-  const width = () => Math.max(1, Math.min(48, dimensions().width - 4, Math.max(28, contentWidth())))
+  const content = () => props.title + (props.message ? `: ${props.message}` : "")
+  const width = () => Math.max(1, Math.min(48, dimensions().width - 4, Bun.stringWidth(content()) + 5))
 
   onMount(() => {
     const timeout = setTimeout(props.onDismiss, props.duration ?? 5000)
@@ -26,7 +27,7 @@ export function Toast(props: {
       right={2}
       width={width()}
       minHeight={3}
-      zIndex={150}
+      zIndex={props.zIndex ?? 150}
       flexDirection="row"
       backgroundColor={colors.panel}
     >
@@ -40,7 +41,7 @@ export function Toast(props: {
         paddingLeft={2}
         paddingRight={2}
       >
-        <text flexGrow={1} minWidth={0} fg={colors.text} wrapMode="word">{props.title}: {props.message}</text>
+        <text flexGrow={1} minWidth={0} fg={colors.text} wrapMode="word">{content()}</text>
       </box>
     </box>
   )
