@@ -1,6 +1,6 @@
 import type { ScrollBoxRenderable } from "@opentui/core"
 import { useKeyboard, useRenderer, useTerminalDimensions } from "@opentui/solid"
-import { createEffect, createMemo, createSignal, For, onCleanup, Show } from "solid-js"
+import { createEffect, createMemo, createSignal, For, on, onCleanup, Show } from "solid-js"
 import { defaultConfig, type Config } from "../config"
 import { cloneCommand, cloneDestination, matchesLocalRepository, type LocalRepository, type CommandSpec, type CommandTask } from "../command-actions"
 import { CommandDialog, type CommandAction } from "./components/command-dialog"
@@ -56,6 +56,8 @@ export type AppProps = {
   localRepository?: LocalRepository
   onRunCommand?: (spec: CommandSpec, output: (chunk: string) => void, signal: AbortSignal) => Promise<CommandTask>
   onCommandCaptureCancel?: (cancel: (() => void) | undefined) => void
+  initialPage?: Page
+  onPageChange?: (page: Page) => void
   onQuit?: () => void
   onRefresh?: () => void
   recentRepositories?: readonly string[]
@@ -107,7 +109,10 @@ export function App(props: AppProps) {
   const renderer = useRenderer()
   const { colors } = useTheme()
   const dimensions = useTerminalDimensions()
-  const [navigation, setNavigation] = createSignal<NavigationState>({ page: "overview" })
+  // Initial preference is sampled once; later history writes must not navigate.
+  const initialPage = props.initialPage ?? "overview"
+  let initialPagePending = initialPage === "actions"
+  const [navigation, setNavigation] = createSignal<NavigationState>({ page: initialPagePending ? "overview" : initialPage })
   const [issueState, setIssueState] = createSignal<ListState>("open")
   const [issueRefresh, setIssueRefresh] = createSignal<{ number: number }>()
   const [pullState, setPullState] = createSignal<ListState>("open")
@@ -514,6 +519,15 @@ export function App(props: AppProps) {
   })
 
   createEffect(() => {
+    if (!initialPagePending || !navigationTabs().resolved) return
+    initialPagePending = false
+    if (visibleTabs().some((tab) => tab.page === initialPage))
+      setNavigation((state) => navigate(state, initialPage))
+  })
+
+  createEffect(on(page, (current) => props.onPageChange?.(current), { defer: true }))
+
+  createEffect(() => {
     if (visibleTabs().some((tab) => tab.page === page())) return
     const detail = navigation().details?.[page()]
     setNavigation((state) => navigate(back(state), "overview"))
@@ -540,7 +554,10 @@ export function App(props: AppProps) {
     if (detail?.kind === "issue") { props.onCloseIssue?.(); setRevealActivity() }
     if (detail?.kind === "pull") props.onClosePull?.()
   }
-  const selectPage = (next: Page) => setNavigation((state) => navigate(state, next))
+  const selectPage = (next: Page) => {
+    initialPagePending = false
+    setNavigation((state) => navigate(state, next))
+  }
   const movePage = (delta: number) => {
     const available = visibleTabs()
     const current = Math.max(0, available.findIndex((tab) => tab.page === page()))

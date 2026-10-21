@@ -1,5 +1,7 @@
 import { useKeyboard, useRenderer } from "@opentui/solid"
-import { createEffect, createMemo, createSignal, Match, onMount, Show, Switch } from "solid-js"
+import { createEffect, createMemo, createSignal, Match, onCleanup, onMount, Show, Switch } from "solid-js"
+import type { Page } from "./navigation"
+import { loadRepositoryTabs, saveRepositoryTabs, type RepositoryTabs } from "./repository-tabs"
 import { defaultConfig, loadConfig, saveConfig, type Config } from "./config"
 import { copyToHostClipboard } from "./clipboard"
 import { resolveLocalRepository, runCommand, type LocalRepository } from "./command-actions"
@@ -27,6 +29,8 @@ export type RootServices = {
   resolveRepository(argument: string | undefined, cwd: string): Promise<string | undefined>
   loadRecentRepositories(): Promise<string[]>
   rememberRepository(repository: string): Promise<void>
+  loadRepositoryTabs(): Promise<RepositoryTabs>
+  saveRepositoryTabs(tabs: RepositoryTabs): Promise<void>
   loadConfig(): Promise<Config>
   saveConfig(config: Config): Promise<void>
   createRepositorySession(): RepositorySession
@@ -40,6 +44,8 @@ const defaultServices: RootServices = {
   resolveRepository,
   loadRecentRepositories,
   rememberRepository,
+  loadRepositoryTabs,
+  saveRepositoryTabs,
   loadConfig,
   saveConfig,
   createRepositorySession,
@@ -60,6 +66,36 @@ export function Root(props: {
   const [recent, setRecent] = createSignal<string[]>([])
   const [pickerError, setPickerError] = createSignal("")
   const [config, setConfig] = createSignal(defaultConfig)
+  const [repositoryTabs, setRepositoryTabs] = createSignal<RepositoryTabs>({})
+  let tabSaveTimer: ReturnType<typeof setTimeout> | undefined
+  const dirtyTabs: Record<string, { page: Page }> = {}
+  let pendingTabSave: Promise<void> | undefined
+  const flushRepositoryTabs = (): Promise<void> | undefined => {
+    clearTimeout(tabSaveTimer)
+    tabSaveTimer = undefined
+    if (pendingTabSave) return pendingTabSave.then(() => flushRepositoryTabs())
+    const snapshot = { ...dirtyTabs }
+    if (!Object.keys(snapshot).length) return
+    const updates = Object.fromEntries(Object.entries(snapshot).map(([repository, entry]) => [repository, entry.page]))
+    pendingTabSave = Promise.resolve().then(() => services.saveRepositoryTabs(updates)).then(() => {
+      for (const [repository, entry] of Object.entries(snapshot)) {
+        // A newer navigation, even back to the same tab, must still be saved.
+        if (dirtyTabs[repository] === entry) delete dirtyTabs[repository]
+      }
+    }).catch(() => {
+      // Keep failed updates dirty for the next navigation or exit flush.
+    }).finally(() => { pendingTabSave = undefined })
+    return pendingTabSave
+  }
+  const rememberTab = (repository: string, page: Page) => {
+    const key = repository.toLowerCase()
+    if (repositoryTabs()[key] === page) return
+    setRepositoryTabs((current) => ({ ...current, [key]: page }))
+    dirtyTabs[key] = { page }
+    clearTimeout(tabSaveTimer)
+    tabSaveTimer = setTimeout(() => { void flushRepositoryTabs() }, 250)
+  }
+  onCleanup(() => { void flushRepositoryTabs() })
   const [configSaving, setConfigSaving] = createSignal(false)
   const [configError, setConfigError] = createSignal("")
   const [configWarningDismissed, setConfigWarningDismissed] = createSignal(false)
@@ -72,7 +108,9 @@ export function Root(props: {
   const quit = () => {
     if (quitting) return
     quitting = true
-    renderer.destroy()
+    const pending = flushRepositoryTabs()
+    if (pending) void pending.finally(() => renderer.destroy())
+    else renderer.destroy()
   }
 
   useKeyboard((event) => {
@@ -128,15 +166,17 @@ export function Root(props: {
     void Promise.all([
       services.resolveRepository(props.repositoryArgument, props.cwd),
       services.loadRecentRepositories().catch(() => []),
+      services.loadRepositoryTabs().catch(() => ({})),
       services.loadConfig().catch((error) => {
         const message = error instanceof Error ? error.message : "Could not load config"
         setConfigError(`${message}. Fix or move the config file and restart before saving settings.`)
         return { ...defaultConfig }
       }),
-    ]).then(([resolved, repositories, loadedConfig]) => {
+    ]).then(([resolved, repositories, savedTabs, loadedConfig]) => {
       if (renderer.isDestroyed) return
       setRecent(repositories)
       setConfig(loadedConfig)
+      setRepositoryTabs(savedTabs)
       if (resolved) return open(resolved)
       if (props.repositoryArgument === ".") setPickerError("No GitHub repository found")
       else if (props.repositoryArgument) setPickerError(`Invalid repository: “${props.repositoryArgument}”`)
@@ -183,6 +223,8 @@ export function Root(props: {
               {(repositoryName) => <App
               data={() => current().data}
               operations={() => current().operations}
+              initialPage={repositoryTabs()[repositoryName.toLowerCase()]}
+              onPageChange={(page) => rememberTab(repositoryName, page)}
               config={config()}
               configSaving={configSaving()}
               configError={configError()}

@@ -1356,3 +1356,32 @@ test("compact header uses one row with tabs left and repository right", async ()
   expect(rows[1]).toContain("Page content");
   expect(view.captureCharFrame()).not.toContain("─");
 });
+
+test("remembered Actions waits for availability, falls back when absent, and does not override user navigation", async () => {
+  for (const outcome of ["available", "empty", "user-navigated"] as const) {
+    const [data, setData] = createSignal<RepositoryData>({ ...githubDataFixture, runs: { status: "loading", phase: "load" } });
+    const changes: string[] = [];
+    const view = await testRender(() => <App data={data} operations={repositoryOperationsFixture}
+      initialPage="actions" onPageChange={(page) => changes.push(page)}
+    />, { width: 120, height: 32 });
+    active.push(view);
+    await view.flush();
+    expect(view.captureCharFrame()).toContain("About");
+    if (outcome === "user-navigated") {
+      view.mockInput.pressKey("3");
+      await view.flush();
+    }
+    setData((current) => ({ ...current, runs: outcome === "empty"
+      ? { status: "ready", value: { items: [], page: 1, hasMore: false } } : githubDataFixture.runs }));
+    await view.flush();
+    if (outcome === "available") {
+      expect(view.captureCharFrame()).toContain("Publish v0.4.5");
+    } else if (outcome === "empty") {
+      expect(view.captureCharFrame()).toContain("About");
+      expect(changes).not.toContain("actions");
+    } else {
+      expect(view.captureCharFrame()).toContain("ScrollBox loses focus");
+      expect(changes).not.toContain("actions");
+    }
+  }
+});

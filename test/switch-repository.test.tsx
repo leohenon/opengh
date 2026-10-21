@@ -43,6 +43,8 @@ test("repository switch popup isolates input, preserves cancelled navigation, an
   const view = await testRender(() => <Root cwd="/work" repositoryArgument="anomalyco/opentui" services={{
     resolveRepository: async () => "anomalyco/opentui",
     resolveLocalRepository: async () => undefined,
+    loadRepositoryTabs: async () => ({}),
+    saveRepositoryTabs: async () => {},
     loadRecentRepositories: async () => { recentReads++; return [...recent] },
     rememberRepository: async (repository) => { recent = [repository, ...recent.filter((item) => item !== repository)] },
     loadConfig: async () => ({ ...defaultConfig, theme: "nord", showStatusBarHints: true }),

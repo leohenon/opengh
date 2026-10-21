@@ -4,6 +4,7 @@ import { Root } from "./root"
 import { initializeHunk } from "./ui/hunk-host"
 import { stopGitHubProcesses } from "./github/process"
 import { stopClipboardProcesses } from "./clipboard"
+import { saveRepositoryTabs } from "./repository-tabs"
 import { saveConfig } from "./config"
 import { rememberRepository } from "./github/repository"
 
@@ -45,6 +46,7 @@ try {
       cwd={process.cwd()}
       services={{
         saveConfig: (config) => trackSave(saveConfig(config)),
+        saveRepositoryTabs: (tabs) => trackSave(saveRepositoryTabs(tabs)),
         rememberRepository: (repository) => trackSave(rememberRepository(repository)),
       }}
     />
