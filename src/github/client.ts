@@ -503,11 +503,11 @@ export function createGitHubClient(transport: GitHubTransport) {
         data?: { repository?: {
           isArchived: boolean
           viewerPermission: string | null
-          issue?: { viewerCanClose: boolean; viewerCanReopen: boolean } | null
+          issue?: { viewerCanClose: boolean; viewerCanReopen: boolean; viewerCanAssign: boolean } | null
         } | null }
         errors?: unknown[]
       }>(
-        `query($owner: String!, $name: String!) { repository(owner: $owner, name: $name) { isArchived viewerPermission issue(number: ${number}) { viewerCanClose viewerCanReopen } } }`,
+        `query($owner: String!, $name: String!) { repository(owner: $owner, name: $name) { isArchived viewerPermission issue(number: ${number}) { viewerCanClose viewerCanReopen viewerCanAssign } } }`,
         { owner: owner!, name: name! },
       )
       const repo = response.data?.repository
@@ -519,6 +519,7 @@ export function createGitHubClient(transport: GitHubTransport) {
         close: writable && repo.issue.viewerCanClose === true,
         reopen: writable && repo.issue.viewerCanReopen === true,
         duplicate: writable && maintainer && repo.issue.viewerCanClose === true,
+        assignees: writable && repo.issue.viewerCanAssign === true,
       }
     } catch {
       // Permission lookup failures must not prevent read-only browsing.
@@ -562,6 +563,26 @@ export function createGitHubClient(transport: GitHubTransport) {
       { state, ...(state === "closed" ? { state_reason: reason ?? "completed" } : {}) },
     )
     return withIssuePermissions(repository, number, issueDetail(item))
+  }
+
+  const assignableUsers = async (repository: string, page = 1): Promise<Page<string>> => {
+    const users = await transport.json<{ login: string }[]>(`repos/${repository}/assignees?per_page=100&page=${page}`)
+    return { items: users.map((user) => user.login), hasMore: users.length === 100 }
+  }
+
+  const setIssueAssignees = async (repository: string, number: number, assignees: string[]): Promise<IssueDetail> => {
+    if (!transport.mutate) throw new Error("GitHub transport does not support mutations.")
+    const item = await transport.mutate<IssueDetailResponse>(
+      `repos/${repository}/issues/${number}`, "PATCH", { assignees },
+    )
+    const detail = issueDetail(item)
+    const requested = new Set(assignees.map((login) => login.toLowerCase()))
+    const confirmed = new Set(detail.assignees.map((login) => login.toLowerCase()))
+    if (detail.number !== number || requested.size !== confirmed.size
+      || [...requested].some((login) => !confirmed.has(login))) {
+      throw new Error("GitHub did not confirm the requested assignees. Check the issue and your permissions on GitHub before retrying.")
+    }
+    return withIssuePermissions(repository, number, detail)
   }
 
   const markIssueDuplicate = async (
@@ -967,7 +988,7 @@ export function createGitHubClient(transport: GitHubTransport) {
     }
   }
 
-  return { metadata, documents, document, branches, commits, commitCount, commit, issues, workCounts, hasIssues, issue, issueComments, createIssueComment, updateIssueState, markIssueDuplicate, issueReferences, issueTimeline, pulls, pull, pullCommits, pullContext, runs, run, runJobs }
+  return { metadata, documents, document, branches, commits, commitCount, commit, issues, workCounts, hasIssues, issue, issueComments, createIssueComment, updateIssueState, assignableUsers, setIssueAssignees, markIssueDuplicate, issueReferences, issueTimeline, pulls, pull, pullCommits, pullContext, runs, run, runJobs }
 }
 
 const client = createGitHubClient(githubTransport)
@@ -986,6 +1007,8 @@ export const loadGitHubIssue = client.issue
 export const loadGitHubIssueComments = client.issueComments
 export const createGitHubIssueComment = client.createIssueComment
 export const updateGitHubIssueState = client.updateIssueState
+export const loadGitHubAssignableUsers = client.assignableUsers
+export const setGitHubIssueAssignees = client.setIssueAssignees
 export const markGitHubIssueDuplicate = client.markIssueDuplicate
 export const loadGitHubIssueReferences = client.issueReferences
 export const loadGitHubIssueTimeline = client.issueTimeline

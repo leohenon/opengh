@@ -23,6 +23,7 @@ export function IssueActionsMenu(props: {
       { kind: "close", label: "Close issue…" },
       { kind: "duplicate", label: "Mark as duplicate…" },
     ] : [{ kind: "reopen", label: "Reopen issue…" }]
+    actions.push({ kind: "assignees", label: "Edit assignees…" })
     return actions.filter((item) => props.permissions?.[item.kind])
   })
   const active = () => Math.min(selected(), items().length - 1)

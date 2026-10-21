@@ -23,6 +23,8 @@ import {
   loadGitHubRunJobs,
   createGitHubIssueComment,
   updateGitHubIssueState,
+  setGitHubIssueAssignees,
+  loadGitHubAssignableUsers,
   markGitHubIssueDuplicate,
 } from "./github/client"
 import { GitHubApiError } from "./github/transport"
@@ -84,6 +86,8 @@ export type RepositoryLoaders = {
   issueReferences(repository: string, number: number): Promise<IssueReference[]>
   createIssueComment?(repository: string, number: number, body: string): Promise<IssueComment>
   updateIssueState?(repository: string, number: number, state: ListState, reason?: IssueCloseReason): Promise<IssueDetail>
+  setIssueAssignees?(repository: string, number: number, assignees: string[]): Promise<IssueDetail>
+  assignableUsers?(repository: string, page?: number): Promise<Page<string>>
   markIssueDuplicate?(repository: string, number: number, canonicalNumber: number): Promise<IssueDetail>
   issueTimeline?(repository: string, number: number): Promise<IssueTimeline>
   issues(repository: string, state: ListState, page?: number): Promise<Page<IssueSummary>>
@@ -122,9 +126,11 @@ export type RepositorySession = {
   loadMoreIssueComments(): Promise<void>
   retryIssueReferences(): Promise<void>
   clearIssue(): void
+  assignableUsers?: Accessor<ResourceState<Paginated<string>> | undefined>
+  loadAssignableUsers?(): Promise<void>
   issueAction(number: number): IssueActionState
   prepareIssueAction(number: number, kind: IssueActionKind): void
-  updateIssueDraft(number: number, draft: Partial<Pick<IssueActionState, "body" | "reason" | "duplicateTarget">>): void
+  updateIssueDraft(number: number, draft: Partial<Pick<IssueActionState, "body" | "reason" | "duplicateTarget" | "selectedAssignees">>): void
   discardIssueDraft(number: number): void
   submitIssueAction(number: number, kind: IssueActionKind): Promise<IssueActionResult>
   load(repository: string): Promise<void>
@@ -154,6 +160,8 @@ const defaultLoaders: RepositoryLoaders = {
   issueReferences: loadGitHubIssueReferences,
   createIssueComment: createGitHubIssueComment,
   updateIssueState: updateGitHubIssueState,
+  setIssueAssignees: setGitHubIssueAssignees,
+  assignableUsers: loadGitHubAssignableUsers,
   markIssueDuplicate: markGitHubIssueDuplicate,
   issueTimeline: loadGitHubIssueTimeline,
   issues: loadGitHubIssues,
@@ -941,6 +949,43 @@ export function createRepositorySession(loaders: RepositoryLoaders = defaultLoad
     }
   }
 
+  // Repository-keyed resources retain pages and in-flight requests across picker opens.
+  const [assignableUserCache, setAssignableUserCache] = createSignal<Record<string, ResourceState<Paginated<string>>>>({})
+  const assignableUsers = () => assignableUserCache()[state().repository.toLowerCase()]
+  const loadAssignableUsers = async () => {
+    const current = state()
+    if (current.status !== "ready") return
+    const repository = current.repository
+    const key = repository.toLowerCase()
+    const previous = assignableUserCache()[key]
+    if (previous?.status === "loading" || (previous?.value && !previous.value.hasMore)) return
+    const value = previous?.value
+    const nextPage = (value?.page ?? 0) + 1
+    const phase = value ? "pagination" : "load"
+    const store = (resource: ResourceState<Paginated<string>>) =>
+      setAssignableUserCache((cache) => ({ ...cache, [key]: resource }))
+    const pending = loadingResource(value, phase)
+    store(pending)
+    const finish = (resource: ResourceState<Paginated<string>>) => {
+      // A repository refresh invalidates this request along with its cached pages.
+      if (assignableUserCache()[key] === pending) store(resource)
+    }
+    try {
+      if (!loaders.assignableUsers) throw new Error("Assignable users are unavailable.")
+      const next = await loaders.assignableUsers(repository, nextPage)
+      const seen = new Set<string>()
+      const items = [...(value?.items ?? []), ...next.items].filter((login) => {
+        const key = login.toLowerCase()
+        if (seen.has(key)) return false
+        seen.add(key)
+        return true
+      })
+      finish({ status: "ready", value: { items, page: nextPage, hasMore: next.hasMore } })
+    } catch (error) {
+      finish(failedResource(error, value, phase))
+    }
+  }
+
   const issueAction = (number: number) => issueActions()[issueKey(state().repository, number)] ?? emptyIssueAction
   const updateAction = (key: string, update: (action: IssueActionState) => IssueActionState) => {
     setIssueActions((actions) => ({ ...actions, [key]: update(actions[key] ?? emptyIssueAction) }))
@@ -949,10 +994,13 @@ export function createRepositorySession(loaders: RepositoryLoaders = defaultLoad
     updateAction(issueKey(state().repository, number), (action) => {
       if (action.operation.status === "loading" || action.retry === kind) return action
       // Selecting a new action must not resume a different failed state change.
-      return { ...action, retry: undefined, operation: idle() }
+      const issue = issueDetail()?.number === number ? issueDetail()?.resource.value : undefined
+      const selectedAssignees = issue && kind === "assignees" ? [...issue.assignees] : action.selectedAssignees
+      return { ...action, selectedAssignees, retry: undefined, operation: idle() }
     })
+    if (kind === "assignees" && !assignableUsers()) void loadAssignableUsers()
   }
-  const updateIssueDraft = (number: number, draft: Partial<Pick<IssueActionState, "body" | "reason" | "duplicateTarget">>) => {
+  const updateIssueDraft = (number: number, draft: Partial<Pick<IssueActionState, "body" | "reason" | "duplicateTarget" | "selectedAssignees">>) => {
     updateAction(issueKey(state().repository, number), (action) => action.operation.status === "loading" || action.retry
       ? action : { ...action, ...draft, operation: idle() })
   }
@@ -1031,6 +1079,28 @@ export function createRepositorySession(loaders: RepositoryLoaders = defaultLoad
     updateAction(key, (draft) => ({ ...draft, operation: loading() }))
     try {
       if (!issue.permissions?.[kind]) throw new Error("You do not have permission to perform this issue action.")
+      if (kind === "assignees") {
+        if (!loaders.setIssueAssignees) throw new Error("Assigning issues is unavailable.")
+        if (!action.selectedAssignees) throw new Error("Open the assignee picker before saving.")
+        const candidates = [...issue.assignees, ...(assignableUsers()?.value?.items ?? [])]
+        const allowed = new Set(candidates.map((login) => login.toLowerCase()))
+        if (action.selectedAssignees.some((login) => !allowed.has(login.toLowerCase())))
+          throw new Error("Select assignees from the suggested users.")
+        const seen = new Set<string>()
+        const selected = action.selectedAssignees.filter((login) => {
+          const key = login.toLowerCase()
+          if (seen.has(key)) return false
+          seen.add(key)
+          return true
+        })
+        if (selected.length > 10) throw new Error("An issue can have at most 10 assignees.")
+        const updated = await loaders.setIssueAssignees(repository, number, selected)
+        if (updated.number !== number) throw new Error("GitHub returned a different issue.")
+        reconcileIssueState(repository, number, updated, scope)
+        // Assignment never posts or discards the independent comment draft.
+        updateAction(key, (draft) => ({ ...draft, selectedAssignees: undefined, operation: idle() }))
+        return { issue: updated }
+      }
       if (!action.retry && kind !== "duplicate" && action.body.trim() && !issue.permissions.comment)
         throw new Error("You do not have permission to comment on this issue.")
       if (kind === "duplicate") {
@@ -1126,6 +1196,11 @@ export function createRepositorySession(loaders: RepositoryLoaders = defaultLoad
     const request = ++repositoryGeneration
     ++branchGeneration
     const repository = current.repository
+    setAssignableUserCache((cache) => {
+      const next = { ...cache }
+      delete next[repository.toLowerCase()]
+      return next
+    })
     const branch = current.data.currentBranch
     setState({ ...current, operations: { ...current.operations, refresh: loading() } })
     try {
@@ -1525,6 +1600,8 @@ export function createRepositorySession(loaders: RepositoryLoaders = defaultLoad
     loadMoreIssueComments,
     retryIssueReferences,
     clearIssue,
+    assignableUsers,
+    loadAssignableUsers,
     issueAction,
     prepareIssueAction,
     updateIssueDraft,

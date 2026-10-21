@@ -3,12 +3,14 @@ import { testRender } from "@opentui/solid";
 import type { ScrollBoxRenderable } from "@opentui/core";
 import { createSignal } from "solid-js";
 import { defaultConfig } from "../src/config";
-import type { IssueActionResult } from "../src/models";
+import type { IssueActionResult, Paginated } from "../src/models";
 import type {
   IssueActionState,
   IssueDetailState,
+  ResourceState,
 } from "../src/repository-state";
 import { App } from "../src/ui/app";
+import { IssueAssigneesPicker } from "../src/ui/components/issue-assignees-picker";
 import {
   githubDataFixture,
   issueCommentsFixture,
@@ -347,8 +349,94 @@ test("issue action overlays isolate input and confirm comments, closing, reopeni
   }
 });
 
+test("assignee suggestions filter locally, preserve selection, retry and save independently of comments", async () => {
+  const [action, setAction] = createSignal<IssueActionState>({ body: "Comment draft", reason: "completed", operation: { status: "idle" } });
+  const submitted: string[] = [];
+  const [users, setUsers] = createSignal<ResourceState<Paginated<string>>>({ status: "ready", value: { items: ["john", "jane", "kate"], page: 1, hasMore: true } });
+  let candidateCalls = 0;
+  let finishSave: (() => void) | undefined;
+  let fail = true;
+  const view = await testRender(() => <App
+    data={githubDataFixture} operations={repositoryOperationsFixture}
+    config={{ ...defaultConfig, showStatusBarHints: true }}
+    issueDetail={{ number: issueDetailFixture.number,
+      resource: { status: "ready", value: { ...issueDetailFixture, state: "closed", permissions: {
+        comment: false, close: false, reopen: false, duplicate: false, assignees: true,
+      } } }, comments: { status: "ready", value: { items: [], page: 1, hasMore: false } }, references: { status: "ready", value: [] } }}
+    onLoadIssue={async () => {}}
+    getIssueAction={() => action()}
+    assignableUsers={users()}
+    onLoadAssignableUsers={async () => {
+      candidateCalls++;
+      setUsers(candidateCalls === 1 ? { status: "error", phase: "pagination", message: "Candidates failed", value: users().value }
+        : { status: "ready", value: { items: ["john", "jane", "kate", "zoe"], page: 2, hasMore: false } });
+    }}
+    onPrepareIssueAction={() => setAction((draft) => ({ ...draft, selectedAssignees: [...issueDetailFixture.assignees], operation: { status: "idle" } }))}
+    onIssueDraftChange={(_number, draft) => setAction((current) => ({ ...current, ...draft }))}
+    onSubmitIssueAction={async (_number, kind) => {
+      submitted.push(kind);
+      if (fail) {
+        setAction((draft) => ({ ...draft, operation: { status: "error", message: "Save failed. GitHub did not confirm the requested assignees. Check GitHub before retrying." } }));
+        throw new Error("Save failed");
+      }
+      setAction((draft) => ({ ...draft, operation: { status: "loading" } }));
+      await new Promise<void>((resolve) => { finishSave = resolve; });
+      return {};
+    }}
+  />, { width: 110, height: 34 });
+  const settle = async () => { await view.flush(); await Bun.sleep(40); await view.flush(); };
+  try {
+    view.mockInput.pressKey("3"); view.mockInput.pressEnter(); await settle();
+    expect(view.captureCharFrame()).toContain("a actions");
+    view.mockInput.pressKey("a"); await settle();
+    expect(view.captureCharFrame()).not.toContain("Edit issue…");
+    expect(view.captureCharFrame()).not.toContain("Edit labels…");
+    expect(view.captureCharFrame()).toContain("Edit assignees…");
+    expect(view.captureCharFrame()).not.toContain("Reopen issue…");
+    view.mockInput.pressEnter(); await settle();
+    expect(view.captureCharFrame()).toContain("[x] @max");
+    expect(view.captureCharFrame()).toContain("[x] @jane");
+    await view.mockInput.typeText("@jo"); await settle();
+    expect(view.captureCharFrame()).toContain("[ ] @john");
+    expect(view.captureCharFrame()).not.toContain("@kate");
+    expect(view.captureCharFrame()).not.toContain("@max");
+    expect(action().selectedAssignees).toEqual(["max", "jane"]);
+    view.mockInput.pressEnter(); await settle();
+    expect(action().selectedAssignees).toEqual(["max", "jane", "john"]);
+    expect(view.captureCharFrame()).toContain("@jo");
+    view.mockInput.pressEnter(); await settle();
+    expect(action().selectedAssignees).toEqual(["max", "jane"]);
+    await view.mockInput.typeText("zz"); await settle();
+    expect(view.captureCharFrame()).toContain("No matching users");
+    view.mockInput.pressEnter(); await settle();
+    expect(view.captureCharFrame()).toContain("Candidates failed");
+    expect(view.captureCharFrame()).toContain("Retry loading users");
+    view.mockInput.pressEnter(); await settle();
+    expect(candidateCalls).toBe(2);
+    expect(view.captureCharFrame()).not.toContain("Retry loading users");
+    view.mockInput.pressKey("s", { ctrl: true }); await settle();
+    expect(view.captureCharFrame()).toContain("Save failed");
+    expect(view.captureCharFrame().replace(/\s+/g, " ")).toContain("GitHub before retrying.");
+    expect(action().selectedAssignees).toEqual(["max", "jane"]);
+    expect(action().body).toBe("Comment draft");
+    fail = false;
+    view.mockInput.pressKey("s", { ctrl: true }); await settle();
+    // Saving feedback lives in the status bar, which delays its loading indicator.
+    await Bun.sleep(220); await view.flush();
+    expect(view.captureCharFrame()).toContain("Saving assignees…");
+    view.mockInput.pressEscape(); view.mockInput.pressKey("s", { ctrl: true });
+    await view.mockInput.typeText("ignored"); await settle();
+    expect(submitted).toEqual(["assignees", "assignees"]);
+    expect(action().selectedAssignees).toEqual(["max", "jane"]);
+    expect(view.captureCharFrame()).not.toContain("ignored");
+    finishSave?.(); await settle();
+    expect(view.captureCharFrame()).toContain("Issue assignees updated");
+    expect(action().body).toBe("Comment draft");
+  } finally { view.renderer.destroy(); }
+});
+
 test("issue shortcuts and hints hide actions without viewer permission", async () => {
-  const [permissions, setPermissions] = createSignal({ comment: true, close: false, reopen: false, duplicate: false });
+  const [permissions, setPermissions] = createSignal({ comment: true, close: false, reopen: false, duplicate: false, assignees: false });
   const selected: string[] = [];
   const view = await testRender(() => <App
     data={githubDataFixture}
@@ -378,7 +466,7 @@ test("issue shortcuts and hints hide actions without viewer permission", async (
     await settle();
     expect(selected).toEqual(["comment"]);
     view.mockInput.pressEscape();
-    setPermissions({ comment: false, close: true, reopen: false, duplicate: false });
+    setPermissions({ comment: false, close: true, reopen: false, duplicate: false, assignees: false });
     await settle();
     expect(view.captureCharFrame()).not.toContain("c comment");
     view.mockInput.pressKey("c");
@@ -390,4 +478,27 @@ test("issue shortcuts and hints hide actions without viewer permission", async (
   } finally {
     view.renderer.destroy();
   }
+});
+
+test("assignee picker limits selection to ten while allowing removal", async () => {
+  const logins = Array.from({ length: 11 }, (_, index) => `user${index}`);
+  const [action, setAction] = createSignal<IssueActionState>({ body: "", reason: "completed", operation: { status: "idle" }, selectedAssignees: logins.slice(0, 10) });
+  const view = await testRender(() => <IssueAssigneesPicker number={42} state={action()}
+    users={{ status: "ready", value: { items: logins, page: 1, hasMore: false } }}
+    onChange={(selectedAssignees) => setAction((current) => ({ ...current, selectedAssignees }))}
+    onLoadMore={() => {}} onSubmit={() => {}} onHintChange={() => {}} onClose={() => {}} />,
+    { width: 80, height: 30 });
+  const settle = async () => { await view.flush(); await Bun.sleep(40); await view.flush(); };
+  try {
+    await view.mockInput.typeText("user10"); await settle();
+    view.mockInput.pressEnter(); await settle();
+    expect(action().selectedAssignees).toHaveLength(10);
+    expect(view.captureCharFrame()).toContain("Maximum 10 assignees.");
+    setAction((current) => ({ ...current, selectedAssignees: logins.slice(1) }));
+    view.mockInput.pressEnter(); await settle();
+    expect(action().selectedAssignees).toHaveLength(9);
+    expect(view.captureCharFrame()).not.toContain("Maximum 10 assignees.");
+    view.mockInput.pressEnter(); await settle();
+    expect(action().selectedAssignees).toHaveLength(10);
+  } finally { view.renderer.destroy(); }
 });

@@ -47,7 +47,7 @@ export type IssueDetail = IssueSummary & {
 }
 
 export type IssueCloseReason = "completed" | "not_planned"
-export type IssueActionKind = "comment" | "close" | "reopen" | "duplicate"
+export type IssueActionKind = "comment" | "close" | "reopen" | "duplicate" | "assignees"
 export type IssueActionResult = { comment?: IssueComment; issue?: IssueDetail; duplicateOf?: number }
 
 export type ReactionKind = "+1" | "-1" | "laugh" | "hooray" | "confused" | "heart" | "rocket" | "eyes"

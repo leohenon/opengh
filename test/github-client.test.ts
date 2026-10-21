@@ -410,17 +410,17 @@ describe("GitHub client", () => {
       expect(_query).toContain("issue(number: 42)")
       if (failed) throw new Error("unavailable")
       return { data: { repository: { isArchived: archived, viewerPermission: permission,
-        issue: { viewerCanClose: true, viewerCanReopen: false } } } } as T
+        issue: { viewerCanClose: true, viewerCanReopen: false, viewerCanAssign: true } } } } as T
     } })
     expect((await client.issue("owner/repo", 42)).permissions).toEqual({
-      comment: false, close: true, reopen: false, duplicate: false,
+      comment: false, close: true, reopen: false, duplicate: false, assignees: true,
     })
     permission = "WRITE"
     expect((await client.issue("owner/repo", 42)).permissions).toEqual({
-      comment: true, close: true, reopen: false, duplicate: true,
+      comment: true, close: true, reopen: false, duplicate: true, assignees: true,
     })
     archived = true
-    expect(Object.values((await client.issue("owner/repo", 42)).permissions!)).toEqual([false, false, false, false])
+    expect(Object.values((await client.issue("owner/repo", 42)).permissions!)).toEqual([false, false, false, false, false])
     failed = true
     expect((await client.issue("owner/repo", 42)).permissions).toBeUndefined()
   })
@@ -494,6 +494,52 @@ describe("GitHub client", () => {
       { path: "repos/owner/repo/issues/42", method: "PATCH", body: { state: "closed", state_reason: "not_planned" } },
       { path: "repos/owner/repo/issues/42", method: "PATCH", body: { state: "open" } },
     ])
+  })
+
+  test("paginates assignable logins and clears assignees with an isolated PATCH", async () => {
+    const paths: string[] = []
+    const calls: unknown[] = []
+    let returnedAssignees: string[] = []
+    const client = createGitHubClient({
+      ...transport(),
+      async json<T>(path: string) {
+        paths.push(path)
+        return Array.from({ length: path.endsWith("page=1") ? 100 : 1 }, (_, index) => ({ login: `user${index}` })) as T
+      },
+      async mutate<T>(path: string, method: "POST" | "PATCH", body: Record<string, unknown>) {
+        calls.push({ path, method, body })
+        return { number: 42, state: "closed", title: "Original", body: "", user: null,
+          created_at: "2026-01-01", updated_at: "2026-01-01", html_url: "https://github.com/owner/repo/issues/42",
+          locked: false, labels: [], assignees: returnedAssignees.map((login) => ({ login })), comments: 0 } as T
+      },
+      async graphql<T>(query: string) {
+        expect(query).toContain("viewerCanAssign")
+        expect(query).not.toContain("viewerCanUpdate")
+        expect(query).not.toContain("viewerCanLabel")
+        return { data: { repository: { isArchived: false, viewerPermission: "READ", issue: {
+          viewerCanClose: false, viewerCanReopen: false, viewerCanAssign: true,
+        } } } } as T
+      },
+    })
+    expect(await client.assignableUsers("owner/repo")).toMatchObject({ hasMore: true })
+    expect(await client.assignableUsers("owner/repo", 2)).toEqual({ items: ["user0"], hasMore: false })
+    expect(paths).toEqual(["repos/owner/repo/assignees?per_page=100&page=1", "repos/owner/repo/assignees?per_page=100&page=2"])
+    const updated = await client.setIssueAssignees("owner/repo", 42, [])
+    expect(updated.permissions?.assignees).toBe(true)
+    expect(updated.assignees).toEqual([])
+    expect(calls).toEqual([{ path: "repos/owner/repo/issues/42", method: "PATCH", body: { assignees: [] } }])
+    returnedAssignees = ["BOB", "Alice"]
+    expect((await client.setIssueAssignees("owner/repo", 42, ["alice", "bob"])).assignees).toEqual(returnedAssignees)
+    for (const [requested, returned] of [
+      [["alice"], []], // Ignored addition.
+      [[], ["alice"]], // Ignored removal.
+      [["alice", "bob"], ["alice"]], // Partial assignment.
+      [["alice"], ["bob"]], // Different assignee, same count.
+      [["alice"], ["alice", "bob"]], // Unexpected extra assignee.
+    ]) {
+      returnedAssignees = returned!
+      await expect(client.setIssueAssignees("owner/repo", 42, requested!)).rejects.toThrow("did not confirm the requested assignees")
+    }
   })
 
   test("closes duplicates using the canonical global ID and rejects invalid targets without writes", async () => {

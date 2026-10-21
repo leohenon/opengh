@@ -220,6 +220,8 @@ export function Root(props: {
               onLoadMoreIssueComments={session.loadMoreIssueComments}
               onRetryIssueReferences={session.retryIssueReferences}
               onCloseIssue={session.clearIssue}
+              assignableUsers={session.assignableUsers?.()}
+              onLoadAssignableUsers={session.loadAssignableUsers}
               getIssueAction={session.issueAction}
               onPrepareIssueAction={session.prepareIssueAction}
               onIssueDraftChange={session.updateIssueDraft}

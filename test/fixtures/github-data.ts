@@ -128,7 +128,7 @@ export const issueDetailFixture: IssueDetail = {
   body: "## Reproduction\n\nThe viewport loses focus after a resize.\n\n- [x] Confirmed on macOS\n- [ ] Check Linux\n\n```ts\nrenderer.resize(40, 24)\n```",
   updatedAt: "2026-04-14T08:00:00Z",
   locked: false,
-  permissions: { comment: true, close: true, reopen: true, duplicate: true },
+  permissions: { comment: true, close: true, reopen: true, duplicate: true, assignees: true },
   labels: ["bug", "terminal"],
   assignees: ["max", "jane"],
   milestone: { title: "Next release", dueAt: "2026-05-01T00:00:00Z" },

@@ -639,6 +639,128 @@ describe("repository session", () => {
     expect(commentCalls).toBe(0)
   })
 
+  test("assignment preserves comment drafts, guards writes and reconciles without stale reads", async () => {
+    const number = issueDetailFixture.number
+    let remote: IssueDetail = { ...issueDetailFixture, state: "closed", permissions: { ...issueDetailFixture.permissions!, comment: false } }
+    const pending = deferred<IssueDetail>()
+    const stale = deferred<IssueDetail>()
+    let staleRead = false
+    let fail = true
+    let commentCalls = 0
+    const updates: string[][] = []
+    const candidates = Array.from({ length: 11 }, (_, index) => `user${index}`)
+    const session = createRepositorySession(loaders({
+      issue: async () => staleRead ? stale.promise : remote,
+      issues: async (_repository, state) => ({ items: remote.state === state ? [remote] : [], hasMore: false }),
+      assignableUsers: async () => ({ items: ["octocat", ...candidates], hasMore: false }),
+      createIssueComment: async () => { commentCalls++; return issueCommentsFixture[0]! },
+      setIssueAssignees: async (_repository, _number, selected) => {
+        updates.push(selected)
+        if (fail) throw new Error("Assignment denied")
+        if (!selected.length) return pending.promise
+        remote = { ...remote, assignees: selected }
+        return remote
+      },
+    }))
+    await session.load("owner/repo")
+    await session.loadIssue(number)
+    session.updateIssueDraft(number, { body: "Unrelated comment draft" })
+    session.prepareIssueAction(number, "assignees")
+    expect(session.issueAction(number).selectedAssignees).toEqual(remote.assignees)
+    session.updateIssueDraft(number, { selectedAssignees: ["invented"] })
+    await expect(session.submitIssueAction(number, "assignees")).rejects.toThrow("suggested")
+    await session.loadAssignableUsers!()
+    session.updateIssueDraft(number, { selectedAssignees: candidates })
+    await expect(session.submitIssueAction(number, "assignees")).rejects.toThrow("at most 10")
+    expect(updates).toHaveLength(0)
+    session.updateIssueDraft(number, { selectedAssignees: [] })
+    await expect(session.submitIssueAction(number, "assignees")).rejects.toThrow("Assignment denied")
+    expect(session.issueAction(number).selectedAssignees).toEqual([])
+    fail = false
+    const saving = session.submitIssueAction(number, "assignees")
+    await expect(session.submitIssueAction(number, "assignees")).rejects.toThrow("already in progress")
+    session.updateIssueDraft(number, { selectedAssignees: ["octocat"] })
+    expect(session.issueAction(number).selectedAssignees).toEqual([])
+    staleRead = true
+    const reading = session.loadIssue(number)
+    const old = remote
+    remote = { ...remote, assignees: [] }
+    pending.resolve(remote)
+    await saving
+    stale.resolve(old)
+    await reading
+    expect(session.issueDetail()?.resource.value).toMatchObject({ assignees: [], title: old.title, body: old.body, labels: old.labels })
+    expect(ready(session).data.issues.closed.value?.items.some((item) => item.number === number)).toBe(true)
+    expect(updates).toEqual([[], []])
+    session.prepareIssueAction(number, "assignees")
+    session.updateIssueDraft(number, { selectedAssignees: ["octocat", "OCTOCAT"] })
+    await session.submitIssueAction(number, "assignees")
+    expect(updates).toEqual([[], [], ["octocat"]])
+    expect(session.issueDetail()?.resource.value?.assignees).toEqual(["octocat"])
+    expect(session.issueAction(number).body).toBe("Unrelated comment draft")
+    expect(commentCalls).toBe(0)
+    staleRead = false
+    remote = { ...remote, permissions: { ...remote.permissions!, assignees: false } }
+    await session.loadIssue(number)
+    session.prepareIssueAction(number, "assignees")
+    expect(session.issueAction(number).selectedAssignees).toEqual(["octocat"])
+    await expect(session.submitIssueAction(number, "assignees")).rejects.toThrow("permission")
+    expect(updates).toHaveLength(3)
+  })
+
+  test("assignable users cache by repository, dedupe pages, retry the failed page and guard concurrent requests", async () => {
+    const first = deferred<{ items: string[]; hasMore: boolean }>()
+    let firstPage = first.promise
+    const calls: [string, number | undefined][] = []
+    let fail = true
+    const session = createRepositorySession(loaders({
+      assignableUsers: async (repository, page) => {
+        calls.push([repository, page])
+        if (repository === "owner/repo" && page === 1) return firstPage
+        if (repository === "owner/other") return { items: ["other"], hasMore: false }
+        if (fail) throw new Error("Try again")
+        return { items: ["ALICE", "bob"], hasMore: false }
+      },
+    }))
+    await session.load("owner/repo")
+    await session.loadIssue(issueDetailFixture.number)
+    session.prepareIssueAction(issueDetailFixture.number, "assignees")
+    await session.loadAssignableUsers!()
+    expect(calls).toEqual([["owner/repo", 1]])
+    await session.load("owner/other")
+    expect(session.assignableUsers!()).toBeUndefined()
+    await session.loadAssignableUsers!()
+    first.resolve({ items: ["alice"], hasMore: true })
+    await first.promise
+    await Promise.resolve()
+    expect(session.assignableUsers!()?.value?.items).toEqual(["other"])
+    await session.load("owner/repo")
+    expect(session.assignableUsers!()?.value?.items).toEqual(["alice"])
+    await session.loadIssue(issueDetailFixture.number)
+    session.prepareIssueAction(issueDetailFixture.number, "assignees")
+    expect(calls).toHaveLength(2)
+    await session.loadAssignableUsers!()
+    expect(session.assignableUsers!()).toMatchObject({ status: "error", value: { page: 1, items: ["alice"], hasMore: true } })
+    fail = false
+    await session.loadAssignableUsers!()
+    expect(session.assignableUsers!()).toEqual({ status: "ready", value: { page: 2, items: ["alice", "bob"], hasMore: false } })
+    await session.loadAssignableUsers!()
+    expect(calls).toEqual([["owner/repo", 1], ["owner/other", 1], ["owner/repo", 2], ["owner/repo", 2]])
+    firstPage = Promise.resolve({ items: ["new-collaborator"], hasMore: false })
+    await session.refresh()
+    expect(session.assignableUsers!()).toBeUndefined()
+    await session.loadAssignableUsers!()
+    expect(session.assignableUsers!()?.value?.items).toEqual(["new-collaborator"])
+    const late = deferred<{ items: string[]; hasMore: boolean }>()
+    firstPage = late.promise
+    await session.refresh()
+    const loading = session.loadAssignableUsers!()
+    await session.refresh()
+    late.resolve({ items: ["stale"], hasMore: false })
+    await loading
+    expect(session.assignableUsers!()).toBeUndefined()
+  })
+
   test("loads commit details on demand and ignores obsolete responses", async () => {
     const pending = new Map<string, ReturnType<typeof deferred<CommitDetail>>>()
     const session = createRepositorySession(loaders({

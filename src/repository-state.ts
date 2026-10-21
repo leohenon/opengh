@@ -73,6 +73,7 @@ export type OperationState =
   | { status: "error"; message: string }
 
 export type IssueActionState = {
+  selectedAssignees?: string[]
   body: string
   reason: IssueCloseReason
   duplicateTarget?: string

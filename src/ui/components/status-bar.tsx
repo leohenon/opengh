@@ -12,6 +12,7 @@ export type StatusKind =
   | "closing-issue"
   | "reopening-issue"
   | "marking-duplicate"
+  | "updating-issue"
 
 const loadingMessages: Record<StatusKind, string> = {
   refreshing: "Refreshing…",
@@ -22,6 +23,7 @@ const loadingMessages: Record<StatusKind, string> = {
   "closing-issue": "Closing issue…",
   "reopening-issue": "Reopening issue…",
   "marking-duplicate": "Marking duplicate…",
+  "updating-issue": "Saving assignees…",
 }
 
 export function StatusBar(props: { kind?: StatusKind; detail?: string; hint?: string; zIndex?: number }) {

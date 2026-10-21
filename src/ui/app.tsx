@@ -4,7 +4,7 @@ import { createEffect, createMemo, createSignal, For, onCleanup, Show } from "so
 import { defaultConfig, type Config } from "../config"
 import { cloneCommand, cloneDestination, matchesLocalRepository, type LocalRepository, type CommandSpec, type CommandTask } from "../command-actions"
 import { CommandDialog, type CommandAction } from "./components/command-dialog"
-import type { CommitDetail, DiffContent, DiffTarget, IssueActionKind, IssueActionResult, ListState } from "../models"
+import type { CommitDetail, DiffContent, DiffTarget, IssueActionKind, IssueActionResult, Paginated, ListState } from "../models"
 import { back, navigate, openDetail, openDiff, type NavigationState, type Page } from "../navigation"
 import type {
   CommitDetailState,
@@ -22,6 +22,7 @@ import { BranchPicker } from "./components/branch-picker"
 import { Header } from "./components/header"
 import { IssueReferencesPicker } from "./components/issue-references-picker"
 import { IssueActionDialog, IssueActionsMenu } from "./components/issue-actions"
+import { IssueAssigneesPicker } from "./components/issue-assignees-picker"
 import { Help } from "./components/help"
 import { Settings } from "./components/settings"
 import { StatusBar, type StatusKind } from "./components/status-bar"
@@ -82,8 +83,10 @@ export type AppProps = {
   onRetryIssueReferences?: () => Promise<void>
   onCloseIssue?: () => void
   getIssueAction?: (number: number) => IssueActionState
+  assignableUsers?: ResourceState<Paginated<string>>
+  onLoadAssignableUsers?: () => Promise<void>
   onPrepareIssueAction?: (number: number, kind: IssueActionKind) => void
-  onIssueDraftChange?: (number: number, draft: Partial<Pick<IssueActionState, "body" | "reason" | "duplicateTarget">>) => void
+  onIssueDraftChange?: (number: number, draft: Partial<Pick<IssueActionState, "body" | "reason" | "duplicateTarget" | "selectedAssignees">>) => void
   onDiscardIssueDraft?: (number: number) => void
   onSubmitIssueAction?: (number: number, kind: IssueActionKind) => Promise<IssueActionResult>
   pullDetail?: PullDetailState
@@ -196,6 +199,7 @@ export function App(props: AppProps) {
       && props.getIssueAction?.(number).operation.status !== "loading")
   }
   const hasIssueActions = () => canActOnIssue(issueDetail().resource.value?.state === "closed" ? "reopen" : "close") || canActOnIssue("duplicate")
+    || canActOnIssue("assignees")
   const openIssueAction = (kind: IssueActionKind) => {
     const number = activeIssueNumber()
     if (!number || !canActOnIssue(kind) || props.getIssueAction?.(number).operation.status === "loading") return
@@ -215,6 +219,7 @@ export function App(props: AppProps) {
       setOverlay()
       setIssueAction()
       setToast({ id: ++toastId, title: action.kind === "comment" ? "Comment posted"
+        : action.kind === "assignees" ? "Issue assignees updated"
         : action.kind === "duplicate" ? "Issue marked as duplicate" : action.kind === "close" ? "Issue closed" : "Issue reopened",
         message: result.duplicateOf ? `#${action.number} → #${result.duplicateOf}` : `#${action.number}`, duration: 2000, tone: "success" })
     } catch (error) {
@@ -352,7 +357,8 @@ export function App(props: AppProps) {
     if (overlay() === "issue-action") {
       const action = issueAction()
       if (action && props.getIssueAction?.(action.number).operation.status === "loading")
-        return action.kind === "duplicate" ? "marking-duplicate" : action.kind === "comment" ? "posting-comment"
+        return action.kind === "assignees" ? "updating-issue"
+          : action.kind === "duplicate" ? "marking-duplicate" : action.kind === "comment" ? "posting-comment"
           : action.kind === "close" ? "closing-issue" : "reopening-issue"
       return undefined
     }
@@ -1042,23 +1048,36 @@ export function App(props: AppProps) {
         />
       </Show>
       <Show when={overlay() === "issue-action" ? issueAction() : undefined} keyed>
-        {(action) => <IssueActionDialog
-          number={action.number}
-          kind={action.kind}
-          state={props.getIssueAction?.(action.number) ?? emptyIssueAction}
-          showScrollbar={config().showScrollbars}
-          locked={issueDetail().resource.value?.locked}
-          repositoryUrl={data().repo.url}
-          defaultBranch={data().repo.defaultBranch}
-          onBodyChange={(body) => props.onIssueDraftChange?.(action.number, { body })}
-          onReasonChange={(reason) => props.onIssueDraftChange?.(action.number, { reason })}
-          onDuplicateTargetChange={(duplicateTarget) => props.onIssueDraftChange?.(action.number, { duplicateTarget })}
-          onSubmit={() => void submitIssueAction()}
-          onDiscard={() => props.onDiscardIssueDraft?.(action.number)}
-          onHintChange={setIssueActionHint}
-          onConfirmationChange={setConfirmationPopup}
-          onClose={() => { setOverlay(); setIssueAction() }}
-        />}
+        {(action) => <Show when={action.kind === "assignees"}
+          fallback={<IssueActionDialog
+            number={action.number}
+            kind={action.kind}
+            state={props.getIssueAction?.(action.number) ?? emptyIssueAction}
+            showScrollbar={config().showScrollbars}
+            locked={issueDetail().resource.value?.locked}
+            repositoryUrl={data().repo.url}
+            defaultBranch={data().repo.defaultBranch}
+            onBodyChange={(body) => props.onIssueDraftChange?.(action.number, { body })}
+            onReasonChange={(reason) => props.onIssueDraftChange?.(action.number, { reason })}
+            onDuplicateTargetChange={(duplicateTarget) => props.onIssueDraftChange?.(action.number, { duplicateTarget })}
+            onSubmit={() => void submitIssueAction()}
+            onDiscard={() => props.onDiscardIssueDraft?.(action.number)}
+            onHintChange={setIssueActionHint}
+            onConfirmationChange={setConfirmationPopup}
+            onClose={() => { setOverlay(); setIssueAction() }}
+          />}>
+          <IssueAssigneesPicker
+            number={action.number}
+            state={props.getIssueAction?.(action.number) ?? emptyIssueAction}
+            users={props.assignableUsers}
+            showScrollbar={config().showScrollbars}
+            onLoadMore={() => void props.onLoadAssignableUsers?.()}
+            onChange={(selectedAssignees) => props.onIssueDraftChange?.(action.number, { selectedAssignees })}
+            onSubmit={() => void submitIssueAction()}
+            onHintChange={setIssueActionHint}
+            onClose={() => { setOverlay(); setIssueAction() }}
+          />
+        </Show>}
       </Show>
       <Show when={overlay() === "issue-references" && (activeIssueNumber() || activePullNumber())}>
         <IssueReferencesPicker
