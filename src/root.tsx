@@ -1,5 +1,5 @@
 import { useKeyboard, useRenderer } from "@opentui/solid"
-import { createSignal, Match, onMount, Show, Switch } from "solid-js"
+import { createEffect, createMemo, createSignal, Match, onMount, Show, Switch } from "solid-js"
 import { defaultConfig, loadConfig, saveConfig, type Config } from "./config"
 import { copyToHostClipboard } from "./clipboard"
 import { resolveLocalRepository, runCommand, type LocalRepository } from "./command-actions"
@@ -106,9 +106,16 @@ export function Root(props: {
       // Recents are optional; keep the last usable list when persistence is unavailable.
     }
   }
+  const accessibleRepository = createMemo(() => {
+    const current = session.state()
+    return current.status === "ready" ? current.repository : undefined
+  })
+  createEffect(() => {
+    const repository = accessibleRepository()
+    if (repository) void services.rememberRepository(repository).catch(() => {}).then(refreshRecent)
+  })
   const open = (repository: string) => {
     setView("repository")
-    void services.rememberRepository(repository).catch(() => {}).then(refreshRecent)
     void session.load(repository)
   }
   const showSwitcher = () => {

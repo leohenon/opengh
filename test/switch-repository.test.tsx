@@ -9,6 +9,7 @@ import { commitDetailFixture, githubDataFixture, issueDetailFixture, pullContext
 // Exercise the real Root, session, focused input, and mounted repository pages without GitHub or disk writes.
 test("repository switch popup isolates input, preserves cancelled navigation, and resets confirmed switches", async () => {
   const loads: string[] = []
+  let missingFails = true
   let recent = ["anomalyco/opentui", ...Array.from({ length: 98 }, (_, index) => `owner/repo-${index}`), "owner/qrshly"]
   let recentReads = 0
   let saves = 0
@@ -21,7 +22,7 @@ test("repository switch popup isolates input, preserves cancelled navigation, an
     commitCount: async () => 4,
     metadata: async (repository) => {
       loads.push(repository)
-      if (repository === "owner/missing") throw new Error("Repository not found")
+      if (repository === "owner/missing" && missingFails) throw new Error("Repository not found")
       if (repository === "owner/pending") await pendingMetadata
       return { ...githubDataFixture.repo, nameWithOwner: repository, url: `https://github.com/${repository}` }
     },
@@ -61,6 +62,7 @@ test("repository switch popup isolates input, preserves cancelled navigation, an
   try {
     await settle()
     expect(loads).toEqual(["anomalyco/opentui"])
+    expect(recent[0]).toBe("anomalyco/opentui")
     view.mockInput.pressKey("s", { ctrl: true })
     await settle()
     expect(view.captureCharFrame()).not.toContain("Switch repository")
@@ -152,6 +154,13 @@ test("repository switch popup isolates input, preserves cancelled navigation, an
     await settle()
     expect(loads.at(-1)).toBe("owner/missing")
     expect(view.captureCharFrame()).toContain("Repository not found")
+    expect(recent).not.toContain("owner/missing")
+    expect(recent[0]).toBe("owner/qrshly")
+    missingFails = false
+    view.mockInput.pressKey("r")
+    await settle()
+    expect(view.captureCharFrame()).toContain("About")
+    expect(recent[0]).toBe("owner/missing")
     await switchPage()
     await view.mockInput.typeText("https://github.com/cli/cli.git")
     view.mockInput.pressEnter()
@@ -165,6 +174,7 @@ test("repository switch popup isolates input, preserves cancelled navigation, an
     view.mockInput.pressEnter()
     await settle()
     expect(view.captureCharFrame()).toContain("owner/pending")
+    expect(recent).not.toContain("owner/pending")
     await switchPage() // A slow load is escapable; an obsolete response must not replace the chosen repo.
     await view.mockInput.typeText("cli/cli")
     view.mockInput.pressEnter()
@@ -173,6 +183,8 @@ test("repository switch popup isolates input, preserves cancelled navigation, an
     await settle()
     expect(view.captureCharFrame()).toContain("cli/cli")
     expect(view.captureCharFrame()).not.toContain("owner/pending")
+    expect(recent).not.toContain("owner/pending")
+    expect(recent[0]).toBe("cli/cli")
     view.mockInput.pressKey(",")
     await settle()
     expect(view.captureCharFrame()).toContain("nord")
