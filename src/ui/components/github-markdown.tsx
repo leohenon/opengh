@@ -5,6 +5,7 @@ import { normalizeGitHubMarkdown, type GitHubMarkdownContext } from "../github-m
 import { compactLinkChunks, compactMarkdownLinks } from "../markdown-links"
 import "../markdown-parsers"
 import { useTheme } from "../theme"
+import { READING_WIDTH } from "../detail-layout"
 import { useMarkdownPreference } from "../markdown-preferences"
 
 // One prose renderer for repository documents, issue descriptions, and comments.
@@ -24,7 +25,7 @@ export function GitHubMarkdown(props: { content: string; syntaxStyle: SyntaxStyl
   }))
   const renderNode = createMemo<MarkdownOptions["renderNode"]>(() => {
     const simple = minimal()
-    const contentWidth = props.wide ? "100%" : 96
+    const contentWidth = props.wide ? "100%" : READING_WIDTH
     const background = colors.panel
     const canvas = props.backgroundColor ?? colors.canvas
     const muted = colors.muted
@@ -39,12 +40,14 @@ export function GitHubMarkdown(props: { content: string; syntaxStyle: SyntaxStyl
     const blue = theme.markdownInfo ?? colors.blue
     const tables = tableOptions()
     const codePanels = new WeakSet<Renderable>()
+    const headings = new WeakSet<Renderable>()
     const codePanel = (source: CodeRenderable, language = source.filetype ?? "text") => {
+      const short = !source.content.trimEnd().includes("\n")
       const parent = source.parent
       const index = parent?.getChildren().indexOf(source)
       const panel = new BoxRenderable(renderer, {
         width: "100%", minWidth: 0, flexShrink: 0, flexDirection: "column",
-        paddingX: codePadding, paddingY: simple ? 0 : 1, backgroundColor: background,
+        paddingX: codePadding, paddingY: simple || short ? 0 : 1, backgroundColor: background,
       })
       // Preserve authored margins, including percentages and auto, before reparenting.
       for (const [edge, property] of [
@@ -71,7 +74,7 @@ export function GitHubMarkdown(props: { content: string; syntaxStyle: SyntaxStyl
       source.bg = background
       source.fg = foreground
       source.wrapMode = "word"
-      if (!simple) panel.add(new TextRenderable(renderer, {
+      if (!simple && !short) panel.add(new TextRenderable(renderer, {
         content: language.trim().split(/\s+/)[0] || "text",
         height: 1, fg: muted, bg: background,
       }))
@@ -96,7 +99,7 @@ export function GitHubMarkdown(props: { content: string; syntaxStyle: SyntaxStyl
       if (codePanels.has(node) || node instanceof MarkdownRenderable) return
       if (node instanceof CodeRenderable) {
         node.syntaxStyle = syntaxStyle
-        if (node.filetype === "markdown" && node.conceal) compactMarkdownLinks(node)
+        if (node.filetype === "markdown" && node.conceal) compactMarkdownLinks(node, { padInlineCode: !simple })
         else if (panels && node.parent) {
           codePanel(node)
           return
@@ -139,19 +142,28 @@ export function GitHubMarkdown(props: { content: string; syntaxStyle: SyntaxStyl
         block = context.defaultRender()
       }
       if (!block) return undefined
+      if (token.type === "heading" && block instanceof CodeRenderable)
+        block.baseHighlight = `markup.heading.${token.depth}`
       block.marginTop = 0
       block.marginBottom = 0
       if (token.type === "code" && panels && block instanceof CodeRenderable) block = codePanel(block, token.lang ?? "text")
       // Do not interpret markdown-language fence contents as prose.
       if (token.type !== "code") decorateProse(block, token.type === "list")
       const readable = token.type !== "table" && token.type !== "hr"
-      const section = token.type === "heading" && token.depth <= 2
+      const section = token.type === "heading" && token.depth === 1
       const wrapper = new BoxRenderable(renderer, {
         width: "100%", minWidth: 0, flexShrink: 0, flexDirection: "column", marginTop: 0,
         ...(readable ? { maxWidth: contentWidth, alignSelf: "flex-start" } : {}),
         ...(section && !simple ? { border: ["bottom"], borderColor: border } : {}),
       })
-      // Native top-level layout owns inter-block spacing and list indentation.
+      if (token.type === "heading") headings.add(wrapper)
+      if (token.type === "paragraph") wrapper.onLifecyclePass = () => {
+        // Core applies its block margins after renderNode; tighten heading/body
+        // gaps here, before layout, without changing paragraph or list spacing.
+        const siblings = wrapper.parent?.getChildren() ?? []
+        const previous = siblings[siblings.indexOf(wrapper) - 1]
+        if (previous && headings.has(previous) && wrapper.marginTop !== 0) wrapper.marginTop = 0
+      }
       wrapper.add(block)
       return wrapper
     }
@@ -166,7 +178,7 @@ export function GitHubMarkdown(props: { content: string; syntaxStyle: SyntaxStyl
         bg={props.backgroundColor ?? colors.canvas}
         wrapMode="word"
         width="100%"
-        maxWidth={props.wide ? "100%" : 96}
+        maxWidth={props.wide ? "100%" : READING_WIDTH}
         minWidth={0}
         flexShrink={0}
       />

@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test"
-import { CodeRenderable, RGBA, type Renderable } from "@opentui/core"
+import { CodeRenderable, RGBA, TextAttributes, type Renderable } from "@opentui/core"
 import type { GitHubMarkdownContext } from "../src/ui/github-markdown"
 import { testRender } from "@opentui/solid"
 import { createSignal } from "solid-js"
@@ -80,14 +80,12 @@ End.`)
       expect(frame).not.toContain("[!NOTE]")
       expect(frame).toContain("Note")
       expect(frame).toContain("https://example.com/log") // Code must not be concealed.
-      const labelRow = rows.findIndex((row) => row.trim() === "json")
-      const codeRow = rows.findIndex((row) => row.includes('{"enabled"'))
-      expect(labelRow).toBeGreaterThan(0)
-      expect(rows[labelRow - 1]?.trim()).toBe("")
-      expect(codeRow).toBe(labelRow + 1)
-      expect(rows[codeRow + 1]?.trim()).toBe("")
-      expect(rows[labelRow]?.indexOf("json")).toBe(width < 80 ? 1 : 2)
       const codes = codeBlocks(view.renderer.root)
+      const json = codes.find((block) => block.filetype === "json")!
+      expect(rows.some((row) => row.trim() === "json")).toBe(false)
+      expect(json.screenY - json.parent!.screenY).toBe(0)
+      expect(json.parent!.height).toBe(json.height)
+      expect(json.screenX - json.parent!.screenX).toBe(width < 80 ? 1 : 2)
       const linked = codes.find((block) => block.content.includes("Open PR"))!
       const result = await linked.treeSitterClient.highlightOnce(linked.content, "markdown")
       const highlights = await linked.onHighlight!(result.highlights ?? [], { content: linked.content, filetype: "markdown", syntaxStyle: linked.syntaxStyle })
@@ -138,8 +136,8 @@ fn main() { println!("qdrant"); }
       expect(frame).toContain("Updated")
       expect(frame).not.toContain("Implementation")
       const rows = frame.split("\n").map((row) => row.trim())
-      expect(rows[rows.indexOf("Updated") + 1]).toMatch(/^─+$/)
-      expect(rows[rows.indexOf("Subsection") + 1]).toBe("")
+      expect(rows[rows.indexOf("Updated") + 1]).toBe("")
+      expect(rows[rows.indexOf("Subsection") + 1]).toBe("First paragraph.")
       const first = rows.indexOf("First paragraph.")
       expect(rows[first + 1]).toBe("")
       expect(rows[first + 2]).toBe("Second paragraph.")
@@ -147,9 +145,9 @@ fn main() { println!("qdrant"); }
       expect(frame).toContain("• Python client")
       const codes = codeBlocks(view.renderer.root)
       const prose = codes.find((block) => block.content.includes("A readable prose"))!
-      expect(prose.width).toBe(Math.min(width, 96))
+      expect(prose.width).toBe(Math.min(width, 84))
       const python = codes.find((block) => block.filetype === "python")!
-      expect(python.parent!.width).toBe(Math.min(width, 96))
+      expect(python.parent!.width).toBe(Math.min(width, 84))
       const spans = view.captureSpans().lines.flatMap((line) => line.spans)
       const keyword = spans.find((span) => span.text.trim() === "from")!
       const string = spans.find((span) => span.text.includes("localhost"))!
@@ -201,8 +199,8 @@ test("references, image captions, nested fences, and plain-text documents keep t
       for (const filetype of ["json", "python", "markdown"]) {
         const code = codes.find((block) => block.filetype === filetype && !block.conceal)!
         const panel = code.parent!
-        expect(code.screenY - panel.screenY).toBe(2) // One padding row + language label.
-        expect(panel.screenY + panel.height - code.screenY - code.height).toBe(1)
+        expect(code.screenY - panel.screenY).toBe(0) // Single-line fences omit the standalone label and padding rows.
+        expect(panel.screenY + panel.height - code.screenY - code.height).toBe(0)
       }
       expect(codes.find((block) => block.filetype === "markdown" && !block.conceal)?.plainText).toContain("## Literal heading #777")
       const spans = view.captureSpans().lines.flatMap((line) => line.spans)
@@ -212,7 +210,7 @@ test("references, image captions, nested fences, and plain-text documents keep t
       const marker = spans.find((span) => span.text.includes("▧"))!
       const caption = spans.find((span) => span.text === "Screenshot")!
       expect(marker.fg.equals(caption.fg)).toBe(false)
-      const inline = spans.find((span) => span.text === "nested")!
+      const inline = spans.find((span) => span.text.trim() === "nested")!
       const prose = spans.find((span) => span.text.includes("option links"))!
       expect(inline.fg.equals(prose.fg)).toBe(true)
     }
@@ -258,7 +256,7 @@ Inline code: \`\\~20\`
     expect(frame).not.toContain("hidden metadata")
     expect(frame).not.toContain("change_assessment_start")
     expect(frame).toContain("Estimated effort: ~20 minutes; *literal* punctuation.")
-    expect(frame).toContain(String.raw`Inline code: \~20`)
+    expect(frame).toContain(String.raw`Inline code:  \~20`)
     expect(frame).toContain("<!-- literal code comment -->")
     expect(codeBlocks(view.renderer.root).find((block) => block.filetype === "text")?.plainText).toContain(String.raw`\~20 minutes`)
   } finally {
@@ -284,12 +282,12 @@ test("overview layout centers documents or uses available width independently of
       await settle(view)
       const prose = () => codeBlocks(view.renderer.root).find((block) => block.content.includes("Overview prose"))!
       const panel = () => codeBlocks(view.renderer.root).find((block) => block.filetype === "text")!.parent!
-      expect(prose().width).toBe(96)
-      expect(panel().width).toBe(96)
+      expect(prose().width).toBe(84)
+      expect(panel().width).toBe(84)
       const centeredX = prose().screenX
       setLayout("wide")
       await settle(view)
-      expect(prose().width).toBeGreaterThan(96)
+      expect(prose().width).toBeGreaterThan(84)
       expect(panel().width).toBe(prose().width)
       expect(prose().screenX).toBeLessThan(centeredX)
       expect(view.captureCharFrame().includes("About")).toBe(about === "show")
@@ -322,7 +320,9 @@ test("minimal Markdown switches live without losing structure, links, or literal
 - Nested code:
 
   \`\`\`json
-  {"enabled": true, "count": 12}
+  {
+    "enabled": true, "count": 12
+  }
   \`\`\`
 
 \`\`\`md
@@ -358,7 +358,7 @@ test("minimal Markdown switches live without losing structure, links, or literal
       expect(frame).not.toMatch(/[─│┌└]/)
       expect(frame.split("\n").some((row) => row.trim() === "json")).toBe(false)
       expect(json().screenY - json().parent!.screenY).toBe(0)
-      expect(json().plainText).toBe('{"enabled": true, "count": 12}')
+      expect(json().plainText).toBe('{\n  "enabled": true, "count": 12\n}')
       const foreground = RGBA.fromHex(resolveTheme("github", appearance).text)
       expect(json().syntaxStyle.getStyle("number")?.fg).toEqual(foreground)
       expect(json().syntaxStyle.getStyle("string")?.fg).toEqual(foreground)
@@ -374,4 +374,76 @@ test("minimal Markdown switches live without losing structure, links, or literal
   } finally {
     view.renderer.destroy()
   }
+}, 15_000)
+
+
+test("Markdown hierarchy, compact examples, and inline padding respect rich and minimal styles", async () => {
+  const [style, setStyle] = createSignal<MarkdownStyle>("rich")
+  const content = `# Bun
+
+[Documentation](https://example.com/docs) · [Discord](https://example.com/chat)
+
+## What is Bun?
+
+Bun runs \`bun\` and [\`bun test\`](https://example.com/test).
+
+### Install
+
+Run this:
+
+\`\`\`bash
+bun install
+\`\`\`
+
+\`\`\`typescript
+const runtime = "bun"
+console.log(runtime)
+\`\`\``
+  const view = await testRender(() => <ThemeProvider name="github"><MarkdownProvider style={style()}>
+    <MarkdownSample content={content} />
+  </MarkdownProvider></ThemeProvider>, { width: 120, height: 50 })
+  try {
+    for (const preference of ["rich", "minimal", "rich"] as const) {
+      setStyle(preference)
+      for (const width of [120, 44]) {
+        view.resize(width, 50)
+        await settle(view)
+        const frame = view.captureCharFrame()
+        const rows = frame.split("\n").map((row) => row.trim())
+        const rules = rows.filter((row) => /^─+$/.test(row))
+        expect(rules).toHaveLength(preference === "rich" ? 1 : 0)
+        const title = rows.indexOf("Bun")
+        expect(rows[title + (preference === "rich" ? 2 : 1)]).toContain("Documentation")
+        expect(rows[rows.indexOf("What is Bun?") + 1]).toContain("Bun runs")
+        expect(rows[rows.indexOf("Install") + 1]).toBe("Run this:")
+        const codes = codeBlocks(view.renderer.root)
+        const bash = codes.find((code) => code.filetype === "bash")!
+        expect(bash.parent!.height).toBe(1)
+        expect(bash.plainText).toBe("bun install")
+        expect(rows).not.toContain("bash")
+        const multiline = codes.find((code) => code.filetype === "typescript")!
+        expect(multiline.screenY - multiline.parent!.screenY).toBe(preference === "rich" ? 2 : 0)
+        expect(multiline.plainText).toBe('const runtime = "bun"\nconsole.log(runtime)')
+        const spans = view.captureSpans().lines.flatMap((line) => line.spans)
+        const h1 = spans.find((span) => span.text.trim() === "Bun")!
+        const h2 = spans.find((span) => span.text.trim() === "What is Bun?")!
+        const h3 = spans.find((span) => span.text.trim() === "Install")!
+        expect(h1.attributes & TextAttributes.BOLD).not.toBe(0)
+        expect(h2.attributes & TextAttributes.BOLD).not.toBe(0)
+        expect(h3.attributes & TextAttributes.ITALIC).not.toBe(0)
+        expect(h3.attributes & TextAttributes.BOLD).toBe(0)
+        if (preference === "rich") {
+          const chip = spans.find((span) => span.text.trim() === "bun")!
+          expect(chip.text).toBe(" bun ")
+          const linkedChip = spans.find((span) => span.text.trim() === "bun test")!
+          expect(linkedChip.text).toBe(" bun test ")
+          expect(chip.bg).toEqual(linkedChip.bg)
+        } else {
+          expect(h1.attributes & TextAttributes.UNDERLINE).not.toBe(0)
+          expect(frame).toContain("Bun runs bun and bun test.")
+        }
+        expect(frame).not.toContain("https://example.com")
+      }
+    }
+  } finally { view.renderer.destroy() }
 }, 15_000)

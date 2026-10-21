@@ -22,11 +22,13 @@ export function compactLinkChunks(chunks: TextChunk[]) {
 }
 
 // Conceal destinations, not the links themselves: keep labels selectable and linked.
-export function compactMarkdownLinks(block: CodeRenderable) {
+export function compactMarkdownLinks(block: CodeRenderable, options: { padInlineCode?: boolean } = {}) {
   let source = ""
   let links: Array<{ start: number; end: number; labelStart: number; labelEnd: number; url: string }> = []
+  let inlineCode: Array<{ start: number; end: number }> = []
   block.onHighlight = (highlights, context) => {
     source = context.content
+    inlineCode = []
     links = []
     const tree = parser.parse(source)
     const markers: SimpleHighlight[] = []
@@ -41,6 +43,13 @@ export function compactMarkdownLinks(block: CodeRenderable) {
       // only, so inline code and fenced examples keep their literal backslashes.
       for (const match of text.matchAll(/\\[!"#$%&'()*+,\-./:;<=>?@[\]\\^_`{|}~]/g))
         markers.push([start + match.index!, start + match.index! + 1, "conceal", { conceal: "", isInjection: true }])
+    })
+    if (options.padInlineCode) visit(tree, "inlineCode", (node) => {
+      const start = node.position?.start.offset
+      const end = node.position?.end.offset
+      if (start === undefined || end === undefined) return
+      const ticks = source.slice(start, end).match(/^`+/)?.[0].length ?? 1
+      inlineCode.push({ start: start + ticks, end: end - ticks })
     })
     visit(tree, "link", (node) => {
       const start = node.position?.start.offset
@@ -65,6 +74,17 @@ export function compactMarkdownLinks(block: CodeRenderable) {
   }
   const linkify = block.onChunks
   block.onChunks = async (chunks, context) => {
+    const padding = new Map<TextChunk, { before: boolean; after: boolean }>()
+    for (const code of inlineCode) {
+      const inside = chunks.filter((_chunk, index) => {
+        const range = context.sourceRanges?.[index]
+        return range && range.start >= code.start && range.end <= code.end
+      })
+      if (inside.length) {
+        padding.set(inside[0]!, { before: true, after: inside.length === 1 })
+        if (inside.length > 1) padding.set(inside.at(-1)!, { before: false, after: true })
+      }
+    }
     const result = await linkify?.(chunks, context) ?? chunks
     let offset = 0
     for (const chunk of result) {
@@ -81,6 +101,11 @@ export function compactMarkdownLinks(block: CodeRenderable) {
       chunk.link = link ? { url: link.url } : undefined
       offset = index + chunk.text.length
     }
-    return result
+    return result.flatMap((chunk) => {
+      const pad = padding.get(chunk)
+      if (!pad) return [chunk]
+      const space: TextChunk = { ...chunk, text: " " }
+      return [...(pad.before ? [space] : []), chunk, ...(pad.after ? [{ ...space }] : [])]
+    })
   }
 }

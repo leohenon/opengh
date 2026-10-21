@@ -241,7 +241,7 @@ export function Settings(props: {
     }
     if (selected() === "markdown-style") return {
       title: "Markdown style",
-      description: "Rich keeps syntax colors, code labels, and decorative borders. Minimal uses neutral syntax colors, simpler code blocks, and borderless headings, quotes, and tables. Links and diff colors stay distinct.",
+      description: "Rich keeps syntax colors, labels on multiline code, and decorative borders. Minimal uses neutral syntax colors, simpler code blocks, and borderless headings, quotes, and tables. Links and diff colors stay distinct.",
     }
     if (selected() === "tab-counts") return {
       title: "Tab counts",
