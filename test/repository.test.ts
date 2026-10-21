@@ -8,6 +8,8 @@ describe("repository resolution", () => {
     expect(normalizeRepository("anomalyco/opentui")).toBe("anomalyco/opentui")
     expect(normalizeRepository("https://github.com/anomalyco/opentui.git")).toBe("anomalyco/opentui")
     expect(normalizeRepository("not-a-repository")).toBeUndefined()
+    for (const repository of ["../repo", "owner/..", "./repo"])
+      expect(normalizeRepository(repository)).toBeUndefined()
   })
 
   test("explicit repository wins without inspecting the directory", async () => {

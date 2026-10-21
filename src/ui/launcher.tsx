@@ -85,7 +85,7 @@ export function RepositoryLoadError(props: {
 
   return (
     <box width={dimensions().width} height={dimensions().height} backgroundColor={colors.canvas}>
-      <Popup width={64} height={9} placement="center">
+      <Popup width={64} height={13} placement="center">
         <box
           flexGrow={1}
           minHeight={0}
@@ -115,6 +115,7 @@ export function RepositoryPicker(props: {
   const { colors } = useTheme();
   const quit = () => props.onQuit ? props.onQuit() : renderer.destroy();
   const [error, setError] = createSignal(props.error ?? "");
+  const dimensions = useTerminalDimensions();
   const recent = () => props.recent;
 
   const open = (candidate: string) => {
@@ -124,7 +125,8 @@ export function RepositoryPicker(props: {
     props.onOpen(repository);
   };
 
-  const height = () => 7 + Math.min(20, recent().length) + (error() ? 1 : 0);
+  const errorLines = () => error() ? 1 + Math.ceil((error().length + 2) / Math.max(1, Math.min(80, dimensions().width - 2) - 8)) : 0;
+  const height = () => 7 + Math.min(20, recent().length) + errorLines();
 
   return (
     <SearchablePicker

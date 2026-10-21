@@ -1011,10 +1011,7 @@ export function createRepositorySession(loaders: RepositoryLoaders = defaultLoad
   const actionError = (error: unknown, locked: boolean) => {
     const message = messageFrom(error)
     if (!(error instanceof GitHubApiError)) return message
-    if (error.status === 401) return `${message}. Run gh auth login and try again.`
-    if (error.status === 403) return `${message}. ${locked
-      ? "This thread is locked; maintainer access may be required."
-      : "Your account may not have permission, or GitHub may be rate limiting requests."}`
+    if (error.status === 403 && locked) return `${message}. This thread is locked; maintainer access may be required.`
     if (error.status === 404) return `${message}. The issue may be unavailable to your account.`
     if (error.status === undefined || error.status >= 500)
       return `${message}. GitHub did not confirm the change; check the issue on GitHub before retrying.`
@@ -1066,8 +1063,8 @@ export function createRepositorySession(loaders: RepositoryLoaders = defaultLoad
     const current = state()
     const detail = issueDetail()
     const issue = detail?.resource.value
-    if (current.status !== "ready" || detail?.number !== number || !issue || detail.resource.status === "loading")
-      throw new Error("Wait for the issue to load before taking action.")
+    if (current.status !== "ready" || detail?.number !== number || !issue || detail.resource.status !== "ready")
+      throw new Error("Reload the issue successfully before taking action.")
     const repository = current.repository
     const key = issueKey(repository, number)
     const action = issueActions()[key] ?? emptyIssueAction

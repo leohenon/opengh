@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process"
 import { resolve } from "node:path"
 import { homedir } from "node:os"
+import { githubEnvironment } from "./github/process"
 
 export type LocalRepository = { directory: string; repository: string }
 export type CommandSpec = { args: string[]; cwd: string }
@@ -9,7 +10,7 @@ export type CommandTask = { cancel(): void; result: Promise<CommandResult> }
 
 // Never inherit repository overrides: local commands must refer to the actual cwd.
 function commandEnvironment() {
-  const env = { ...process.env }
+  const env = githubEnvironment()
   for (const key of Object.keys(env)) if (key.startsWith("GIT_") || key === "GH_REPO") delete env[key]
   return { ...env, GH_PROMPT_DISABLED: "1", GIT_TERMINAL_PROMPT: "0", GIT_ASKPASS: "/usr/bin/false", SSH_ASKPASS: "/usr/bin/false", GIT_SSH_COMMAND: "ssh -oBatchMode=yes" }
 }
@@ -77,7 +78,7 @@ export function cloneDestination(destination: string, cwd: string) {
 }
 
 export function cloneCommand(repository: string, destination: string, cwd: string): CommandSpec {
-  return { args: ["gh", "repo", "clone", repository, cloneDestination(destination, cwd), "--", "--progress"], cwd }
+  return { args: ["gh", "repo", "clone", `github.com/${repository}`, cloneDestination(destination, cwd), "--", "--progress"], cwd }
 }
 
 // Progress uses CR rewrites; render it as lines rather than letting control bytes affect the TUI.

@@ -4,6 +4,7 @@ import { createSignal } from "solid-js"
 import { defaultConfig, type Config } from "../src/config"
 import type { RepositoryState } from "../src/repository-state"
 import { Root } from "../src/root"
+import { GitHubApiError } from "../src/github/transport"
 import { githubDataFixture, repositoryOperationsFixture } from "./fixtures/github-data"
 
 const active: Array<{ renderer: { destroy(): void; isDestroyed: boolean } }> = []
@@ -109,6 +110,32 @@ describe("application root", () => {
 
     view.mockInput.pressCtrlC()
     expect(view.renderer.isDestroyed).toBe(true)
+  })
+
+  test("shows repository discovery authentication errors instead of hanging or claiming no repository exists", async () => {
+    const error = new GitHubApiError("repository discovery", "Bad credentials (HTTP 401)")
+    const view = await testRender(
+      () => <Root repositoryArgument="." cwd="/work/repository" services={{
+        resolveRepository: async () => { throw error },
+        resolveLocalRepository: async () => undefined,
+        loadRepositoryTabs: async () => ({}),
+        saveRepositoryTabs: async () => {},
+        rememberRepository: async () => {},
+        loadRecentRepositories: async () => ["cli/cli"],
+        loadConfig: async () => ({ ...defaultConfig }),
+        createRepositorySession: readySession,
+      }} />,
+      { width: 80, height: 24 },
+    )
+    active.push(view)
+    await Bun.sleep(0)
+    await view.flush()
+    const frame = view.captureCharFrame()
+    expect(frame).toContain("Open a GitHub repository")
+    expect(frame).toContain("Bad credentials")
+    expect(frame).toContain("cli / cli")
+    expect(frame).not.toContain("No GitHub repository found")
+    for (const word of error.message.split(/\s+/)) expect(frame).toContain(word)
   })
 
   test("warns and prevents overwriting config when loading fails", async () => {

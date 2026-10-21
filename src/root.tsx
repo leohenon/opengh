@@ -164,7 +164,10 @@ export function Root(props: {
   onMount(() => {
     void refreshLocalRepository().catch(() => setLocalRepository(undefined))
     void Promise.all([
-      services.resolveRepository(props.repositoryArgument, props.cwd),
+      services.resolveRepository(props.repositoryArgument, props.cwd).catch((error) => {
+        if (!renderer.isDestroyed) setPickerError(error instanceof Error ? error.message : "Could not resolve GitHub repository")
+        return undefined
+      }),
       services.loadRecentRepositories().catch(() => []),
       services.loadRepositoryTabs().catch(() => ({})),
       services.loadConfig().catch((error) => {
@@ -178,8 +181,10 @@ export function Root(props: {
       setConfig(loadedConfig)
       setRepositoryTabs(savedTabs)
       if (resolved) return open(resolved)
-      if (props.repositoryArgument === ".") setPickerError("No GitHub repository found")
-      else if (props.repositoryArgument) setPickerError(`Invalid repository: “${props.repositoryArgument}”`)
+      if (!pickerError()) {
+        if (props.repositoryArgument === ".") setPickerError("No GitHub repository found")
+        else if (props.repositoryArgument) setPickerError(`Invalid repository: “${props.repositoryArgument}”`)
+      }
       setView("picker")
     })
   })

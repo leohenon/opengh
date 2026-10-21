@@ -17,7 +17,7 @@ test("workflow runs use gh run view while existing browse and diff targets stay 
       [42, "diff", ["pr", "diff", "42", "--web"]],
     ] as const) {
       await openGitHub("owner/repo", target, view)
-      expect(spawn.mock.calls.at(-1)?.[0]).toEqual(["gh", ...args, "--repo", "owner/repo"])
+      expect(spawn.mock.calls.at(-1)?.[0]).toEqual(["gh", ...args, "--repo", "github.com/owner/repo"])
     }
   } finally {
     spawn.mockRestore()

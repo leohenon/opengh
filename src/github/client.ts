@@ -514,14 +514,17 @@ export function createGitHubClient(transport: GitHubTransport) {
       const writable = repo.isArchived === false
       const maintainer = ["WRITE", "MAINTAIN", "ADMIN"].includes(repo.viewerPermission ?? "")
       detail.permissions = {
+        // GitHub exposes no issue-level comment capability. This is an eligibility
+        // hint, not authorization; issue-creation permission is not a valid proxy.
         comment: writable && (!detail.locked || maintainer),
         close: writable && repo.issue.viewerCanClose === true,
         reopen: writable && repo.issue.viewerCanReopen === true,
         duplicate: writable && maintainer && repo.issue.viewerCanClose === true,
         assignees: writable && repo.issue.viewerCanAssign === true,
       }
-    } catch {
-      // Permission lookup failures must not prevent read-only browsing.
+    } catch (error) {
+      // Keep reading available, but retain login/restart guidance for the UI.
+      detail.permissionsError = error instanceof Error ? error.message : "Issue action permissions could not be verified."
     }
     return detail
   }

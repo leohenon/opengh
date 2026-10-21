@@ -2,8 +2,9 @@ import { afterEach, expect, test } from "bun:test"
 import { testRender } from "@opentui/solid"
 import { createSignal } from "solid-js"
 import type { CommitDetailState, IssueDetailState } from "../src/repository-state"
-import type { IssueReference } from "../src/models"
+import type { IssueDetail, IssueReference } from "../src/models"
 import { App } from "../src/ui/app"
+import { IssueScreen } from "../src/ui/pages/issue"
 import { commitDetailFixture, githubDataFixture, issueDetailFixture, issueCommentsFixture, issuePullReferenceFixture, repositoryOperationsFixture } from "./fixtures/github-data"
 
 const active: Array<{ renderer: { destroy(): void; isDestroyed: boolean } }> = []
@@ -117,6 +118,36 @@ test("issue details retain scrolling and restore selection while hidden tabs sta
   await view.flush()
   expect(detail()).toBeUndefined()
   expect(view.captureCharFrame().split("\n").find((row) => row.includes("▌"))).toBe(selected)
+})
+
+test("permission recovery guidance remains visible with readable issue content and clears after recovery", async () => {
+  const [issue, setIssue] = createSignal<IssueDetail>({
+    ...issueDetailFixture,
+    body: "Readable issue description.",
+    permissions: undefined,
+    permissionsError: "GitHub account changed. Restart opengh before continuing; no changes were sent.",
+  })
+  const view = await testRender(() => <IssueScreen
+    number={issueDetailFixture.number}
+    detail={{
+      number: issueDetailFixture.number,
+      resource: { status: "ready", value: issue() },
+      comments: { status: "ready", value: { items: [], page: 1, hasMore: false } },
+      references: { status: "ready", value: [] },
+    }}
+    interactive
+    showScrollbar={false}
+  />, { width: 100, height: 32 })
+  active.push(view)
+  await settle(view)
+  expect(view.captureCharFrame()).toContain("Issue actions unavailable:")
+  expect(view.captureCharFrame()).toContain("Restart opengh")
+  expect(view.captureCharFrame()).toContain("Readable issue description.")
+  setIssue((current) => ({ ...current, permissions: issueDetailFixture.permissions, permissionsError: undefined }))
+  await view.flush()
+  expect(view.captureCharFrame()).not.toContain("Issue actions unavailable:")
+  expect(view.captureCharFrame()).not.toContain("Restart opengh")
+  expect(view.captureCharFrame()).toContain("Readable issue description.")
 })
 
 test("issue and comment failures retry separately, with honest empty states", async () => {

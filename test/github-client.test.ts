@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import { createGitHubClient } from "../src/github/client"
 import { currentPullReviews } from "../src/ui/pull-reviews"
-import type { GitHubTransport } from "../src/github/transport"
+import { GitHubApiError, type GitHubTransport } from "../src/github/transport"
 
 type Responses = Record<string, unknown>
 
@@ -404,12 +404,13 @@ describe("GitHub client", () => {
     })
     let permission = "READ"
     let archived = false
-    let failed = false
+    let failure: Error | undefined
     const client = createGitHubClient({ ...rest, async graphql<T>(_query: string, variables: Record<string, string>) {
       expect(variables).toEqual({ owner: "owner", name: "repo" })
       expect(_query).toContain("issue(number: 42)")
-      if (failed) throw new Error("unavailable")
-      return { data: { repository: { isArchived: archived, viewerPermission: permission,
+      expect(_query).not.toContain("viewerCanCreateIssues")
+      if (failure) throw failure
+      return { data: { repository: { isArchived: archived, viewerCanCreateIssues: false, viewerPermission: permission,
         issue: { viewerCanClose: true, viewerCanReopen: false, viewerCanAssign: true } } } } as T
     } })
     expect((await client.issue("owner/repo", 42)).permissions).toEqual({
@@ -421,8 +422,18 @@ describe("GitHub client", () => {
     })
     archived = true
     expect(Object.values((await client.issue("owner/repo", 42)).permissions!)).toEqual([false, false, false, false, false])
-    failed = true
-    expect((await client.issue("owner/repo", 42)).permissions).toBeUndefined()
+    for (const error of [
+      new Error("unavailable"),
+      new GitHubApiError("graphql", "Bad credentials (HTTP 401)"),
+      new Error("GitHub account changed. Restart opengh before continuing; no changes were sent."),
+    ]) {
+      failure = error
+      const detail = await client.issue("owner/repo", 42)
+      expect(detail.permissions).toBeUndefined()
+      expect(detail.permissionsError).toBe(error.message)
+    }
+    failure = undefined
+    expect((await client.issue("owner/repo", 42)).permissionsError).toBeUndefined()
   })
 
   test("maps issue comments with full IDs and raw bodies through the terminal page", async () => {

@@ -60,7 +60,7 @@ test("cancellation kills descendants, including a child ignoring SIGTERM", async
 test("clone arguments cannot turn destination into flags and expand home paths", () => {
   const local = { directory: cwd, repository: "cli/cli" }
   expect(matchesLocalRepository(local, "CLI/cli")).toBe(true)
-  expect(cloneCommand("cli/cli", "--evil; echo hi", cwd).args).toEqual(["gh", "repo", "clone", "cli/cli", `${cwd}/--evil; echo hi`, "--", "--progress"])
+  expect(cloneCommand("cli/cli", "--evil; echo hi", cwd).args).toEqual(["gh", "repo", "clone", "github.com/cli/cli", `${cwd}/--evil; echo hi`, "--", "--progress"])
   expect(cloneCommand("cli/cli", "~/dev/cli", cwd).args[4]).toBe(join(homedir(), "dev/cli"))
   expect(plainCommandOutput("\x1b[31mprogress\rnext\x1b[0m\r\n")).toBe("progress\nnext\n")
 })

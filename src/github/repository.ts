@@ -1,5 +1,6 @@
 import { normalizeRepository } from "../repository-name";
 import { spawnGitHub } from "./process";
+import { GitHubApiError } from "./errors";
 import { configDirectory } from "../paths";
 import { mkdir } from "node:fs/promises";
 import { dirname, join } from "node:path";
@@ -9,26 +10,34 @@ const MAX_RECENT = 100;
 export async function repositoryFromDirectory(
   cwd: string,
 ): Promise<string | undefined> {
+  const child = spawnGitHub(
+    ["repo", "view", "--json", "nameWithOwner,url"],
+    cwd,
+  );
+  let timedOut = false;
+  const timeout = setTimeout(() => {
+    timedOut = true;
+    child.kill();
+  }, 20_000);
   try {
-    const child = spawnGitHub(
-      [
-        "repo",
-        "view",
-        "--json",
-        "nameWithOwner",
-        "--jq",
-        ".nameWithOwner",
-      ],
-      cwd,
-    );
-    const [output, exitCode] = await Promise.all([
+    const [output, error, exitCode] = await Promise.all([
       new Response(child.stdout).text(),
+      new Response(child.stderr).text(),
       child.exited,
     ]);
-    if (exitCode !== 0) return undefined;
-    return normalizeRepository(output);
-  } catch {
-    return undefined;
+    if (timedOut) throw new GitHubApiError("repository discovery", "Repository discovery timed out");
+    if (exitCode !== 0) throw new GitHubApiError(
+      "repository discovery",
+      error.trim() || `gh repo view failed (${exitCode})`,
+      exitCode === 4 ? 401 : undefined,
+    );
+    const repository = JSON.parse(output) as { nameWithOwner: string; url: string };
+    // gh repo view can select a host from a Git remote even with GH_HOST set.
+    if (!/^https:\/\/github\.com\//i.test(repository.url))
+      throw new Error("Only GitHub.com repositories are supported; GitHub Enterprise remotes cannot be opened.");
+    return normalizeRepository(repository.nameWithOwner);
+  } finally {
+    clearTimeout(timeout);
   }
 }
 

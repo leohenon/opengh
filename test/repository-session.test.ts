@@ -510,6 +510,27 @@ describe("repository session", () => {
     expect(session.issueDetail()?.comments.value?.hasMore).toBe(false)
   })
 
+  test("a failed issue reload cannot reuse previously loaded write permissions", async () => {
+    let failReload = false
+    let writes = 0
+    const session = createRepositorySession(loaders({
+      issue: async () => {
+        if (failReload) throw new Error("Access revoked")
+        return structuredClone(issueDetailFixture)
+      },
+      createIssueComment: async () => { writes++; return issueCommentsFixture[0]! },
+    }))
+    await session.load("owner/repo")
+    await session.loadIssue(issueDetailFixture.number)
+    session.updateIssueDraft(issueDetailFixture.number, { body: "Preserved draft" })
+    failReload = true
+    await session.loadIssue(issueDetailFixture.number)
+    expect(session.issueDetail()?.resource.status).toBe("error")
+    await expect(session.submitIssueAction(issueDetailFixture.number, "comment")).rejects.toThrow("Reload the issue successfully")
+    expect(writes).toBe(0)
+    expect(session.issueAction(issueDetailFixture.number).body).toBe("Preserved draft")
+  })
+
   test("comment-and-close preserves failures and retries only the unconfirmed state change", async () => {
     const number = issueDetailFixture.number
     const posted = { ...issueCommentsFixture[0]!, id: 9001, body: "Resolved", createdAt: "2026-07-01T00:00:00Z" }

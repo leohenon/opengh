@@ -1,16 +1,7 @@
 import { spawnGitHub } from "./process"
+import { GitHubApiError } from "./errors"
 
-export class GitHubApiError extends Error {
-  readonly path: string
-  readonly status?: number
-
-  constructor(path: string, message: string, status?: number) {
-    super(message)
-    this.name = "GitHubApiError"
-    this.path = path
-    this.status = status
-  }
-}
+export { GitHubApiError } from "./errors"
 
 export type RequestOptions = { signal?: AbortSignal; maxBytes?: number; jq?: string }
 
@@ -24,9 +15,15 @@ export type GitHubTransport = {
 
 const REQUEST_TIMEOUT_MS = 20_000
 
-function httpStatus(message: string) {
-  const match = message.match(/HTTP\s+(\d{3})/i)
-  return match ? Number(match[1]) : undefined
+function validateEndpoint(path: string) {
+  // --hostname does not constrain absolute gh api URLs. Only accept relative
+  // endpoints, without path traversal or CLI-option/URL interpretation.
+  let route: string
+  try { route = decodeURIComponent(path.split("?")[0]!) } catch { throw new Error("Invalid GitHub API endpoint") }
+  if (!/^[a-z\d]/i.test(path) || /^[a-z][a-z\d+.-]*:/i.test(path)
+    || /[\\\s#\x00-\x1f\x7f]/.test(path) || /[\\\x00-\x1f\x7f]/.test(route)
+    || route.split("/").some((part) => part === "." || part === ".."))
+    throw new Error("Only relative GitHub API endpoints without path traversal are allowed")
 }
 
 async function request(
@@ -36,8 +33,9 @@ async function request(
   mutation?: { method: "POST" | "PATCH"; body: Record<string, unknown> },
   options?: RequestOptions,
 ) {
+  validateEndpoint(path)
   options?.signal?.throwIfAborted()
-  const args = ["api", path]
+  const args = ["api", "--hostname", "github.com", path]
   if (accept) args.push("-H", `Accept: ${accept}`)
   if (options?.jq) args.push("--jq", options.jq)
   if (fields) for (const [key, value] of Object.entries(fields)) args.push("-f", `${key}=${value}`)
@@ -61,7 +59,7 @@ async function request(
     if (timedOut) throw new GitHubApiError(path, "Request timed out")
     if (code !== 0) {
       const message = error.trim() || `gh api failed (${code})`
-      throw new GitHubApiError(path, message, httpStatus(message))
+      throw new GitHubApiError(path, message, code === 4 ? 401 : undefined)
     }
     return output
   } finally {
@@ -92,26 +90,75 @@ async function readLimited(stream: ReadableStream<Uint8Array>, maxBytes: number,
   }
 }
 
-export const githubTransport: GitHubTransport = {
-  async json<T>(path: string) {
-    return JSON.parse(await request(path)) as T
-  },
-  async mutate<T>(path: string, method: "POST" | "PATCH", body: Record<string, unknown>) {
-    return JSON.parse(await request(path, undefined, undefined, { method, body })) as T
-  },
-  async graphql<T>(query: string, variables: Record<string, string>) {
-    return JSON.parse(await request("graphql", undefined, { query, ...variables })) as T
-  },
-  text(path: string, accept?: string, options?: RequestOptions) {
-    return request(path, accept, undefined, undefined, options)
-  },
-  async page(url: string) {
-    // Web pages are anonymous: never forward the CLI's API credentials here.
-    const response = await fetch(url, {
-      headers: { Accept: "text/html", "User-Agent": "opengh" },
-      signal: AbortSignal.timeout(10_000),
-    })
-    if (!response.ok) throw new Error(`GitHub page failed (HTTP ${response.status})`)
-    return response.text()
-  },
+function awaitWithAbort<T>(promise: Promise<T>, signal?: AbortSignal): Promise<T> {
+  if (!signal) return promise
+  return new Promise<T>((resolve, reject) => {
+    const abort = () => {
+      signal.removeEventListener("abort", abort)
+      reject(signal.reason)
+    }
+    signal.addEventListener("abort", abort, { once: true })
+    promise.then(
+      (value) => { signal.removeEventListener("abort", abort); resolve(value) },
+      (error) => { signal.removeEventListener("abort", abort); reject(error) },
+    )
+    if (signal.aborted) abort()
+  })
 }
+
+export function createGitHubTransport(): GitHubTransport {
+  type Viewer = { id: number; login: string }
+  let initialViewer: Promise<Viewer> | undefined
+  async function viewer(): Promise<Viewer> {
+    const value = JSON.parse(await request("user"))
+    if (!value || !Number.isSafeInteger(value.id) || value.id <= 0 || typeof value.login !== "string" || !value.login.trim())
+      throw new Error("GitHub account could not be verified; no changes were sent.")
+    return { id: value.id, login: value.login }
+  }
+  async function authenticatedRequest(...args: Parameters<typeof request>) {
+    const [path, , fields, mutation, options] = args
+    validateEndpoint(path)
+    options?.signal?.throwIfAborted()
+    // Remember the account that loaded this session, not its credentials. A failed
+    // initial login remains retryable after authenticating outside the app.
+    initialViewer ??= viewer().catch((error) => { initialViewer = undefined; throw error })
+    // Cancel this caller's wait, not the shared probe needed by other requests.
+    const expected = await awaitWithAbort(initialViewer, options?.signal)
+    if (fields || mutation) {
+      const actual = await viewer()
+      if (actual.id !== expected.id)
+        throw new Error(`GitHub account changed from @${expected.login} to @${actual.login}. Restart opengh before continuing; no changes were sent.`)
+    }
+    return request(...args)
+  }
+
+  return {
+    async json<T>(path: string) {
+      return JSON.parse(await authenticatedRequest(path)) as T
+    },
+    async mutate<T>(path: string, method: "POST" | "PATCH", body: Record<string, unknown>) {
+      return JSON.parse(await authenticatedRequest(path, undefined, undefined, { method, body })) as T
+    },
+    async graphql<T>(query: string, variables: Record<string, string>) {
+      return JSON.parse(await authenticatedRequest("graphql", undefined, { query, ...variables })) as T
+    },
+    text(path: string, accept?: string, options?: RequestOptions) {
+      return authenticatedRequest(path, accept, undefined, undefined, options)
+    },
+    async page(url: string) {
+      // Restrict anonymous fetches too: no arbitrary destinations or redirects.
+      const target = new URL(url)
+      if (target.origin !== "https://github.com" || target.username || target.password)
+        throw new Error("Only anonymous GitHub.com pages are supported")
+      const response = await fetch(target, {
+        headers: { Accept: "text/html", "User-Agent": "opengh" },
+        redirect: "error",
+        signal: AbortSignal.timeout(10_000),
+      })
+      if (!response.ok) throw new Error(`GitHub page failed (HTTP ${response.status})`)
+      return response.text()
+    },
+  }
+}
+
+export const githubTransport = createGitHubTransport()

@@ -128,7 +128,7 @@ export function SearchablePicker<T>(props: {
             />
           </box>
           <Show when={props.error}>
-            {(message) => <text height={1} fg={colors.red}>× {message()}</text>}
+            {(message) => <text flexShrink={0} fg={colors.red} wrapMode="word">× {message()}</text>}
           </Show>
         </box>
         <Show when={items().length > 0 || props.empty}>

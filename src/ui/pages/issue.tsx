@@ -165,6 +165,9 @@ export function IssueScreen(props: {
             <>
               <box width="100%" maxWidth={contentWidth()} minWidth={0} flexShrink={0} flexDirection="row" alignItems="flex-start">
                 <box flexGrow={1} flexBasis={0} minWidth={0} flexShrink={1} flexDirection="column" paddingRight={wide() ? 2 : 0}>
+                  <Show when={current().permissionsError}>
+                    {(message) => <text width="100%" flexShrink={0} paddingBottom={1} fg={colors.yellow} wrapMode="word">Issue actions unavailable: {message()}</text>}
+                  </Show>
                   <Show when={!wide()}>
                     <box width="100%" minWidth={0} flexShrink={0} paddingBottom={1}>
                       <IssueMetadata issue={current()} compact />
