@@ -100,6 +100,7 @@ export function ThemePicker(props: {
           placeholderColor={colors.muted}
           focusedBackgroundColor={colors.panel}
           textColor={colors.text}
+          focusedTextColor={colors.text}
           cursorColor={colors.blue}
           onInput={(value) => {
             setQuery(value)

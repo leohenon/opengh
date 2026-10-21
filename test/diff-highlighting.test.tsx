@@ -18,8 +18,9 @@ test("diff syntax colors load asynchronously, follow the theme, and retain plain
   const setup = await createTestRenderer({ width: 72, height: 18 })
   initializeHunk(setup.renderer)
   const [theme, setTheme] = createSignal("github")
+  const [mode, setMode] = createSignal<"dark" | "light">("dark")
   const [content, setContent] = createSignal(patch)
-  await render(() => <ThemeProvider name={theme()}><box width="100%" height="100%">
+  await render(() => <ThemeProvider name={theme()} mode={mode()}><box width="100%" height="100%">
     <DiffScreen target={{ kind: "commit", sha: "color-test" }}
       resource={{ status: "ready", value: { kind: "patch", patch: content() } }}
       interactive showScrollbar onLoadFiles={() => {}} />
@@ -50,6 +51,18 @@ test("diff syntax colors load asynchronously, follow the theme, and retain plain
       return Boolean(value && !value.keyword.equals(value.literal)
         && JSON.stringify(value.keyword.toInts()) !== JSON.stringify(firstKeyword))
     })
+    const lightBackground = () => {
+      const row = setup.captureSpans().lines.find((line) => line.spans.map((span) => span.text).join("").includes("new message"))
+      const rgb = row?.spans.find((span) => span.text.includes("const"))?.bg.toInts()
+      return rgb ? (rgb[0]! * 299 + rgb[1]! * 587 + rgb[2]! * 114) / 1000 > 128 : undefined
+    }
+    for (const name of ["github", "opengh", "dracula"]) {
+      setTheme(name)
+      setMode("light")
+      await waitFor(() => lightBackground() === true)
+      setMode("dark")
+      await waitFor(() => lightBackground() === false)
+    }
     setContent(patch.replaceAll("message.ts", "message.unrecognized"))
     await setup.flush()
     expect(setup.captureCharFrame()).toContain("new message")

@@ -106,7 +106,7 @@ export function IssueAssigneesPicker(props: {
           <text height={1} fg={colors.text} attributes={TextAttributes.BOLD}>Assignees · #{props.number}</text>
           <box height={2} flexShrink={0} paddingTop={1}>
             <input flexGrow={1} minWidth={0} focused={!pending()} value={query()}
-              placeholderColor={colors.muted} textColor={colors.text} cursorColor={colors.blue}
+              placeholderColor={colors.muted} textColor={colors.text} focusedTextColor={colors.text} cursorColor={colors.blue}
               focusedBackgroundColor={colors.panel}
               onInput={(value) => { if (!pending()) { setQuery(value); setActive(0) } }} />
           </box>

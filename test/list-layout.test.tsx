@@ -29,7 +29,7 @@ test("list rows truncate the right edge and resize without horizontal overflow",
         view.mockInput.pressKey(key)
         await view.flush()
         const frame = view.captureCharFrame()
-        const row = frame.split("\n").find((line) => line.includes("Long title"))!
+        const row = frame.split("\n").find((line) => line.includes("Long tit"))!
         expect(row).toBeDefined()
         expect(row).toContain("...")
         expect(frame).not.toContain("OFFSCREEN_END")
@@ -48,4 +48,48 @@ test("list rows truncate the right edge and resize without horizontal overflow",
       }
     }
   } finally { view.renderer.destroy() }
+})
+
+
+test("list rows keep metadata, selection, and half-page navigation correct through resizes", async () => {
+  const data = structuredClone(githubDataFixture)
+  data.commits.value!.items = Array.from({ length: 30 }, (_, index) => ({
+    ...data.commits.value!.items[0]!,
+    sha: index.toString(16).padStart(40, "0"),
+    message: `list row ${index.toString().padStart(2, "0")}`,
+    author: "octocat",
+  }))
+  data.commits.value!.hasMore = false
+  const view = await testRender(() => (
+    <App data={data} operations={repositoryOperationsFixture} config={defaultConfig} />
+  ), { width: 100, height: 20 })
+  const rows = () => view.captureCharFrame().split("\n")
+  try {
+    await view.flush()
+    view.mockInput.pressKey("2")
+    await view.flush()
+    view.mockInput.pressKey("g")
+    await view.flush()
+    const first = rows().findIndex((row) => row.includes("list row 00"))
+    const second = rows().findIndex((row) => row.includes("list row 01"))
+    expect(second - first).toBe(3)
+    expect(rows()[first + 1]).toContain("octocat committed")
+    expect(rows()[first]?.indexOf("list row")).toBe(4)
+    const visibleRows = rows().filter((row) => row.includes("list row")).length
+    const halfPage = Math.max(1, Math.floor(visibleRows / 2))
+    view.mockInput.pressKey("d")
+    await view.flush()
+    expect(rows().find((row) => row.includes("▌"))).toContain(`list row ${halfPage.toString().padStart(2, "0")}`)
+    view.mockInput.pressKey("G")
+    await view.flush()
+    expect(rows().find((row) => row.includes("▌"))).toContain("list row 29")
+    expect(view.captureCharFrame()).toContain("octocat committed")
+    for (const width of [40, 100]) {
+      view.resize(width, 24)
+      await view.flush()
+      expect(rows().find((row) => row.includes("▌"))).toContain("list row 29")
+    }
+  } finally {
+    view.renderer.destroy()
+  }
 })

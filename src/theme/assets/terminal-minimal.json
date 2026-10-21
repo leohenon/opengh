@@ -11,9 +11,9 @@
     "primary": "foreground",
     "secondary": 5,
     "accent": "foreground",
-    "error": 9,
+    "error": { "dark": 9, "light": 1 },
     "warning": "foreground",
-    "success": 10,
+    "success": { "dark": 10, "light": 2 },
     "info": "foreground",
     "text": "foreground",
     "textMuted": "muted",
@@ -63,6 +63,6 @@
     "markdownError": 1,
     "markdownSuccess": 2,
     "markdownInfo": 4,
-    "closedState": 9
+    "closedState": { "dark": 9, "light": 1 }
   }
 }

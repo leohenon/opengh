@@ -1,10 +1,11 @@
-import { SyntaxStyle, type CliRenderer } from "@opentui/core"
+import { SyntaxStyle, type CliRenderer, type StyleDefinitionInput } from "@opentui/core"
 import { useRenderer } from "@opentui/solid"
 import { createMemo, onCleanup } from "solid-js"
 import type { AppColors, ResolvedTheme } from "../theme"
+import { useMarkdownPreference } from "./markdown-preferences"
 
-function createMarkdownStyle(colors: AppColors, theme: ResolvedTheme, owner: CliRenderer["nativeScene"]) {
-  return SyntaxStyle.fromStyles({
+function createMarkdownStyle(colors: AppColors, theme: ResolvedTheme, owner: CliRenderer["nativeScene"], minimal: boolean) {
+  const styles: Record<string, StyleDefinitionInput> = {
     default: { fg: theme.markdownText },
     conceal: { fg: colors.muted },
     "markup.heading": { fg: theme.markdownHeading, bold: true },
@@ -41,11 +42,23 @@ function createMarkdownStyle(colors: AppColors, theme: ResolvedTheme, owner: Cli
     boolean: { fg: theme.syntaxNumber },
     operator: { fg: theme.syntaxOperator },
     punctuation: { fg: theme.syntaxPunctuation },
-  }, owner)
+  }
+  if (minimal) {
+    for (const [scope, style] of Object.entries(styles)) {
+      // Links and diff colors convey meaning rather than syntax decoration.
+      if (scope.startsWith("diff.") || scope.startsWith("markup.link") && scope !== "markup.link.url") continue
+      style.fg = ["conceal", "comment", "markup.link.url", "markup.image.marker", "markup.list"].includes(scope)
+        ? colors.muted : colors.text
+      delete style.bg
+      if (scope === "comment") delete style.italic
+    }
+  }
+  return SyntaxStyle.fromStyles(styles, owner)
 }
 
 export function createReactiveMarkdownStyle(colors: AppColors, theme: ResolvedTheme) {
   const renderer = useRenderer()
+  const preference = useMarkdownPreference()
   let current: SyntaxStyle | undefined
   const release = (style: SyntaxStyle) => {
     queueMicrotask(() => {
@@ -55,7 +68,7 @@ export function createReactiveMarkdownStyle(colors: AppColors, theme: ResolvedTh
   }
   const style = createMemo(() => {
     const previous = current
-    current = createMarkdownStyle(colors, theme, renderer.nativeScene)
+    current = createMarkdownStyle(colors, theme, renderer.nativeScene, preference() === "minimal")
     if (previous) release(previous)
     return current
   })

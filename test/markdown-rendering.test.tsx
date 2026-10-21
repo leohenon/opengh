@@ -1,14 +1,16 @@
 import { expect, test } from "bun:test"
-import { CodeRenderable, type Renderable } from "@opentui/core"
+import { CodeRenderable, RGBA, type Renderable } from "@opentui/core"
 import type { GitHubMarkdownContext } from "../src/ui/github-markdown"
 import { testRender } from "@opentui/solid"
 import { createSignal } from "solid-js"
-import type { AboutSidebar, DetailLayout } from "../src/config"
+import type { AboutSidebar, DetailLayout, MarkdownStyle } from "../src/config"
 import { githubDataFixture, repositoryDocumentsFixture } from "./fixtures/github-data"
 import { OverviewScreen } from "../src/ui/pages/overview"
 import { GitHubMarkdown } from "../src/ui/components/github-markdown"
 import { createReactiveMarkdownStyle } from "../src/ui/markdown-style"
 import { ThemeProvider, useTheme } from "../src/ui/theme"
+import { MarkdownProvider } from "../src/ui/markdown-preferences"
+import { resolveTheme } from "../src/theme"
 
 function MarkdownSample(props: { content: string; context?: GitHubMarkdownContext; plainText?: boolean }) {
   const { colors, theme } = useTheme()
@@ -301,6 +303,74 @@ test("overview layout centers documents or uses available width independently of
       expect(prose.width).toBeLessThanOrEqual(76)
       expect(view.captureCharFrame()).toContain("example code")
     }
+  } finally {
+    view.renderer.destroy()
+  }
+}, 15_000)
+
+
+test("minimal Markdown switches live without losing structure, links, or literal code", async () => {
+  const [style, setStyle] = createSignal<MarkdownStyle>("rich")
+  const [mode, setMode] = createSignal<"dark" | "light">("dark")
+  const content = `# Heading
+
+[Guide](https://example.com/guide) and **important** text.
+
+> [!WARNING]
+> Keep this warning.
+
+- Nested code:
+
+  \`\`\`json
+  {"enabled": true, "count": 12}
+  \`\`\`
+
+\`\`\`md
+## Literal heading
+\`\`\`
+
+| Resource | Status |
+| --- | --- |
+| [Docs](https://example.com/docs) | Ready |
+
+\`\`\`diff
+- removed
++ added
+\`\`\``
+  const view = await testRender(() => (
+    <ThemeProvider name="github" mode={mode()}>
+      <MarkdownProvider style={style()}><MarkdownSample content={content} /></MarkdownProvider>
+    </ThemeProvider>
+  ), { width: 100, height: 60 })
+  const json = () => codeBlocks(view.renderer.root).find((block) => block.filetype === "json")!
+  try {
+    await settle(view)
+    expect(json().screenY - json().parent!.screenY).toBe(2)
+    expect(view.captureCharFrame()).toContain("─")
+    setStyle("minimal")
+    for (const appearance of ["dark", "light"] as const) {
+      setMode(appearance)
+      await settle(view)
+      const frame = view.captureCharFrame()
+      for (const text of ["Heading", "Guide and important text.", "Warning", "Keep this warning.", "Nested code:", "Docs", "Ready", "## Literal heading"])
+        expect(frame).toContain(text)
+      expect(frame).not.toContain("https://example.com")
+      expect(frame).not.toMatch(/[─│┌└]/)
+      expect(frame.split("\n").some((row) => row.trim() === "json")).toBe(false)
+      expect(json().screenY - json().parent!.screenY).toBe(0)
+      expect(json().plainText).toBe('{"enabled": true, "count": 12}')
+      const foreground = RGBA.fromHex(resolveTheme("github", appearance).text)
+      expect(json().syntaxStyle.getStyle("number")?.fg).toEqual(foreground)
+      expect(json().syntaxStyle.getStyle("string")?.fg).toEqual(foreground)
+      const spans = view.captureSpans().lines.flatMap((line) => line.spans)
+      expect(spans.find((span) => span.text.includes('"enabled"'))?.fg).toEqual(foreground)
+      expect(spans.find((span) => span.text.includes("added"))?.fg.equals(spans.find((span) => span.text.includes("removed"))!.fg)).toBe(false)
+    }
+    setStyle("rich")
+    await settle(view)
+    expect(json().screenY - json().parent!.screenY).toBe(2)
+    expect(view.captureCharFrame()).toContain("─")
+    expect(json().syntaxStyle.getStyle("number")?.fg?.equals(json().syntaxStyle.getStyle("string")!.fg!)).toBe(false)
   } finally {
     view.renderer.destroy()
   }

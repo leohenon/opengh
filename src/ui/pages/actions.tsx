@@ -1,5 +1,5 @@
 import { TextAttributes } from "@opentui/core"
-import { createEffect, createMemo, createSignal, onCleanup, Show } from "solid-js"
+import { createMemo, Show } from "solid-js"
 import type { Paginated, WorkflowRunSummary } from "../../models"
 import type { ResourceState } from "../../repository-state"
 import { PageShell } from "../components/page-shell"
@@ -10,8 +10,7 @@ import { ago, fitText } from "../format"
 import { useTheme } from "../theme"
 import { useIcons } from "../icon-style"
 import { runColor, runIcon, runState } from "../workflow-status"
-
-const spinnerFrames = ["◐", "◓", "◑", "◒"] as const
+import { useLoadingGlyph } from "../motion"
 
 export function ActionsScreen(props: {
   runs: ResourceState<Paginated<WorkflowRunSummary>>
@@ -26,14 +25,9 @@ export function ActionsScreen(props: {
   const { colors } = useTheme()
   const icons = useIcons()
   const runCount = () => props.runs.value?.items.length ?? 0
-  const [frame, setFrame] = createSignal(0)
   const spinning = createMemo(() => props.active && props.interactive
     && Boolean(props.runs.value?.items.some((run) => run.status === "in_progress")))
-  createEffect(() => {
-    if (!spinning()) return
-    const timer = setInterval(() => setFrame((value) => (value + 1) % spinnerFrames.length), 125)
-    onCleanup(() => clearInterval(timer))
-  })
+  const glyph = useLoadingGlyph(spinning)
 
   return (
     <PageShell
@@ -63,7 +57,7 @@ export function ActionsScreen(props: {
             {(run, active) => (
               <>
                 <box height={2} width={3} flexShrink={0} alignItems="flex-start">
-                  <text fg={runColor(run(), colors)}>{run().status === "in_progress" ? spinnerFrames[frame()] : runIcon(run(), icons().workflow)}</text>
+                  <text fg={runColor(run(), colors)}>{run().status === "in_progress" ? glyph() : runIcon(run(), icons().workflow)}</text>
                 </box>
                 <box height={2} flexGrow={1} flexBasis={0} minWidth={0} flexDirection="column" overflow="hidden">
                   <ListLine

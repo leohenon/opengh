@@ -102,7 +102,7 @@ export function CommandDialog(props: {
         <Show when={phase() === "Preview"}>
           <box height={2} flexShrink={0} paddingTop={1}>
             <Show when={editing()} fallback={<text fg={colors.muted}>{props.action.destination !== undefined ? `Into ${destination()}` : preview()?.cwd}</text>}>
-              <input value={destination()} onInput={setDestination} focused textColor={colors.text} backgroundColor={colors.panel} />
+              <input value={destination()} onInput={setDestination} focused textColor={colors.text} focusedTextColor={colors.text} backgroundColor={colors.panel} focusedBackgroundColor={colors.panel} cursorColor={colors.blue} />
             </Show>
           </box>
         </Show>

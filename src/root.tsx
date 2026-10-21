@@ -11,6 +11,7 @@ import { createRepositorySession, type RepositorySession } from "./repository-se
 import type { RepositoryState } from "./repository-state"
 import { App } from "./ui/app"
 import { ThemeProvider } from "./ui/theme"
+import { MotionProvider } from "./ui/motion"
 import { Toast } from "./ui/components/toast"
 import { SwitchRepositoryScreen } from "./ui/pages/switch-repository"
 import {
@@ -190,7 +191,8 @@ export function Root(props: {
   })
 
   return (
-    <ThemeProvider name={config().theme}>
+    <ThemeProvider name={config().theme} mode={config().colorMode}>
+      <MotionProvider reduced={config().reducedMotion}>
       <Show
         when={view() === "repository"}
       fallback={
@@ -299,6 +301,7 @@ export function Root(props: {
           onDismiss={() => setConfigWarningDismissed(true)}
         />
       </Show>
+      </MotionProvider>
     </ThemeProvider>
   )
 }

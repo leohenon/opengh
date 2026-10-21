@@ -38,9 +38,9 @@ const required = [
 
 describe("themes", () => {
   test("includes the OpenCode built-in themes and custom bundled themes", () => {
-    expect(themeNames).toHaveLength(37)
+    expect(themeNames).toHaveLength(36)
     expect(themeNames).toContain("opengh")
-    expect(themeNames).toContain("github-light")
+    expect(themeNames).not.toContain("github-light")
     expect(themeNames).toContain("terminal-minimal")
     expect(themeNames).toContain("terminal-native")
     expect(themeNames).toContain("github")
@@ -107,14 +107,18 @@ describe("themes", () => {
     })
   })
 
-  test("keeps GitHub Light light regardless of requested mode", () => {
-    expect(resolveTheme("github-light")).toEqual(resolveTheme("github", "light"))
-    expect(resolveTheme("github-light", "light")).toEqual(resolveTheme("github-light"))
+  test("gives GitHub, opengh, and terminal themes distinct dark and light variants", () => {
+    for (const name of ["github", "opengh", "terminal-minimal", "terminal-native"]) {
+      expect(resolveTheme(name, "light").background).not.toBe(resolveTheme(name, "dark").background)
+      expect(resolveTheme(name, "light").text).not.toBe(resolveTheme(name, "dark").text)
+    }
+    expect(isThemeName("github-light")).toBe(false)
   })
 
   test("uses neutral terminal UI with bright status colors and colored Markdown", () => {
     for (const [foreground, background] of [["#eeeeee", "#111111"], ["#111111", "#eeeeee"]]) {
-      const theme = resolveTheme("terminal-minimal", "dark", {
+      const mode = background === "#eeeeee" ? "light" : "dark"
+      const theme = resolveTheme("terminal-minimal", mode, {
         defaultForeground: foreground!,
         defaultBackground: background!,
         palette: [null, "#cc3333", "#33aa55", "#ccaa33", "#5588ff", "#aa55cc", "#33aaaa", null, null, "#ff5555", "#55ff55"],
@@ -129,18 +133,48 @@ describe("themes", () => {
       expect(theme.syntaxString).toBe("#33aa55")
       expect(theme.textMuted).not.toBe(foreground!)
       expect(theme.backgroundElement).not.toBe(background!)
-      expect(theme.error).toBe("#ff5555")
+      expect(theme.error).toBe(mode === "dark" ? "#ff5555" : "#cc3333")
       expect(theme.diffAdded).toBe("#33aa55")
       expect(theme.warning).toBe(foreground!)
       expect(appColors(theme)).toMatchObject({
-        openState: "#55ff55",
-        closedState: "#ff5555",
+        openState: mode === "dark" ? "#55ff55" : "#33aa55",
+        closedState: mode === "dark" ? "#ff5555" : "#cc3333",
         purple: "#aa55cc",
       })
     }
     expect(resolveTheme("terminal-minimal", "dark", {
       defaultForeground: null, defaultBackground: null, palette: [],
     })).toEqual(resolveTheme("terminal-minimal"))
+  })
+
+  test("reverses detected terminal surfaces when forcing the opposite mode", () => {
+    for (const name of ["terminal-minimal", "terminal-native"]) {
+      const colors = { defaultForeground: "#eeeeee", defaultBackground: "#111111", palette: [] }
+      // OpenTUI detects this mid-gray terminal as light; retain its native surfaces.
+      expect(resolveTheme(name, "light", { ...colors, defaultForeground: "#111111", defaultBackground: "#909090" }))
+        .toMatchObject({ text: "#111111", background: "#909090" })
+      expect(resolveTheme(name, "light", colors)).toMatchObject({ text: "#111111", background: "#eeeeee" })
+      expect(resolveTheme(name, "dark", { ...colors, defaultForeground: "#111111", defaultBackground: "#eeeeee" }))
+        .toMatchObject({ text: "#eeeeee", background: "#111111" })
+    }
+  })
+
+  test("uses contrasting fallback surfaces when terminal defaults are incomplete", () => {
+    for (const name of ["terminal-minimal", "terminal-native"]) {
+      for (const mode of ["dark", "light"] as const) {
+        const palette = [null, null, null, null, null, "#aa55cc"]
+        for (const defaults of [
+          { defaultForeground: null, defaultBackground: mode === "light" ? "#000000" : "#ffffff" },
+          { defaultForeground: mode === "light" ? "#ffffff" : "#000000", defaultBackground: null },
+        ]) {
+          expect(resolveTheme(name, mode, { ...defaults, palette })).toMatchObject({
+            text: mode === "dark" ? "#c0c0c0" : "#1f2937",
+            background: mode === "dark" ? "#000000" : "#ffffff",
+            syntaxKeyword: "#aa55cc",
+          })
+        }
+      }
+    }
   })
 
   test("uses the full terminal palette for terminal-native", () => {

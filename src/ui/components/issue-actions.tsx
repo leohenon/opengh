@@ -220,7 +220,7 @@ export function IssueActionDialog(props: {
           <Show when={props.kind === "duplicate"}>
             <box marginTop={1} flexShrink={0} flexDirection="column">
               <input value={props.state.duplicateTarget ?? ""} placeholder="#123" maxLength={17}
-                focused={writing()} textColor={colors.text} backgroundColor={colors.panel}
+                focused={writing()} textColor={colors.text} focusedTextColor={colors.text} backgroundColor={colors.panel}
                 focusedBackgroundColor={colors.panel} cursorColor={colors.blue}
                 onInput={(target) => {
                   if (writing() && target !== (props.state.duplicateTarget ?? "")) props.onDuplicateTargetChange(target)

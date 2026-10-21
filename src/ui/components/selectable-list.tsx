@@ -144,7 +144,7 @@ export function SelectableList<T>(props: {
         <Show
           when={props.items.length > 0}
           fallback={(
-            <box width="100%" minWidth={0} height={3} alignItems="center" paddingLeft={2}>
+            <box width="100%" minWidth={0} height={rowHeight()} alignItems="center" paddingLeft={2}>
               <ListLine fg={colors.muted}>{(width) => fitText(props.empty, width)}</ListLine>
             </box>
           )}

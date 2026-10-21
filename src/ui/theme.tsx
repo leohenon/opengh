@@ -1,6 +1,6 @@
-import { CliRenderEvents, type TerminalColors } from "@opentui/core"
+import { CliRenderEvents, type ThemeMode, type TerminalColors } from "@opentui/core"
 import { useRenderer } from "@opentui/solid"
-import { defaultConfig } from "../config"
+import { defaultConfig, type ColorMode } from "../config"
 import {
   createContext,
   createEffect,
@@ -23,6 +23,7 @@ type ThemeContextValue = {
   colors: AppColors
   theme: ResolvedTheme
   selected: () => ThemeName
+  mode: () => ThemeMode
   preview: (name?: ThemeName) => void
 }
 
@@ -39,25 +40,33 @@ const standalone: ThemeContextValue = {
   colors: appColors(defaultTheme),
   theme: defaultTheme,
   selected: () => defaultConfig.theme,
+  mode: () => "dark",
   preview: () => {},
 }
 
 const ThemeContext = createContext<ThemeContextValue>(standalone)
 
-export function ThemeProvider(props: ParentProps<{ name: string }>) {
+export function ThemeProvider(props: ParentProps<{ name: string; mode?: ColorMode }>) {
   const renderer = useRenderer()
   const [preview, setPreview] = createSignal<ThemeName>()
   const selected = createMemo<ThemeName>(() => preview() ?? (isThemeName(props.name) ? props.name : defaultConfig.theme))
   const [terminalColors, setTerminalColors] = createSignal<TerminalColors>()
+  const [systemMode, setSystemMode] = createSignal<ThemeMode | null>(renderer.themeMode)
   let paletteRequested = false
   let disposed = false
   const updatePalette = (palette: TerminalColors) => {
     if (!disposed) setTerminalColors(palette)
   }
+  const updateMode = (mode: ThemeMode | null) => {
+    if (!disposed) setSystemMode(mode)
+  }
+  renderer.on(CliRenderEvents.THEME_MODE, updateMode)
+  void renderer.waitForThemeMode().then(updateMode).catch(() => {})
   renderer.on(CliRenderEvents.PALETTE, updatePalette)
   onCleanup(() => {
     disposed = true
     renderer.off(CliRenderEvents.PALETTE, updatePalette)
+    renderer.off(CliRenderEvents.THEME_MODE, updateMode)
   })
   createEffect(() => {
     if ((selected() !== "terminal-minimal" && selected() !== "terminal-native") || paletteRequested) return
@@ -65,7 +74,8 @@ export function ThemeProvider(props: ParentProps<{ name: string }>) {
     // Unsupported terminals retain the neutral fallback palette.
     void renderer.getPalette({ size: 16 }).then(updatePalette).catch(() => {})
   })
-  const resolved = createMemo(() => resolveTheme(selected(), "dark", terminalColors()))
+  const mode = () => !props.mode || props.mode === "system" ? systemMode() ?? "dark" : props.mode
+  const resolved = createMemo(() => resolveTheme(selected(), mode(), terminalColors()))
   const resolvedColors = createMemo(() => appColors(resolved()))
   const colors = reactiveProxy(resolvedColors)
   const theme = reactiveProxy(resolved)
@@ -76,6 +86,7 @@ export function ThemeProvider(props: ParentProps<{ name: string }>) {
     colors,
     theme,
     selected,
+    mode,
     preview: setPreview,
   }
 

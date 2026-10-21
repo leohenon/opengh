@@ -19,6 +19,14 @@ const themeAliases: Partial<Record<string, HunkDiffThemeName>> = {
   solarized: "solarized-dark", synthwave84: "synthwave-84", tokyonight: "tokyo-night",
 }
 
+const lightThemeAliases: Partial<Record<string, HunkDiffThemeName>> = {
+  ayu: "ayu-light", catppuccin: "catppuccin-latte",
+  "catppuccin-frappe": "catppuccin-latte", "catppuccin-macchiato": "catppuccin-latte",
+  everforest: "everforest-light", github: "github-light-default", gruvbox: "gruvbox-light-medium",
+  kanagawa: "kanagawa-lotus", material: "material-theme-lighter", nightowl: "night-owl-light",
+  "one-dark": "one-light", opengh: "github-light-default", rosepine: "rose-pine-dawn", solarized: "solarized-light",
+}
+
 export type DiffFocus = "files" | "diff"
 
 export function DiffScreen(props: {
@@ -34,7 +42,7 @@ export function DiffScreen(props: {
   const renderer = useRenderer()
   const dimensions = useTerminalDimensions()
   const active = () => props.active !== false
-  const { colors, selected: selectedTheme } = useTheme()
+  const { colors, selected: selectedTheme, mode } = useTheme()
   const content = createMemo(() => props.resource.value)
   const parsed = createMemo<ReturnType<typeof parseDiff>>(() => {
     const value = content()
@@ -59,11 +67,8 @@ export function DiffScreen(props: {
   const message = () => selected()?.message ?? (selected() && !selected()?.body ? "Patch unavailable for this file. Press r to retry or o to open GitHub." : undefined)
   const renderFile = () => message() ? undefined : selected()?.body
   const theme = createMemo(() => {
-    const matching = HUNK_DIFF_THEME_NAMES.find((name) => name === selectedTheme()) ?? themeAliases[selectedTheme()]
-    if (matching) return matching
-    const rgb = colors.canvas.match(/^#([\da-f]{2})([\da-f]{2})([\da-f]{2})/i)
-    const brightness = rgb ? Number.parseInt(rgb[1]!, 16) * 0.299 + Number.parseInt(rgb[2]!, 16) * 0.587 + Number.parseInt(rgb[3]!, 16) * 0.114 : 0
-    return brightness > 150 ? "github-light-default" : "github-dark-default"
+    if (mode() === "light") return lightThemeAliases[selectedTheme()] ?? "github-light-default"
+    return HUNK_DIFF_THEME_NAMES.find((name) => name === selectedTheme()) ?? themeAliases[selectedTheme()] ?? "github-dark-default"
   })
   const bindScrollbar = createScrollbarVisibility(() => props.showScrollbar)
   let scroll: ScrollBoxRenderable | undefined

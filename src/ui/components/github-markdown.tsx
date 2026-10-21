@@ -5,14 +5,17 @@ import { normalizeGitHubMarkdown, type GitHubMarkdownContext } from "../github-m
 import { compactLinkChunks, compactMarkdownLinks } from "../markdown-links"
 import "../markdown-parsers"
 import { useTheme } from "../theme"
+import { useMarkdownPreference } from "../markdown-preferences"
 
 // One prose renderer for repository documents, issue descriptions, and comments.
 export function GitHubMarkdown(props: { content: string; syntaxStyle: SyntaxStyle; preserveImages?: boolean; codePanels?: boolean; backgroundColor?: string; context?: GitHubMarkdownContext; plainText?: boolean; wide?: boolean }) {
   const renderer = useRenderer()
   const { colors, theme } = useTheme()
+  const preference = useMarkdownPreference()
+  const minimal = () => preference() === "minimal"
   const content = createMemo(() => props.plainText ? props.content : normalizeGitHubMarkdown(props.content, { preserveImages: props.preserveImages, codePanels: props.codePanels, context: props.context }))
   const tableOptions = createMemo<MarkdownOptions["tableOptions"]>(() => ({
-    style: "grid",
+    style: minimal() ? "columns" : "grid",
     widthMode: "full",
     columnFitter: "balanced",
     wrapMode: "word",
@@ -20,12 +23,13 @@ export function GitHubMarkdown(props: { content: string; syntaxStyle: SyntaxStyl
     borderColor: colors.border,
   }))
   const renderNode = createMemo<MarkdownOptions["renderNode"]>(() => {
+    const simple = minimal()
     const contentWidth = props.wide ? "100%" : 96
     const background = colors.panel
     const canvas = props.backgroundColor ?? colors.canvas
     const muted = colors.muted
     const foreground = colors.text
-    const codePadding = renderer.width < 80 ? 1 : 2
+    const codePadding = simple || renderer.width < 80 ? 1 : 2
     const panels = props.codePanels !== false
     const syntaxStyle = props.syntaxStyle
     const border = colors.border
@@ -40,7 +44,7 @@ export function GitHubMarkdown(props: { content: string; syntaxStyle: SyntaxStyl
       const index = parent?.getChildren().indexOf(source)
       const panel = new BoxRenderable(renderer, {
         width: "100%", minWidth: 0, flexShrink: 0, flexDirection: "column",
-        paddingX: codePadding, paddingY: 1, backgroundColor: background,
+        paddingX: codePadding, paddingY: simple ? 0 : 1, backgroundColor: background,
       })
       // Preserve authored margins, including percentages and auto, before reparenting.
       for (const [edge, property] of [
@@ -57,7 +61,7 @@ export function GitHubMarkdown(props: { content: string; syntaxStyle: SyntaxStyl
       source.marginBottom = 0
       source.marginLeft = 0
       panel.onSizeChange = () => {
-        const padding = panel.width < 80 ? 1 : 2
+        const padding = simple || panel.width < 80 ? 1 : 2
         if (panel.paddingLeft !== padding) {
           panel.paddingLeft = padding
           panel.paddingRight = padding
@@ -67,7 +71,7 @@ export function GitHubMarkdown(props: { content: string; syntaxStyle: SyntaxStyl
       source.bg = background
       source.fg = foreground
       source.wrapMode = "word"
-      panel.add(new TextRenderable(renderer, {
+      if (!simple) panel.add(new TextRenderable(renderer, {
         content: language.trim().split(/\s+/)[0] || "text",
         height: 1, fg: muted, bg: background,
       }))
@@ -104,7 +108,8 @@ export function GitHubMarkdown(props: { content: string; syntaxStyle: SyntaxStyl
         // Native list blockquotes contain one markdown CodeRenderable, not blocks.
         if (children.length === 1 && source instanceof CodeRenderable && source.baseHighlight === "markup.quote") {
           const text = source.content
-          node.borderColor = quoteColor(text)
+          if (simple) node.border = []
+          else node.borderColor = quoteColor(text)
           source.destroyRecursively()
           node.add(quoteContent(text))
           return
@@ -126,7 +131,7 @@ export function GitHubMarkdown(props: { content: string; syntaxStyle: SyntaxStyl
       if (token.type === "blockquote") {
         const quote = new BoxRenderable(renderer, {
           width: "100%", minWidth: 0, flexShrink: 0, flexDirection: "column",
-          border: ["left"], borderColor: quoteColor(token.text), paddingLeft: 1,
+          border: simple ? [] : ["left"], borderColor: quoteColor(token.text), paddingLeft: 1,
         })
         quote.add(quoteContent(token.text))
         block = quote
@@ -144,7 +149,7 @@ export function GitHubMarkdown(props: { content: string; syntaxStyle: SyntaxStyl
       const wrapper = new BoxRenderable(renderer, {
         width: "100%", minWidth: 0, flexShrink: 0, flexDirection: "column", marginTop: 0,
         ...(readable ? { maxWidth: contentWidth, alignSelf: "flex-start" } : {}),
-        ...(section ? { border: ["bottom"], borderColor: border } : {}),
+        ...(section && !simple ? { border: ["bottom"], borderColor: border } : {}),
       })
       // Native top-level layout owns inter-block spacing and list indentation.
       wrapper.add(block)

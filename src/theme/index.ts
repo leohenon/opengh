@@ -55,7 +55,6 @@ export const themeNames = [
   "everforest",
   "flexoki",
   "github",
-  "github-light",
   "gruvbox",
   "kanagawa",
   "lucent-orng",
@@ -155,7 +154,6 @@ const themes: Record<ThemeName, ThemeJson> = {
   everforest: everforest as ThemeJson,
   flexoki: flexoki as ThemeJson,
   github: githubTheme,
-  "github-light": githubTheme,
   gruvbox: gruvbox as ThemeJson,
   kanagawa: kanagawa as ThemeJson,
   "lucent-orng": lucentOrng as ThemeJson,
@@ -268,9 +266,13 @@ function resolve(theme: ThemeJson, mode: Mode, palette?: (string | null)[]): Res
   return result
 }
 
-function terminalTheme(theme: ThemeJson, colors?: TerminalThemeColors): ThemeJson {
-  const foreground = colors?.defaultForeground ?? "#c0c0c0"
-  const background = colors?.defaultBackground ?? "#000000"
+function terminalTheme(theme: ThemeJson, mode: Mode, colors?: TerminalThemeColors): ThemeJson {
+  // Partial defaults cannot form a reliable contrasting pair, especially after inversion.
+  const detected = colors?.defaultForeground && colors.defaultBackground ? colors : undefined
+  let foreground = detected?.defaultForeground ?? (mode === "dark" ? "#c0c0c0" : "#1f2937")
+  let background = detected?.defaultBackground ?? (mode === "dark" ? "#000000" : "#ffffff")
+  // Keep the terminal's colors, but reverse its surfaces when forcing the opposite mode.
+  if (backgroundMode(background) !== mode) [foreground, background] = [background, foreground]
   const fg = rgb(foreground)!
   const bg = rgb(background)!
   const mix = (amount: number) => `#${bg.map((value, index) =>
@@ -286,9 +288,9 @@ export function resolveTheme(name: string, mode: Mode = "dark", terminalColors?:
   const selected = isThemeName(name) ? name : defaultTheme
   try {
     if (selected === "terminal-minimal" || selected === "terminal-native") {
-      return resolve(terminalTheme(themes[selected], terminalColors), mode, terminalColors?.palette)
+      return resolve(terminalTheme(themes[selected], mode, terminalColors), mode, terminalColors?.palette)
     }
-    return resolve(themes[selected], selected === "github-light" ? "light" : mode)
+    return resolve(themes[selected], mode)
   } catch (error) {
     if (selected === defaultTheme) throw error
     return resolve(themes[defaultTheme], mode)
@@ -303,6 +305,12 @@ function rgb(value: string) {
     ? source.slice(0, 3).split("").map((part) => part + part).join("")
     : source.slice(0, 6)
   return [0, 2, 4].map((index) => Number.parseInt(hex.slice(index, index + 2), 16))
+}
+
+function backgroundMode(background: string): Mode {
+  const [r, g, b] = rgb(background)!
+  // Match OpenTUI's terminal appearance detection.
+  return (299 * r! + 587 * g! + 114 * b!) / 1000 > 128 ? "light" : "dark"
 }
 
 function colorDistance(left: string, right: string) {
