@@ -8,7 +8,6 @@ export type Repo = {
   stars: number
   forks: number
   watchers: number
-  openIssues: number
   language: string
   license: string
   updatedAt: string
@@ -235,7 +234,6 @@ export type PullReadiness = {
   reviewDecision?: "APPROVED" | "CHANGES_REQUESTED" | "REVIEW_REQUIRED" | null
   checks: PullCheck[]
   checksComplete: boolean
-  checksState?: string
 }
 
 export type PullContext = {
@@ -263,12 +261,10 @@ export type PullRequestDetail = PullRequestSummary & {
   changedFiles: number
   commitCount: number
   commentCount: number
-  reviewCommentCount: number
   labels: string[]
   assignees: string[]
   reviewers: string[]
   mergeable: boolean | null
-  mergeableState: string
 }
 
 export type WorkflowRunSummary = {

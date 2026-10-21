@@ -51,7 +51,6 @@ export const githubDataFixture: RepositoryData = {
     stars: 5280,
     forks: 214,
     watchers: 42,
-    openIssues: 61,
     language: "TypeScript",
     license: "MIT",
     updatedAt: "2026-04-14T10:24:00Z",

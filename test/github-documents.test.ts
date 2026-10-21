@@ -5,7 +5,7 @@ import type { Repo } from "../src/models"
 
 const repo: Repo = {
   nameWithOwner: "owner/repo", url: "https://github.com/owner/repo/", visibility: "PUBLIC",
-  defaultBranch: "main", description: "", stars: 0, forks: 0, watchers: 0, openIssues: 0,
+  defaultBranch: "main", description: "", stars: 0, forks: 0, watchers: 0,
   language: "Rust", license: "MIT", updatedAt: "",
 }
 const branch = "topic/docs"

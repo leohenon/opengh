@@ -359,7 +359,6 @@ export function createGitHubClient(transport: GitHubTransport) {
       stars: repo.stargazers_count,
       forks: repo.forks_count,
       watchers: repo.subscribers_count,
-      openIssues: repo.open_issues_count,
       language: repo.language ?? "Unknown",
       license: repo.license?.spdx_id ?? "None",
       updatedAt: repo.updated_at,
@@ -895,7 +894,6 @@ export function createGitHubClient(transport: GitHubTransport) {
       changedFiles: item.changed_files,
       commitCount: item.commits,
       commentCount: item.comments,
-      reviewCommentCount: item.review_comments,
       labels: item.labels.map((label) => typeof label === "string" ? label : label.name),
       assignees: item.assignees.map((assignee) => assignee.login),
       reviewers: [
@@ -903,7 +901,6 @@ export function createGitHubClient(transport: GitHubTransport) {
         ...item.requested_teams.map((team) => team.name),
       ],
       mergeable: item.mergeable,
-      mergeableState: item.mergeable_state,
     }
   }
 

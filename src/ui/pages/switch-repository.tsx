@@ -7,7 +7,6 @@ import { useTheme } from "../theme"
 
 export function SwitchRepositoryScreen(props: {
   recent: readonly string[]
-  current?: string
   showScrollbar?: boolean
   showStatusBarHints: boolean
   renderStatusBar?: boolean

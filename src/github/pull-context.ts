@@ -211,9 +211,8 @@ export function createGitHubPullContext(transport: GitHubTransport) {
         return result
       }
       async function checks() {
-        let state: string | undefined
         const items = await collection("PullChecks", `headRefOid commits(last: 1) { nodes { commit {
-          statusCheckRollup { state contexts(first: 100, after: $cursor) {
+          statusCheckRollup { contexts(first: 100, after: $cursor) {
             nodes { __typename
               ... on CheckRun { id name status conclusion detailsUrl isRequired(pullRequestNumber: ${number}) }
               ... on StatusContext { id context state targetUrl isRequired(pullRequestNumber: ${number}) }
@@ -224,11 +223,9 @@ export function createGitHubPullContext(transport: GitHubTransport) {
           if (!Array.isArray(commits) || commits.length !== 1) throw new Error("Missing PR head commit checks")
           const rollup = object(object(commits[0]).commit).statusCheckRollup
           if (rollup == null) return { nodes: [], pageInfo: { hasNextPage: false, endCursor: null } }
-          const value = object(rollup)
-          state = text(value.state)
-          return value.contexts
+          return object(rollup).contexts
         }, check, item => item.id, true)
-        return { checks: items, checksComplete: true, checksState: state }
+        return { checks: items, checksComplete: true }
       }
       // Optional API surfaces fail independently; neither can erase threads or readiness.
       const [threadItems, checkResult, projectsResult, issuesResult] = await Promise.all([

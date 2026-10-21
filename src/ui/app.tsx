@@ -497,11 +497,6 @@ export function App(props: AppProps) {
       setPullState("open")
     }
 
-    if (navigationTabs().resolved) {
-      if (!visibleTabs().some((tab) => tab.page === "issues")) issueDefaultResolved = false
-      if (!visibleTabs().some((tab) => tab.page === "pulls")) pullDefaultResolved = false
-    }
-
     if (!issueDefaultResolved && current.issues.open.status === "ready" && current.issues.closed.status === "ready"
       && (current.issues.open.value.items.length > 0 || current.issues.closed.value.items.length > 0)
       && (current.issues.open.value.items.length > 0 || !current.issues.open.value.hasMore)) {
@@ -529,11 +524,7 @@ export function App(props: AppProps) {
 
   createEffect(() => {
     if (visibleTabs().some((tab) => tab.page === page())) return
-    const detail = navigation().details?.[page()]
     setNavigation((state) => navigate(back(state), "overview"))
-    if (detail?.kind === "issue") props.onCloseIssue?.()
-    if (detail?.kind === "pull") props.onClosePull?.()
-    if (detail?.kind === "issue") setRevealActivity()
     if (overlay() === "issue-references" || overlay() === "issue-actions" || overlay() === "issue-action") { setOverlay(); setIssueAction() }
   })
 
@@ -1022,7 +1013,6 @@ export function App(props: AppProps) {
           renderStatusBar={false}
           recent={props.recentRepositories ?? []}
           showStatusBarHints={config().showStatusBarHints}
-          current={data().repo.nameWithOwner}
           showScrollbar={config().showScrollbars}
           onClose={() => setOverlay()}
           onOpen={(repository) => {

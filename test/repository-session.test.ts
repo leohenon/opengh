@@ -325,8 +325,8 @@ describe("repository session", () => {
         return { ...summary, number, url: `https://github.com/anomalyco/opentui/pull/${number}`,
           body: "Keep focus during layout changes.", updatedAt: summary.createdAt,
           baseBranch: "main", headBranch: "fix/focus", additions: 18, deletions: 7,
-          changedFiles: 2, commitCount: 3, commentCount: 2, reviewCommentCount: 0,
-          labels: [], assignees: [], reviewers: [], mergeable: null, mergeableState: "unknown" }
+          changedFiles: 2, commitCount: 3, commentCount: 2,
+          labels: [], assignees: [], reviewers: [], mergeable: null }
       },
       pullCommits: async () => {
         if (failCommits) throw new Error("Commits offline")
