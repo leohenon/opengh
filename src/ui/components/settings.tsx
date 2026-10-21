@@ -1,4 +1,4 @@
-import { TextAttributes } from "@opentui/core"
+import { TextAttributes, type ScrollBoxRenderable } from "@opentui/core"
 import { useKeyboard, useTerminalDimensions } from "@opentui/solid"
 import { createEffect, createSignal, onCleanup, Show } from "solid-js"
 import type { Config } from "../../config"
@@ -6,9 +6,9 @@ import { useTheme } from "../theme"
 import { Popup } from "./popup"
 import { ThemePicker } from "./theme-picker"
 
-type Setting = "theme" | "scrollbars" | "about-sidebar" | "detail-layout" | "status-bar-hints" | "icon-style" | "compact-header" | "hide-documents-tab"
+type Setting = "theme" | "scrollbars" | "about-sidebar" | "detail-layout" | "status-bar-hints" | "icon-style" | "compact-header" | "hide-documents-tab" | "tab-counts"
 
-const settingOrder: Setting[] = ["theme", "scrollbars", "about-sidebar", "detail-layout", "status-bar-hints", "icon-style", "compact-header", "hide-documents-tab"]
+const settingOrder: Setting[] = ["theme", "scrollbars", "about-sidebar", "detail-layout", "status-bar-hints", "icon-style", "compact-header", "hide-documents-tab", "tab-counts"]
 const sidebarValues = ["auto", "show", "hide"] as const
 
 export function Settings(props: {
@@ -22,6 +22,7 @@ export function Settings(props: {
   const dimensions = useTerminalDimensions()
   const theme = useTheme()
   const { colors } = theme
+  let settingsScroll: ScrollBoxRenderable | undefined
   const [screen, setScreen] = createSignal<"settings" | "themes">("settings")
   const [selected, setSelected] = createSignal<Setting>("theme")
   const [saving, setSaving] = createSignal(false)
@@ -39,9 +40,10 @@ export function Settings(props: {
   const moveSetting = (delta: number) => {
     const current = settingOrder.indexOf(selected())
     setSelected(settingOrder[Math.max(0, Math.min(settingOrder.length - 1, current + delta))]!)
+    settingsScroll?.scrollChildIntoView(`setting-${selected()}`)
   }
 
-  const toggleBoolean = async (key: "showScrollbars" | "showStatusBarHints" | "compactHeader" | "hideDocumentsTab") => {
+  const toggleBoolean = async (key: "showScrollbars" | "showStatusBarHints" | "compactHeader" | "hideDocumentsTab" | "showTabCounts") => {
     if (busy()) return
     setSaving(true)
     setError("")
@@ -120,6 +122,8 @@ export function Settings(props: {
     }
     if (selected() === "scrollbars" && (event.name === "left" || event.name === "right" || enter))
       return void toggleBoolean("showScrollbars")
+    if (selected() === "tab-counts" && (event.name === "left" || event.name === "right" || enter))
+      return void toggleBoolean("showTabCounts")
     if (selected() === "hide-documents-tab" && (event.name === "left" || event.name === "right" || enter))
       return void toggleBoolean("hideDocumentsTab")
     if (selected() === "compact-header" && (event.name === "left" || event.name === "right" || enter))
@@ -138,6 +142,7 @@ export function Settings(props: {
     const active = () => selected() === setting
     return (
       <box
+        id={`setting-${setting}`}
         height={rowHeight()}
         flexShrink={0}
         flexDirection="row"
@@ -160,6 +165,10 @@ export function Settings(props: {
     if (selected() === "theme") return {
       title: "Theme",
       description: "Choose the color theme used throughout opengh. Moving through the theme list previews each theme.",
+    }
+    if (selected() === "tab-counts") return {
+      title: "Tab counts",
+      description: "Show open issue and pull request totals in tabs.",
     }
     if (selected() === "hide-documents-tab") return {
       title: "Hide documents tab",
@@ -223,20 +232,21 @@ export function Settings(props: {
           >
             <box height={1} flexShrink={0} flexDirection="row" justifyContent="space-between">
               <text fg={colors.text} attributes={TextAttributes.BOLD}>Settings</text>
-              <Show when={busy()}><text fg={colors.muted}>Saving…</text></Show>
             </box>
             <box height={1} flexShrink={0} />
             <text fg={colors.muted}>Appearance</text>
             <box height={1} flexShrink={0} />
-            {settingRow("theme", "Theme", "Interface color theme", props.config.theme)}
-            {settingRow("scrollbars", "Scrollbars", "Lists and documents", scrollbarValue())}
-            {settingRow("about-sidebar", "About sidebar", "Repository metadata", props.config.aboutSidebar)}
-            {settingRow("detail-layout", "Detail layout", "Detail page width", props.config.detailLayout)}
-            {settingRow("status-bar-hints", "Status bar hints", "Keyboard shortcuts", props.config.showStatusBarHints ? "on" : "off")}
-            {settingRow("icon-style", "Icon style", "Terminal symbols", props.config.iconStyle === "nerd" ? "Nerd Font" : "Unicode")}
-            {settingRow("compact-header", "Compact header", "More room for content", props.config.compactHeader ? "on" : "off")}
-            {settingRow("hide-documents-tab", "Hide documents tab", "Overview document tabs", props.config.hideDocumentsTab ? "on" : "off")}
-            <box flexGrow={1} minHeight={0} />
+            <scrollbox ref={(value) => { settingsScroll = value }} flexGrow={1} minHeight={0} scrollY scrollX={false} scrollbarOptions={{ visible: false }}>
+              {settingRow("theme", "Theme", "Interface color theme", props.config.theme)}
+              {settingRow("scrollbars", "Scrollbars", "Lists and documents", scrollbarValue())}
+              {settingRow("about-sidebar", "About sidebar", "Repository metadata", props.config.aboutSidebar)}
+              {settingRow("detail-layout", "Detail layout", "Detail page width", props.config.detailLayout)}
+              {settingRow("status-bar-hints", "Status bar hints", "Keyboard shortcuts", props.config.showStatusBarHints ? "on" : "off")}
+              {settingRow("icon-style", "Icon style", "Terminal symbols", props.config.iconStyle === "nerd" ? "Nerd Font" : "Unicode")}
+              {settingRow("compact-header", "Compact header", "More room for content", props.config.compactHeader ? "on" : "off")}
+              {settingRow("hide-documents-tab", "Hide documents tab", "Overview document tabs", props.config.hideDocumentsTab ? "on" : "off")}
+              {settingRow("tab-counts", "Tab counts", "Issue and PR totals", props.config.showTabCounts ? "on" : "off")}
+            </scrollbox>
             <Show when={props.loadError || error()}>
               {(message) => <text fg={colors.red} wrapMode="word">{message()}</text>}
             </Show>
@@ -256,7 +266,6 @@ export function Settings(props: {
             >
               <box height={1} flexShrink={0} flexDirection="row" justifyContent="space-between">
                 <text fg={colors.blue} attributes={TextAttributes.BOLD}>{detail().title}</text>
-                <Show when={busy()}><text fg={colors.muted}>Saving…</text></Show>
               </box>
               <box height={1} flexShrink={0} />
               <text fg={colors.text} wrapMode="word">{detail().description}</text>

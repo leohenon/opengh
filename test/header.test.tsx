@@ -18,8 +18,9 @@ test("header prioritizes tabs over repository identity and counts, then reveals 
   const [page, setPage] = createSignal<Page>("overview")
   const [compact, setCompact] = createSignal(true)
   const [issues, setIssues] = createSignal(61)
+  const [showTabCounts, setShowTabCounts] = createSignal(true)
   const view = await testRender(() => <Header repo={repo} page={page()} tabs={tabs} compact={compact()}
-    workCounts={{ status: "ready", value: { issues: issues(), pulls: 24 } }}
+    showTabCounts={showTabCounts()} workCounts={{ status: "ready", value: { issues: issues(), pulls: 24 } }}
   />, { width: 160, height: 8 })
   const row = () => view.captureCharFrame().split("\n")[compact() ? 0 : 3]!
   const bare = tabs.map((tab, index) => `${index + 1} ${tab.label}`)
@@ -72,6 +73,17 @@ test("header prioritizes tabs over repository identity and counts, then reveals 
     expect(row()).toContain("3 Issues (1234567)")
     expect(row()).toContain(repo.nameWithOwner)
     expect(row()).not.toMatch(/[‹›]/)
+    setShowTabCounts(false)
+    for (const mode of [true, false]) {
+      setCompact(mode)
+      for (const terminalWidth of [160, 80, 40]) {
+        view.resize(terminalWidth, 8)
+        setPage("issues")
+        await view.flush()
+        expect(row()).toContain("3 Issues")
+        expect(row()).not.toContain("(")
+      }
+    }
   } finally {
     view.renderer.destroy()
   }

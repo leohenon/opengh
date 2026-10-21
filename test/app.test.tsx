@@ -860,7 +860,7 @@ describe("opengh TUI", () => {
   });
 
   test("opens settings and applies saved changes immediately", async () => {
-    const [config, setConfig] = createSignal<Config>({ showScrollbars: false, theme: "github", aboutSidebar: "auto", detailLayout: "centered", showStatusBarHints: true, hideDocumentsTab: false, compactHeader: false, iconStyle: "unicode" });
+    const [config, setConfig] = createSignal<Config>({ showScrollbars: false, theme: "github", aboutSidebar: "auto", detailLayout: "centered", showStatusBarHints: true, showTabCounts: true, hideDocumentsTab: false, compactHeader: false, iconStyle: "unicode" });
     let saves = 0;
     const view = await testRender(
       () => (
@@ -897,7 +897,7 @@ describe("opengh TUI", () => {
     await Bun.sleep(0);
     await view.flush();
     expect(saves).toBe(1);
-    expect(config()).toEqual({ showScrollbars: true, theme: "github", aboutSidebar: "auto", detailLayout: "centered", showStatusBarHints: true, hideDocumentsTab: false, compactHeader: false, iconStyle: "unicode" });
+    expect(config()).toEqual({ showScrollbars: true, theme: "github", aboutSidebar: "auto", detailLayout: "centered", showStatusBarHints: true, showTabCounts: true, hideDocumentsTab: false, compactHeader: false, iconStyle: "unicode" });
     expect(view.captureCharFrame()).toContain("‹ on ›");
 
     view.mockInput.pressArrow("down");
@@ -946,10 +946,29 @@ describe("opengh TUI", () => {
     await view.flush();
     expect(view.captureCharFrame()).not.toMatch(/[\uE000-\uF8FF]/);
     expect(view.captureCharFrame()).not.toContain("Show vertical scrollbars");
+
+    view.resize(120, 24);
+    view.mockInput.pressKey(",");
+    await view.flush();
+    for (let i = 0; i < 8; i++) view.mockInput.pressKey("j");
+    await view.flush();
+    expect(view.captureCharFrame()).toContain("Tab counts");
+    expect(view.captureCharFrame()).toContain("Show open issue and pull request");
+    view.mockInput.pressArrow("left");
+    await view.flush();
+    expect(config().showTabCounts).toBe(false);
+    view.mockInput.pressEscape();
+    await Bun.sleep(30);
+    await view.flush();
+    const header = view.captureCharFrame().split("\n").slice(0, 5).join("\n");
+    expect(header).toContain("3 Issues");
+    expect(header).toContain("4 Pull requests");
+    expect(header).not.toContain("(61)");
+    expect(header).not.toContain("(24)");
   });
 
   test("previews and saves a theme from settings", async () => {
-    const [config, setConfig] = createSignal<Config>({ showScrollbars: false, theme: "github", aboutSidebar: "auto", detailLayout: "centered", showStatusBarHints: true, hideDocumentsTab: false, compactHeader: false, iconStyle: "unicode" });
+    const [config, setConfig] = createSignal<Config>({ showScrollbars: false, theme: "github", aboutSidebar: "auto", detailLayout: "centered", showStatusBarHints: true, showTabCounts: true, hideDocumentsTab: false, compactHeader: false, iconStyle: "unicode" });
     let canvas = () => "";
     const ThemedApp = () => {
       const current = useTheme();
@@ -999,7 +1018,7 @@ describe("opengh TUI", () => {
   });
 
   test("restores the configured theme when preview is cancelled", async () => {
-    const config: Config = { showScrollbars: false, theme: "github", aboutSidebar: "auto", detailLayout: "centered", showStatusBarHints: true, hideDocumentsTab: false, compactHeader: false, iconStyle: "unicode" };
+    const config: Config = { showScrollbars: false, theme: "github", aboutSidebar: "auto", detailLayout: "centered", showStatusBarHints: true, showTabCounts: true, hideDocumentsTab: false, compactHeader: false, iconStyle: "unicode" };
     let canvas = () => "";
     const ThemedApp = () => {
       const current = useTheme();
@@ -1038,7 +1057,7 @@ describe("opengh TUI", () => {
         <App
           data={githubDataFixture}
           operations={repositoryOperationsFixture}
-          config={{ showScrollbars: false, theme: "github", aboutSidebar: "auto", detailLayout: "centered", showStatusBarHints: true, hideDocumentsTab: false, compactHeader: false, iconStyle: "unicode" }}
+          config={{ showScrollbars: false, theme: "github", aboutSidebar: "auto", detailLayout: "centered", showStatusBarHints: true, showTabCounts: true, hideDocumentsTab: false, compactHeader: false, iconStyle: "unicode" }}
           onConfigChange={async () => { throw new Error("Config directory is read-only") }}
         />
       ),
@@ -1299,7 +1318,7 @@ describe("opengh TUI", () => {
       theme: "github",
       aboutSidebar: "show",
       detailLayout: "centered",
-      showStatusBarHints: true, hideDocumentsTab: false, compactHeader: false, iconStyle: "unicode",
+      showStatusBarHints: true, showTabCounts: true, hideDocumentsTab: false, compactHeader: false, iconStyle: "unicode",
     });
     const view = await testRender(
       () => <App data={githubDataFixture} operations={repositoryOperationsFixture} config={config()} />,

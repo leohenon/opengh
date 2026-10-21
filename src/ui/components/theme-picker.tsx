@@ -90,7 +90,6 @@ export function ThemePicker(props: {
     <box flexGrow={1} minHeight={0} flexDirection="column" paddingLeft={4} paddingRight={4} paddingBottom={1}>
       <box height={1} flexShrink={0} flexDirection="row" justifyContent="space-between">
         <text fg={colors.text} attributes={TextAttributes.BOLD}>Themes</text>
-        <Show when={busy()}><text fg={colors.muted}>Saving…</text></Show>
       </box>
       <box height={2} flexShrink={0} paddingTop={1}>
         <input

@@ -24,6 +24,7 @@ export function Header(props: {
   repo: Repo
   page: Page
   compact?: boolean
+  showTabCounts?: boolean
   workCounts?: RepositoryData["workCounts"]
   tabs: ReadonlyArray<{ page: Page; label: string }>
 }) {
@@ -33,7 +34,7 @@ export function Header(props: {
     const width = Math.max(0, dimensions().width - 4)
     const tabs = props.tabs.map((tab, index) => {
       const label = `${index + 1} ${tab.label}`
-      if (tab.page !== "issues" && tab.page !== "pulls") return { ...tab, label, counted: label }
+      if (props.showTabCounts === false || tab.page !== "issues" && tab.page !== "pulls") return { ...tab, label, counted: label }
       const count = props.workCounts?.value?.[tab.page]
       const placeholder = props.workCounts?.status === "error" ? "—" : "…"
       return { ...tab, label, counted: `${label} (${count ?? placeholder})` }

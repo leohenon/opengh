@@ -763,7 +763,7 @@ export function App(props: AppProps) {
   return (
     <IconProvider style={config().iconStyle}>
     <box width={dimensions().width} height={dimensions().height} flexDirection="column" backgroundColor={colors.canvas}>
-      <Header repo={data().repo} page={page()} tabs={visibleTabs()} workCounts={data().workCounts} compact={config().compactHeader} />
+      <Header repo={data().repo} page={page()} tabs={visibleTabs()} workCounts={data().workCounts} compact={config().compactHeader} showTabCounts={config().showTabCounts} />
       <box visible={!diffTarget()} flexGrow={1} minHeight={0} flexDirection="column">
       <box visible={page() === "overview"} flexGrow={1} minHeight={0}>
           <OverviewScreen
