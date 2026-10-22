@@ -20,6 +20,18 @@ function transport(responses: Responses = {}, textResponse: string | Error = "RE
 }
 
 describe("GitHub client", () => {
+  test("resolves shared issue/PR numbers without fetching lists and preserves lookup failures", async () => {
+    const error = new GitHubApiError("repos/owner/repo/issues/3", "Not Found (HTTP 404)")
+    const client = createGitHubClient(transport({
+      "repos/owner/repo/issues/1": { number: 1 },
+      "repos/owner/repo/issues/2": { number: 2, pull_request: { url: "https://api.github.com/repos/owner/repo/pulls/2" } },
+      "repos/owner/repo/issues/3": error,
+    }))
+    expect(await client.issueKind("owner/repo", 1)).toBe("issue")
+    expect(await client.issueKind("owner/repo", 2)).toBe("pull")
+    await expect(client.issueKind("owner/repo", 3)).rejects.toBe(error)
+  })
+
   test("loads PR commits in API order across pages without exceeding GitHub's 250-commit limit", async () => {
     const paths: string[] = []
     const client = createGitHubClient({

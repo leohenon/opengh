@@ -7,6 +7,7 @@ import { stopClipboardProcesses } from "./clipboard"
 import { saveRepositoryTabs } from "./repository-tabs"
 import { saveConfig } from "./config"
 import { rememberRepository } from "./github/repository"
+import { launchUsage, parseLaunchArguments, type LaunchOptions } from "./launch-target"
 
 const pendingSaves = new Set<Promise<void>>()
 
@@ -19,9 +20,20 @@ function trackSave(save: Promise<void>) {
   return save
 }
 
-const repositoryArgument = process.argv[2] && !process.argv[2].startsWith("-")
-  ? process.argv[2]
-  : undefined
+const cwd = process.env.OPENGH_LAUNCH_CWD ?? process.cwd()
+delete process.env.OPENGH_LAUNCH_CWD
+
+let launch: LaunchOptions
+try {
+  launch = parseLaunchArguments(process.argv.slice(2))
+} catch (error) {
+  console.error(`opengh: ${error instanceof Error ? error.message : "Invalid arguments"}\nRun opengh --help for usage.`)
+  process.exit(1)
+}
+if (launch.help) {
+  console.log(launchUsage)
+  process.exit(0)
+}
 
 const renderer = await createCliRenderer({
   targetFps: 30,
@@ -42,8 +54,10 @@ try {
   initializeHunk(renderer)
   await render(() => (
     <Root
-      repositoryArgument={repositoryArgument}
-      cwd={process.cwd()}
+      repositoryArgument={launch.repositoryArgument}
+      initialPage={launch.initialPage}
+      initialDetail={launch.initialDetail}
+      cwd={cwd}
       services={{
         saveConfig: (config) => trackSave(saveConfig(config)),
         saveRepositoryTabs: (tabs) => trackSave(saveRepositoryTabs(tabs)),

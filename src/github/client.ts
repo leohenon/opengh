@@ -529,6 +529,11 @@ export function createGitHubClient(transport: GitHubTransport) {
     return detail
   }
 
+  const issueKind = async (repository: string, number: number): Promise<"issue" | "pull"> => {
+    const item = await transport.json<IssueResponse>(`repos/${repository}/issues/${number}`)
+    return item.pull_request ? "pull" : "issue"
+  }
+
   const issue = async (repository: string, number: number): Promise<IssueDetail> => {
     const item = await transport.json<IssueDetailResponse>(`repos/${repository}/issues/${number}`)
     return withIssuePermissions(repository, number, issueDetail(item))
@@ -988,7 +993,7 @@ export function createGitHubClient(transport: GitHubTransport) {
     }
   }
 
-  return { metadata, documents, document, branches, commits, commitCount, commit, issues, workCounts, hasIssues, issue, issueComments, createIssueComment, updateIssueState, assignableUsers, setIssueAssignees, markIssueDuplicate, issueReferences, issueTimeline, pulls, pull, pullCommits, pullContext, runs, run, runJobs }
+  return { metadata, documents, document, branches, commits, commitCount, commit, issues, workCounts, hasIssues, issueKind, issue, issueComments, createIssueComment, updateIssueState, assignableUsers, setIssueAssignees, markIssueDuplicate, issueReferences, issueTimeline, pulls, pull, pullCommits, pullContext, runs, run, runJobs }
 }
 
 const client = createGitHubClient(githubTransport)
@@ -1003,6 +1008,7 @@ export const loadGitHubCommit = client.commit
 export const loadGitHubIssues = client.issues
 export const loadGitHubWorkCounts = client.workCounts
 export const loadGitHubHasIssues = client.hasIssues
+export const loadGitHubIssueKind = client.issueKind
 export const loadGitHubIssue = client.issue
 export const loadGitHubIssueComments = client.issueComments
 export const createGitHubIssueComment = client.createIssueComment

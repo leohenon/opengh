@@ -1,13 +1,13 @@
 import type { ScrollBoxRenderable } from "@opentui/core"
 import { useRenderer, useTerminalDimensions } from "@opentui/solid"
-import { createEffect, createMemo, createSignal, For, on, onCleanup, Show } from "solid-js"
+import { createEffect, createMemo, createSignal, For, on, onCleanup, onMount, Show } from "solid-js"
 import { defaultConfig, type Config } from "../config"
 import type { HintEntry } from "../keybindings"
 import { KeybindingsBoundary, useKeyActions, useKeybindings } from "./keybindings"
 import { cloneCommand, cloneDestination, matchesLocalRepository, type LocalRepository, type CommandSpec, type CommandTask } from "../command-actions"
 import { CommandDialog, type CommandAction } from "./components/command-dialog"
 import type { CommitDetail, DiffContent, DiffTarget, IssueActionKind, IssueActionResult, Paginated, ListState } from "../models"
-import { back, navigate, openDetail, openDiff, type NavigationState, type Page } from "../navigation"
+import { back, navigate, openDetail, openDiff, type InitialNavigation, type NavigationState, type Page } from "../navigation"
 import type {
   CommitDetailState,
   RunDetailState,
@@ -61,6 +61,7 @@ export type AppProps = {
   onRunCommand?: (spec: CommandSpec, output: (chunk: string) => void, signal: AbortSignal) => Promise<CommandTask>
   onCommandCaptureCancel?: (cancel: (() => void) | undefined) => void
   initialPage?: Page
+  initialNavigation?: InitialNavigation
   onPageChange?: (page: Page) => void
   onQuit?: () => void
   onRefresh?: () => void
@@ -117,10 +118,21 @@ function AppContent(props: AppProps) {
   const renderer = useRenderer()
   const { colors } = useTheme()
   const dimensions = useTerminalDimensions()
-  // Initial preference is sampled once; later history writes must not navigate.
-  const initialPage = props.initialPage ?? "overview"
-  let initialPagePending = initialPage === "actions"
-  const [navigation, setNavigation] = createSignal<NavigationState>({ page: initialPagePending ? "overview" : initialPage })
+  // Startup intent and preferences are sampled once; later writes must not navigate.
+  const initialNavigation = props.initialNavigation
+  const initialDetail = initialNavigation?.detail
+  const initialPage = initialNavigation?.page ?? props.initialPage ?? "overview"
+  const requestedActions = initialNavigation?.page === "actions" || initialDetail?.kind === "run"
+  let initialPagePending = !initialNavigation && initialPage === "actions"
+  const initialState: NavigationState = { page: initialPagePending ? "overview" : initialPage }
+  const [navigation, setNavigation] = createSignal<NavigationState>(initialDetail ? openDetail(initialState, initialDetail) : initialState)
+  onMount(() => {
+    if (initialNavigation) props.onPageChange?.(navigation().page)
+    if (initialDetail?.kind === "commit") void props.onLoadCommit?.(initialDetail.sha)
+    if (initialDetail?.kind === "issue") void props.onLoadIssue?.(initialDetail.number)
+    if (initialDetail?.kind === "pull") void props.onLoadPull?.(initialDetail.number)
+    if (initialDetail?.kind === "run") void props.onLoadRun?.(initialDetail.id)
+  })
   const [issueState, setIssueState] = createSignal<ListState>("open")
   const [issueRefresh, setIssueRefresh] = createSignal<{ number: number }>()
   const [pullState, setPullState] = createSignal<ListState>("open")
@@ -310,7 +322,7 @@ function AppContent(props: AppProps) {
     open: data().pulls.open.value?.items.length ?? 0,
     closed: data().pulls.closed.value?.items.length ?? 0,
   })
-  const baseTabs = tabs.filter((tab) => tab.page !== "actions")
+  const baseTabs = requestedActions ? tabs : tabs.filter((tab) => tab.page !== "actions")
   const sectionAvailable = (...resources: ResourceState<{ items: readonly unknown[]; hasMore: boolean }>[]) => resources.some((resource) =>
     resource.status === "error" || Boolean(resource.value && (resource.value.items.length > 0 || resource.value.hasMore)),
   )
@@ -323,7 +335,7 @@ function AppContent(props: AppProps) {
     if (pending && previous.repository === repository && previous.resolved) return previous
     if (pending && conditional.some((resource) => resource.value === undefined)) return { repository, tabs: baseTabs, resolved: false }
     const available = tabs.filter((tab) => {
-      if (tab.page === "actions") return sectionAvailable(current.runs)
+      if (tab.page === "actions") return requestedActions || sectionAvailable(current.runs)
       return true
     })
     if (previous.repository === repository && previous.resolved && available.length === previous.tabs.length
@@ -736,7 +748,7 @@ function AppContent(props: AppProps) {
     "item.copy": () => {
       if (diffTarget()) return false
       if (activeRunId()) void copyToClipboard(runUrl(activeRunId()!), "URL")
-      else if (activeCommitSha()) void copyToClipboard(activeCommitSha()!, "SHA")
+      else if (activeCommitSha()) void copyToClipboard(commitResource().value?.sha ?? activeCommitSha()!, "SHA")
       else if (activeIssueNumber()) void copyToClipboard(issueUrl(activeIssueNumber()!), "URL")
       else if (activePullNumber()) void copyToClipboard(pullUrl(activePullNumber()!), "URL")
       else if (page() === "overview") void copyToClipboard(data().repo.url, "URL")

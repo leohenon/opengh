@@ -9,6 +9,11 @@ export type DetailTarget =
   | { kind: "pull"; number: number }
   | { kind: "run"; id: number }
 
+export type InitialNavigation = {
+  page?: Page
+  detail?: DetailTarget
+}
+
 export type NavigationState = {
   page: Page
   details?: Partial<Record<Page, DetailTarget>>

@@ -1,12 +1,14 @@
 import { useRenderer } from "@opentui/solid"
 import { createEffect, createMemo, createSignal, Match, onCleanup, onMount, Show, Switch } from "solid-js"
-import type { Page } from "./navigation"
+import type { DetailTarget, InitialNavigation, Page } from "./navigation"
+import type { LaunchDetail } from "./launch-target"
 import { loadRepositoryTabs, saveRepositoryTabs, type RepositoryTabs } from "./repository-tabs"
 import { defaultConfig, loadConfig, saveConfig, type Config } from "./config"
 import { copyToHostClipboard } from "./clipboard"
 import { resolveLocalRepository, runCommand, type LocalRepository } from "./command-actions"
 import { loadRecentRepositories, rememberRepository, resolveRepository } from "./github/repository"
 import { openGitHub } from "./github/browser"
+import { loadGitHubIssueKind } from "./github/client"
 import { createRepositorySession, type RepositorySession } from "./repository-session"
 import type { RepositoryState } from "./repository-state"
 import { App } from "./ui/app"
@@ -22,13 +24,15 @@ import {
   ResolvingRepository,
 } from "./ui/launcher"
 
-type View = "resolving" | "picker" | "repository" | "switch"
+type View = "resolving" | "picker" | "repository" | "switch" | "launch-error"
+type LaunchRequest = { repository: string; detail?: LaunchDetail; page?: Page }
 type ReadyState = Extract<RepositoryState, { status: "ready" }>
 type LoadingState = Extract<RepositoryState, { status: "loading" }>
 type ErrorState = Extract<RepositoryState, { status: "error" }>
 
 export type RootServices = {
   resolveRepository(argument: string | undefined, cwd: string): Promise<string | undefined>
+  loadIssueKind(repository: string, number: number): Promise<"issue" | "pull">
   loadRecentRepositories(): Promise<string[]>
   rememberRepository(repository: string): Promise<void>
   loadRepositoryTabs(): Promise<RepositoryTabs>
@@ -44,6 +48,7 @@ export type RootServices = {
 
 const defaultServices: RootServices = {
   resolveRepository,
+  loadIssueKind: loadGitHubIssueKind,
   loadRecentRepositories,
   rememberRepository,
   loadRepositoryTabs,
@@ -59,6 +64,8 @@ const defaultServices: RootServices = {
 
 export function Root(props: {
   repositoryArgument?: string
+  initialPage?: Page
+  initialDetail?: LaunchDetail
   cwd: string
   services?: Partial<RootServices>
 }) {
@@ -67,6 +74,7 @@ export function Root(props: {
   const [view, setView] = createSignal<View>("resolving")
   const [recent, setRecent] = createSignal<string[]>([])
   const [pickerError, setPickerError] = createSignal("")
+  const [launchError, setLaunchError] = createSignal<LaunchRequest & { message: string }>()
   const [config, setConfig] = createSignal(defaultConfig)
   const [repositoryTabs, setRepositoryTabs] = createSignal<RepositoryTabs>({})
   let tabSaveTimer: ReturnType<typeof setTimeout> | undefined
@@ -172,13 +180,36 @@ export function Root(props: {
     const repository = accessibleRepository()
     if (repository) void services.rememberRepository(repository).catch(() => {}).then(refreshRecent)
   })
-  const open = (repository: string) => {
-    setView("repository")
+  let pendingNavigation: (InitialNavigation & { repository: string }) | undefined
+  const open = (repository: string, initial?: InitialNavigation) => {
+    pendingNavigation = initial ? { ...initial, repository } : undefined
+    setLaunchError(undefined)
     void session.load(repository)
+    setView("repository")
   }
+  let switchReturn: View = "repository"
   const showSwitcher = () => {
+    switchReturn = view()
     setView("switch")
     void refreshRecent()
+  }
+  const resolveLaunch = async (request: LaunchRequest) => {
+    setLaunchError(undefined)
+    setView("resolving")
+    let detail: DetailTarget | undefined
+    try {
+      detail = request.detail?.kind === "number"
+        ? { kind: await services.loadIssueKind(request.repository, request.detail.number), number: request.detail.number }
+        : request.detail
+    } catch (error) {
+      if (renderer.isDestroyed) return
+      const target = request.detail?.kind === "number" ? `#${request.detail.number}` : ""
+      const message = error instanceof Error ? error.message : "Could not resolve issue or PR"
+      setLaunchError({ ...request, message: `Could not open ${request.repository}${target}: ${message}` })
+      setView("launch-error")
+      return
+    }
+    if (!renderer.isDestroyed) open(request.repository, detail || request.page ? { detail, page: request.page } : undefined)
   }
 
   onMount(() => {
@@ -200,9 +231,11 @@ export function Root(props: {
       setRecent(repositories)
       setConfig(loadedConfig)
       setRepositoryTabs(savedTabs)
-      if (resolved) return open(resolved)
+      if (resolved) return resolveLaunch({ repository: resolved, detail: props.initialDetail, page: props.initialPage })
       if (!pickerError()) {
-        if (props.repositoryArgument === ".") setPickerError("No GitHub repository found")
+        if (props.repositoryArgument === ".") setPickerError(props.initialDetail
+          ? "No GitHub repository found in the current directory. Pass owner/repo explicitly."
+          : "No GitHub repository found")
         else if (props.repositoryArgument) setPickerError(`Invalid repository: “${props.repositoryArgument}”`)
       }
       setView("picker")
@@ -219,10 +252,20 @@ export function Root(props: {
       fallback={
         <Switch>
           <Match when={view() === "resolving"}><ResolvingRepository /></Match>
+          <Match when={view() === "launch-error" && launchError()}>
+            {(current) => <RepositoryLoadError
+              title="Issue/PR unavailable"
+              repository={current().repository}
+              message={current().message}
+              onRetry={() => void resolveLaunch(current())}
+              onSwitchRepository={showSwitcher}
+              onQuit={quit}
+            />}
+          </Match>
           <Match when={view() === "switch"}>
             <SwitchRepositoryScreen recent={recent()} showScrollbar={config().showScrollbars}
               showStatusBarHints={config().showStatusBarHints}
-              onOpen={open} onClose={() => setView("repository")} />
+              onOpen={open} onClose={() => setView(switchReturn)} />
           </Match>
           <Match when={view() === "picker"}>
             <RepositoryPicker recent={recent()} error={pickerError()} onOpen={open} onQuit={quit} />
@@ -248,10 +291,16 @@ export function Root(props: {
         <Match when={session.state().status === "ready" ? session.state() as ReadyState : undefined}>
           {(current) => (
             <Show when={current().repository} keyed>
-              {(repositoryName) => <App
+              {(repositoryName) => {
+                // Consume only when this repository actually mounts, preserving intent across metadata retries.
+                const initialNavigation = pendingNavigation?.repository.toLowerCase() === repositoryName.toLowerCase()
+                  ? pendingNavigation : undefined
+                if (initialNavigation) pendingNavigation = undefined
+                return <App
               data={() => current().data}
               operations={() => current().operations}
               initialPage={repositoryTabs()[repositoryName.toLowerCase()]}
+              initialNavigation={initialNavigation}
               onPageChange={(page) => rememberTab(repositoryName, page)}
               config={config()}
               configSaving={configSaving() || configReloading()}
@@ -309,7 +358,8 @@ export function Root(props: {
               onLoadMoreRuns={session.loadMoreRuns}
               onLoadMoreIssues={session.loadMoreIssues}
               onLoadMorePulls={session.loadMorePulls}
-            />}
+            />
+              }}
             </Show>
           )}
         </Match>

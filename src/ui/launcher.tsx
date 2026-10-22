@@ -63,6 +63,7 @@ export function LoadingRepository(props: { repository: string; onSwitchRepositor
 }
 
 export function RepositoryLoadError(props: {
+  title?: string;
   repository: string;
   message: string;
   onRetry: () => void;
@@ -96,7 +97,7 @@ export function RepositoryLoadError(props: {
           paddingBottom={1}
           gap={1}
         >
-          <text fg={colors.text} attributes={TextAttributes.BOLD}>Repository unavailable</text>
+          <text fg={colors.text} attributes={TextAttributes.BOLD}>{props.title ?? "Repository unavailable"}</text>
           <text fg={colors.text}>{props.repository}</text>
           <text flexGrow={1} minHeight={0} fg={colors.red} wrapMode="word">{props.message}</text>
           <text fg={colors.muted}>{keys.hints(["view.refresh", "retry"], ...(props.onSwitchRepository ? [["global.switchRepository", "switch repo"] as const] : []), ["global.quit", "quit"])}</text>

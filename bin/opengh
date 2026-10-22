@@ -1,0 +1,21 @@
+#!/bin/sh
+set -eu
+
+# Resolve package-manager symlinks without starting Bun in the caller's checkout.
+caller=$(pwd -P)
+script=$0
+while [ -L "$script" ]; do
+  directory=$(CDPATH= cd -- "$(dirname -- "$script")" && pwd -P)
+  target=$(readlink "$script")
+  case "$target" in
+    /*) script=$target ;;
+    *) script=$directory/$target ;;
+  esac
+done
+root=$(CDPATH= cd -- "$(dirname -- "$script")/.." && pwd -P)
+
+# Bun also discovers tsconfig and preload dependencies from cwd. Keep runtime
+# discovery in the trusted installation and pass the user's directory explicitly.
+export OPENGH_LAUNCH_CWD="$caller"
+cd "$root"
+exec bun --no-env-file "--config=$root/bunfig.toml" "$root/src/index.tsx" "$@"

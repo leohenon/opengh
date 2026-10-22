@@ -2,8 +2,8 @@ import { afterEach, describe, expect, test } from "bun:test"
 import { testRender } from "@opentui/solid"
 import { createSignal } from "solid-js"
 import { defaultConfig, type Config } from "../src/config"
-import type { IssueDetailState } from "../src/repository-state"
-import type { RepositoryState } from "../src/repository-state"
+import type { IssueDetailState, PullDetailState, RepositoryState } from "../src/repository-state"
+import { parseLaunchArguments } from "../src/launch-target"
 import { Root } from "../src/root"
 import { GitHubApiError } from "../src/github/transport"
 import { githubDataFixture, repositoryOperationsFixture, issueDetailFixture, issuePullReferenceFixture } from "./fixtures/github-data"
@@ -68,6 +68,128 @@ function readySession() {
 }
 
 describe("application root", () => {
+  test("retains a resolved launch through metadata retry, then consumes it before repository switching", async () => {
+    const [state, setState] = createSignal<RepositoryState>({ status: "loading", repository: "cli/cli" })
+    const [pullDetail, setPullDetail] = createSignal<PullDetailState>()
+    const loads: string[] = []
+    const lookups: string[] = []
+    const saved: Record<string, string> = {}
+    let attempts = 0
+    const session = { ...readySession(), state, pullDetail,
+      clearPull: () => setPullDetail(undefined),
+      loadPull: async (number: number) => {
+        const current = state()
+        if (current.status !== "ready") throw new Error("Detail loaded before metadata")
+        loads.push(`${current.repository}#${number}`)
+        const resource = { status: "error" as const, phase: "load" as const, message: "Direct PR unavailable" }
+        setPullDetail({ number, resource, comments: resource, references: resource, commits: resource, context: resource })
+      },
+      load: async (repository: string) => {
+        setState({ status: "loading", repository })
+        if (++attempts === 1) {
+          setState({ status: "error", repository, message: "Metadata unavailable" })
+          return
+        }
+        setState({ status: "ready", repository, data: {
+          ...structuredClone(githubDataFixture), repo: { ...githubDataFixture.repo, nameWithOwner: repository },
+        }, operations: structuredClone(repositoryOperationsFixture) })
+      },
+    }
+    const view = await testRender(() => <Root {...parseLaunchArguments(["9999"])} cwd="/work" services={{
+      resolveRepository: async (argument) => { expect(argument).toBe("."); return "cli/cli" },
+      loadIssueKind: async (repository, number) => { lookups.push(`${repository}#${number}`); return "pull" },
+      resolveLocalRepository: async () => undefined,
+      loadRecentRepositories: async () => [], rememberRepository: async () => {},
+      loadRepositoryTabs: async () => ({ "cli/cli": "actions" }),
+      saveRepositoryTabs: async (tabs) => { Object.assign(saved, tabs) },
+      loadConfig: async () => ({ ...defaultConfig }),
+      createRepositorySession: () => session,
+    }} />, { width: 120, height: 32 })
+    active.push(view)
+    const settle = async () => { await Bun.sleep(0); await view.flush() }
+    await settle()
+    expect(view.captureCharFrame()).toContain("Metadata unavailable")
+    view.mockInput.pressKey("s")
+    await settle()
+    view.mockInput.pressEscape()
+    await Bun.sleep(30)
+    await settle()
+    expect(view.captureCharFrame()).toContain("Metadata unavailable")
+    view.mockInput.pressKey("r")
+    await settle()
+    expect(view.captureCharFrame()).toContain("Direct PR unavailable")
+    expect(lookups).toEqual(["cli/cli#9999"])
+    expect(loads).toEqual(["cli/cli#9999"])
+    view.mockInput.pressEscape()
+    await Bun.sleep(30)
+    await settle()
+    expect(view.captureCharFrame()).toContain("retain focused child")
+
+    for (const repository of ["owner/other", "CLI/CLI"]) {
+      view.mockInput.pressKey("s")
+      await settle()
+      await view.mockInput.typeText(repository)
+      view.mockInput.pressEnter()
+      await settle()
+    }
+    expect(view.captureCharFrame()).toContain("retain focused child")
+    expect(loads).toEqual(["cli/cli#9999"])
+    expect(lookups).toEqual(["cli/cli#9999"])
+    view.mockInput.pressKey("q")
+    await Bun.sleep(0)
+    expect(saved["cli/cli"]).toBe("pulls")
+  })
+
+  test.each(["retry", "select"])("keeps failed number launches retryable and clears them on explicit selection (%s)", async (action) => {
+    let loads = 0
+    let lookups = 0
+    const pulls: number[] = []
+    const view = await testRender(() => <Root {...parseLaunchArguments(["cli/cli", "9999"])} cwd="/work" services={{
+      resolveRepository: async () => "cli/cli",
+      loadIssueKind: async () => {
+        if (++lookups === 1) throw new GitHubApiError("repos/cli/cli/issues/9999", "Not Found (HTTP 404)")
+        return "pull"
+      },
+      resolveLocalRepository: async () => undefined,
+      loadRecentRepositories: async () => [], rememberRepository: async () => {},
+      loadRepositoryTabs: async () => ({}), saveRepositoryTabs: async () => {},
+      loadConfig: async () => ({ ...defaultConfig }),
+      createRepositorySession: () => ({ ...readySession(),
+        load: async () => { loads++ }, loadPull: async (number) => { pulls.push(number) },
+      }),
+    }} />, { width: 120, height: 32 })
+    active.push(view)
+    const settle = async () => { await Bun.sleep(0); await view.flush() }
+    await settle()
+    expect(view.captureCharFrame()).toContain("Could not open cli/cli#9999")
+    expect(view.captureCharFrame()).toContain("Not Found (HTTP 404)")
+    expect(loads).toBe(0)
+
+    view.mockInput.pressKey("s")
+    await settle()
+    view.mockInput.pressEscape()
+    await Bun.sleep(30)
+    await settle()
+    expect(view.captureCharFrame()).toContain("Could not open cli/cli#9999")
+    if (action === "retry") {
+      view.mockInput.pressKey("r")
+      await settle()
+      expect(view.captureCharFrame()).toContain("Pull request #9999")
+      expect(lookups).toBe(2)
+      expect(pulls).toEqual([9999])
+    } else {
+      view.mockInput.pressKey("s")
+      await settle()
+      await view.mockInput.typeText("cli/cli")
+      view.mockInput.pressEnter()
+      await settle()
+      expect(view.captureCharFrame()).toContain("About")
+      expect(lookups).toBe(1)
+      expect(pulls).toEqual([])
+    }
+    expect(loads).toBe(1)
+  })
+
   test("resolves startup services before showing the repository picker", async () => {
     const resolution = deferred<string | undefined>()
     let receivedArgument: string | undefined

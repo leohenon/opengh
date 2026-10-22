@@ -8,6 +8,7 @@ import { defaultConfig, type Config } from "../src/config";
 import { appColors, resolveTheme } from "../src/theme";
 import { issueIcons, pullRequestIcons, repositoryIcons, workflowIcons } from "../src/ui/icons";
 import type { RepositoryData, ResourceState } from "../src/repository-state";
+import type { DetailTarget, Page } from "../src/navigation";
 import { ThemeProvider, useTheme } from "../src/ui/theme";
 import {
   commitDetailFixture,
@@ -64,6 +65,61 @@ async function setup() {
 }
 
 describe("opengh TUI", () => {
+  test.each<[DetailTarget, Page, string]>([
+    [{ kind: "issue", number: 9999 }, "issues", "ScrollBox loses focus"],
+    [{ kind: "pull", number: 9999 }, "pulls", "retain focused child"],
+    [{ kind: "commit", sha: "abcd" }, "commits", "cad92f4"],
+    [{ kind: "run", id: 9999 }, "actions", "Publish v0.4.5"],
+  ])("opens startup detail %j once, independent of lists and saved Actions preference", async (target, parent, listText) => {
+    const [data, setData] = createSignal<RepositoryData>({
+      ...githubDataFixture,
+      issues: { open: { status: "loading", phase: "load" }, closed: { status: "loading", phase: "load" } },
+      pulls: { open: { status: "loading", phase: "load" }, closed: { status: "loading", phase: "load" } },
+      runs: { status: "loading", phase: "load" },
+    });
+    const failed = { status: "error" as const, phase: "load" as const, message: "Direct target unavailable" };
+    const loaded: DetailTarget[] = [];
+    const pages: Page[] = [];
+    const view = await testRender(() => <App data={data} operations={repositoryOperationsFixture}
+      initialPage="actions" initialNavigation={{ detail: target }} onPageChange={(page) => pages.push(page)}
+      commitDetail={{ sha: "abcd", resource: failed }} onLoadCommit={async (sha) => { loaded.push({ kind: "commit", sha }); }}
+      issueDetail={{ number: 9999, resource: failed, comments: failed, references: failed }}
+      onLoadIssue={async (number) => { loaded.push({ kind: "issue", number }); }}
+      pullDetail={{ number: 9999, resource: failed, comments: failed, references: failed, commits: failed, context: failed }}
+      onLoadPull={async (number) => { loaded.push({ kind: "pull", number }); }}
+      runDetail={{ id: 9999, resource: failed, jobs: failed }} onLoadRun={async (id) => { loaded.push({ kind: "run", id }); }}
+    />, { width: 120, height: 32 });
+    active.push(view);
+    await view.flush();
+    expect(view.captureCharFrame()).toContain("Direct target unavailable");
+    expect(loaded).toEqual([target]);
+    expect(pages).toEqual([parent]);
+
+    setData(structuredClone(githubDataFixture));
+    await view.flush();
+    expect(view.captureCharFrame()).toContain("Direct target unavailable");
+    expect(loaded).toEqual([target]);
+    expect(pages).toEqual([parent]);
+
+    view.mockInput.pressEscape();
+    await Bun.sleep(30);
+    await view.flush();
+    expect(view.captureCharFrame()).toContain(listText);
+    expect(loaded).toEqual([target]);
+  });
+
+  test("explicit Actions page remains accessible even without runs", async () => {
+    const data: RepositoryData = { ...githubDataFixture, runs: { status: "ready", value: { items: [], page: 1, hasMore: false } } };
+    const pages: Page[] = [];
+    const view = await testRender(() => <App data={data} operations={repositoryOperationsFixture}
+      initialPage="issues" initialNavigation={{ page: "actions" }} onPageChange={(page) => pages.push(page)} />,
+    { width: 120, height: 32 });
+    active.push(view);
+    await view.flush();
+    expect(view.captureCharFrame()).toContain("No workflow runs");
+    expect(pages).toEqual(["actions"]);
+  });
+
   test("shows loaded versus total commits for the selected branch without changing the tab", async () => {
     const commits = Array.from({ length: 30 }, (_, index) => ({
       ...githubDataFixture.commits.value!.items[0]!, sha: `commit-${index}`,

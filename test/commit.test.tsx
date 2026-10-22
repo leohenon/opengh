@@ -11,6 +11,33 @@ afterEach(() => {
   for (const view of active.splice(0)) if (!view.renderer.isDestroyed) view.renderer.destroy()
 })
 
+test("abbreviated startup commits copy the resolved full SHA through remapped bindings", async () => {
+  const sha = commitDetailFixture.sha.slice(0, 7)
+  const [detail, setDetail] = createSignal<CommitDetailState>()
+  const loads: string[] = []
+  const copies: string[] = []
+  const view = await testRender(() => <App
+    initialNavigation={{ detail: { kind: "commit", sha } }}
+    config={{ ...defaultConfig, keybindings: { "item.copy": ["f6"] } }}
+    data={githubDataFixture} operations={repositoryOperationsFixture} commitDetail={detail()}
+    onLoadCommit={async (requested) => {
+      loads.push(requested)
+      setDetail({ sha: requested, resource: { status: "ready", value: commitDetailFixture } })
+    }}
+    onCopyToClipboard={async (value) => { copies.push(value); return true }}
+  />, { width: 120, height: 32 })
+  active.push(view)
+  await view.flush()
+  expect(view.captureCharFrame()).toContain("Files changed")
+  view.mockInput.pressKey("y")
+  expect(copies).toEqual([])
+  view.mockInput.pressKey("F6")
+  await Bun.sleep(0)
+  await view.flush()
+  expect(loads).toEqual([sha])
+  expect(copies).toEqual([commitDetailFixture.sha])
+})
+
 test("commit tabs retain detail state and Escape restores the list after resizing", async () => {
   const commits = Array.from({ length: 35 }, (_, index) => ({
     ...commitDetailFixture,
