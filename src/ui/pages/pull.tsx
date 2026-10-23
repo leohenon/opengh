@@ -1,7 +1,7 @@
 import { RGBA, rgbToHex, TextAttributes, type ScrollBoxRenderable } from "@opentui/core"
-import { useTerminalDimensions } from "@opentui/solid"
+import { useRenderer, useTerminalDimensions } from "@opentui/solid"
 import { useKeyActions } from "../keybindings"
-import { createMemo, Show } from "solid-js"
+import { createEffect, createMemo, onCleanup, Show } from "solid-js"
 import { defaultConfig, type DetailLayout } from "../../config"
 import type { PullRequestDetail, PullContext, IssueTimelineEvent } from "../../models"
 import type { PullDetailState, ResourceState } from "../../repository-state"
@@ -68,6 +68,7 @@ export function PullScreen(props: {
   number: number
   reactionControls?: ReactionControls
   detail: PullDetailState
+  revealActivity?: number
   interactive: boolean
   showScrollbar: boolean
   defaultBranch?: string
@@ -75,6 +76,7 @@ export function PullScreen(props: {
 }) {
   const { colors, theme } = useTheme()
   const icons = useIcons()
+  const renderer = useRenderer()
   const dimensions = useTerminalDimensions()
   const wide = () => dimensions().width >= 112
   const centered = () => (props.detailLayout ?? defaultConfig.detailLayout) === "centered"
@@ -105,6 +107,13 @@ export function PullScreen(props: {
   const markdownStyle = createReactiveMarkdownStyle(colors, theme)
   let scroll: ScrollBoxRenderable | undefined
   const bindScrollbar = createScrollbarVisibility(() => props.showScrollbar)
+  const revealActivity = () => scroll?.scrollTo(scroll.scrollHeight)
+  createEffect(() => {
+    if (props.revealActivity === undefined) return
+    renderer.once("frame", revealActivity)
+    renderer.requestRender()
+    onCleanup(() => renderer.off("frame", revealActivity))
+  })
   const keys = useKeyActions({
     "navigation.up": () => scroll!.scrollBy(-1),
     "navigation.down": () => scroll!.scrollBy(1),

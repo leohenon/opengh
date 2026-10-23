@@ -41,6 +41,7 @@ import type {
   IssueComment,
   IssueReference,
   IssueActionKind,
+  IssueActionParent,
   IssueActionResult,
   IssueCloseReason,
   IssueTimeline,
@@ -137,11 +138,11 @@ export type RepositorySession = {
   clearIssue(): void
   assignableUsers?: Accessor<ResourceState<Paginated<string>> | undefined>
   loadAssignableUsers?(): Promise<void>
-  issueAction(number: number): IssueActionState
-  prepareIssueAction(number: number, kind: IssueActionKind): void
-  updateIssueDraft(number: number, draft: Partial<Pick<IssueActionState, "body" | "reason" | "duplicateTarget" | "selectedAssignees">>): void
-  discardIssueDraft(number: number): void
-  submitIssueAction(number: number, kind: IssueActionKind): Promise<IssueActionResult>
+  issueAction(number: number, parent?: IssueActionParent): IssueActionState
+  prepareIssueAction(number: number, kind: IssueActionKind, parent?: IssueActionParent): void
+  updateIssueDraft(number: number, draft: Partial<Pick<IssueActionState, "body" | "reason" | "duplicateTarget" | "selectedAssignees">>, parent?: IssueActionParent): void
+  discardIssueDraft(number: number, parent?: IssueActionParent): void
+  submitIssueAction(number: number, kind: IssueActionKind, parent?: IssueActionParent): Promise<IssueActionResult>
   load(repository: string): Promise<void>
   refresh(): Promise<void>
   retryResource(resource: RepositoryResource): Promise<void>
@@ -309,7 +310,7 @@ export function createRepositorySession(loaders: RepositoryLoaders = defaultLoad
   const [issueDetail, setIssueDetail] = createSignal<IssueDetailState>()
   const [issueActions, setIssueActions] = createSignal<Record<string, IssueActionState>>({})
   const emptyIssueAction: IssueActionState = { body: "", reason: "completed", operation: idle() }
-  const issueKey = (repository: string, number: number) => `${repository.toLowerCase()}#${number}`
+  const issueKey = (repository: string, number: number, parent: IssueActionParent = "issue") => `${repository.toLowerCase()}#${number}${parent === "pull" ? ":pull" : ""}`
   const postedComments = new Map<string, IssueComment[]>()
   const issueWriteRevision = new Map<string, number>()
   const confirmIssueWrite = (key: string) => issueWriteRevision.set(key, (issueWriteRevision.get(key) ?? 0) + 1)
@@ -792,7 +793,7 @@ export function createRepositorySession(loaders: RepositoryLoaders = defaultLoad
     try {
       const loaded = await loadPageSet(pageCount, (page) => loaders.issueComments(repository, number, page), (comment) => comment.id)
       if (request !== pullGeneration) return
-      const value = withCommentReactions("pull", number, loaded, revision)
+      const value = withCommentReactions("pull", number, withPostedComments(repository, number, loaded, loaded.items, "pull"), revision)
       setPullDetail((current) => current?.number === number
         ? { ...current, comments: { status: "ready", value } } : current)
     } catch (error) {
@@ -884,19 +885,34 @@ export function createRepositorySession(loaders: RepositoryLoaders = defaultLoad
     setPullDetail({ number, resource: loadingResource(value), comments: loadingResource(comments),
       references: loadingResource(references), events, commits: loadingResource(commits), context: loadingResource(context) })
     try {
-      const loaded = await (loaders.pull ?? loadGitHubPull)(repository, number)
+      const key = issueKey(repository, number, "pull")
+      let writeRevision = issueWriteRevision.get(key)
+      let loaded = await (loaders.pull ?? loadGitHubPull)(repository, number)
       if (request !== pullGeneration) return
+      // Retain confirmed comment metadata without discarding fresh permissions or PR state.
+      while (writeRevision !== issueWriteRevision.get(key)) {
+        const confirmed = pullDetail()?.resource.value
+        if (confirmed) {
+          loaded = { ...loaded, commentCount: Math.max(loaded.commentCount, confirmed.commentCount),
+            updatedAt: Date.parse(loaded.updatedAt) >= Date.parse(confirmed.updatedAt) ? loaded.updatedAt : confirmed.updatedAt }
+          break
+        }
+        writeRevision = issueWriteRevision.get(key)
+        loaded = await (loaders.pull ?? loadGitHubPull)(repository, number)
+        if (request !== pullGeneration) return
+      }
       if (value?.nodeId && loaded.nodeId && value.nodeId !== loaded.nodeId) resetReactionOwner("pull")
       const pull = withReactionFields({ kind: "pull", number }, loaded, revision)
       comments = pullDetail()?.comments.value ?? comments
       context = pullDetail()?.context.value ?? context
+      const hasComments = pull.commentCount > 0 || (postedComments.get(key)?.length ?? 0) > 0
       setPullDetail({ number, resource: { status: "ready", value: pull },
-        comments: pull.commentCount === 0
+        comments: !hasComments
           ? { status: "ready", value: { items: [], page: 1, hasMore: false } } : loadingResource(comments),
         references: loadingResource(references), events,
         commits: pull.commitCount === 0 ? { status: "ready", value: [] } : loadingResource(commits), context: loadingResource(context) })
       await Promise.all([
-        pull.commentCount > 0 ? fetchPullComments(repository, number, request, comments?.page ?? 1, comments) : Promise.resolve(),
+        hasComments ? fetchPullComments(repository, number, request, comments?.page ?? 1, comments) : Promise.resolve(),
         fetchPullReferences(repository, number, request, references),
         pull.commitCount > 0 ? fetchPullCommits(repository, number, request, commits) : Promise.resolve(),
         fetchPullContext(repository, number, request, context),
@@ -932,7 +948,8 @@ export function createRepositorySession(loaders: RepositoryLoaders = defaultLoad
         const merged = new Map((latest.comments.value?.items ?? value!.items).map((comment) => [comment.id, comment]))
         for (const comment of next.items) merged.set(comment.id, comment)
         return { ...latest, comments: { status: "ready", value: withCommentReactions("pull", number,
-          page({ items: [...merged.values()], hasMore: next.hasMore }, value!.page + 1), revision) } }
+          withPostedComments(current.repository, number,
+            page({ items: [...merged.values()], hasMore: next.hasMore }, value!.page + 1), next.items, "pull"), revision) } }
       })
     } catch (error) {
       if (request === pullGeneration) setPullDetail((latest) => latest?.number === number
@@ -950,8 +967,9 @@ export function createRepositorySession(loaders: RepositoryLoaders = defaultLoad
   // server returns a comment, it owns that entry again (including later edits/deletion).
   const withPostedComments = (
     repository: string, number: number, value: Paginated<IssueComment>, returned: readonly IssueComment[] = value.items,
+    parent: IssueActionParent = "issue",
   ): Paginated<IssueComment> => {
-    const key = issueKey(repository, number)
+    const key = issueKey(repository, number, parent)
     const ids = new Set(returned.map((comment) => comment.id))
     const missing = (postedComments.get(key) ?? []).filter((comment) => !ids.has(comment.id))
     if (missing.length) postedComments.set(key, missing)
@@ -1126,12 +1144,13 @@ export function createRepositorySession(loaders: RepositoryLoaders = defaultLoad
     }
   }
 
-  const issueAction = (number: number) => issueActions()[issueKey(state().repository, number)] ?? emptyIssueAction
+  const issueAction = (number: number, parent: IssueActionParent = "issue") => issueActions()[issueKey(state().repository, number, parent)] ?? emptyIssueAction
   const updateAction = (key: string, update: (action: IssueActionState) => IssueActionState) => {
     setIssueActions((actions) => ({ ...actions, [key]: update(actions[key] ?? emptyIssueAction) }))
   }
-  const prepareIssueAction = (number: number, kind: IssueActionKind) => {
-    updateAction(issueKey(state().repository, number), (action) => {
+  const prepareIssueAction = (number: number, kind: IssueActionKind, parent: IssueActionParent = "issue") => {
+    if (parent === "pull" && kind !== "comment") throw new Error("Only comments are supported for pull requests.")
+    updateAction(issueKey(state().repository, number, parent), (action) => {
       if (action.operation.status === "loading" || action.retry === kind) return action
       // Selecting a new action must not resume a different failed state change.
       const issue = issueDetail()?.number === number ? issueDetail()?.resource.value : undefined
@@ -1140,21 +1159,21 @@ export function createRepositorySession(loaders: RepositoryLoaders = defaultLoad
     })
     if (kind === "assignees" && !assignableUsers()) void loadAssignableUsers()
   }
-  const updateIssueDraft = (number: number, draft: Partial<Pick<IssueActionState, "body" | "reason" | "duplicateTarget" | "selectedAssignees">>) => {
-    updateAction(issueKey(state().repository, number), (action) => action.operation.status === "loading" || action.retry
+  const updateIssueDraft = (number: number, draft: Partial<Pick<IssueActionState, "body" | "reason" | "duplicateTarget" | "selectedAssignees">>, parent: IssueActionParent = "issue") => {
+    updateAction(issueKey(state().repository, number, parent), (action) => action.operation.status === "loading" || action.retry
       ? action : { ...action, ...draft, operation: idle() })
   }
-  const discardIssueDraft = (number: number) => {
-    updateAction(issueKey(state().repository, number), (action) => action.operation.status === "loading" ? action : emptyIssueAction)
+  const discardIssueDraft = (number: number, parent: IssueActionParent = "issue") => {
+    updateAction(issueKey(state().repository, number, parent), (action) => action.operation.status === "loading" ? action : emptyIssueAction)
   }
 
-  const actionError = (error: unknown, locked: boolean) => {
+  const actionError = (error: unknown, locked: boolean, subject = "issue") => {
     const message = messageFrom(error)
     if (!(error instanceof GitHubApiError)) return message
     if (error.status === 403 && locked) return `${message}. This thread is locked; maintainer access may be required.`
-    if (error.status === 404) return `${message}. The issue may be unavailable to your account.`
+    if (error.status === 404) return `${message}. The ${subject} may be unavailable to your account.`
     if (error.status === undefined || error.status >= 500)
-      return `${message}. GitHub did not confirm the change; check the issue on GitHub before retrying.`
+      return `${message}. GitHub did not confirm the change; check the ${subject} on GitHub before retrying.`
     return message
   }
 
@@ -1201,7 +1220,57 @@ export function createRepositorySession(loaders: RepositoryLoaders = defaultLoad
     return updated
   }
 
-  const submitIssueAction = async (number: number, kind: IssueActionKind): Promise<IssueActionResult> => {
+  const submitPullComment = async (number: number): Promise<IssueActionResult> => {
+    const current = state()
+    const detail = pullDetail()
+    const pull = detail?.resource.value
+    if (current.status !== "ready" || detail?.number !== number || !pull || detail.resource.status === "loading")
+      throw new Error("Wait for the pull request to load before commenting.")
+    const repository = current.repository
+    const key = issueKey(repository, number, "pull")
+    const action = issueActions()[key] ?? emptyIssueAction
+    if (action.operation.status === "loading") throw new Error("A pull request action is already in progress.")
+    const scope = repositoryScope
+    const stillHere = () => scope === repositoryScope && state().repository === repository
+    updateAction(key, (draft) => ({ ...draft, operation: loading() }))
+    try {
+      if (!pull.permissions?.comment) throw new Error("You do not have permission to comment on this pull request.")
+      if (!action.body.trim()) throw new Error("Write a comment before posting.")
+      if (!loaders.createIssueComment) throw new Error("Commenting is unavailable.")
+      const comment = await loaders.createIssueComment(repository, number, action.body)
+      confirmIssueWrite(key)
+      postedComments.set(key, [...(postedComments.get(key) ?? []), comment])
+      // Settle the original repository's draft even after navigating away.
+      updateAction(key, (draft) => ({ ...draft, body: "", operation: idle() }))
+      if (stillHere()) {
+        setPullDetail((latest) => {
+          if (latest?.number !== number) return latest
+          const comments = latest.comments.value ?? { items: [], page: 0, hasMore: true }
+          const items = [...comments.items.filter((item) => item.id !== comment.id), comment]
+            .sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt))
+          return {
+            ...latest,
+            resource: latest.resource.value ? { ...latest.resource, value: {
+              ...latest.resource.value, commentCount: Math.max(latest.resource.value.commentCount, pull.commentCount + 1),
+              updatedAt: Date.parse(latest.resource.value.updatedAt) >= Date.parse(comment.createdAt) ? latest.resource.value.updatedAt : comment.createdAt,
+            } } : latest.resource,
+            comments: { ...latest.comments, value: { ...comments, items } },
+          }
+        })
+      }
+      return { comment }
+    } catch (error) {
+      const message = actionError(error, pull.locked ?? false, "pull request")
+      updateAction(key, (draft) => ({ ...draft, operation: { status: "error", message } }))
+      throw new Error(message)
+    }
+  }
+
+  const submitIssueAction = async (number: number, kind: IssueActionKind, parent: IssueActionParent = "issue"): Promise<IssueActionResult> => {
+    if (parent === "pull") {
+      if (kind !== "comment") throw new Error("Only comments are supported for pull requests.")
+      return submitPullComment(number)
+    }
     const current = state()
     const detail = issueDetail()
     const issue = detail?.resource.value

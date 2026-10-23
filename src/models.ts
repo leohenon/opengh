@@ -47,6 +47,7 @@ export type IssueDetail = IssueSummary & Partial<ReactionState> & {
   commentCount: number
 }
 
+export type IssueActionParent = "issue" | "pull"
 export type IssueCloseReason = "completed" | "not_planned"
 export type IssueActionKind = "comment" | "close" | "reopen" | "duplicate" | "assignees"
 export type IssueActionResult = { comment?: IssueComment; issue?: IssueDetail; duplicateOf?: number }
@@ -256,6 +257,8 @@ export type PullContext = {
 
 export type PullRequestDetail = PullRequestSummary & Partial<ReactionState> & {
   nodeId?: string
+  locked?: boolean
+  permissions?: { comment: boolean }
   url: string
   body: string
   updatedAt: string

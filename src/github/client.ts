@@ -130,6 +130,7 @@ type PullResponse = IssueResponse & {
 }
 
 type PullDetailResponse = PullResponse & {
+  locked: boolean
   html_url: string
   body: string | null
   updated_at: string
@@ -895,14 +896,37 @@ export function createGitHubClient(transport: GitHubTransport) {
     }
   }
 
+  const withPullPermissions = async (repository: string, number: number, detail: PullRequestDetail): Promise<PullRequestDetail> => {
+    if (!transport.graphql || !Number.isSafeInteger(number) || number <= 0) return detail
+    const [owner, name] = repository.split("/")
+    try {
+      const response = record(await transport.graphql<unknown>(
+        `query($owner: String!, $name: String!) { repository(owner: $owner, name: $name) { isArchived viewerPermission pullRequest(number: ${number}) { id } } }`,
+        { owner: owner!, name: name! },
+      ))
+      if (response?.errors != null && (!Array.isArray(response.errors) || response.errors.length)) return detail
+      const repo = record(record(response?.data)?.repository)
+      const id = record(repo?.pullRequest)?.id
+      if (typeof id !== "string" || !id.trim() || typeof repo?.isArchived !== "boolean"
+        || repo.viewerPermission !== null && typeof repo.viewerPermission !== "string"
+        || detail.nodeId !== undefined && detail.nodeId !== id) return detail
+      const maintainer = ["WRITE", "MAINTAIN", "ADMIN"].includes(typeof repo.viewerPermission === "string" ? repo.viewerPermission : "")
+      detail.permissions = { comment: repo.isArchived === false && (detail.locked === false || maintainer) }
+    } catch {
+      // Permission lookup failures must not prevent read-only browsing.
+    }
+    return detail
+  }
+
   const pull = async (repository: string, number: number): Promise<PullRequestDetail> => {
     const item = await transport.json<PullDetailResponse>(`repos/${repository}/pulls/${number}`)
     const reactions = await bodyReactions(repository, number, "pull")
-    return {
+    return withPullPermissions(repository, number, {
       ...issueSummary(item),
       ...(typeof item.node_id === "string" && item.node_id.trim() ? { nodeId: item.node_id } : {}),
       merged: item.merged_at != null,
       draft: item.draft === true,
+      ...(typeof item.locked === "boolean" ? { locked: item.locked } : {}),
       url: item.html_url,
       body: item.body ?? "",
       updatedAt: item.updated_at,
@@ -926,7 +950,7 @@ export function createGitHubClient(transport: GitHubTransport) {
       ],
       mergeable: item.mergeable,
       ...reactions,
-    }
+    })
   }
 
   const pullCommits = async (repository: string, number: number): Promise<CommitSummary[]> => {

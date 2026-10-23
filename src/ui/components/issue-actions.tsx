@@ -1,7 +1,7 @@
 import { TextAttributes, type ScrollBoxRenderable, type TextareaRenderable } from "@opentui/core"
 import { usePaste } from "@opentui/solid"
 import { createEffect, createMemo, createSignal, Index, onCleanup, Show, untrack } from "solid-js"
-import type { IssueActionKind, IssueCloseReason } from "../../models"
+import type { IssueActionKind, IssueActionParent, IssueCloseReason } from "../../models"
 import type { IssueActionState } from "../../repository-state"
 import { createReactiveMarkdownStyle } from "../markdown-style"
 import { useTheme } from "../theme"
@@ -63,6 +63,7 @@ export function IssueActionsMenu(props: {
 export function IssueActionDialog(props: {
   number: number
   kind: IssueActionKind
+  parent?: IssueActionParent
   state: IssueActionState
   showScrollbar: boolean
   locked?: boolean
@@ -102,7 +103,7 @@ export function IssueActionDialog(props: {
     ? duplicateNumber() !== undefined && duplicateNumber() !== props.number
     : Boolean(retry()) || props.kind !== "comment" || Boolean(body().trim()))
   const action = () => retry() ?? props.kind
-  const title = () => props.kind === "comment" ? `#${props.number}`
+  const title = () => props.kind === "comment" ? `${props.parent === "pull" ? "PR " : ""}#${props.number}`
     : `${props.kind === "duplicate" ? "Mark as duplicate" : props.kind === "close" ? "Close issue" : "Reopen issue"} · #${props.number}`
   const requestSubmit = () => { if (canSubmit()) setConfirmSubmit(true) }
   const requestClose = () => {
@@ -121,7 +122,7 @@ export function IssueActionDialog(props: {
     else props.onDiscard()
   }
   const confirmation = () => {
-    if (action() === "comment") return `Post comment to #${props.number}?`
+    if (action() === "comment") return `Post comment to ${props.parent === "pull" ? "PR " : ""}#${props.number}?`
     if (action() === "duplicate") return `Close #${props.number} as a duplicate of #${duplicateNumber()}?`
     if (retry()) return `Retry ${action() === "close" ? "closing" : "reopening"} issue #${props.number}?`
     const verb = action() === "close" ? "close" : "reopen"
@@ -257,7 +258,7 @@ export function IssueActionDialog(props: {
                 <scrollbox id="issue-comment-preview-scroll" ref={(value) => { previewScroll = value; bindScrollbar(value) }} focusable={false} flexGrow={1} minHeight={0} scrollX={false} scrollY>
                   <Show when={body().trim()} fallback={<text fg={colors.muted}>Nothing to preview.</text>}>
                     <GitHubMarkdown content={body()} syntaxStyle={markdownStyle()} backgroundColor={colors.panel} preserveImages codePanels
-                      context={{ repositoryUrl: props.repositoryUrl, ref: props.defaultBranch, sourceUrl: `${props.repositoryUrl}/issues/${props.number}` }} />
+                      context={{ repositoryUrl: props.repositoryUrl, ref: props.defaultBranch, sourceUrl: `${props.repositoryUrl}/${props.parent === "pull" ? "pull" : "issues"}/${props.number}` }} />
                 </Show>
               </scrollbox>
             </Show>

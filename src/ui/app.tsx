@@ -6,7 +6,7 @@ import type { HintEntry } from "../keybindings"
 import { KeybindingsBoundary, useKeyActions, useKeybindings } from "./keybindings"
 import { cloneCommand, cloneDestination, matchesLocalRepository, type LocalRepository, type CommandSpec, type CommandTask } from "../command-actions"
 import { CommandDialog, type CommandAction } from "./components/command-dialog"
-import type { CommitDetail, DiffContent, DiffTarget, IssueActionKind, IssueActionResult, Paginated, ListState, ReactionKind, ReactionState, ReactionTarget } from "../models"
+import type { CommitDetail, DiffContent, DiffTarget, IssueActionKind, IssueActionParent, IssueActionResult, Paginated, ListState, ReactionKind, ReactionState, ReactionTarget } from "../models"
 import { back, navigate, openDetail, openDiff, type InitialNavigation, type NavigationState, type Page } from "../navigation"
 import type {
   CommitDetailState,
@@ -97,13 +97,13 @@ export type AppProps = {
   onLoadMoreIssueComments?: () => Promise<void>
   onRetryIssueReferences?: () => Promise<void>
   onCloseIssue?: () => void
-  getIssueAction?: (number: number) => IssueActionState
+  getIssueAction?: (number: number, parent?: IssueActionParent) => IssueActionState
   assignableUsers?: ResourceState<Paginated<string>>
   onLoadAssignableUsers?: () => Promise<void>
-  onPrepareIssueAction?: (number: number, kind: IssueActionKind) => void
-  onIssueDraftChange?: (number: number, draft: Partial<Pick<IssueActionState, "body" | "reason" | "duplicateTarget" | "selectedAssignees">>) => void
-  onDiscardIssueDraft?: (number: number) => void
-  onSubmitIssueAction?: (number: number, kind: IssueActionKind) => Promise<IssueActionResult>
+  onPrepareIssueAction?: (number: number, kind: IssueActionKind, parent?: IssueActionParent) => void
+  onIssueDraftChange?: (number: number, draft: Partial<Pick<IssueActionState, "body" | "reason" | "duplicateTarget" | "selectedAssignees">>, parent?: IssueActionParent) => void
+  onDiscardIssueDraft?: (number: number, parent?: IssueActionParent) => void
+  onSubmitIssueAction?: (number: number, kind: IssueActionKind, parent?: IssueActionParent) => Promise<IssueActionResult>
   pullDetail?: PullDetailState
   onLoadPull?: (number: number) => Promise<void>
   onLoadMorePullComments?: () => Promise<void>
@@ -150,16 +150,17 @@ function AppContent(props: AppProps) {
   const [overlay, setOverlay] = createSignal<Overlay>()
   const [toast, setToast] = createSignal<ToastState>()
   const [commandAction, setCommandAction] = createSignal<CommandAction>()
-  const [issueAction, setIssueAction] = createSignal<{ number: number; kind: IssueActionKind }>()
+  const [issueAction, setIssueAction] = createSignal<{ number: number; kind: IssueActionKind; parent?: IssueActionParent }>()
   const [issueActionHint, setIssueActionHint] = createSignal<string>()
   const [commandHint, setCommandHint] = createSignal<string>()
   const [settingsHint, setSettingsHint] = createSignal<string>()
-  const [revealActivity, setRevealActivity] = createSignal<{ number: number; id: number }>()
+  const [revealActivity, setRevealActivity] = createSignal<{ number: number; id: number; parent?: IssueActionParent }>()
   const emptyIssueAction: IssueActionState = { body: "", reason: "completed", operation: { status: "idle" } }
   let revealId = 0
   const canClone = () => Boolean(props.onRunCommand && props.cwd && !matchesLocalRepository(props.localRepository, data().repo.nameWithOwner))
   const openCommand = (action: CommandAction) => { setCommandAction(action); setOverlay("command") }
   let toastId = 0
+  let disposed = false
   let overviewScroll: ScrollBoxRenderable | undefined
   let defaultStateRepository: string | undefined
   let issueDefaultResolved = false
@@ -257,13 +258,15 @@ function AppContent(props: AppProps) {
   }
   const submitIssueAction = async () => {
     const action = issueAction()
-    if (!action || !props.onSubmitIssueAction || action.number !== activeIssueNumber() || !canActOnIssue(action.kind)) return
+    if (!action || !props.onSubmitIssueAction) return
+    if (action.parent === "pull" ? action.kind !== "comment" || action.number !== activePullNumber() || !canCommentOnPull()
+      : action.number !== activeIssueNumber() || !canActOnIssue(action.kind)) return
     const repository = data().repo.nameWithOwner
-    const retry = props.getIssueAction?.(action.number).retry
+    const retry = props.getIssueAction?.(action.number, action.parent).retry
     try {
-      const result = await props.onSubmitIssueAction(action.number, action.kind)
-      if (renderer.isDestroyed || data().repo.nameWithOwner !== repository || issueAction() !== action) return
-      if (result.comment || retry) setRevealActivity({ number: action.number, id: ++revealId })
+      const result = await props.onSubmitIssueAction(action.number, action.kind, action.parent)
+      if (disposed || renderer.isDestroyed || data().repo.nameWithOwner !== repository || issueAction() !== action) return
+      if (result.comment || retry) setRevealActivity({ number: action.number, id: ++revealId, parent: action.parent })
       setOverlay()
       setIssueAction()
       setToast({ id: ++toastId, title: action.kind === "comment" ? "Comment posted"
@@ -271,8 +274,8 @@ function AppContent(props: AppProps) {
         : action.kind === "duplicate" ? "Issue marked as duplicate" : action.kind === "close" ? "Issue closed" : "Issue reopened",
         message: result.duplicateOf ? `#${action.number} → #${result.duplicateOf}` : `#${action.number}`, duration: 2000, tone: "success" })
     } catch (error) {
-      if (!renderer.isDestroyed && issueAction() === action && props.getIssueAction?.(action.number).operation.status !== "error")
-        setToast({ id: ++toastId, title: "Issue action failed", message: error instanceof Error ? error.message : "Unknown error" })
+      if (!disposed && !renderer.isDestroyed && issueAction() === action && props.getIssueAction?.(action.number, action.parent).operation.status !== "error")
+        setToast({ id: ++toastId, title: action.parent === "pull" ? "Comment failed" : "Issue action failed", message: error instanceof Error ? error.message : "Unknown error" })
     }
   }
   const refreshIssue = async (number: number) => {
@@ -299,6 +302,21 @@ function AppContent(props: AppProps) {
   const pullDetail = createMemo<PullDetailState>(() => props.pullDetail && props.pullDetail.number === pullNumber()
     ? props.pullDetail
     : { number: pullNumber() ?? 0, resource: { status: "loading", phase: "load" }, commits: { status: "loading", phase: "load" }, context: { status: "loading", phase: "load" }, comments: { status: "loading", phase: "load" }, references: { status: "loading", phase: "load" } })
+  const canCommentOnPull = () => {
+    const number = activePullNumber()
+    return Boolean(number && props.onSubmitIssueAction && pullDetail().resource.value?.permissions?.comment
+      && pullDetail().resource.status !== "loading"
+      && props.getIssueAction?.(number, "pull").operation.status !== "loading")
+  }
+  const canComment = () => canActOnIssue("comment") || canCommentOnPull()
+  const openComment = () => {
+    if (!activePullNumber()) return openIssueAction("comment")
+    if (!canCommentOnPull()) return
+    const number = activePullNumber()!
+    props.onPrepareIssueAction?.(number, "comment", "pull")
+    setIssueAction({ number, kind: "comment", parent: "pull" })
+    setOverlay("issue-action")
+  }
   const pullResource = () => pullDetail().resource
   const pullDetailPart = () => {
     const detail = pullDetail()
@@ -452,7 +470,7 @@ function AppContent(props: AppProps) {
   const statusKind = (): StatusKind | undefined => {
     if (overlay() === "issue-action") {
       const action = issueAction()
-      if (action && props.getIssueAction?.(action.number).operation.status === "loading")
+      if (action && props.getIssueAction?.(action.number, action.parent).operation.status === "loading")
         return action.kind === "assignees" ? "updating-issue"
           : action.kind === "duplicate" ? "marking-duplicate" : action.kind === "comment" ? "posting-comment"
           : action.kind === "close" ? "closing-issue" : "reopening-issue"
@@ -626,7 +644,7 @@ function AppContent(props: AppProps) {
     }
   })
 
-  onCleanup(() => { props.onCloseDiff?.(); props.onCloseRun?.(); props.onCloseCommit?.(); props.onCloseIssue?.(); props.onClosePull?.() })
+  onCleanup(() => { disposed = true; props.onCloseDiff?.(); props.onCloseRun?.(); props.onCloseCommit?.(); props.onCloseIssue?.(); props.onClosePull?.() })
 
   const closeDetail = () => {
     const detail = navigation().details?.[page()]
@@ -634,7 +652,7 @@ function AppContent(props: AppProps) {
     if (detail?.kind === "run") props.onCloseRun?.()
     if (detail?.kind === "commit") props.onCloseCommit?.()
     if (detail?.kind === "issue") { props.onCloseIssue?.(); setRevealActivity() }
-    if (detail?.kind === "pull") props.onClosePull?.()
+    if (detail?.kind === "pull") { props.onClosePull?.(); setRevealActivity() }
   }
   const selectPage = (next: Page) => {
     initialPagePending = false
@@ -775,10 +793,10 @@ function AppContent(props: AppProps) {
   const backContextItems = (): ContextMenuItem[] =>
     canGoBack() ? [{ label: "Back", run: goBack }] : [];
   const commentContextItems = (): ContextMenuItem[] =>
-    canActOnIssue("comment") ? [{
+    canComment() ? [{
       label: "Add comment",
-      run: () => openIssueAction("comment"),
-      get disabled() { return !canActOnIssue("comment"); },
+      run: openComment,
+      get disabled() { return !canComment(); },
     }] : [];
   const openMessageContext = (target: ReactionTarget, body: string, position: MousePosition) => {
     const message = () => reactionMessages().find((message) => sameReactionTarget(message.target, target))
@@ -918,10 +936,11 @@ function AppContent(props: AppProps) {
       const retry = activeResource()?.status === "error"
       const more = pullDetail().comments.value?.hasMore
       const references = pullMenuItems().length
-      if (dimensions().width < 64) return hint(back, diff,
+      const commentHints: HintEntry[] = canCommentOnPull() ? [["issue.comment", "comment"]] : []
+      if (dimensions().width < 64) return hint(back, diff, ...commentHints,
         retry ? ["view.refresh", "retry"] : more ? ["navigation.activate", "load more"]
           : references ? ["detail.references", "references"] : github, ...common)
-      return hint(back, diff, ...(retry ? [["view.refresh", "retry"] as const] : more ? [["navigation.activate", "load more"] as const] : []),
+      return hint(back, diff, ...commentHints, ...(retry ? [["view.refresh", "retry"] as const] : more ? [["navigation.activate", "load more"] as const] : []),
         ...(references ? [["detail.references", "references"] as const] : []),
         ...(dimensions().width >= 100 || !retry && !more ? [github, copy] : []), ...common)
     }
@@ -1030,7 +1049,7 @@ function AppContent(props: AppProps) {
         else props.onRefresh?.()
       }
     },
-    "issue.comment": () => { if (!activeIssueNumber() || diffTarget() || !canActOnIssue("comment")) return false; openIssueAction("comment") },
+    "issue.comment": () => { if (diffTarget() || !canComment()) return false; openComment() },
     "issue.actions": () => { if (!activeIssueNumber() || diffTarget() || !hasIssueActions()) return false; setOverlay("issue-actions") },
     "detail.references": () => { if (diffTarget() || !(activeIssueNumber() || activePullNumber()) || !activeMenuItems().length) return false; setOverlay("issue-references") },
     "command.clone": () => {
@@ -1206,7 +1225,7 @@ function AppContent(props: AppProps) {
               number={number}
               detail={issueDetail()}
               reactionControls={reactionControls()}
-              revealActivity={revealActivity()?.number === number ? revealActivity()?.id : undefined}
+              revealActivity={revealActivity()?.parent !== "pull" && revealActivity()?.number === number ? revealActivity()?.id : undefined}
               defaultBranch={data().repo.defaultBranch}
               interactive={!diffTarget() && page() === "issues" && overlay() === undefined}
               showScrollbar={config().showScrollbars}
@@ -1221,6 +1240,7 @@ function AppContent(props: AppProps) {
             <PullScreen
               number={number}
               detail={pullDetail()}
+              revealActivity={revealActivity()?.parent === "pull" && revealActivity()?.number === number ? revealActivity()?.id : undefined}
               reactionControls={reactionControls()}
               defaultBranch={data().repo.defaultBranch}
               interactive={!diffTarget() && page() === "pulls" && overlay() === undefined}
@@ -1305,7 +1325,7 @@ function AppContent(props: AppProps) {
           hasMoreFiles={commitResource().value?.files.hasMore}
           hasMoreComments={activePullNumber() ? pullDetail().comments.value?.hasMore : issueDetail().comments.value?.hasMore}
           hasReferences={activeMenuItems().length > 0}
-          canComment={canActOnIssue("comment")}
+          canComment={canComment()}
           hasIssueActions={hasIssueActions()}
           command={page() === "overview" && canClone() ? "clone repository" : undefined}
         />
@@ -1324,16 +1344,17 @@ function AppContent(props: AppProps) {
           fallback={<IssueActionDialog
             number={action.number}
             kind={action.kind}
-            state={props.getIssueAction?.(action.number) ?? emptyIssueAction}
+            parent={action.parent}
+            state={props.getIssueAction?.(action.number, action.parent) ?? emptyIssueAction}
             showScrollbar={config().showScrollbars}
-            locked={issueDetail().resource.value?.locked}
+            locked={action.parent === "pull" ? pullDetail().resource.value?.locked : issueDetail().resource.value?.locked}
             repositoryUrl={data().repo.url}
             defaultBranch={data().repo.defaultBranch}
-            onBodyChange={(body) => props.onIssueDraftChange?.(action.number, { body })}
-            onReasonChange={(reason) => props.onIssueDraftChange?.(action.number, { reason })}
-            onDuplicateTargetChange={(duplicateTarget) => props.onIssueDraftChange?.(action.number, { duplicateTarget })}
+            onBodyChange={(body) => props.onIssueDraftChange?.(action.number, { body }, action.parent)}
+            onReasonChange={(reason) => props.onIssueDraftChange?.(action.number, { reason }, action.parent)}
+            onDuplicateTargetChange={(duplicateTarget) => props.onIssueDraftChange?.(action.number, { duplicateTarget }, action.parent)}
             onSubmit={() => void submitIssueAction()}
-            onDiscard={() => props.onDiscardIssueDraft?.(action.number)}
+            onDiscard={() => props.onDiscardIssueDraft?.(action.number, action.parent)}
             onHintChange={setIssueActionHint}
             onClose={() => { setOverlay(); setIssueAction() }}
           />}>
