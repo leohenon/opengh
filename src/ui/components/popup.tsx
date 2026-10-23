@@ -1,4 +1,4 @@
-import { RGBA } from "@opentui/core"
+import { MouseButton, RGBA } from "@opentui/core"
 import { useTerminalDimensions } from "@opentui/solid"
 import type { JSX } from "solid-js"
 import { useTheme } from "../theme"
@@ -8,10 +8,12 @@ export function Popup(props: {
   height: number
   zIndex?: number
   placement?: "upper" | "center"
+  onClose?: () => void
   children: JSX.Element
 }) {
   const dimensions = useTerminalDimensions()
   const { colors } = useTheme()
+  let dismissOnRelease = false
   const width = () => Math.max(1, Math.min(props.width ?? 64, dimensions().width - 2))
   const height = () => Math.max(1, Math.min(props.height, dimensions().height - 2))
   const top = () => props.placement === "center"
@@ -29,6 +31,20 @@ export function Popup(props: {
       alignItems="center"
       paddingTop={top()}
       backgroundColor={RGBA.fromInts(0, 0, 0, 150)}
+      onMouse={(event) => {
+        event.stopPropagation()
+        if (event.type === "drag") dismissOnRelease = false
+      }}
+      onMouseDown={(event) => {
+        event.preventDefault()
+        dismissOnRelease = event.button === MouseButton.LEFT
+      }}
+      onMouseUp={(event) => {
+        const dismiss = dismissOnRelease && event.button === MouseButton.LEFT
+        dismissOnRelease = false
+        // Keep the backdrop mounted through the whole click to avoid release click-through.
+        if (dismiss) props.onClose?.()
+      }}
     >
       <box
         width={width()}
@@ -38,6 +54,14 @@ export function Popup(props: {
         overflow="hidden"
         paddingTop={1}
         backgroundColor={colors.panel}
+        onMouseDown={(event) => {
+          dismissOnRelease = false
+          event.stopPropagation()
+        }}
+        onMouseUp={(event) => {
+          dismissOnRelease = false
+          event.stopPropagation()
+        }}
       >
         {props.children}
       </box>

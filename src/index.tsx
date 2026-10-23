@@ -38,7 +38,8 @@ if (launch.help) {
 const renderer = await createCliRenderer({
   targetFps: 30,
   exitOnCtrlC: false,
-  useMouse: false,
+  useMouse: true,
+  enableMouseMovement: false,
   onDestroy: () => {
     // Host cleanup can finish before native teardown and terminal output settle.
     void Promise.allSettled([

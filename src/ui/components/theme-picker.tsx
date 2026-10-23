@@ -1,8 +1,10 @@
 import { TextAttributes, type ScrollBoxRenderable } from "@opentui/core"
 import { createEffect, createMemo, createSignal, For, Show } from "solid-js"
 import { defaultTheme, themeNames, type ThemeName } from "../../theme"
+import { mouseClick } from "../mouse"
 import { useTheme } from "../theme"
 import { KeyInput, useKeyActions } from "../keybindings"
+import { Action } from "./action"
 
 function fuzzyScore(value: string, query: string) {
   const target = value.toLowerCase()
@@ -60,12 +62,13 @@ export function ThemePicker(props: {
     list?.scrollChildIntoView(`theme-${active.theme}`)
   })
 
-  const choose = async () => {
-    if (busy() || !themes().some((entry) => entry.theme === selected())) return
+  const choose = async (name: ThemeName = selected()) => {
+    if (busy() || !themes().some((entry) => entry.theme === name)) return
+    setSelected(name)
     setSaving(true)
     setError("")
     try {
-      await props.onSelect(selected())
+      await props.onSelect(name)
     } catch (error) {
       props.onPreview(props.current)
       setError(error instanceof Error ? error.message : "Theme save failed")
@@ -74,9 +77,10 @@ export function ThemePicker(props: {
     }
   }
 
+  const requestClose = () => { if (!busy()) props.onCancel() }
   useKeyActions({}, { when: busy, priority: 200, modal: true })
   useKeyActions({
-    "dialog.close": () => props.onCancel(),
+    "dialog.close": requestClose,
     "picker.up": () => move(-1),
     "picker.down": () => move(1),
     "picker.accept": () => { void choose() },
@@ -107,6 +111,7 @@ export function ThemePicker(props: {
       <box height={1} flexShrink={0} />
       <scrollbox
         ref={(value) => (list = value)}
+        focusable={false}
         flexGrow={1}
         minHeight={0}
         verticalScrollbarOptions={{ visible: false }}
@@ -122,6 +127,7 @@ export function ThemePicker(props: {
               return (
                 <box
                   id={`theme-${entry.theme}`}
+                  {...mouseClick(() => void choose(entry.theme), () => !busy())}
                   height={1}
                   flexShrink={0}
                   flexDirection="row"
@@ -148,6 +154,9 @@ export function ThemePicker(props: {
         </Show>
       </scrollbox>
       <Show when={error()}>{(message) => <text fg={colors.red}>{message()}</text>}</Show>
+      <box height={1} flexShrink={0} flexDirection="row">
+        <Action id="theme-back" onActivate={requestClose} disabled={busy()}>Back</Action>
+      </box>
     </box>
   )
 }

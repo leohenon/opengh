@@ -68,6 +68,8 @@ export function CommitScreen(props: {
   return (
     <box flexGrow={1} minHeight={0} flexDirection="column" backgroundColor={colors.canvas} paddingX={2}>
       <scrollbox
+        focusable={false}
+        onMouseScroll={(event) => event.stopPropagation()}
         id="commit-detail-scroll"
         ref={(value) => { scroll = value; bindScrollbar(value) }}
         flexGrow={1}

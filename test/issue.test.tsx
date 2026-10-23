@@ -252,7 +252,7 @@ test("zero-comment issues still show PR mentions and open the correct source rep
   view.mockInput.pressEnter()
   await view.flush()
   expect(opened).toEqual({ target: 77, repository: "other/repo" })
-  expect(view.captureCharFrame()).not.toContain("References")
+  expect(view.renderer.root.findDescendantById("references-tab-pull")).toBeUndefined()
   expect(detail()?.number).toBe(number)
   view.mockInput.pressKey("p")
   await view.flush()

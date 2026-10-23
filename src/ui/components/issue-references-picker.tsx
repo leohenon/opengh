@@ -9,6 +9,8 @@ import { useIcons } from "../icon-style"
 import { ListLine } from "./list-line"
 import { Popup } from "./popup"
 import { SelectableList } from "./selectable-list"
+import { Action } from "./action"
+import { mouseClick } from "../mouse"
 
 export function IssueReferencesPicker(props: {
   references: readonly IssueReference[]
@@ -16,6 +18,7 @@ export function IssueReferencesPicker(props: {
   showScrollbar: boolean
   onOpen: (reference: IssueLinkReference) => void
   onCopy: (reference: IssueLinkReference) => void
+  onClose: () => void
 }) {
   const { colors } = useTheme()
   const icons = useIcons()
@@ -23,12 +26,14 @@ export function IssueReferencesPicker(props: {
   const pulls = createMemo(() => items().filter((reference) => reference.kind === "pull"))
   const issues = createMemo(() => items().filter((reference) => reference.kind === "issue"))
   const [tab, setTab] = createSignal<"pull" | "issue">(pulls().length ? "pull" : "issue")
+  const [selectedKeys, setSelectedKeys] = createSignal<Partial<Record<"pull" | "issue", string>>>({})
+  const selected = () => (tab() === "pull" ? pulls() : issues()).find((item) => `${item.repository}#${item.number}` === selectedKeys()[tab()])
 
   useKeyActions({
     "references.switchTab": () => { setTab((current) => current === "pull" ? "issue" : "pull") },
   }, { priority: 100 })
   return (
-    <Popup width={80} height={20} zIndex={200} placement="center">
+    <Popup width={80} height={20} zIndex={200} placement="center" onClose={props.onClose}>
       <box flexGrow={1} minHeight={0} paddingLeft={2} paddingRight={2} paddingBottom={1}>
         <box height={1} flexShrink={0}>
           <text fg={colors.text} attributes={TextAttributes.BOLD}>References</text>
@@ -40,12 +45,12 @@ export function IssueReferencesPicker(props: {
               const active = () => tab() === kind
               const label = () => `${kind === "pull" ? "PRs" : "Issues"} (${kind === "pull" ? pulls().length : issues().length})`
               return (
-                <box height={2} flexShrink={0} flexDirection="column">
-                  <text fg={active() ? colors.blue : colors.muted} attributes={active() ? TextAttributes.BOLD : TextAttributes.NONE}>
+                <box id={`references-tab-${kind}`} height={2} flexShrink={0} flexDirection="column" {...mouseClick(() => setTab(kind))}>
+                  <text selectable={false} fg={active() ? colors.blue : colors.muted} attributes={active() ? TextAttributes.BOLD : TextAttributes.NONE}>
                     {kind === "pull" ? "PRs" : "Issues"}
                     <span style={{ fg: colors.muted }}>{` (${kind === "pull" ? pulls().length : issues().length})`}</span>
                   </text>
-                  <text height={1} fg={colors.blue}>{active() ? "─".repeat(label().length) : ""}</text>
+                  <text height={1} selectable={false} fg={colors.blue}>{active() ? "─".repeat(label().length) : ""}</text>
                 </box>
               )
             }}
@@ -61,6 +66,7 @@ export function IssueReferencesPicker(props: {
                 active={tab() === kind}
                 empty={kind === "pull" ? "No referenced pull requests" : "No referenced issues"}
                 showScrollbar={props.showScrollbar}
+                onSelect={(item) => setSelectedKeys((current) => ({ ...current, [kind]: `${item.repository}#${item.number}` }))}
                 onActivate={props.onOpen}
                 onOpenInBrowser={props.onOpen}
                 onCopy={props.onCopy}
@@ -82,6 +88,11 @@ export function IssueReferencesPicker(props: {
             </box>
           )}
         </For>
+        <box height={1} flexShrink={0} flexDirection="row" gap={2}>
+          <Action id="references-open" disabled={!selected()} onActivate={() => { const item = selected(); if (item) props.onOpen(item) }}>Open</Action>
+          <Action id="references-copy" disabled={!selected()} onActivate={() => { const item = selected(); if (item) props.onCopy(item) }}>Copy URL</Action>
+          <Action id="references-back" onActivate={props.onClose}>Back</Action>
+        </box>
       </box>
     </Popup>
   )

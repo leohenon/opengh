@@ -4,6 +4,8 @@ import { useTheme } from "../theme"
 import { createScrollbarVisibility } from "../scrollbar-visibility"
 import { Popup } from "./popup"
 import { KeyInput, useKeyActions } from "../keybindings"
+import { Action } from "./action"
+import { mouseClick } from "../mouse"
 
 type Match = number | undefined
 
@@ -12,6 +14,7 @@ export function SearchablePicker<T>(props: {
   placeholder: string
   items: readonly T[]
   itemKey: (item: T) => string | number
+  itemDisabled?: (item: T) => boolean
   match: (item: T, query: string) => Match
   preferred?: (item: T) => boolean
   titleMeta?: string
@@ -61,6 +64,13 @@ export function SearchablePicker<T>(props: {
     if (item) setSelectedKey(props.itemKey(item))
   }
 
+  const activate = (index: number) => {
+    const item = items()[index]
+    if (!item || props.itemDisabled?.(item)) return
+    setSelectedKey(props.itemKey(item))
+    props.onSelect(item)
+  }
+
   createEffect(() => {
     listReady()
     const available = items()
@@ -74,23 +84,26 @@ export function SearchablePicker<T>(props: {
     list?.scrollChildIntoView(`picker-row-${index}`)
   })
 
+  const submit = () => {
+    const item = items()[selected()]
+    if (item !== undefined && props.itemDisabled?.(item)) return
+    if (props.onSubmit) props.onSubmit(query(), item)
+    else if (item) props.onSelect(item)
+  }
   useKeyActions({
     "dialog.close": () => props.onClose(),
     "picker.up": () => move(-1),
     "picker.down": () => move(1),
-    "picker.accept": () => {
-      const item = items()[selected()]
-      if (props.onSubmit) props.onSubmit(query(), item)
-      else if (item) props.onSelect(item)
-    },
+    "picker.accept": submit,
   }, { priority: 100, modal: true })
 
   return (
     <Popup
       width={props.width ?? 64}
-      height={props.height}
+      height={props.height + (props.onSubmit ? 2 : 0)}
       placement={props.placement}
       zIndex={100}
+      onClose={props.onClose}
     >
       <box flexGrow={1} minHeight={0} flexDirection="column" gap={1} paddingBottom={1}>
         <box flexShrink={0} paddingLeft={4} paddingRight={4}>
@@ -100,6 +113,7 @@ export function SearchablePicker<T>(props: {
           </box>
           <box height={2} flexShrink={0} paddingTop={1}>
             <KeyInput
+              id="picker-query"
               width="100%"
               focused
               value={query()}
@@ -135,6 +149,7 @@ export function SearchablePicker<T>(props: {
                 bindScrollbar(value)
                 setListReady(true)
               }}
+              focusable={false}
               flexGrow={1}
               minHeight={0}
               paddingLeft={1}
@@ -158,6 +173,7 @@ export function SearchablePicker<T>(props: {
                         paddingLeft={3}
                         paddingRight={3}
                         backgroundColor={active() ? colors.panelHover : colors.panel}
+                        {...mouseClick(() => activate(index), () => !props.itemDisabled?.(item()), () => props.itemKey(item()))}
                       >
                         <text width={2} fg={colors.blue}>{active() ? "›" : " "}</text>
                         {props.children(item(), active, rowIndex)}
@@ -167,6 +183,12 @@ export function SearchablePicker<T>(props: {
                 </Index>
               </Show>
             </scrollbox>
+          </box>
+        </Show>
+        <Show when={props.onSubmit}>
+          <box height={1} flexShrink={0} flexDirection="row" gap={2} paddingX={4}>
+            <Action id="picker-submit" onActivate={submit}>Open</Action>
+            <Action id="picker-cancel" onActivate={props.onClose}>Cancel</Action>
           </box>
         </Show>
       </box>

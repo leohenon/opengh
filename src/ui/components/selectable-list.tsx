@@ -1,6 +1,7 @@
-import type { BoxRenderable, ScrollBoxRenderable } from "@opentui/core"
+import { MouseButton, type BoxRenderable, type ScrollBoxRenderable } from "@opentui/core"
+import { useKeyboard } from "@opentui/solid"
 import { useKeyActions } from "../keybindings"
-import { createEffect, createSignal, Index, onCleanup, Show, type Accessor, type JSX } from "solid-js"
+import { createEffect, createMemo, createSignal, Index, onCleanup, Show, type Accessor, type JSX } from "solid-js"
 import { fitText } from "../format"
 import { scrollRowIntoView } from "../scroll-selection"
 import { ListLine } from "./list-line"
@@ -13,6 +14,8 @@ export function SelectableList<T>(props: {
   items: readonly T[]
   itemKey: (item: T) => ItemKey
   active: boolean
+  mouseActive?: boolean
+  onMouseFocus?: () => void
   showScrollbar?: boolean
   resetKey?: string | number
   empty: string
@@ -30,6 +33,9 @@ export function SelectableList<T>(props: {
   const [selectedKey, setSelectedKey] = createSignal<ItemKey>()
   const [containerHeight, setContainerHeight] = createSignal(0)
   let selectedIndex = 0
+  let mousePress: { key: ItemKey; x: number; y: number } | undefined
+  const mouseActive = () => props.mouseActive ?? props.active
+  let followSelection = true
   let previousResetKey = props.resetKey
   let container: BoxRenderable | undefined
   let list: ScrollBoxRenderable | undefined
@@ -41,12 +47,24 @@ export function SelectableList<T>(props: {
     const height = container?.height ?? 0
     setContainerHeight((current) => current === height ? current : height)
   }
-  const indexOfSelection = () => {
+  // Appending a page must not reveal an unchanged selection after wheel browsing.
+  const indexOfSelection = createMemo(() => {
     const key = selectedKey()
     return key === undefined ? -1 : props.items.findIndex((item) => props.itemKey(item) === key)
+  })
+
+  const revealSelection = () => {
+    const index = indexOfSelection()
+    if (followSelection && props.active && list && index >= 0) {
+      scrollRowIntoView(list, index, rowHeight())
+      // Selection-driven scrolling emits the same native change event as the mouse.
+      followSelection = true
+    }
   }
 
   const selectIndex = (index: number) => {
+    mousePress = undefined
+    followSelection = true
     if (!props.items.length) {
       selectedIndex = 0
       setSelectedKey(undefined)
@@ -57,6 +75,7 @@ export function SelectableList<T>(props: {
     if (!item) return
     setSelectedKey(props.itemKey(item))
     props.onSelect?.(item)
+    revealSelection()
   }
 
   const move = (delta: number) => {
@@ -65,7 +84,11 @@ export function SelectableList<T>(props: {
   }
   const halfPage = () => Math.max(1, Math.floor(listHeight() / rowHeight() / 2))
 
+  createEffect(() => { if (!mouseActive()) mousePress = undefined })
+  useKeyboard(() => { mousePress = undefined })
+
   const activate = (callback: ((item: T) => void) | undefined) => {
+    mousePress = undefined
     const item = props.items[indexOfSelection()]
     if (!callback || item === undefined) return false
     callback(item)
@@ -99,12 +122,19 @@ export function SelectableList<T>(props: {
     else selectIndex(Math.min(selectedIndex, Math.max(0, items.length - 1)))
   })
 
-  const revealSelection = () => {
-    const index = indexOfSelection()
-    if (props.active && list && index >= 0) scrollRowIntoView(list, index, rowHeight())
-  }
   createEffect(revealSelection)
-  onCleanup(() => list?.viewport.off("resize", revealSelection))
+
+  const onScrollChange = () => {
+    // Native wheel/scrollbar browsing may intentionally leave the selected row offscreen.
+    followSelection = false
+    if (!props.active || !list || list.viewport.height <= 0 || !props.items.length) return
+    const lastVisibleIndex = Math.ceil((list.scrollTop + list.viewport.height) / rowHeight()) - 1
+    if (lastVisibleIndex >= props.items.length - (props.endThreshold ?? 3)) props.onEndReached?.()
+  }
+  onCleanup(() => {
+    list?.viewport.off("resize", revealSelection)
+    list?.verticalScrollBar.off("change", onScrollChange)
+  })
 
   createEffect(() => {
     const index = indexOfSelection()
@@ -132,6 +162,24 @@ export function SelectableList<T>(props: {
           bindScrollbar(value)
           // Resize events run after ScrollBox updates its viewport and scrollbar bounds.
           list.viewport.on("resize", revealSelection)
+          list.verticalScrollBar.on("change", onScrollChange)
+        }}
+        focusable={false}
+        scrollbarOptions={{ trackOptions: { onMouse: (event) => {
+          if (event.type === "down" && event.button === MouseButton.LEFT && mouseActive()) props.onMouseFocus?.()
+        } } }}
+        onMouse={(event) => {
+          // The previous hit target's hover-out can arrive after a new press at these cells.
+          if (event.type === "out" && mousePress?.x === event.x && mousePress?.y === event.y) return
+          if (event.type === "down" || event.type === "up" || event.type === "drag"
+            || event.type === "scroll" || event.type === "out") mousePress = undefined
+        }}
+        onMouseScroll={(event) => {
+          if (mouseActive()) props.onMouseFocus?.()
+          event.stopPropagation()
+          // An underfilled list or a wheel at the bottom may not emit a position change.
+          if (event.scroll?.direction === "down" && !event.modifiers.shift && list
+            && list.scrollTop + list.viewport.height >= list.scrollHeight) onScrollChange()
         }}
         height={listHeight()}
         flexShrink={0}
@@ -149,7 +197,7 @@ export function SelectableList<T>(props: {
           )}
         >
           <Index each={props.items}>
-            {(item) => {
+            {(item, index) => {
               const active = () => selectedKey() === props.itemKey(item())
               return (
                 <box
@@ -162,6 +210,25 @@ export function SelectableList<T>(props: {
                   alignItems="flex-start"
                   paddingRight={1}
                   backgroundColor={active() ? colors.panelHover : colors.canvas}
+                  onMouseDown={(event) => {
+                    mousePress = undefined
+                    if (!mouseActive() || event.button !== MouseButton.LEFT) return
+                    event.preventDefault()
+                    event.stopPropagation()
+                    props.onMouseFocus?.()
+                    mousePress = { key: props.itemKey(item()), x: event.x, y: event.y }
+                  }}
+                  onMouseUp={(event) => {
+                    const press = mousePress
+                    mousePress = undefined
+                    const clicked = item()
+                    if (!press || !mouseActive() || event.button !== MouseButton.LEFT
+                      || press.key !== props.itemKey(clicked) || press.x !== event.x || press.y !== event.y) return
+                    event.preventDefault()
+                    event.stopPropagation()
+                    selectIndex(index)
+                    props.onActivate?.(clicked)
+                  }}
                 >
                   <text width={2} fg={colors.blue}>{active() ? "▌" : " "}</text>
                   {props.children(item, active)}

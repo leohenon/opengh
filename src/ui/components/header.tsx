@@ -7,17 +7,23 @@ import type { Repo } from "../../models"
 import type { Page } from "../../navigation"
 import type { RepositoryData } from "../../repository-state"
 import { useTheme } from "../theme"
+import { mouseClick } from "../mouse"
 
-function RepositoryName(props: { repo: Repo; short?: boolean }) {
+function RepositoryName(props: { repo: Repo; short?: boolean; interactive?: boolean; onOpen?: () => void }) {
   const { colors } = useTheme()
   return (
-    <box flexDirection="row" flexShrink={0}>
-      <Show when={!props.short}>
-        <text fg={colors.muted}>{props.repo.nameWithOwner.split("/")[0]}/</text>
-      </Show>
-      <text fg={colors.blue} attributes={TextAttributes.BOLD}>
-        {props.repo.nameWithOwner.split("/").slice(1).join("/")}
-      </text>
+    <box id="repository-dropdown" flexDirection="row" flexShrink={1} minWidth={0} maxWidth="100%"
+      {...mouseClick(() => props.onOpen?.(), () => props.interactive !== false && Boolean(props.onOpen))}>
+      <box flexDirection="row" flexShrink={1} minWidth={0} overflow="hidden">
+        <Show when={!props.short}>
+          <text height={1} wrapMode="none" flexShrink={0} selectable={!props.onOpen} fg={colors.muted}>{props.repo.nameWithOwner.split("/")[0]}/</text>
+        </Show>
+        <text height={1} wrapMode="none" truncate flexShrink={1} minWidth={0} selectable={!props.onOpen}
+          fg={props.interactive === false && props.onOpen ? colors.muted : colors.blue} attributes={TextAttributes.BOLD}>
+          {props.repo.nameWithOwner.split("/").slice(1).join("/")}
+        </text>
+      </box>
+      <Show when={props.onOpen}><text flexShrink={0} height={1} selectable={false} fg={colors.muted}> ▾</text></Show>
     </box>
   )
 }
@@ -25,6 +31,9 @@ function RepositoryName(props: { repo: Repo; short?: boolean }) {
 export function Header(props: {
   repo: Repo
   page: Page
+  interactive?: boolean
+  onSelect?: (page: Page) => void
+  onOpenRepository?: () => void
   compact?: boolean
   showTabCounts?: boolean
   workCounts?: RepositoryData["workCounts"]
@@ -51,10 +60,15 @@ export function Header(props: {
     // dropping counts or windowing tabs. The expanded header has its own repo row.
     const fullRepo = props.repo.nameWithOwner
     const shortRepo = fullRepo.split("/").slice(1).join("/")
+    const dropdownWidth = props.onOpenRepository ? 2 : 0
+    const switchLabel = width < 24 ? "▾" : "Repo ▾"
     const repository = !props.compact ? "hidden"
-      : countedWidth + 2 + Bun.stringWidth(fullRepo) <= width ? "full"
-      : countedWidth + 2 + Bun.stringWidth(shortRepo) <= width ? "short" : "hidden"
-    const available = width - (repository === "hidden" ? 0 : 2 + Bun.stringWidth(repository === "full" ? fullRepo : shortRepo))
+      : countedWidth + 2 + Bun.stringWidth(fullRepo) + dropdownWidth <= width ? "full"
+      : countedWidth + 2 + Bun.stringWidth(shortRepo) + dropdownWidth <= width ? "short"
+      : props.onOpenRepository ? "button" : "hidden"
+    const repositoryWidth = repository === "button" ? Bun.stringWidth(switchLabel)
+      : Bun.stringWidth(repository === "full" ? fullRepo : shortRepo) + dropdownWidth
+    const available = width - (repository === "hidden" ? 0 : 2 + repositoryWidth)
     const labels = tabs.map((tab) => ({ ...tab, label: countedWidth <= available ? tab.counted : tab.label }))
     const active = Math.max(0, labels.findIndex((tab) => tab.page === props.page))
     const windowWidth = (start: number, end: number) => totalWidth(labels.slice(start, end).map((tab) => tab.label))
@@ -80,37 +94,40 @@ export function Header(props: {
       if (Bun.stringWidth(visible[0].label) + (start > 0 ? 2 : 0) + (end < labels.length ? 2 : 0) > available)
         visible[0] = { ...visible[0], label: tabKey(active) || shortLabels[visible[0].page] }
     }
-    return { tabs: visible, before: start > 0, after: end < labels.length, repository }
+    return { tabs: visible, before: start > 0, after: end < labels.length, previous: labels[start - 1]?.page, next: labels[end]?.page, repository, switchLabel }
   })
 
   return (
     <box flexDirection="column" flexShrink={0} backgroundColor={colors.header}>
       <Show when={!props.compact}>
         <box height={3} flexDirection="row" alignItems="center" paddingLeft={2} paddingRight={2}>
-          <RepositoryName repo={props.repo} />
+          <RepositoryName repo={props.repo} interactive={props.interactive} onOpen={props.onOpenRepository} />
         </box>
       </Show>
       <box height={props.compact ? 1 : 2} minWidth={0} flexDirection="row" paddingLeft={2} paddingRight={2} gap={2}>
         <box minWidth={0} overflow="hidden" flexGrow={1} flexDirection="row">
           <Show when={layout().before}>
-            <text height={1} width={2} flexShrink={0} fg={colors.muted}>‹ </text>
+            <text height={1} width={2} flexShrink={0} fg={colors.muted} selectable={false}
+              {...mouseClick(() => { const page = layout().previous; if (page) props.onSelect?.(page) }, () => props.interactive !== false)}>‹ </text>
           </Show>
           <box flexDirection="row" gap={3} flexShrink={0}>
             <For each={layout().tabs}>
               {(tab) => {
                 const active = () => props.page === tab.page
                 return (
-                  <box height={props.compact ? 1 : 2} width={Bun.stringWidth(tab.label)} flexShrink={0} flexDirection="column">
+                  <box height={props.compact ? 1 : 2} width={Bun.stringWidth(tab.label)} flexShrink={0} flexDirection="column"
+                    {...mouseClick(() => props.onSelect?.(tab.page), () => props.interactive !== false)}>
                     <text
                       height={1}
                       wrapMode="none"
+                      selectable={false}
                       fg={active() ? props.compact ? colors.salmon : colors.text : colors.muted}
                       attributes={active() ? TextAttributes.BOLD : TextAttributes.NONE}
                     >
                       {tab.label}
                     </text>
                     <Show when={!props.compact}>
-                      <text fg={colors.salmon}>{active() ? "─".repeat(Bun.stringWidth(tab.label)) : " ".repeat(Bun.stringWidth(tab.label))}</text>
+                      <text selectable={false} fg={colors.salmon}>{active() ? "─".repeat(Bun.stringWidth(tab.label)) : " ".repeat(Bun.stringWidth(tab.label))}</text>
                     </Show>
                   </box>
                 )
@@ -118,11 +135,17 @@ export function Header(props: {
             </For>
           </box>
           <Show when={layout().after}>
-            <text height={1} width={2} flexShrink={0} fg={colors.muted}> ›</text>
+            <text height={1} width={2} flexShrink={0} fg={colors.muted} selectable={false}
+              {...mouseClick(() => { const page = layout().next; if (page) props.onSelect?.(page) }, () => props.interactive !== false)}> ›</text>
           </Show>
         </box>
         <Show when={layout().repository !== "hidden"}>
-          <RepositoryName repo={props.repo} short={layout().repository === "short"} />
+          <Show when={layout().repository !== "button"} fallback={
+            <text id="repository-dropdown" height={1} flexShrink={0} selectable={false} fg={props.interactive === false ? colors.muted : colors.blue}
+              {...mouseClick(() => props.onOpenRepository?.(), () => props.interactive !== false)}>{layout().switchLabel}</text>
+          }>
+            <RepositoryName repo={props.repo} short={layout().repository === "short"} interactive={props.interactive} onOpen={props.onOpenRepository} />
+          </Show>
         </Show>
       </box>
     </box>

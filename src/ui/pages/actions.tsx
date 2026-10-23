@@ -18,6 +18,7 @@ export function ActionsScreen(props: {
   interactive: boolean
   showScrollbar: boolean
   onEndReached?: () => void
+  onSelect?: (run: WorkflowRunSummary) => void
   onOpenRun?: (run: WorkflowRunSummary) => void
   onOpenRunInBrowser?: (run: WorkflowRunSummary) => void
   onCopyRunUrl?: (run: WorkflowRunSummary) => void
@@ -50,6 +51,7 @@ export function ActionsScreen(props: {
             showScrollbar={props.showScrollbar}
             empty="No workflow runs"
             onEndReached={props.onEndReached}
+            onSelect={props.onSelect}
             onActivate={props.onOpenRun}
             onOpenInBrowser={props.onOpenRunInBrowser}
             onCopy={props.onCopyRunUrl}

@@ -7,14 +7,18 @@ import { Header } from "../src/ui/components/header";
 import { defaultConfig, type Config } from "../src/config";
 import { appColors, resolveTheme } from "../src/theme";
 import { issueIcons, pullRequestIcons, repositoryIcons, workflowIcons } from "../src/ui/icons";
-import type { RepositoryData, ResourceState } from "../src/repository-state";
+import type { CommitDetailState, RepositoryData, ResourceState } from "../src/repository-state";
 import type { DetailTarget, Page } from "../src/navigation";
 import { ThemeProvider, useTheme } from "../src/ui/theme";
 import {
   commitDetailFixture,
   githubDataFixture,
+  issueDetailFixture,
+  pullContextFixture,
   repositoryOperationsFixture,
 } from "./fixtures/github-data";
+import { workflowJobFixture, workflowRunFixture } from "./fixtures/workflow-run";
+import { clickControl } from "./fixtures/mouse";
 
 const active: Array<{ renderer: { destroy(): void; isDestroyed: boolean } }> =
   [];
@@ -118,6 +122,238 @@ describe("opengh TUI", () => {
     await view.flush();
     expect(view.captureCharFrame()).toContain("No workflow runs");
     expect(pages).toEqual(["actions"]);
+  });
+
+  test("page buttons use the selected item, wrap on narrow screens, and guard pending pagination with hints hidden", async () => {
+    const [detail, setDetail] = createSignal<CommitDetailState>();
+    const copies: string[] = [];
+    const opened: Array<string | number | undefined> = [];
+    let loads = 0;
+    let more = 0;
+    let refreshes = 0;
+    let finish!: () => void;
+    const pending = new Promise<void>((resolve) => { finish = resolve; });
+    const view = await testRender(() => <App data={githubDataFixture} operations={repositoryOperationsFixture}
+      config={{ ...defaultConfig, compactHeader: true, showStatusBarHints: false }} commitDetail={detail()}
+      onCopyToClipboard={async (value) => { copies.push(value); return true; }}
+      onOpenInBrowser={async (target) => { opened.push(target); }}
+      onRefresh={() => { refreshes++; }}
+      onLoadCommit={async (sha) => { loads++; setDetail({ sha, resource: { status: "ready", value: {
+        ...commitDetailFixture, sha, files: { ...commitDetailFixture.files, hasMore: true },
+      } } }); }}
+      onLoadMoreCommitFiles={async () => {
+        more++;
+        setDetail((current) => ({ ...current!, resource: { status: "loading", phase: "pagination", value: current!.resource.value } }));
+        await pending;
+        setDetail((current) => ({ ...current!, resource: { status: "ready", value: commitDetailFixture } }));
+      }}
+    />, { width: 36, height: 28 });
+    active.push(view);
+    await view.flush();
+    view.mockInput.pressKey("2");
+    view.mockInput.pressKey("j");
+    await view.flush();
+    const sha = githubDataFixture.commits.value!.items[1]!.sha;
+    await clickControl(view, "page-action-copy-sha");
+    expect(copies).toEqual([sha]);
+    await clickControl(view, "toast-dismiss");
+    await clickControl(view, "page-action-github");
+    expect(opened).toEqual([sha]);
+    await clickControl(view, "toast-dismiss");
+    view.mockInput.pressEnter();
+    await view.flush();
+    await clickControl(view, "page-action-load-more");
+    await clickControl(view, "page-action-load-more");
+    await clickControl(view, "page-action-refresh");
+    expect(more).toBe(1);
+    expect(loads).toBe(1);
+    finish();
+    await view.flush();
+    await clickControl(view, "page-action-back");
+    await clickControl(view, "page-action-refresh");
+    expect(refreshes).toBe(1);
+    await clickControl(view, "page-action-options");
+    expect(view.captureCharFrame()).toContain("Settings");
+    await clickControl(view, "settings-close");
+    expect(view.captureCharFrame()).not.toContain("Settings");
+  });
+
+  test("mouse navigation selects documents and work filters, retains documents, and uses compact arrows", async () => {
+    const [config, setConfig] = createSignal({ ...defaultConfig, compactHeader: false });
+    const documents = githubDataFixture.documents.value!.map((document, index) => ({ ...document,
+      resource: index === 0 ? { status: "ready" as const, value: Array.from({ length: 60 }, (_, i) => `Paragraph ${i}`).join("\n\n") } : document.resource,
+    }));
+    const view = await testRender(() => <App config={config()} operations={repositoryOperationsFixture}
+      data={{ ...githubDataFixture, documents: { status: "ready", value: documents } }} />,
+      { width: 140, height: 32 });
+    active.push(view);
+    const click = async (label: string, offset = 0) => {
+      const lines = view.captureCharFrame().split("\n");
+      const row = lines.findIndex((line) => line.includes(label));
+      expect(row).toBeGreaterThan(-1);
+      await view.mockMouse.click(lines[row]!.indexOf(label), row + offset);
+      await view.flush();
+    };
+    await view.flush();
+    view.mockInput.pressKey("G");
+    await view.flush();
+    const scroll = view.renderer.root.findDescendantById("overview-document-scroll") as ScrollBoxRenderable;
+    expect(scroll.scrollTop).toBeGreaterThan(0);
+    await click("Contributing", 1);
+    expect(scroll.scrollTop).toBe(0);
+    expect(view.captureCharFrame()).toContain("Thanks for helping");
+    view.mockInput.pressKey("?");
+    await view.flush();
+    await click("2 Commits"); // The backdrop consumes this click instead of switching pages.
+    expect(view.captureCharFrame()).toContain("Thanks for helping");
+    await click("2 Commits");
+    expect(view.captureCharFrame()).toContain("4 of 4 commits");
+    await click("3 Issues");
+    await click("Closed (");
+    const closedIssue = githubDataFixture.issues.closed.value!.items[0]!.title;
+    expect(view.captureCharFrame()).toContain(closedIssue);
+    await click("Closed (");
+    expect(view.captureCharFrame()).toContain(closedIssue);
+    await click("Open (");
+    expect(view.captureCharFrame()).toContain(githubDataFixture.issues.open.value!.items[0]!.title);
+    await click("4 Pull requests");
+    await click("Closed (");
+    expect(view.captureCharFrame()).toContain(githubDataFixture.pulls.closed.value!.items[0]!.title);
+    await click("1 Overview");
+    expect(view.captureCharFrame()).toContain("Thanks for helping");
+    setConfig((current) => ({ ...current, compactHeader: true }));
+    view.resize(44, 32);
+    await view.flush();
+    const docRow = view.captureCharFrame().split("\n").findIndex((line) => line.includes("Contributing"));
+    let line = view.captureCharFrame().split("\n")[docRow]!;
+    await view.mockMouse.click(line.indexOf("‹"), docRow);
+    await view.flush();
+    expect(view.captureCharFrame()).toContain("Be respectful and welcoming.");
+    line = view.captureCharFrame().split("\n")[docRow]!;
+    await view.mockMouse.click(line.indexOf("›"), docRow);
+    await view.flush();
+    expect(view.captureCharFrame()).toContain("Thanks for helping");
+  });
+
+  test("clicks open the correct commit, issue, pull request, and run while preserving selection and popup shielding", async () => {
+    const opened: Array<{ kind: string; id: string | number }> = [];
+    const view = await testRender(() => (
+      <App data={githubDataFixture} operations={repositoryOperationsFixture}
+        onLoadCommit={async (id) => { opened.push({ kind: "commit", id }); }}
+        onLoadIssue={async (id) => { opened.push({ kind: "issue", id }); }}
+        onLoadPull={async (id) => { opened.push({ kind: "pull", id }); }}
+        onLoadRun={async (id) => { opened.push({ kind: "run", id }); }}
+      />
+    ), { width: 120, height: 32 });
+    active.push(view);
+    const commit = githubDataFixture.commits.value!.items[1]!;
+    const issue = githubDataFixture.issues.open.value!.items[1]!;
+    const pull = githubDataFixture.pulls.open.value!.items[1]!;
+    const run = githubDataFixture.runs.value!.items[1]!;
+    for (const entry of [
+      { key: "2", kind: "commit", id: commit.sha, label: commit.message, detail: "commit-detail-scroll" },
+      { key: "3", kind: "issue", id: issue.number, label: issue.title, detail: "issue-detail-scroll" },
+      { key: "4", kind: "pull", id: pull.number, label: pull.title, detail: "pull-detail-scroll" },
+      { key: "5", kind: "run", id: run.id, label: run.title, detail: "run-detail-scroll" },
+    ]) {
+      view.mockInput.pressKey(entry.key);
+      await view.flush();
+      const lines = view.captureCharFrame().split("\n");
+      const row = lines.findIndex((line) => line.includes(entry.label));
+      expect(row).toBeGreaterThan(-1);
+      const x = lines[row]!.indexOf(entry.label) + 2;
+      const before = opened.length;
+      view.mockInput.pressKey("?");
+      await view.flush();
+      await view.mockMouse.click(x, row); // Dismissing help must not also open the row beneath it.
+      await view.flush();
+      expect(opened).toHaveLength(before);
+      expect(view.captureCharFrame()).not.toContain("Help");
+
+      await view.mockMouse.pressDown(x, row);
+      await view.flush();
+      expect(opened).toHaveLength(before);
+      await view.mockMouse.release(x, row);
+      await view.flush();
+      expect(opened).toHaveLength(before + 1);
+      expect(opened.at(-1)).toEqual({ kind: entry.kind, id: entry.id });
+      expect(view.renderer.root.findDescendantById(entry.detail)).toBeDefined();
+      view.mockInput.pressEscape();
+      await Bun.sleep(30);
+      await view.flush();
+      expect(view.captureCharFrame().split("\n").find((line) => line.includes(entry.label))).toContain("▌");
+    }
+  });
+
+  test("regular pages wheel-scroll under the pointer without stealing keyboard focus or scrolling behind help", async () => {
+    const body = Array.from({ length: 60 }, (_, index) => `Paragraph ${index}`).join("\n\n");
+    const pull = githubDataFixture.pulls.open.value!.items[0]!;
+    const view = await testRender(() => (
+      <App
+        config={{ ...defaultConfig, showScrollbars: false }}
+        data={{ ...githubDataFixture, documents: { status: "ready", value: [{
+          ...githubDataFixture.documents.value![0]!, resource: { status: "ready", value: body },
+        }] } }}
+        operations={repositoryOperationsFixture}
+        commitDetail={{ sha: commitDetailFixture.sha, resource: { status: "ready", value: {
+          ...commitDetailFixture, fullMessage: `Commit title\n\n${body}`,
+        } } }}
+        issueDetail={{ number: issueDetailFixture.number,
+          resource: { status: "ready", value: { ...issueDetailFixture, body } },
+          comments: { status: "ready", value: { items: [], page: 1, hasMore: false } },
+          references: { status: "ready", value: [] },
+        }}
+        pullDetail={{ number: pull.number, resource: { status: "ready", value: {
+          ...pull, body, url: `${githubDataFixture.repo.url}/pull/${pull.number}`,
+          updatedAt: issueDetailFixture.updatedAt, baseBranch: "main", headBranch: "feature",
+          additions: 1, deletions: 0, changedFiles: 1, commitCount: 0, commentCount: 0,
+          labels: [], assignees: [], reviewers: [], mergeable: true,
+        } }, comments: { status: "ready", value: { items: [], page: 1, hasMore: false } },
+          references: { status: "ready", value: [] }, commits: { status: "ready", value: [] },
+          context: { status: "ready", value: pullContextFixture },
+        }}
+        runDetail={{ id: workflowRunFixture.id, resource: { status: "ready", value: workflowRunFixture },
+          jobs: { status: "ready", value: { items: Array.from({ length: 30 }, (_, id) => ({ ...workflowJobFixture, id })), page: 1, hasMore: false } },
+        }}
+      />
+    ), { width: 120, height: 28 });
+    active.push(view);
+    await view.flush();
+
+    for (const [key, id] of [
+      ["1", "overview-document-scroll"], ["2", "commit-detail-scroll"],
+      ["3", "issue-detail-scroll"], ["4", "pull-detail-scroll"], ["5", "run-detail-scroll"],
+    ] as const) {
+      view.mockInput.pressKey(key);
+      await view.flush();
+      if (key !== "1") { view.mockInput.pressEnter(); await view.flush(); }
+      const scroll = view.renderer.root.findDescendantById(id) as ScrollBoxRenderable;
+      expect(scroll).toBeInstanceOf(ScrollBoxRenderable);
+      const x = scroll.viewport.x + 2;
+      const y = scroll.viewport.y + 2;
+      const before = scroll.scrollTop;
+      await view.mockMouse.scroll(x, y, "down");
+      await view.flush();
+      expect(scroll.scrollTop).toBeGreaterThan(before);
+      await view.mockMouse.click(x, y);
+      expect(view.renderer.currentFocusedRenderable).toBeNull();
+      const afterWheel = scroll.scrollTop;
+      view.mockInput.pressArrow("down");
+      await view.flush();
+      expect(scroll.scrollTop).toBe(afterWheel + 1);
+      await view.mockMouse.scroll(x, y, "up");
+      await view.flush();
+      expect(scroll.scrollTop).toBeLessThan(afterWheel + 1);
+
+      view.mockInput.pressKey("?");
+      await view.flush();
+      const covered = scroll.scrollTop;
+      await view.mockMouse.scroll(x, y, "down");
+      await view.flush();
+      expect(scroll.scrollTop).toBe(covered);
+      await view.mockMouse.click(0, 0);
+      await view.flush();
+    }
   });
 
   test("shows loaded versus total commits for the selected branch without changing the tab", async () => {
@@ -884,28 +1120,41 @@ describe("opengh TUI", () => {
     }))
     await view.flush()
     expect(view.captureCharFrame()).toContain("Switch branch (200 branches)")
+    await view.mockMouse.click(0, 0)
+    await view.flush()
+    setCurrent((value) => ({ ...value, branches: { status: "loading", phase: "load" } }))
+    await view.flush()
+    await clickControl(view, "branch-dropdown")
+    expect(view.captureCharFrame()).not.toContain("Switch branch")
   })
 
   test("opens the branch picker and toggles work states", async () => {
     const { view, branch, setCanSwitchBranch } = await setup();
     view.mockInput.pressKey("2");
-    view.mockInput.pressTab();
     await view.flush();
+    setCanSwitchBranch(false);
+    await clickControl(view, "branch-dropdown");
+    expect(view.captureCharFrame()).not.toContain("Switch branch");
+    setCanSwitchBranch(true);
+    await clickControl(view, "branch-dropdown");
+    await clickControl(view, "picker-row-0"); // The current branch closes without changing or reloading it.
+    expect(branch()).toBe("");
+    expect(view.captureCharFrame()).not.toContain("Switch branch");
+    await clickControl(view, "branch-dropdown");
     const branchFrame = view.captureCharFrame();
     expect(branchFrame).toContain("Switch branch");
     const currentBranchRow = branchFrame.split("\n").find((row) => row.includes("✓ current"));
     expect(currentBranchRow).toContain("›");
     await view.mockInput.typeText("nxt");
     setCanSwitchBranch(false);
-    view.mockInput.pressEnter();
     await view.flush();
+    await clickControl(view, "picker-row-0");
     expect(branch()).toBe("");
     expect(view.captureCharFrame()).toContain("Repository is busy");
     expect(view.captureCharFrame()).toContain("Switch branch");
 
     setCanSwitchBranch(true);
-    view.mockInput.pressEnter();
-    await view.flush();
+    await clickControl(view, "picker-row-0");
     expect(branch()).toBe("next");
 
     view.mockInput.pressKey("3");
@@ -1206,11 +1455,13 @@ describe("opengh TUI", () => {
     await view.flush();
     expect(canvas()).toBe(resolveTheme("dracula").background);
 
-    view.mockInput.pressEscape();
-    await Bun.sleep(30);
+    await view.mockMouse.click(0, 0);
     await view.flush();
     expect(canvas()).toBe(resolveTheme("github").background);
     expect(view.captureCharFrame()).toContain("‹ github ›");
+    await view.mockMouse.click(0, 0);
+    await view.flush();
+    expect(view.captureCharFrame()).not.toContain("Settings");
   });
 
   test("keeps settings open and reports persistence failures", async () => {

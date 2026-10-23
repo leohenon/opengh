@@ -9,6 +9,7 @@ import { ago, fitText } from "../format"
 import { issueIcon, pullRequestIcon } from "../issue-references"
 import { useTheme } from "../theme"
 import { useIcons } from "../icon-style"
+import { mouseClick } from "../mouse"
 
 export function WorkScreen(props: {
   kind: "issue" | "pull"
@@ -19,6 +20,8 @@ export function WorkScreen(props: {
   interactive: boolean
   showScrollbar: boolean
   onEndReached?: () => void
+  onStateChange?: (state: ListState) => void
+  onSelect?: (entry: IssueSummary | PullRequestSummary) => void
   onOpen?: (entry: IssueSummary | PullRequestSummary) => void
   onOpenInBrowser?: (entry: IssueSummary | PullRequestSummary) => void
   onCopy?: (entry: IssueSummary | PullRequestSummary) => void
@@ -45,12 +48,16 @@ export function WorkScreen(props: {
           <text
             fg={props.state === "open" ? colors.openState : colors.muted}
             attributes={props.state === "open" ? TextAttributes.BOLD : TextAttributes.NONE}
+            selectable={false}
+            {...mouseClick(() => props.onStateChange?.("open"), () => props.active && props.interactive)}
           >
             Open ({props.counts.open})
           </text>
           <text
             fg={props.state === "closed" ? colors.closedState : colors.muted}
             attributes={props.state === "closed" ? TextAttributes.BOLD : TextAttributes.NONE}
+            selectable={false}
+            {...mouseClick(() => props.onStateChange?.("closed"), () => props.active && props.interactive)}
           >
             Closed ({props.counts.closed})
           </text>
@@ -67,6 +74,7 @@ export function WorkScreen(props: {
             resetKey={props.state}
             empty={`No ${props.state} ${props.kind === "issue" ? "issues" : "pull requests"}${page().hasMore ? " loaded yet" : ""}`}
             onEndReached={props.onEndReached}
+            onSelect={props.onSelect}
             onActivate={props.onOpen}
             onOpenInBrowser={props.onOpenInBrowser}
             onCopy={props.onCopy}

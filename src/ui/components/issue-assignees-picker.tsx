@@ -7,6 +7,8 @@ import { createScrollbarVisibility } from "../scrollbar-visibility"
 import { useTheme } from "../theme"
 import { Popup } from "./popup"
 import { KeyInput, useKeyActions, useKeybindings } from "../keybindings"
+import { Action } from "./action"
+import { mouseClick } from "../mouse"
 
 export function IssueAssigneesPicker(props: {
   number: number
@@ -30,6 +32,8 @@ export function IssueAssigneesPicker(props: {
   const initial = [...(props.state.selectedAssignees ?? [])]
   const selected = () => props.state.selectedAssignees ?? []
   const pending = () => props.state.operation.status === "loading"
+  const requestClose = () => { if (!pending()) props.onClose() }
+  const submit = () => { if (!pending()) props.onSubmit() }
   const loading = () => props.users?.status === "loading"
   const canLoad = () => !props.users || props.users.status === "error" || props.users.value?.hasMore === true
   const candidates = createMemo(() => {
@@ -58,8 +62,10 @@ export function IssueAssigneesPicker(props: {
   const rowCount = () => filtered().length + (canLoad() || loading() ? 1 : 0)
   const currentRow = () => Math.min(active(), Math.max(0, rowCount() - 1))
   const loadMore = () => { if (!pending() && !loading() && canLoad()) props.onLoadMore() }
-  const activate = () => {
-    const login = filtered()[currentRow()]
+  const activate = (index = currentRow()) => {
+    if (pending()) return
+    setActive(index)
+    const login = filtered()[index]
     if (login) toggle(login)
     else loadMore()
   }
@@ -78,11 +84,11 @@ export function IssueAssigneesPicker(props: {
   const move = (delta: number) => { setActive(Math.max(0, Math.min(rowCount() - 1, currentRow() + delta))) }
   useKeyActions({}, { when: pending, priority: 200, modal: true })
   useKeyActions({
-    "dialog.close": () => props.onClose(),
-    "dialog.submit": () => props.onSubmit(),
+    "dialog.close": requestClose,
+    "dialog.submit": submit,
     "picker.up": () => move(-1),
     "picker.down": () => move(1),
-    "picker.accept": activate,
+    "picker.accept": () => activate(),
   }, { when: () => !pending(), priority: 100, modal: true })
 
   const error = () => [
@@ -95,10 +101,10 @@ export function IssueAssigneesPicker(props: {
     const width = Math.max(1, Math.min(44, dimensions().width - 2) - 8)
     return Math.min(6, error().split("\n").reduce((rows, line) => rows + Math.ceil(Bun.stringWidth(line) / width) + 1, 0))
   }
-  const popupHeight = () => Math.min(16, Math.max(1, rowCount() + (!filtered().length && !loading() ? 1 : 0)) + 6 + errorHeight())
+  const popupHeight = () => Math.min(16, Math.max(1, rowCount() + (!filtered().length && !loading() ? 1 : 0)) + 7 + errorHeight())
 
   return (
-    <Popup width={44} height={popupHeight()} placement="center" zIndex={250}>
+    <Popup width={44} height={popupHeight()} placement="center" zIndex={250} onClose={requestClose}>
       <box flexGrow={1} minHeight={0} flexDirection="column" paddingBottom={1}>
         <box flexShrink={0} paddingX={4} flexDirection="column">
           <text height={1} fg={colors.text} attributes={TextAttributes.BOLD}>Assignees · #{props.number}</text>
@@ -111,14 +117,14 @@ export function IssueAssigneesPicker(props: {
         </box>
         <box height={1} flexShrink={0} />
         <scrollbox ref={(value) => { list = value; bindScrollbar(value); setListReady(true) }}
-          flexGrow={1} minHeight={0} paddingX={1} scrollY>
+          focusable={false} flexGrow={1} minHeight={0} paddingX={1} scrollY>
           <Show when={!filtered().length && !loading()}>
             <text height={1} paddingLeft={3} fg={colors.muted}>No matching users.</text>
           </Show>
           <Index each={filtered()}>{(login, index) => (
             <box id={`assignee-row-${index}`} height={1} flexShrink={0} flexDirection="row" paddingX={3}
               backgroundColor={currentRow() === index ? colors.panelHover : colors.panel}
-              onMouseDown={(event) => { event.preventDefault(); if (event.button === 0 && !pending()) { setActive(index); toggle(login()) } }}>
+              {...mouseClick(() => activate(index), () => !pending(), () => login())}>
               <text width={2} flexShrink={0} fg={colors.blue}>{currentRow() === index ? "›" : " "}</text>
               <text height={1} wrapMode="none" flexGrow={1} fg={colors.muted}>
                 [{isSelected(login()) ? "x" : " "}] <span style={{ fg: colors.blue }}>@{login()}</span>
@@ -128,16 +134,20 @@ export function IssueAssigneesPicker(props: {
           <Show when={canLoad() || loading()}>
             <box id={`assignee-row-${filtered().length}`} height={1} flexShrink={0} flexDirection="row" paddingX={3}
               backgroundColor={currentRow() === filtered().length ? colors.panelHover : colors.panel}
-              onMouseDown={(event) => { event.preventDefault(); if (event.button === 0) loadMore() }}>
+              {...mouseClick(() => activate(filtered().length), () => !pending() && !loading(), () => filtered().length)}>
               <text fg={colors.blue}>{currentRow() === filtered().length ? "› " : "  "}{loading() ? "Loading users…" : props.users?.status === "error" ? "Retry loading users" : "Load more users…"}</text>
             </box>
           </Show>
         </scrollbox>
         <Show when={error()}>
-          <scrollbox height={errorHeight()} flexShrink={0} paddingX={4} scrollY>
+          <scrollbox height={errorHeight()} focusable={false} flexShrink={0} paddingX={4} scrollY>
             <text width="100%" wrapMode="word" fg={colors.red}>{error()}</text>
           </scrollbox>
         </Show>
+        <box height={1} flexShrink={0} flexDirection="row" gap={2} paddingX={4}>
+          <Action id="assignees-save" disabled={pending()} onActivate={submit}>Save</Action>
+          <Action id="assignees-back" disabled={pending()} onActivate={requestClose}>Back</Action>
+        </box>
       </box>
     </Popup>
   )

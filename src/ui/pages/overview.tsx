@@ -12,6 +12,7 @@ import { createReactiveMarkdownStyle } from "../markdown-style"
 import { useTheme } from "../theme"
 import { useIcons } from "../icon-style"
 import { createScrollbarVisibility } from "../scrollbar-visibility"
+import { mouseClick } from "../mouse"
 
 function extractAboutContent(value: string) {
   const urls: string[] = []
@@ -35,6 +36,9 @@ export function OverviewScreen(props: {
   repo: Repo
   documents: ResourceState<RepositoryDocumentState[]>
   currentDocument?: string
+  interactive?: boolean
+  onSelectDocument?: (id: string) => void
+  onMoveDocument?: (delta: number) => void
   compactHeader?: boolean
   hideDocumentsTab?: boolean
   showScrollbar: boolean
@@ -105,9 +109,11 @@ export function OverviewScreen(props: {
                 when={!compactDocuments()}
                 fallback={(
                   <box flexDirection="row" gap={1}>
-                    <text fg={colors.muted}>‹</text>
+                    <text fg={colors.muted} selectable={false}
+                      {...mouseClick(() => props.onMoveDocument?.(-1), () => props.interactive !== false)}>‹</text>
                     <text fg={props.compactHeader ? colors.salmon : colors.text} attributes={TextAttributes.BOLD}>{currentLabel()}</text>
-                    <text fg={colors.muted}>›</text>
+                    <text fg={colors.muted} selectable={false}
+                      {...mouseClick(() => props.onMoveDocument?.(1), () => props.interactive !== false)}>›</text>
                   </box>
                 )}
               >
@@ -116,6 +122,8 @@ export function OverviewScreen(props: {
                     <text
                       fg={item.id === document()?.id ? props.compactHeader ? colors.salmon : colors.text : colors.muted}
                       attributes={item.id === document()?.id ? TextAttributes.BOLD : TextAttributes.NONE}
+                      selectable={false}
+                      {...mouseClick(() => props.onSelectDocument?.(item.id), () => props.interactive !== false)}
                     >
                       {item.label}
                     </text>
@@ -140,7 +148,8 @@ export function OverviewScreen(props: {
                   <For each={documents()}>
                     {(item) => (
                       <>
-                        <text fg={item.id === document()?.id ? colors.salmon : colors.border}>
+                        <text fg={item.id === document()?.id ? colors.salmon : colors.border} selectable={false}
+                          {...mouseClick(() => props.onSelectDocument?.(item.id), () => props.interactive !== false)}>
                           {"─".repeat(item.label.length)}
                         </text>
                         <text fg={colors.border}>──</text>
@@ -165,6 +174,9 @@ export function OverviewScreen(props: {
                   onCleanup(() => props.scrollRef(undefined))
                   return (
                     <scrollbox
+                      id="overview-document-scroll"
+                      focusable={false}
+                      onMouseScroll={(event) => event.stopPropagation()}
                       ref={(value) => { bindScrollbar(value); props.scrollRef(value) }}
                       flexGrow={1}
                       minWidth={0}

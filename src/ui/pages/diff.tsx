@@ -1,11 +1,13 @@
-import { BoxRenderable, type ScrollBoxRenderable } from "@opentui/core"
-import { useRenderer, useTerminalDimensions } from "@opentui/solid"
+import { BoxRenderable, MouseButton, type MouseEvent, type Renderable, type ScrollBoxRenderable } from "@opentui/core"
+import { useKeyboard, useRenderer, useTerminalDimensions } from "@opentui/solid"
 import { useKeyActions } from "../keybindings"
 import { HUNK_DIFF_THEME_NAMES, type HunkDiffBodyProps, type HunkDiffThemeName } from "hunkdiff/opentui"
 import { createEffect, createMemo, createSignal, on, onCleanup, onMount, Show } from "solid-js"
 import type { DiffContent, DiffTarget } from "../../models"
 import type { ResourceState } from "../../repository-state"
 import { SelectableList } from "../components/selectable-list"
+import { ActionBar, type ActionItem } from "../components/action-bar"
+import { mouseClick } from "../mouse"
 import { parseDiff, type DiffFile } from "../diff-model"
 import { mountHunk } from "../hunk-host"
 import { createScrollbarVisibility } from "../scrollbar-visibility"
@@ -27,6 +29,7 @@ const lightThemeAliases: Partial<Record<string, HunkDiffThemeName>> = {
   kanagawa: "kanagawa-lotus", material: "material-theme-lighter", nightowl: "night-owl-light",
   "one-dark": "one-light", opengh: "github-light-default", rosepine: "rose-pine-dawn", solarized: "solarized-light",
 }
+const TAB_WIDTH = 4
 
 export type DiffFocus = "files" | "diff"
 
@@ -43,6 +46,7 @@ export function DiffScreen(props: {
   const renderer = useRenderer()
   const dimensions = useTerminalDimensions()
   const active = () => props.active !== false
+  const interactive = () => active() && props.interactive
   const { colors, selected: selectedTheme, mode } = useTheme()
   const content = createMemo(() => props.resource.value)
   const parsed = createMemo<ReturnType<typeof parseDiff>>(() => {
@@ -62,11 +66,25 @@ export function DiffScreen(props: {
   const [host, setHost] = createSignal<BoxRenderable>()
   const narrow = () => dimensions().width < 80
   const showFiles = () => !sidebarHidden() && (!narrow() || focus() === "files")
+  const showBody = () => !narrow() || focus() === "diff"
+  const currentLayout = () => layout() ?? (narrow() ? "unified" : "split")
   const targetKey = () => props.target.kind === "commit" ? props.target.sha : `PR #${props.target.number}`
   const label = () => props.target.kind === "commit" ? props.target.sha.slice(0, 7) : `PR #${props.target.number}`
   const error = () => props.resource.status === "error" ? props.resource.message : parsed().error
   const message = () => selected()?.message ?? (selected() && !selected()?.body ? "Patch unavailable for this file." : undefined)
   const renderFile = () => message() ? undefined : selected()?.body
+  const hunkCount = () => renderFile()?.metadata.hunks.length ?? 0
+  const maxOffset = createMemo(() => {
+    const metadata = renderFile()?.metadata
+    let longest = 0
+    if (metadata) for (const lines of [metadata.deletionLines, metadata.additionLines]) for (const line of lines) {
+      const cells = line.split("\t").reduce((column, part, index) =>
+        column + (index ? TAB_WIDTH - column % TAB_WIDTH : 0) + Bun.stringWidth(part), 0)
+      longest = Math.max(longest, cells)
+    }
+    // Bound panning by source columns without duplicating Hunk's private gutter geometry.
+    return Math.max(0, longest - 1)
+  })
   const theme = createMemo(() => {
     if (mode() === "light") return lightThemeAliases[selectedTheme()] ?? "github-light-default"
     return HUNK_DIFF_THEME_NAMES.find((name) => name === selectedTheme()) ?? themeAliases[selectedTheme()] ?? "github-dark-default"
@@ -98,7 +116,7 @@ export function DiffScreen(props: {
       }
     }).catch(() => { waiting = false })
   }
-  const measure = () => { if (active()) setWidth(Math.max(1, scroll?.viewport.width ?? 1)) }
+  const measure = () => { if (active() && showBody()) setWidth(Math.max(1, scroll?.viewport.width ?? 1)) }
 
   createEffect(on(selected, (file) => {
     rememberedScroll = 0
@@ -122,7 +140,7 @@ export function DiffScreen(props: {
     const container = host()
     const bodyProps: HunkDiffBodyProps = {
       file: renderFile(), width: width(), theme: theme(),
-      canonicalLayout: layout() ?? (narrow() ? "unified" : "split"),
+      canonicalLayout: currentLayout(), tabWidth: TAB_WIDTH,
       wrapLines: wrap(), horizontalOffset: offset(), selectedHunkIndex: hunk(),
       highlight: true, showLineNumbers: true, showHunkHeaders: true,
     }
@@ -153,35 +171,95 @@ export function DiffScreen(props: {
   })
 
   const jump = (direction: number) => {
+    setFocus("diff")
     const file = selected()
-    const count = renderFile()?.metadata.hunks.length ?? 0
+    const count = hunkCount()
     if (!count) return
     const index = Math.max(0, Math.min(count - 1, hunk() + direction))
     pending = { file, index }
     if (index === hunk()) revealPending()
     else setHunk(index)
   }
-  const interactive = () => active() && props.interactive
   const scrollBody = (callback: (body: ScrollBoxRenderable) => void) => {
     if (focus() !== "diff" || !scroll) return false
+    pending = undefined
+    bodyMouse.onMouseDrag()
     callback(scroll)
   }
+  const focusFiles = () => { setSidebarHidden(false); setFocus("files") }
+  const toggleSidebar = () => {
+    const hide = showFiles()
+    setSidebarHidden(hide)
+    setFocus(hide ? "diff" : "files")
+  }
+  const toggleLayout = () => setLayout(currentLayout() === "split" ? "unified" : "split")
+  const toggleWrap = () => setWrap((value) => !value)
+  const pan = (delta: number) => {
+    if (wrap() || !renderFile()) return
+    pending = undefined
+    setFocus("diff")
+    setOffset((value) => Math.max(0, Math.min(maxOffset(), value + delta)))
+  }
+  const clickedHunk = (target: Renderable | null) => {
+    const body = renderFile()
+    if (!body) return
+    const header = `diff-hunk:${body.id}:`
+    const row = `review-row:diff-row:${body.id}:`
+    for (let node = target; node && node !== host(); node = node.parent) {
+      // Hunk 0.24.0 anchors headers and tags flat split/unified rows with their hunk index.
+      const raw = node.id.startsWith(header) ? node.id.slice(header.length)
+        : node.id.startsWith(row) ? /^(?:split|unified):(\d+):/.exec(node.id.slice(row.length))?.[1] : undefined
+      const index = raw === undefined ? NaN : Number(raw)
+      if (Number.isInteger(index) && index >= 0 && index < hunkCount()) return index
+    }
+  }
+  const bodyMouse = mouseClick((event) => {
+    const index = clickedHunk(event.target)
+    if (index !== undefined) setHunk(index)
+  }, interactive, selected)
+  const focusBody = (event: MouseEvent) => {
+    if (event.button !== MouseButton.LEFT || !interactive()) return
+    pending = undefined
+    setFocus("diff")
+  }
+  const bodyWheel = (event: MouseEvent) => {
+    bodyMouse.onMouseScroll()
+    if (!interactive()) { event.stopPropagation(); return }
+    pending = undefined
+    setFocus("diff")
+    const direction = event.scroll?.direction
+    if (direction === "left" || direction === "right" || event.modifiers.shift) {
+      event.stopPropagation()
+      const sign = direction === "left" || direction === "up" ? -1 : 1
+      pan(sign * Math.max(1, Math.round((event.scroll?.delta ?? 1) * 4)))
+    }
+  }
+  const controls = createMemo<ActionItem[]>(() => [
+    { id: "diff-focus-files", label: "Files", run: focusFiles },
+    { id: "diff-focus-body", label: "Diff", run: () => setFocus("diff") },
+    { id: "diff-toggle-files", label: showFiles() ? "Hide files" : "Show files", run: toggleSidebar },
+    { id: "diff-previous-hunk", label: "Prev hunk", run: () => jump(-1), disabled: !hunkCount() || hunk() === 0 },
+    { id: "diff-next-hunk", label: "Next hunk", run: () => jump(1), disabled: !hunkCount() || hunk() >= hunkCount() - 1 },
+    { id: "diff-layout", label: currentLayout() === "split" ? "Split" : "Unified", run: toggleLayout, disabled: !renderFile() },
+    { id: "diff-wrap", label: wrap() ? "Wrap on" : "Wrap off", run: toggleWrap, disabled: !renderFile() },
+    { id: "diff-pan-left", label: "Pan ←", run: () => pan(-4), disabled: wrap() || offset() === 0 || !renderFile() },
+    { id: "diff-pan-right", label: "Pan →", run: () => pan(4), disabled: wrap() || offset() >= maxOffset() || !renderFile() },
+  ])
+  createEffect(() => { if (!interactive()) bodyMouse.onMouseDrag() })
+  useKeyboard(() => bodyMouse.onMouseDrag())
   const keys = useKeyActions({
     "diff.focus": () => {
-      if (focus() === "diff") { setSidebarHidden(false); setFocus("files") }
+      bodyMouse.onMouseDrag()
+      if (focus() === "diff") focusFiles()
       else setFocus("diff")
     },
-    "diff.toggleFiles": () => {
-      const hide = showFiles()
-      setSidebarHidden(hide)
-      setFocus(hide ? "diff" : "files")
-    },
+    "diff.toggleFiles": toggleSidebar,
     "navigation.activate": () => {
       if (!error()) return false
       props.onLoadFiles()
     },
-    "diff.toggleLayout": () => { setLayout((value) => (value ?? (narrow() ? "unified" : "split")) === "split" ? "unified" : "split") },
-    "diff.toggleWrap": () => { setWrap((value) => !value) },
+    "diff.toggleLayout": toggleLayout,
+    "diff.toggleWrap": toggleWrap,
     "diff.previousHunk": () => {
       if (!renderFile()?.metadata.hunks.length) return false
       setFocus("diff"); jump(-1)
@@ -210,9 +288,10 @@ export function DiffScreen(props: {
     },
   }, { when: () => interactive() && focus() === "files", priority: 10 })
   useKeyActions({
-    "diff.panLeft": () => { setOffset((value) => Math.max(0, value - 4)) },
-    "diff.panRight": () => { setOffset((value) => value + 4) },
+    "diff.panLeft": () => pan(-4),
+    "diff.panRight": () => pan(4),
   }, { when: () => interactive() && focus() === "diff" && Boolean(scroll), priority: 10 })
+
 
   return (
     <box flexGrow={1} minHeight={0} minWidth={0} flexDirection="column" backgroundColor={colors.canvas}>
@@ -225,7 +304,11 @@ export function DiffScreen(props: {
           <text flexShrink={0} fg={colors.green}> +{selected()?.additions ?? 0}</text>
           <text flexShrink={0} fg={colors.red}> −{selected()?.deletions ?? 0}</text>
         </Show>
+        <Show when={hunkCount() > 0}>
+          <text id="diff-position" flexShrink={0} fg={colors.muted}> hunk {hunk() + 1}/{hunkCount()} · col {wrap() ? 1 : offset() + 1}</text>
+        </Show>
       </box>
+      <ActionBar id="diff-controls" actions={controls()} disabled={!interactive()} />
       <Show when={props.resource.status === "loading"}>
         <text height={1} flexShrink={0} fg={colors.muted}>Loading diff…</text>
       </Show>
@@ -242,13 +325,18 @@ export function DiffScreen(props: {
           border={["left"]} borderColor={focus() === "files" ? colors.blue : colors.border}
           width={narrow() ? "100%" : 30}
           flexShrink={0} minHeight={0} minWidth={0} flexDirection="column"
+          onMouseDown={(event) => {
+            if (event.button === MouseButton.LEFT && interactive()) { event.preventDefault(); focusFiles() }
+          }}
         >
           <text height={1} fg={colors.muted}>
             Files{props.resource.value !== undefined && !parsed().error ? ` (${parsed().files.length})` : ""}
           </text>
           <SelectableList
             items={parsed().files} itemKey={(file) => file.path} resetKey={targetKey()}
-            active={active() && props.interactive && showFiles() && focus() === "files" && !error()}
+            active={interactive() && showFiles() && focus() === "files" && !error()}
+            mouseActive={interactive() && showFiles() && !error()}
+            onMouseFocus={focusFiles}
             showScrollbar={props.showScrollbar} rowHeight={1}
             empty={props.resource.status === "ready" && !error() ? "No changed files." : ""}
             onSelect={(file) => setPath(file.path)}
@@ -257,10 +345,18 @@ export function DiffScreen(props: {
             {(file) => <text height={1} flexGrow={1} minWidth={0} wrapMode="none" truncate fg={colors.text}>{file().path}</text>}
           </SelectableList>
         </box>
-        <box id="diff-content-pane" visible={!narrow() || focus() === "diff"}
+        <box id="diff-content-pane" visible={showBody()}
+          {...bodyMouse}
+          onMouseDown={(event) => { bodyMouse.onMouseDown(event); focusBody(event) }}
           border={["left"]} borderColor={focus() === "diff" ? colors.blue : colors.border}
           flexGrow={1} minHeight={0} minWidth={0} flexDirection="column">
           <scrollbox
+            focusable={false}
+            onMouseScroll={(event) => { pending = undefined; if (interactive()) setFocus("diff"); event.stopPropagation() }}
+            viewportOptions={{ onMouseScroll: bodyWheel }}
+            scrollbarOptions={{ onMouseScroll: bodyWheel, trackOptions: { onMouse: (event) => {
+              if (event.type === "down") focusBody(event)
+            } } }}
             id="diff-body-scroll"
             ref={(value) => { scroll = value; bindScrollbar(value); value.viewport.on("resize", measure); measure() }}
             flexGrow={1} minHeight={0} minWidth={0} scrollY scrollX={false}

@@ -1,5 +1,5 @@
 import { TextAttributes } from "@opentui/core"
-import { createSignal, Show } from "solid-js"
+import { createMemo, createSignal, Show } from "solid-js"
 import { normalizeRepository } from "../../repository-name"
 import { StatusBar } from "../components/status-bar"
 import { SearchablePicker } from "../components/searchable-picker"
@@ -8,6 +8,7 @@ import { useTheme } from "../theme"
 
 export function SwitchRepositoryScreen(props: {
   recent: readonly string[]
+  current?: string
   showScrollbar?: boolean
   showStatusBarHints: boolean
   renderStatusBar?: boolean
@@ -17,6 +18,15 @@ export function SwitchRepositoryScreen(props: {
   const { colors } = useTheme()
   const keys = useKeybindings()
   const [error, setError] = createSignal("")
+  const repositories = createMemo(() => {
+    const seen = new Set<string>()
+    return [...(props.current ? [props.current] : []), ...props.recent].filter((repository) => {
+      const key = repository.toLowerCase()
+      if (seen.has(key)) return false
+      seen.add(key)
+      return true
+    })
+  })
   const submit = (query: string, selected?: string) => {
     const repository = normalizeRepository(query) ?? selected
     if (!repository) return setError("Enter owner/repository or a GitHub URL")
@@ -28,10 +38,10 @@ export function SwitchRepositoryScreen(props: {
       <SearchablePicker
         placement="center"
         width={80}
-        height={7 + Math.max(1, Math.min(20, props.recent.length)) + (error() ? 1 : 0)}
+        height={7 + Math.max(1, Math.min(20, repositories().length)) + (error() ? 1 : 0)}
         title="Switch repository"
         placeholder="Search recent repositories, owner/repository or GitHub URL"
-        items={props.recent}
+        items={repositories()}
         itemKey={(repository) => repository}
         match={(repository, query) => {
           const index = repository.toLowerCase().indexOf(query.toLowerCase())
@@ -50,8 +60,11 @@ export function SwitchRepositoryScreen(props: {
           const [owner, ...nameParts] = repository.split("/")
           return (
             <>
-              <text fg={colors.muted}>{owner} / </text>
-              <text fg={colors.blue} attributes={TextAttributes.BOLD}>{nameParts.join("/")}</text>
+              <box flexGrow={1} minWidth={0} flexDirection="row" overflow="hidden">
+                <text flexShrink={0} fg={colors.muted}>{owner} / </text>
+                <text minWidth={0} flexShrink={1} height={1} wrapMode="none" truncate fg={colors.blue} attributes={TextAttributes.BOLD}>{nameParts.join("/")}</text>
+              </box>
+              <text width={10} flexShrink={0} fg={colors.green}>{repository.toLowerCase() === props.current?.toLowerCase() ? "✓ current" : ""}</text>
             </>
           )
         }}

@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test"
 import { testRender } from "@opentui/solid"
+import { clickControl } from "./fixtures/mouse"
 import {
   LoadingRepository,
   RepositoryLoadError,
@@ -51,11 +52,16 @@ describe("repository launcher", () => {
     expect(frame).toContain("r retry · q quit")
     expect(frame).not.toContain("╭")
 
+    await view.mockMouse.click(1, 1)
     view.mockInput.pressKey("r")
     view.mockInput.pressKey("q")
     await view.flush()
     expect(retries).toBe(1)
     expect(quits).toBe(1)
+    await clickControl(view, "repository-retry")
+    await clickControl(view, "repository-quit")
+    expect(retries).toBe(2)
+    expect(quits).toBe(2)
   })
 
   test("opens a repository entered by the user", async () => {
@@ -108,6 +114,20 @@ describe("repository launcher", () => {
     expect(opened).toBe("cli/cli")
   })
 
+  test("opens a recent repository by clicking its row", async () => {
+    let opened = ""
+    const view = await testRender(
+      () => <RepositoryPicker recent={["anomalyco/opentui", "cli/cli"]} onOpen={(repository) => opened = repository} />,
+      { width: 80, height: 24 },
+    )
+    active.push(view)
+    await view.flush()
+    const row = view.captureCharFrame().split("\n").findIndex((line) => line.includes("cli / cli"))
+    expect(row).toBeGreaterThan(-1)
+    await view.mockMouse.click(40, row)
+    await view.flush()
+    expect(opened).toBe("cli/cli")
+  })
 
   test("typing a number searches instead of opening a repository", async () => {
     let opened = ""

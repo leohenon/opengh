@@ -4,6 +4,7 @@ import { createSignal } from "solid-js"
 import type { Page } from "../src/navigation"
 import { Header } from "../src/ui/components/header"
 import { githubDataFixture } from "./fixtures/github-data"
+import { clickControl } from "./fixtures/mouse"
 
 const tabs: ReadonlyArray<{ page: Page; label: string }> = [
   { page: "overview", label: "Overview" },
@@ -12,6 +13,65 @@ const tabs: ReadonlyArray<{ page: Page; label: string }> = [
   { page: "pulls", label: "Pull requests" },
   { page: "actions", label: "Actions" },
 ]
+
+test("mouse tabs include their underline, respect disabled/drag guards, and reveal hidden tabs", async () => {
+  const [page, setPage] = createSignal<Page>("overview")
+  const [compact, setCompact] = createSignal(false)
+  const [interactive, setInteractive] = createSignal(true)
+  let repositories = 0
+  const [repo, setRepo] = createSignal(githubDataFixture.repo)
+  const view = await testRender(() => <Header repo={repo()} page={page()} tabs={tabs}
+    compact={compact()} interactive={interactive()} onSelect={setPage} onOpenRepository={() => { repositories++ }} />, { width: 140, height: 8 })
+  const click = async (label: string, offset = 0, button: 0 | 1 | 2 = 0) => {
+    const lines = view.captureCharFrame().split("\n")
+    const row = lines.findIndex((line) => line.includes(label))
+    expect(row).toBeGreaterThan(-1)
+    await view.mockMouse.click(lines[row]!.indexOf(label), row + offset, button)
+    await view.flush()
+  }
+  try {
+    await view.flush()
+    await click("2 Commits", 1)
+    expect(page()).toBe("commits")
+    for (const button of [1, 2] as const) await click("1 Overview", 0, button)
+    const row = view.captureCharFrame().split("\n")[3]!
+    await view.mockMouse.drag(row.indexOf("1 Overview"), 3, row.indexOf("1 Overview") + 2, 3)
+    expect(page()).toBe("commits")
+    setInteractive(false)
+    await clickControl(view, "repository-dropdown")
+    expect(repositories).toBe(0)
+    await click("3 Issues")
+    expect(page()).toBe("commits")
+    setInteractive(true)
+    await click("3 Issues")
+    expect(page()).toBe("issues")
+    expect(view.renderer.currentFocusedRenderable).toBeNull()
+    await clickControl(view, "repository-dropdown")
+    expect(repositories).toBe(1)
+    setCompact(true)
+    view.resize(24, 8)
+    await view.flush()
+    await click("›")
+    expect(page()).toBe("pulls")
+    await click("‹")
+    expect(page()).toBe("issues")
+    expect(view.captureCharFrame()).not.toContain("anomalyco/opentui")
+    await clickControl(view, "repository-dropdown")
+    expect(repositories).toBe(2)
+    view.resize(160, 8)
+    await view.flush()
+    expect(view.captureCharFrame()).toContain("anomalyco/opentui ▾")
+    await clickControl(view, "repository-dropdown")
+    expect(repositories).toBe(3)
+    setCompact(false)
+    setRepo({ ...githubDataFixture.repo, nameWithOwner: "a-very-long-owner/a-very-long-repository-name" })
+    view.resize(30, 8)
+    await view.flush()
+    expect(view.captureCharFrame().split("\n")[1]!.trimEnd().endsWith("▾")).toBe(true)
+    await clickControl(view, "repository-dropdown")
+    expect(repositories).toBe(4)
+  } finally { view.renderer.destroy() }
+})
 
 test("header prioritizes tabs over repository identity and counts, then reveals whole tabs on navigation", async () => {
   const repo = { ...githubDataFixture.repo, nameWithOwner: "a-very-long-owner/pi-anthropic-oauth" }

@@ -11,6 +11,7 @@ import type {
 } from "../src/repository-state";
 import { App } from "../src/ui/app";
 import { IssueAssigneesPicker } from "../src/ui/components/issue-assignees-picker";
+import { clickControl } from "./fixtures/mouse";
 import {
   githubDataFixture,
   issueCommentsFixture,
@@ -174,12 +175,20 @@ test("issue action overlays isolate input and confirm comments, closing, reopeni
     expect(submitted).toEqual([]);
     expect(quit).toBe(0);
     expect(refresh).toBe(0);
-    view.mockInput.pressEscape();
+    await clickControl(view, "issue-action-back");
     await settle();
+    expect(view.captureCharFrame()).not.toContain("Write");
+    expect(action().body).toBe("**Draft** qrs?h1l,\n");
     view.mockInput.pressKey("c");
     await settle();
     expect(view.captureCharFrame()).toContain("**Draft** qrs?h1l,");
-    view.mockInput.pressTab();
+    await clickControl(view, "issue-action-discard");
+    expect(action().body).toBe("");
+    await view.mockInput.typeText("**Draft** qrs?h1l,");
+    view.mockInput.pressEnter();
+    const previewTab = view.captureCharFrame().split("\n").findIndex((line) => line.includes("Write") && line.includes("Preview"));
+    const previewColumn = view.captureCharFrame().split("\n")[previewTab]!.indexOf("Preview");
+    await view.mockMouse.click(previewColumn, previewTab);
     await settle();
     expect(view.captureCharFrame()).toContain("Draft");
     expect(action().body).toBe("**Draft** qrs?h1l,\n");
@@ -208,7 +217,7 @@ test("issue action overlays isolate input and confirm comments, closing, reopeni
     setAction((current) => ({ ...current, body: draft }));
     view.mockInput.pressTab();
     await settle();
-    view.mockInput.pressKey("s", { ctrl: true });
+    await clickControl(view, "issue-action-submit");
     view.mockInput.pressKey("s", { ctrl: true });
     await settle();
     expect(submitted).toEqual([]);
@@ -219,21 +228,28 @@ test("issue action overlays isolate input and confirm comments, closing, reopeni
     await settle();
     expect(view.captureCharFrame()).toContain("enter confirm · esc back");
     expect(statusLine()).not.toContain("enter confirm");
-    view.mockInput.pressEscape();
+    await clickControl(view, "issue-action-confirm-back");
     await settle();
     expect(view.captureCharFrame()).not.toContain(
       `Post comment to #${number}?`,
     );
     expect(action().body).toBe("**Draft** qrs?h1l,\n");
+    await view.mockInput.typeText("still focused");
+    await settle();
+    expect(action().body).toContain("still focused");
+    setAction((current) => ({ ...current, body: "**Draft** qrs?h1l,\n" }));
     setConfig((current) => ({ ...current, showStatusBarHints: true }));
     view.mockInput.pressKey("s", { ctrl: true });
     await settle();
-    view.mockInput.pressEnter();
+    await clickControl(view, "issue-action-confirm");
     view.mockInput.pressEnter();
     view.mockInput.pressKey("s", { ctrl: true });
     view.mockInput.pressEscape();
     view.mockInput.pressKey("q");
     await settle();
+    await view.mockMouse.click(0, 0);
+    await settle();
+    expect(view.captureCharFrame()).toContain("Write");
     expect(submitted).toEqual(["comment"]);
     expect(quit).toBe(0);
     expect(action().body).toBe("**Draft** qrs?h1l,\n");
@@ -260,6 +276,11 @@ test("issue action overlays isolate input and confirm comments, closing, reopeni
     expect(view.captureCharFrame()).toContain("Close issue");
     expect(statusLine()).toBe("↑/↓ select · enter open · esc close");
     expect(view.captureCharFrame()).toContain("Mark as duplicate");
+    await view.mockMouse.click(0, 0);
+    await settle();
+    expect(view.captureCharFrame()).not.toContain("Close issue…");
+    view.mockInput.pressKey("a");
+    await settle();
     expect(view.captureCharFrame()).not.toContain("Add comment");
     expect(view.captureCharFrame()).not.toContain("Open on GitHub");
     view.mockInput.pressEnter();
@@ -401,7 +422,7 @@ test("assignee suggestions filter locally, preserve selection, retry and save in
     expect(view.captureCharFrame()).not.toContain("@kate");
     expect(view.captureCharFrame()).not.toContain("@max");
     expect(action().selectedAssignees).toEqual(["max", "jane"]);
-    view.mockInput.pressEnter(); await settle();
+    await clickControl(view, "assignee-row-0"); await settle();
     expect(action().selectedAssignees).toEqual(["max", "jane", "john"]);
     expect(view.captureCharFrame()).toContain("@jo");
     view.mockInput.pressEnter(); await settle();
@@ -414,16 +435,20 @@ test("assignee suggestions filter locally, preserve selection, retry and save in
     view.mockInput.pressEnter(); await settle();
     expect(candidateCalls).toBe(2);
     expect(view.captureCharFrame()).not.toContain("Retry loading users");
-    view.mockInput.pressKey("s", { ctrl: true }); await settle();
+    await clickControl(view, "assignees-save"); await settle();
     expect(view.captureCharFrame()).toContain("Save failed");
     expect(view.captureCharFrame().replace(/\s+/g, " ")).toContain("GitHub before retrying.");
     expect(action().selectedAssignees).toEqual(["max", "jane"]);
     expect(action().body).toBe("Comment draft");
     fail = false;
-    view.mockInput.pressKey("s", { ctrl: true }); await settle();
+    await clickControl(view, "assignees-save"); await settle();
     // Saving feedback lives in the status bar, which delays its loading indicator.
     await Bun.sleep(220); await view.flush();
     expect(view.captureCharFrame()).toContain("Saving assignees…");
+    await clickControl(view, "assignees-save");
+    await clickControl(view, "assignees-back");
+    await view.mockMouse.click(0, 0); await settle();
+    expect(view.captureCharFrame()).toContain(`Assignees · #${issueDetailFixture.number}`);
     view.mockInput.pressEscape(); view.mockInput.pressKey("s", { ctrl: true });
     await view.mockInput.typeText("ignored"); await settle();
     expect(submitted).toEqual(["assignees", "assignees"]);
@@ -491,6 +516,12 @@ test("assignee picker limits selection to ten while allowing removal", async () 
   const settle = async () => { await view.flush(); await Bun.sleep(40); await view.flush(); };
   try {
     await view.mockInput.typeText("user10"); await settle();
+    const row = view.renderer.root.findDescendantById("assignee-row-0")!;
+    await view.mockMouse.pressDown(row.x, row.y);
+    view.mockInput.pressBackspace(); await settle();
+    await view.mockMouse.release(row.x, row.y); await settle();
+    expect(action().selectedAssignees).toHaveLength(10);
+    await view.mockInput.typeText("0"); await settle();
     view.mockInput.pressEnter(); await settle();
     expect(action().selectedAssignees).toHaveLength(10);
     expect(view.captureCharFrame()).toContain("Maximum 10 assignees.");

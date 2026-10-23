@@ -3,6 +3,7 @@ import { testRender, useKeyboard } from "@opentui/solid"
 import { App } from "../src/ui/app"
 import { githubDataFixture, repositoryOperationsFixture } from "./fixtures/github-data"
 import type { CommandResult } from "../src/command-actions"
+import { clickControl } from "./fixtures/mouse"
 
 test("command overlay isolates destination input and retains logs; Ctrl+C cancels rather than quits", async () => {
   let quit = 0
@@ -32,7 +33,13 @@ test("command overlay isolates destination input and retains logs; Ctrl+C cancel
     await view.flush()
     view.mockInput.pressKey("x")
     await view.flush()
-    view.mockInput.pressKey("e")
+    await view.mockMouse.click(0, 0)
+    await view.flush()
+    expect(cancel).toBeUndefined()
+    expect(calls).toBe(0)
+    view.mockInput.pressKey("x")
+    await view.flush()
+    await clickControl(view, "command-edit")
     for (const key of ["q", "r", "?", "4", "x"]) view.mockInput.pressKey(key)
     await view.flush()
     expect(view.captureCharFrame()).toContain(`Clone ${githubDataFixture.repo.nameWithOwner}?`)
@@ -40,10 +47,13 @@ test("command overlay isolates destination input and retains logs; Ctrl+C cancel
     expect(view.captureCharFrame()).not.toContain("--progress")
     expect(quit).toBe(0)
     expect(refresh).toBe(0)
-    view.mockInput.pressEnter()
-    await view.flush()
+    await clickControl(view, "command-confirm")
     expect(calls).toBe(1)
     expect(view.captureCharFrame()).toContain("Running")
+    await view.mockMouse.click(0, 0)
+    await view.flush()
+    expect(view.captureCharFrame()).toContain("Running")
+    expect(cancel).toBeDefined()
     view.mockInput.pressEscape()
     view.mockInput.pressKey("q")
     view.mockInput.pressEnter()
@@ -55,12 +65,18 @@ test("command overlay isolates destination input and retains logs; Ctrl+C cancel
     expect(quit).toBe(0)
     expect(view.captureCharFrame()).toContain("Cancelled (exit 143)")
     expect(view.captureCharFrame()).toContain("stderr")
-    view.mockInput.pressKey("y")
-    await view.flush()
+    await clickControl(view, "command-copy")
     expect(copies).toBe("stdout\nstderr\nprogress\n")
-    view.mockInput.pressEscape()
+    await clickControl(view, "command-close")
     await Bun.sleep(40)
     await view.flush()
     expect(cancel).toBeUndefined()
+    await clickControl(view, "page-action-clone")
+    await clickControl(view, "command-confirm")
+    expect(calls).toBe(2)
+    await clickControl(view, "command-cancel")
+    expect(view.captureCharFrame()).toContain("Cancelled (exit 143)")
+    expect(quit).toBe(0)
+    await clickControl(view, "command-close")
   } finally { view.renderer.destroy() }
 })

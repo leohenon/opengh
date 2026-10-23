@@ -3,6 +3,7 @@ import { testRender } from "@opentui/solid"
 import type { IssueReference } from "../src/models"
 import { IssueReferencesPicker } from "../src/ui/components/issue-references-picker"
 import { referencedItems, type IssueLinkReference } from "../src/ui/issue-references"
+import { clickControl } from "./fixtures/mouse"
 
 test("shows all unique references without hints and restores each tab's selection and scroll", async () => {
   const link = (kind: "pull" | "issue", number: number): IssueLinkReference => ({
@@ -25,9 +26,10 @@ test("shows all unique references without hints and restores each tab's selectio
   expect(items.find((item) => item.number === 8)?.title).toBe("pull title 8")
   let opened: IssueLinkReference | undefined
   let copied: IssueLinkReference | undefined
+  let closes = 0
   const view = await testRender(() => (
     <IssueReferencesPicker references={references} currentIssue={currentIssue} showScrollbar={false}
-      onOpen={(item) => { opened = item }} onCopy={(item) => { copied = item }} />
+      onOpen={(item) => { opened = item }} onCopy={(item) => { copied = item }} onClose={() => { closes++ }} />
   ), { width: 100, height: 28 })
   try {
     await view.flush()
@@ -58,17 +60,22 @@ test("shows all unique references without hints and restores each tab's selectio
     view.mockInput.pressEnter()
     expect(opened?.number).toBe(1)
     expect(opened?.kind).toBe("pull")
-    view.mockInput.pressArrow("right")
-    await view.flush()
+    await clickControl(view, "references-tab-issue")
     expect(view.captureCharFrame()).toBe(issueFrame)
     view.mockInput.pressKey("o")
     view.mockInput.pressKey("y")
     expect(opened?.number).toBe(12)
     expect(copied?.kind).toBe("issue")
     expect(copied?.number).toBe(12)
+    await clickControl(view, "references-copy")
+    expect(copied?.number).toBe(12)
+    await clickControl(view, "references-open")
+    expect(opened?.number).toBe(12)
     view.mockInput.pressArrow("left")
     await view.flush()
     expect(view.captureCharFrame()).toBe(pullFrame)
+    await clickControl(view, "references-back")
+    expect(closes).toBe(1)
   } finally {
     view.renderer.destroy()
   }

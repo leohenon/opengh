@@ -2,7 +2,9 @@ import { CliRenderEvents, TextAttributes, type ScrollBoxRenderable } from "@open
 import { useRenderer, useTerminalDimensions } from "@opentui/solid"
 import { createEffect, createSignal, For, on, onCleanup, Show } from "solid-js"
 import type { Config } from "../../config"
+import { mouseClick } from "../mouse"
 import { useTheme } from "../theme"
+import { Action } from "./action"
 import { Popup } from "./popup"
 import { ThemePicker } from "./theme-picker"
 import { useKeyActions, useKeybindings } from "../keybindings"
@@ -161,9 +163,21 @@ export function Settings(props: {
     setError("")
     setScreen("themes")
   }
+  const closeThemes = () => {
+    theme.preview()
+    setScreen("settings")
+  }
+  const requestClose = () => {
+    if (busy()) return
+    if (screen() === "themes") closeThemes()
+    else props.onClose()
+  }
 
-  const changeSetting = (direction: number) => {
-    switch (selected()) {
+  const changeSetting = (setting: Setting, direction: number) => {
+    if (busy()) return
+    setSelected(setting)
+    revealSetting()
+    switch (setting) {
       case "theme": openThemes(); break
       case "color-mode": void changeColorMode(direction); break
       case "reduced-motion": void toggleBoolean("reducedMotion"); break
@@ -180,12 +194,12 @@ export function Settings(props: {
   }
   useKeyActions({}, { when: () => screen() === "settings" && busy(), priority: 200, modal: true })
   useKeyActions({
-    "dialog.close": () => props.onClose(),
+    "dialog.close": requestClose,
     "navigation.up": () => moveSetting(-1),
     "navigation.down": () => moveSetting(1),
-    "settings.previousValue": () => changeSetting(-1),
-    "settings.nextValue": () => changeSetting(1),
-    "navigation.activate": () => changeSetting(1),
+    "settings.previousValue": () => changeSetting(selected(), -1),
+    "settings.nextValue": () => changeSetting(selected(), 1),
+    "navigation.activate": () => changeSetting(selected(), 1),
   }, { when: () => screen() === "settings" && !busy(), priority: 100, modal: true })
 
   const settingRow = (setting: Setting) => {
@@ -194,6 +208,7 @@ export function Settings(props: {
     return (
       <box
         id={`setting-${setting}`}
+        {...mouseClick(() => changeSetting(setting, 1), () => !busy())}
         height={rowHeight()}
         flexShrink={0}
         flexDirection="row"
@@ -207,7 +222,11 @@ export function Settings(props: {
           <text width="100%" height={1} wrapMode="none" fg={colors.text} attributes={active() ? TextAttributes.BOLD : TextAttributes.NONE}>{definition.title}</text>
           <text width="100%" height={1} wrapMode="none" fg={colors.muted}>{definition.description}</text>
         </box>
-        <text width={split() ? 24 : Math.min(24, Math.max(12, Math.floor((dimensions().width - 10) * 0.35)))} flexShrink={0} fg={active() ? colors.blue : colors.muted}>‹ {definition.value(props.config)} ›</text>
+        <box width={split() ? 24 : Math.min(24, Math.max(12, Math.floor((dimensions().width - 10) * 0.35)))} height={1} flexShrink={0} flexDirection="row">
+          <Action id={`setting-${setting}-previous`} onActivate={() => changeSetting(setting, -1)} disabled={busy()} fg={active() ? colors.blue : colors.muted}>‹</Action>
+          <text minWidth={0} flexShrink={1} wrapMode="none" fg={active() ? colors.blue : colors.muted}> {definition.value(props.config)} </text>
+          <Action id={`setting-${setting}-next`} onActivate={() => changeSetting(setting, 1)} disabled={busy()} fg={active() ? colors.blue : colors.muted}>›</Action>
+        </box>
       </box>
     )
   }
@@ -264,7 +283,7 @@ export function Settings(props: {
   }
 
   return (
-    <Popup width={100} height={popupHeight()} zIndex={200} placement="center">
+    <Popup width={100} height={popupHeight()} zIndex={200} placement="center" onClose={requestClose}>
       <Show
         when={screen() === "settings"}
         fallback={(
@@ -272,14 +291,15 @@ export function Settings(props: {
             current={props.config.theme}
             saving={busy()}
             onPreview={theme.preview}
-            onCancel={() => {
-              theme.preview()
-              setScreen("settings")
-            }}
+            onCancel={closeThemes}
             onSelect={async (name) => {
-              await props.onChange({ ...props.config, theme: name })
-              theme.preview()
-              setScreen("settings")
+              setSaving(true)
+              try {
+                await props.onChange({ ...props.config, theme: name })
+                closeThemes()
+              } finally {
+                setSaving(false)
+              }
             }}
           />
         )}
@@ -295,9 +315,10 @@ export function Settings(props: {
           >
             <box height={1} flexShrink={0} flexDirection="row" justifyContent="space-between">
               <text fg={colors.text} attributes={TextAttributes.BOLD}>Settings</text>
+              <Action id="settings-close" disabled={busy()} onActivate={requestClose}>Close</Action>
             </box>
             <box height={1} flexShrink={0} />
-            <scrollbox ref={(value) => { settingsScroll = value }} flexGrow={1} minHeight={0} scrollY scrollX={false} scrollbarOptions={{ visible: false }}>
+            <scrollbox ref={(value) => { settingsScroll = value }} focusable={false} flexGrow={1} minHeight={0} scrollY scrollX={false} scrollbarOptions={{ visible: false }}>
               <For each={sectionOrder}>
                 {(section, index) => (
                   <box flexDirection="column" flexShrink={0} marginTop={index() === 0 ? 0 : 1}>

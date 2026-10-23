@@ -11,6 +11,120 @@ import { initializeHunk } from "../src/ui/hunk-host"
 import { DiffScreen } from "../src/ui/pages/diff"
 import { commitDetailFixture, githubDataFixture, pullContextFixture, repositoryOperationsFixture } from "./fixtures/github-data"
 import { patchFixture } from "./fixtures/diff"
+import { parseDiff } from "../src/ui/diff-model"
+import { clickControl } from "./fixtures/mouse"
+
+test("mouse diff controls select hunks in place, isolate pane wheels, pan, wrap, and reach both narrow panes", async () => {
+  const setup = await createTestRenderer({ width: 110, height: 26 })
+  initializeHunk(setup.renderer)
+  const [interactive, setInteractive] = createSignal(true)
+  const lines = (prefix: string, count: number, marker: string) => Array.from({ length: count }, (_, index) => `${marker}${prefix}-${index}-${"x".repeat(90)}\n`).join("")
+  const patch = `diff --git a/mouse.txt b/mouse.txt\n--- a/mouse.txt\n+++ b/mouse.txt\n@@ -1,2 +1,2 @@\n`
+    + lines("first-old", 2, "-") + lines("first-new", 2, "+")
+    + `@@ -100,30 +100,30 @@\n` + lines("second-old", 30, "-") + lines("second-new", 30, "+")
+    + `@@ -500 +500 @@\n-last-old\n+last-new\n`
+    + Array.from({ length: 25 }, (_, index) => `diff --git a/file-${index}.txt b/file-${index}.txt\n--- a/file-${index}.txt\n+++ b/file-${index}.txt\n@@ -1 +1 @@\n-old\n+new\n`).join("")
+  const file = parseDiff({ kind: "patch", patch }).files[0]!.body!
+  const endColumn = Math.max(...file.metadata.additionLines.map((line) => Bun.stringWidth(line)), ...file.metadata.deletionLines.map((line) => Bun.stringWidth(line)))
+  await render(() => <box width="100%" height="100%"><DiffScreen target={{ kind: "commit", sha: "mouse" }}
+    resource={{ status: "ready", value: { kind: "patch", patch } }} interactive={interactive()} showScrollbar={false} onLoadFiles={() => {}} /></box>, setup.renderer)
+  const settle = async () => { await setup.flush(); await setup.renderer.idle(); await setup.flush() }
+  const files = () => setup.renderer.root.findDescendantById("diff-files-pane") as BoxRenderable
+  const body = () => setup.renderer.root.findDescendantById("diff-body-scroll") as ScrollBoxRenderable
+  const position = () => setup.captureCharFrame().split("\n")[0]!
+  const codeRow = (text: string) => setup.captureCharFrame().split("\n").findIndex((line) => line.includes(text))
+  try {
+    await settle()
+    const focused = files().borderColor
+    const x = body().viewport.x + 10
+    const second = codeRow("second-old-0")
+    expect(second).toBeGreaterThan(-1)
+    await setup.mockMouse.click(x, second)
+    await settle()
+    expect(position()).toContain("hunk 2/3")
+    expect(body().scrollTop).toBe(0) // Selecting visible code must not jump to its header.
+    expect((setup.renderer.root.findDescendantById("diff-content-pane") as BoxRenderable).borderColor).toEqual(focused)
+    const first = codeRow("first-old-0")
+    for (const button of [1, 2] as const) await setup.mockMouse.click(x, first, button)
+    await setup.mockMouse.drag(x, first, x + 4, first)
+    await settle()
+    expect(position()).toContain("hunk 2/3")
+    expect(setup.renderer.getSelection()?.getSelectedText()).toBeTruthy()
+    await setup.mockMouse.pressDown(x, first)
+    await setup.mockMouse.scroll(x, first, "right")
+    await setup.mockMouse.release(x, first)
+    await settle()
+    expect(position()).toContain("hunk 2/3") // A wheel gesture cancels a held click, not just its reveal.
+    await setup.mockMouse.scroll(x, first, "left")
+    await settle()
+    const list = files().getChildren()[1]!.getChildren()[0] as ScrollBoxRenderable
+    await setup.mockMouse.scroll(list.viewport.x + 4, list.viewport.y + 2, "down")
+    await settle()
+    expect(files().borderColor).toEqual(focused)
+    expect(list.scrollTop).toBeGreaterThan(0)
+    expect(body().scrollTop).toBe(0)
+    await setup.mockMouse.scroll(x, second, "right")
+    await settle()
+    expect(position()).toContain("col 5")
+    await setup.mockMouse.scroll(x, second, "down", { modifiers: { shift: true } })
+    await setup.mockMouse.scroll(x, second, "right", { modifiers: { shift: true } })
+    await settle()
+    expect(position()).toContain("col 13")
+    expect(body().scrollTop).toBe(0)
+    expect(body().scrollLeft).toBe(0)
+    await clickControl(setup, "diff-wrap")
+    await settle()
+    await setup.mockMouse.click(x, codeRow("first-old-0"))
+    await settle()
+    expect(position()).toContain("hunk 1/3")
+    const wrapped = setup.captureCharFrame()
+    await setup.mockMouse.scroll(x, second, "right")
+    await settle()
+    expect(setup.captureCharFrame()).toBe(wrapped)
+    await clickControl(setup, "diff-wrap")
+    await settle()
+    expect(position()).toContain("col 13")
+    for (let index = 0; index < 40; index++) await setup.mockMouse.scroll(x, second, "right", { delayMs: 0 })
+    await settle()
+    expect(position()).toContain(`col ${endColumn}`)
+    await clickControl(setup, "diff-layout")
+    await settle()
+    const secondHeader = setup.renderer.root.findDescendantById(`diff-hunk:${file.id}:1`)!
+    await setup.mockMouse.click(x, secondHeader.y + 1)
+    await settle()
+    expect(position()).toContain("hunk 2/3")
+    expect(body().scrollTop).toBe(0)
+    const header = setup.renderer.root.findDescendantById(`diff-hunk:${file.id}:0`)!
+    await setup.mockMouse.click(header.x + 2, header.y)
+    await settle()
+    expect(position()).toContain("hunk 1/3")
+    expect(body().scrollTop).toBe(0)
+    await clickControl(setup, "diff-next-hunk")
+    await settle()
+    expect(position()).toContain("hunk 2/3")
+    expect(body().scrollTop).toBeGreaterThan(0)
+    const jumpedTop = body().scrollTop
+    await setup.mockMouse.scroll(x, body().viewport.y + 3, "down")
+    await settle()
+    const top = body().scrollTop
+    expect(top).toBeGreaterThan(jumpedTop)
+    setInteractive(false)
+    await clickControl(setup, "diff-layout")
+    await setup.mockMouse.scroll(x, body().viewport.y + 3, "down")
+    await settle()
+    expect(body().scrollTop).toBe(top)
+    setInteractive(true)
+    await clickControl(setup, "diff-toggle-files")
+    expect(files().visible).toBe(false)
+    setup.resize(48, 26)
+    await settle()
+    await clickControl(setup, "diff-focus-files")
+    expect(files().visible).toBe(true)
+    await clickControl(setup, "diff-focus-body")
+    expect(files().visible).toBe(false)
+    expect(setup.renderer.root.findDescendantById("diff-content-pane")!.visible).toBe(true)
+  } finally { setup.renderer.destroy(); await setup.renderer.closed }
+})
 
 test("commit diffs render when the response arrives after the loading frame", async () => {
   const setup = await createTestRenderer({ width: 120, height: 32 })
@@ -106,6 +220,28 @@ test("hunk navigation follows native layout and metadata-only selection removes 
     expect(setup.captureCharFrame()).toContain("Binary file")
     expect(setup.captureCharFrame()).not.toContain("last-new")
     expect(setup.captureCharFrame()).not.toContain("No file selected")
+    setup.mockInput.pressTab()
+    await settle()
+    expectFocus("diff")
+    const longRow = setup.captureCharFrame().split("\n").findIndex((line) => line.includes("long.ts"))
+    expect(longRow).toBeGreaterThan(-1)
+    await setup.mockMouse.click(pane("files").x + pane("files").width - 2, longRow)
+    await settle()
+    expectFocus("diff")
+    expect(setup.captureCharFrame()).toContain("old-row-0")
+    expect(setup.captureCharFrame()).not.toContain("Binary file")
+    setup.resize(48, 18)
+    await settle()
+    setup.mockInput.pressTab()
+    await settle()
+    expectFocus("files")
+    const binaryRow = setup.captureCharFrame().split("\n").findIndex((line) => line.includes("image.png"))
+    expect(binaryRow).toBeGreaterThan(-1)
+    await setup.mockMouse.click(pane("files").x + 4, binaryRow)
+    await settle()
+    expectFocus("diff")
+    expect(setup.captureCharFrame()).toContain("Binary file")
+    expect(setup.captureCharFrame()).not.toContain("Files (2)")
   } finally { setup.renderer.destroy(); await setup.renderer.closed }
 })
 
@@ -117,6 +253,7 @@ test("numbered tabs retain independent diff viewers, geometry and scroll until E
   const longPatch = patchFixture + `diff --git a/long.ts b/long.ts\n--- a/long.ts\n+++ b/long.ts\n@@ -1,40 +1,40 @@\n`
     + Array.from({ length: 40 }, (_, i) => `-old-row-${i}\n`).join("")
     + Array.from({ length: 40 }, (_, i) => `+new-row-${i}\n`).join("")
+    + `@@ -100 +100 @@\n-last-old\n+last-new\n`
   await render(() => <App data={githubDataFixture} operations={repositoryOperationsFixture} config={{ ...defaultConfig, showStatusBarHints: true }} diffs={diffs()}
     onLoadDiff={async (target) => {
       requests.push(target)
@@ -157,6 +294,7 @@ test("numbered tabs retain independent diff viewers, geometry and scroll until E
     setup.mockInput.pressKey("w")
     setup.mockInput.pressKey("b") // Hidden sidebar and full-width code.
     await settle()
+    setup.mockInput.pressKey("]")
     setup.mockInput.pressKey("G")
     await settle()
     const commitScroll = scroll("commits")
@@ -165,6 +303,7 @@ test("numbered tabs retain independent diff viewers, geometry and scroll until E
     const frame = setup.captureCharFrame()
     expect(position).toBeGreaterThan(0)
     expect(frame).toContain("new-row-39")
+    expect(frame).toContain("hunk 2/2")
     expect(frame).not.toContain("Files (2)")
     setup.mockInput.pressKey("3")
     await settle()

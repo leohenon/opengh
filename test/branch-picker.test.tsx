@@ -4,6 +4,7 @@ import { createSignal } from "solid-js"
 import type { Paginated } from "../src/models"
 import type { ResourceState } from "../src/repository-state"
 import { BranchPicker } from "../src/ui/components/branch-picker"
+import { clickControl } from "./fixtures/mouse"
 
 const active: Array<{ renderer: { destroy(): void; isDestroyed: boolean } }> = []
 afterEach(() => {
@@ -69,10 +70,7 @@ describe("BranchPicker", () => {
     await view.flush()
 
     expect(view.captureCharFrame()).toContain("Load more branches…")
-    view.mockInput.pressArrow("down")
-    view.mockInput.pressArrow("down")
-    view.mockInput.pressEnter()
-    await view.flush()
+    await clickControl(view, "picker-row-2")
 
     const loading = view.captureCharFrame()
     expect(loads).toBe(1)
@@ -81,8 +79,7 @@ describe("BranchPicker", () => {
     expect(loading).toContain("next")
     expect(loading).toContain("Loading more branches…")
 
-    view.mockInput.pressEnter()
-    await view.flush()
+    await clickControl(view, "picker-row-2")
     expect(loads).toBe(1)
 
     setBranches({
@@ -94,9 +91,12 @@ describe("BranchPicker", () => {
     await view.flush()
     expect(view.captureCharFrame()).toContain("Load failed — enter to retry")
 
-    view.mockInput.pressEnter()
-    await view.flush()
+    await clickControl(view, "picker-row-2")
     expect(loads).toBe(2)
+    await view.mockInput.typeText("next")
+    await view.flush()
+    expect(view.captureCharFrame()).not.toContain("✓ current")
+    expect(view.captureCharFrame()).toContain("next")
   })
 
   test("retries a failed branch refresh from inside the picker", async () => {
@@ -196,4 +196,29 @@ describe("BranchPicker", () => {
     expect(loads).toBe(1)
   })
 
+  test("selects a branch when its row is clicked", async () => {
+    let selected = ""
+    const view = await testRender(
+      () => (
+        <BranchPicker
+          branches={readyBranches(["main", "next"])}
+          current="main"
+          showScrollbar={false}
+          onSelect={(branch) => { selected = branch }}
+          onLoadMore={async () => {}}
+          onRetry={() => {}}
+          onClose={() => {}}
+        />
+      ),
+      { width: 100, height: 28 },
+    )
+    active.push(view)
+    await view.flush()
+
+    const row = view.captureCharFrame().split("\n").findIndex((line) => line.includes("next"))
+    expect(row).toBeGreaterThan(-1)
+    await view.mockMouse.click(50, row)
+    await view.flush()
+    expect(selected).toBe("next")
+  })
 })

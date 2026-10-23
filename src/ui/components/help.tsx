@@ -40,6 +40,7 @@ function Shortcut(props: { keys: string; keyWidth: number; children: JSX.Element
 }
 
 export function Help(props: {
+  onClose: () => void;
   view: Page | "run" | "commit" | "issue" | "pull" | "diff";
   tabCount: number;
   hasDocumentTabs?: boolean;
@@ -180,7 +181,7 @@ export function Help(props: {
   ));
 
   return (
-    <Popup width={width()} height={height()} zIndex={200} placement="center">
+    <Popup width={width()} height={height()} zIndex={200} placement="center" onClose={props.onClose}>
       <box
         flexGrow={1}
         minHeight={0}

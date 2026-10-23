@@ -4,11 +4,13 @@ import { defaultConfig } from "../src/config"
 import { createRepositorySession, type RepositoryLoaders } from "../src/repository-session"
 import { Root } from "../src/root"
 import type { CommandResult } from "../src/command-actions"
+import { clickControl } from "./fixtures/mouse"
 import { commitDetailFixture, githubDataFixture, issueDetailFixture, pullContextFixture } from "./fixtures/github-data"
 
 // Exercise the real Root, session, focused input, and mounted repository pages without GitHub or disk writes.
 test("repository switch popup isolates input, preserves cancelled navigation, and resets confirmed switches", async () => {
   const loads: string[] = []
+  const branchLoads: string[] = []
   let missingFails = true
   let recent = ["anomalyco/opentui", ...Array.from({ length: 98 }, (_, index) => `owner/repo-${index}`), "owner/qrshly"]
   let recentReads = 0
@@ -29,7 +31,7 @@ test("repository switch popup isolates input, preserves cancelled navigation, an
     documents: async (repo, branch) => [{ id: `${repo.nameWithOwner}:README.md`, repository: repo.nameWithOwner, ref: branch, path: "README.md", label: "README" }],
     document: async () => Array.from({ length: 100 }, (_, index) => `Line ${index} of documentation\n`).join("\n"),
     branches: async () => ({ items: ["main", "next"], hasMore: false }),
-    commits: async () => ({ items: githubDataFixture.commits.value!.items, hasMore: false }),
+    commits: async (repository, branch) => { branchLoads.push(`${repository}:${branch}`); return { items: githubDataFixture.commits.value!.items, hasMore: false } },
     commit: async (_repository, sha) => ({ ...commitDetailFixture, sha }),
     issue: async () => issueDetailFixture,
     issueComments: async () => ({ items: [], hasMore: false }),
@@ -55,8 +57,9 @@ test("repository switch popup isolates input, preserves cancelled navigation, an
   }} />, { width: 120, height: 32, exitOnCtrlC: false })
   const settle = async () => { await Bun.sleep(0); await view.flush() }
   const escape = async () => { view.mockInput.pressEscape(); await Bun.sleep(30); await view.flush() }
-  const switchPage = async () => {
-    view.mockInput.pressKey("s")
+  const switchPage = async (mouse = false) => {
+    if (mouse) await clickControl(view, "repository-dropdown")
+    else view.mockInput.pressKey("s")
     await settle()
     expect(view.captureCharFrame()).toContain("Switch repository")
     expect(view.captureCharFrame()).not.toContain("s switch repo")
@@ -65,6 +68,23 @@ test("repository switch popup isolates input, preserves cancelled navigation, an
     await settle()
     expect(loads).toEqual(["anomalyco/opentui"])
     expect(recent[0]).toBe("anomalyco/opentui")
+    view.mockInput.pressKey("2")
+    await settle()
+    for (const branch of ["next", "main"]) {
+      await clickControl(view, "branch-dropdown")
+      await clickControl(view, "picker-row-1")
+      await settle()
+      expect(view.captureCharFrame()).toContain(`${branch} ▾`)
+      expect(branchLoads.at(-1)).toBe(`anomalyco/opentui:${branch}`)
+      const before = branchLoads.length
+      await clickControl(view, "branch-dropdown")
+      await clickControl(view, "picker-row-0")
+      expect(branchLoads).toHaveLength(before)
+    }
+    expect(branchLoads).toEqual(["anomalyco/opentui:main", "anomalyco/opentui:next", "anomalyco/opentui:main"])
+    expect(loads).toEqual(["anomalyco/opentui"])
+    view.mockInput.pressKey("1")
+    await settle()
     view.mockInput.pressKey("s", { ctrl: true })
     await settle()
     expect(view.captureCharFrame()).not.toContain("Switch repository")
@@ -73,14 +93,17 @@ test("repository switch popup isolates input, preserves cancelled navigation, an
     await settle()
     expect(view.captureCharFrame()).toContain("Line 5 of documentation")
     const scrolled = view.captureCharFrame()
-    await switchPage()
+    await switchPage(true)
     await view.mockInput.typeText("qrshly?,123")
     await settle()
     expect(view.captureCharFrame()).toContain("qrshly?,123")
     expect(browser).toBe(0)
     expect(view.renderer.isDestroyed).toBe(false)
     expect(loads).toHaveLength(1)
-    await escape()
+    await clickControl(view, "picker-submit")
+    expect(view.captureCharFrame()).toContain("Enter owner/repository or a GitHub URL")
+    expect(loads).toHaveLength(1)
+    await clickControl(view, "picker-cancel")
     expect(view.captureCharFrame()).toBe(scrolled)
 
     // List selection and detail both survive cancellation.
@@ -95,8 +118,10 @@ test("repository switch popup isolates input, preserves cancelled navigation, an
     await settle()
     const detail = view.captureCharFrame()
     expect(detail).toContain("cad92f4")
-    await switchPage()
-    view.mockInput.pressEnter() // current repository: close without reload
+    recent = recent.filter((repository) => repository !== "anomalyco/opentui")
+    await switchPage(true)
+    expect(view.captureCharFrame()).toContain("✓ current")
+    await clickControl(view, "picker-row-0") // Current is pinned even when absent from recent history.
     await settle()
     expect(loads).toHaveLength(1)
     expect(view.captureCharFrame()).toBe(detail)
@@ -139,9 +164,10 @@ test("repository switch popup isolates input, preserves cancelled navigation, an
     view.mockInput.pressEnter()
     await settle()
     const readsBefore = recentReads
-    await switchPage()
+    await switchPage(true)
     await view.mockInput.typeText("qrshly") // partial query must choose the filtered recent
-    view.mockInput.pressEnter()
+    await settle()
+    await clickControl(view, "picker-row-0")
     await settle()
     expect(loads).toEqual(["anomalyco/opentui", "owner/qrshly"])
     expect(view.captureCharFrame()).toContain("owner/qrshly")
@@ -152,12 +178,17 @@ test("repository switch popup isolates input, preserves cancelled navigation, an
     await switchPage()
     expect(view.captureCharFrame().indexOf("› owner / qrshly")).toBeGreaterThan(-1)
     await view.mockInput.typeText("https://github.com/owner/missing")
-    view.mockInput.pressEnter()
+    await clickControl(view, "picker-submit")
     await settle()
     expect(loads.at(-1)).toBe("owner/missing")
     expect(view.captureCharFrame()).toContain("Repository not found")
     expect(recent).not.toContain("owner/missing")
     expect(recent[0]).toBe("owner/qrshly")
+    await view.mockMouse.click(0, 0)
+    await settle()
+    expect(view.captureCharFrame()).toContain("Switch repository")
+    await escape()
+    expect(view.captureCharFrame()).toContain("Repository not found")
     missingFails = false
     view.mockInput.pressKey("r")
     await settle()

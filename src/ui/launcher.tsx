@@ -3,10 +3,11 @@ import {
   useRenderer,
   useTerminalDimensions,
 } from "@opentui/solid";
-import { createSignal } from "solid-js";
+import { createSignal, Show } from "solid-js";
 import { normalizeRepository } from "../repository-name";
 import { LoadingText } from "./components/loading-text";
 import { Popup } from "./components/popup";
+import { Action } from "./components/action";
 import { SearchablePicker } from "./components/searchable-picker";
 import { useKeyActions, useKeybindings } from "./keybindings";
 import { useTheme } from "./theme";
@@ -87,7 +88,7 @@ export function RepositoryLoadError(props: {
 
   return (
     <box width={dimensions().width} height={dimensions().height} backgroundColor={colors.canvas}>
-      <Popup width={64} height={13} placement="center">
+      <Popup width={64} height={13} placement="center" onClose={props.onSwitchRepository}>
         <box
           flexGrow={1}
           minHeight={0}
@@ -100,7 +101,13 @@ export function RepositoryLoadError(props: {
           <text fg={colors.text} attributes={TextAttributes.BOLD}>{props.title ?? "Repository unavailable"}</text>
           <text fg={colors.text}>{props.repository}</text>
           <text flexGrow={1} minHeight={0} fg={colors.red} wrapMode="word">{props.message}</text>
-          <text fg={colors.muted}>{keys.hints(["view.refresh", "retry"], ...(props.onSwitchRepository ? [["global.switchRepository", "switch repo"] as const] : []), ["global.quit", "quit"])}</text>
+          <box height={1} flexShrink={0} flexDirection="row">
+            <Action id="repository-retry" onActivate={props.onRetry}>{keys.hint("view.refresh", "retry")}</Action>
+            <Show when={props.onSwitchRepository}>
+              <text fg={colors.muted}> · </text><Action id="repository-switch" onActivate={() => props.onSwitchRepository?.()}>{keys.hint("global.switchRepository", "switch repo")}</Action>
+            </Show>
+            <text fg={colors.muted}> · </text><Action id="repository-quit" onActivate={quit}>{keys.hint("global.quit", "quit")}</Action>
+          </box>
         </box>
       </Popup>
     </box>

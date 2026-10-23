@@ -10,6 +10,7 @@ import { SelectableList } from "../components/selectable-list"
 import { ago, fitText } from "../format"
 import { useTheme } from "../theme"
 import { useIcons } from "../icon-style"
+import { mouseClick } from "../mouse"
 
 export function CommitsScreen(props: {
   commits: ResourceState<Paginated<CommitSummary>>
@@ -18,7 +19,10 @@ export function CommitsScreen(props: {
   active: boolean
   interactive: boolean
   showScrollbar: boolean
+  canOpenBranches?: boolean
+  onOpenBranches?: () => void
   onEndReached?: () => void
+  onSelect?: (commit: CommitSummary) => void
   onOpenCommit?: (commit: CommitSummary) => void
   onOpenCommitInBrowser?: (commit: CommitSummary) => void
   onCopyCommitSha?: (commit: CommitSummary) => void
@@ -47,9 +51,10 @@ export function CommitsScreen(props: {
               {countLabel()}
             </text>
           </Show>
-          <box width={Bun.stringWidth(props.currentBranch) + 4} flexShrink={1} minWidth={0} flexDirection="row" overflow="hidden">
+          <box id="branch-dropdown" width={Bun.stringWidth(props.currentBranch) + 4} flexShrink={1} minWidth={0} flexDirection="row" overflow="hidden"
+            {...mouseClick(() => props.onOpenBranches?.(), () => props.active && props.interactive && props.canOpenBranches !== false)}>
             <box flexGrow={1} flexBasis={0} minWidth={0}>
-              <ListLine fg={colors.blue} attributes={TextAttributes.BOLD}>
+              <ListLine fg={props.canOpenBranches === false ? colors.muted : colors.blue} attributes={TextAttributes.BOLD}>
                 {(width) => fitText(`${icons().branch} ${props.currentBranch}`, width)}
               </ListLine>
             </box>
@@ -68,6 +73,7 @@ export function CommitsScreen(props: {
             resetKey={props.currentBranch}
             empty="No commits"
             onEndReached={props.onEndReached}
+            onSelect={props.onSelect}
             onActivate={props.onOpenCommit}
             onOpenInBrowser={props.onOpenCommitInBrowser}
             onCopy={props.onCopyCommitSha}
