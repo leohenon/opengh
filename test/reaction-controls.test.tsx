@@ -168,7 +168,8 @@ test("ordinary and opaque review comment chips target the right message and reta
     const chip = view.renderer.root.findDescendantById(id)!
     const row = view.captureCharFrame().split("\n").findIndex((line) => line.includes("Selectable comment 13"))
     await view.mockMouse.drag(chip.x, row, chip.x + 8, row)
-    expect(view.renderer.getSelection()?.getSelectedText()).toBeTruthy()
+    expect(view.renderer.getSelection()).toBeNull()
+    expect(copied.at(-1)).toBeTruthy()
     expect(view.renderer.root.findDescendantById("reaction-picker")).toBeUndefined()
     for (const button of [1, 2] as const) await view.mockMouse.click(chip.x, chip.y, button)
     await view.mockMouse.drag(chip.x, chip.y, chip.x + 3, chip.y)
@@ -177,16 +178,19 @@ test("ordinary and opaque review comment chips target the right message and reta
     await clickControl(view, id)
     expect(calls).toEqual([{ target: { kind: "comment", parent: "issue", number: 412, id: 114, nodeId: "IC_13" }, kind: "+1" }])
     await view.mockMouse.drag(chip.x, row, chip.x + 8, row)
-    const selectedText = view.renderer.getSelection()?.getSelectedText()
+    const selectedText = copied.at(-1)
     pending.resolve(confirmed("+1", 3))
     await settle(view)
     expect(view.renderer.root.findDescendantById(id)).toBe(chip)
     expect(scroll.scrollTop).toBe(top)
-    expect(view.renderer.getSelection()?.getSelectedText()).toBe(selectedText)
+    expect(view.renderer.getSelection()).toBeNull()
     expect(view.captureCharFrame()).toContain("✓ 👍 3")
+    expect(copied).toContain(selectedText!) // Native text drags now copy automatically through Root.
+    const copiesBeforeMenu = copied.length
     await messageGesture(view, "Selectable comment 13", true)
     await clickControl(view, "context-menu-row-1")
-    expect(copied).toEqual(["Selectable comment 13"])
+    expect(copied).toHaveLength(copiesBeforeMenu + 1)
+    expect(copied.at(-1)).toBe("Selectable comment 13")
 
     view.mockInput.pressKey("4")
     view.mockInput.pressEnter()

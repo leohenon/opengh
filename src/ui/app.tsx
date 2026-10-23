@@ -34,6 +34,7 @@ import { IssueAssigneesPicker } from "./components/issue-assignees-picker"
 import { Help } from "./components/help"
 import { Settings } from "./components/settings"
 import { StatusBar, type StatusKind } from "./components/status-bar"
+import { copyText } from "./clipboard"
 import { Toast } from "./components/toast"
 import { ActionsScreen } from "./pages/actions"
 import { CommitsScreen } from "./pages/commits"
@@ -719,16 +720,8 @@ function AppContent(props: AppProps) {
     copying = true
     const origin = navigation()
     try {
-      const copied = await props.onCopyToClipboard?.(value) ?? false
-      if (renderer.isDestroyed) return
-      if (!copied && !renderer.copyToClipboardOSC52(value))
-        throw new Error(`Clipboard unavailable. Enable OSC 52 or copy the ${label} manually.`)
-      if (navigation() === origin) setToast(copied
-        ? { id: ++toastId, title: `${label} copied to clipboard`, message: "", duration: 2000, tone: "success" }
-        : { id: ++toastId, title: `${label} sent to terminal`, message: "Copy could not be confirmed. Your terminal/tmux must allow OSC 52 clipboard requests.", duration: 4000, tone: "info" })
-    } catch (error) {
-      if (!renderer.isDestroyed && navigation() === origin)
-        setToast({ id: ++toastId, title: `Could not copy ${label}`, message: error instanceof Error ? error.message : "Unknown error" })
+      const notice = await copyText(renderer, props.onCopyToClipboard, value, label)
+      if (notice && navigation() === origin) setToast({ id: ++toastId, ...notice })
     } finally {
       copying = false
     }

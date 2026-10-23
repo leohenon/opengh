@@ -16,6 +16,7 @@ import { ThemeProvider } from "./ui/theme"
 import { MotionProvider } from "./ui/motion"
 import { KeybindingsProvider, useKeyActions } from "./ui/keybindings"
 import { MouseSurface } from "./ui/components/mouse-surface"
+import { SelectionClipboard } from "./ui/components/selection-clipboard"
 import { Toast } from "./ui/components/toast"
 import { SwitchRepositoryScreen } from "./ui/pages/switch-repository"
 import {
@@ -249,6 +250,7 @@ export function Root(props: {
     <ThemeProvider name={config().theme} mode={config().colorMode}>
       <MotionProvider reduced={config().reducedMotion}>
       <MouseSurface>
+      <SelectionClipboard onCopy={services.copyToHostClipboard} />
       <Show
         when={view() === "repository"}
       fallback={

@@ -7,6 +7,7 @@ import type { DiffContent, DiffTarget } from "../src/models"
 import type { CommitDetailState, DiffState, PullDetailState, ResourceState } from "../src/repository-state"
 import { App } from "../src/ui/app"
 import { defaultConfig } from "../src/config"
+import { SelectionClipboard } from "../src/ui/components/selection-clipboard"
 import { initializeHunk } from "../src/ui/hunk-host"
 import { DiffScreen } from "../src/ui/pages/diff"
 import { commitDetailFixture, githubDataFixture, pullContextFixture, repositoryOperationsFixture } from "./fixtures/github-data"
@@ -17,6 +18,7 @@ import { clickControl } from "./fixtures/mouse"
 test("mouse diff gestures select hunks in place, isolate pane wheels, pan, wrap, and reach both narrow panes", async () => {
   const setup = await createTestRenderer({ width: 110, height: 26 })
   initializeHunk(setup.renderer)
+  const copied: string[] = []
   const [interactive, setInteractive] = createSignal(true)
   const lines = (prefix: string, count: number, marker: string) => Array.from({ length: count }, (_, index) => `${marker}${prefix}-${index}-${"x".repeat(90)}\n`).join("")
   const patch = `diff --git a/mouse.txt b/mouse.txt\n--- a/mouse.txt\n+++ b/mouse.txt\n@@ -1,2 +1,2 @@\n`
@@ -27,6 +29,7 @@ test("mouse diff gestures select hunks in place, isolate pane wheels, pan, wrap,
   const file = parseDiff({ kind: "patch", patch }).files[0]!.body!
   const endColumn = Math.max(...file.metadata.additionLines.map((line) => Bun.stringWidth(line)), ...file.metadata.deletionLines.map((line) => Bun.stringWidth(line)))
   await render(() => <box width="100%" height="100%">
+    <SelectionClipboard onCopy={async (value) => { copied.push(value); return true }} />
     <DiffScreen target={{ kind: "commit", sha: "mouse" }}
     resource={{ status: "ready", value: { kind: "patch", patch } }} interactive={interactive()} showScrollbar={false} onLoadFiles={() => {}} /></box>, setup.renderer)
   const settle = async () => { await setup.flush(); await setup.renderer.idle(); await setup.flush() }
@@ -51,7 +54,8 @@ test("mouse diff gestures select hunks in place, isolate pane wheels, pan, wrap,
     await setup.mockMouse.drag(x, first, x + 4, first)
     await settle()
     expect(position()).toContain("hunk 2/3")
-    expect(setup.renderer.getSelection()?.getSelectedText()).toBeTruthy()
+    expect(setup.renderer.getSelection()).toBeNull()
+    expect(copied.at(-1)).toBeTruthy()
     await setup.mockMouse.pressDown(x, first)
     await setup.mockMouse.scroll(x, first, "right")
     await setup.mockMouse.release(x, first)

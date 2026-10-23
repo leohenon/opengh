@@ -2,6 +2,7 @@ import type { ScrollBoxRenderable } from "@opentui/core"
 import { useRenderer } from "@opentui/solid"
 import { createEffect, createSignal, onCleanup, Show } from "solid-js"
 import { plainCommandOutput, type CommandSpec, type CommandTask } from "../../command-actions"
+import { copyText } from "../clipboard"
 import { mouseClick } from "../mouse"
 import { Popup } from "./popup"
 import { Action } from "./action"
@@ -67,12 +68,9 @@ export function CommandDialog(props: {
     }
   }
   const copy = async () => {
-    try {
-      const text = plainCommandOutput(output())
-      const copied = await props.onCopy?.(text)
-      if (!copied && !renderer.copyToClipboardOSC52(text)) throw new Error("Clipboard unavailable")
-      setNotice(copied ? "Output copied" : "Output sent to terminal clipboard (OSC 52)")
-    } catch (error) { setNotice(String(error)) }
+    const result = await copyText(renderer, props.onCopy, plainCommandOutput(output()), "Text", () => !disposed)
+    if (result) setNotice(result.tone === "success" ? "Output copied"
+      : result.tone === "info" ? "Output sent to terminal clipboard (OSC 52)" : result.message)
   }
   useKeyActions({
     "dialog.close": requestClose,

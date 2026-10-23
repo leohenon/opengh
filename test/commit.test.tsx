@@ -275,14 +275,13 @@ test("overview, commit, and PR shortcuts open GitHub and copy the active URL or 
   copyFails = true
   view.mockInput.pressKey("y")
   await view.flush()
-  expect(view.captureCharFrame()).toContain("Native clipboard")
-  expect(view.captureCharFrame()).toContain("unavailable")
-  expect(terminalCopies).toBe(0)
+  expect(view.captureCharFrame()).toContain("SHA sent to terminal")
+  expect(terminalCopies).toBe(1) // Native errors also fall back to OSC 52.
   copyFails = false
   nativeClipboard = false
   view.mockInput.pressKey("y")
   await view.flush()
-  expect(terminalCopies).toBe(1)
+  expect(terminalCopies).toBe(2)
   expect(copiedSha).toBe(sha)
   expect(view.captureCharFrame()).toContain("SHA sent to terminal")
   expect(view.captureCharFrame()).not.toContain("copied to clipboard")
