@@ -31,7 +31,8 @@ export type IssueSummary = {
   createdAt: string
 }
 
-export type IssueDetail = IssueSummary & {
+export type IssueDetail = IssueSummary & Partial<ReactionState> & {
+  nodeId?: string
   url: string
   body: string
   updatedAt: string
@@ -50,17 +51,25 @@ export type IssueCloseReason = "completed" | "not_planned"
 export type IssueActionKind = "comment" | "close" | "reopen" | "duplicate" | "assignees"
 export type IssueActionResult = { comment?: IssueComment; issue?: IssueDetail; duplicateOf?: number }
 
-export type ReactionKind = "+1" | "-1" | "laugh" | "hooray" | "confused" | "heart" | "rocket" | "eyes"
+export const reactionKinds = ["+1", "-1", "laugh", "hooray", "confused", "heart", "rocket", "eyes"] as const
+export type ReactionKind = typeof reactionKinds[number]
 export type ReactionCounts = Partial<Record<ReactionKind, number>>
+export type ReactionState = { reactions: ReactionCounts; viewerReactions: ReactionKind[]; canReact: boolean }
+export type ReactionTarget = (
+  | { kind: "issue"; number: number }
+  | { kind: "pull"; number: number }
+  | { kind: "comment"; parent: "issue" | "pull"; number: number; id: number }
+  | { kind: "review-comment"; number: number; id: string }
+) & { nodeId?: string }
 
-export type IssueComment = {
+export type IssueComment = Partial<ReactionState> & {
   id: number
+  nodeId?: string
   author: string
   authorAssociation: string
   body: string
   createdAt: string
   updatedAt: string
-  reactions?: ReactionCounts
 }
 
 type IssueReferenceBase = {
@@ -193,7 +202,7 @@ export type PullRequestSummary = IssueSummary & {
   draft?: boolean
 }
 
-export type ReviewThreadComment = {
+export type ReviewThreadComment = Partial<ReactionState> & {
   id: string
   author: string
   authorAssociation: string
@@ -203,7 +212,6 @@ export type ReviewThreadComment = {
   url: string
   reviewId?: number
   replyToId?: string
-  reactions?: ReactionCounts
 }
 
 export type PullReviewThread = {
@@ -246,7 +254,8 @@ export type PullContext = {
   warnings: string[]
 }
 
-export type PullRequestDetail = PullRequestSummary & {
+export type PullRequestDetail = PullRequestSummary & Partial<ReactionState> & {
+  nodeId?: string
   url: string
   body: string
   updatedAt: string
@@ -256,7 +265,6 @@ export type PullRequestDetail = PullRequestSummary & {
   headBranch: string
   headRepository?: string
   headSha?: string
-  reactions?: ReactionCounts
   additions: number
   deletions: number
   changedFiles: number

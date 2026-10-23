@@ -10,7 +10,8 @@ test("PR context paginates threads, replies and checks without hiding data on pr
     createdAt: "2026-01-01T12:00:00Z", updatedAt: "2026-01-01T12:00:00Z",
     url: `https://github.com/owner/repo/pull/42#discussion_${id}`, pullRequestReview: { databaseId: 7 },
     replyTo: replyTo ? { id: replyTo } : null,
-    reactionGroups: [{ content: "THUMBS_UP", users: { totalCount: 2 } }],
+    viewerCanReact: true,
+    reactionGroups: [{ content: "THUMBS_UP", users: { totalCount: 2 }, viewerHasReacted: true }],
   })
   const check = { __typename: "CheckRun", id: "check1", name: "build", status: "IN_PROGRESS", conclusion: null,
     detailsUrl: "https://github.com/owner/repo/actions/runs/1", isRequired: true }
@@ -45,7 +46,7 @@ test("PR context paginates threads, replies and checks without hiding data on pr
   const context = await client.pullContext("owner/repo", 42)
   expect(context.threads).toHaveLength(2)
   expect(context.threads[0]?.comments.map((entry) => entry.id)).toEqual(["root", "reply"])
-  expect(context.threads[0]?.comments[1]).toMatchObject({ replyToId: "root", reviewId: 7, reactions: { "+1": 2 } })
+  expect(context.threads[0]?.comments[1]).toMatchObject({ replyToId: "root", reviewId: 7, reactions: { "+1": 2 }, viewerReactions: ["+1"], canReact: true })
   expect(context.threads[1]).toMatchObject({ isResolved: true, isOutdated: true, resolvedBy: "bob", originalLine: 9 })
   expect(context.projects).toBeUndefined()
   expect(context.warnings.some((warning) => warning.toLowerCase().includes("project"))).toBe(true)

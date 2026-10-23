@@ -1,7 +1,7 @@
 import { workflowJobFixture, workflowRunFixture } from "./fixtures/workflow-run"
 
 import { describe, expect, test } from "bun:test"
-import type { DiffContent, CommitDetail, CommitSummary, IssueDetail, IssueComment, IssueTimeline, RepositoryDocument } from "../src/models"
+import type { DiffContent, CommitDetail, CommitSummary, IssueDetail, IssueComment, IssueTimeline, RepositoryDocument, ReactionState, ReactionTarget, PullRequestDetail, PullContext } from "../src/models"
 import type { RepositoryLoaders } from "../src/repository-session"
 import { createRepositorySession } from "../src/repository-session"
 import { commitDetailFixture, githubDataFixture, issueDetailFixture, issueCommentsFixture, issuePullReferenceFixture, pullContextFixture } from "./fixtures/github-data"
@@ -1316,4 +1316,246 @@ test("late run lists preserve newer detail responses without blocking subsequent
   holdList = false
   await session.refresh()
   expect(ready(session).data.runs.value?.items[0]?.title).toBe("Newer list title")
+})
+
+
+const reactionSnapshot = (heart: number): ReactionState => ({ reactions: { heart }, viewerReactions: heart ? ["heart"] : [], canReact: true })
+const reactionPull = (number = 421): PullRequestDetail => ({
+  ...githubDataFixture.pulls.open.value!.items[0]!, number, url: `https://github.com/owner/repo/pull/${number}`,
+  body: "PR body", updatedAt: "2026-01-01T00:00:00Z", baseBranch: "main", headBranch: "next",
+  additions: 1, deletions: 0, changedFiles: 1, commitCount: 0, commentCount: 1,
+  labels: [], assignees: [], reviewers: [], mergeable: true, ...reactionSnapshot(0),
+})
+const reactionContext = (): PullContext => ({ ...structuredClone(pullContextFixture), threads: ["RC1", "RC2"].map((id) => ({
+  kind: "review-thread", id: `thread-${id}`, path: "file.ts", isResolved: false, isOutdated: false,
+  comments: [{ ...issueCommentsFixture[0]!, id, url: `https://github.com/owner/repo/pull/421#discussion_${id}`, ...reactionSnapshot(0) }],
+})) })
+function reactionLoaders(overrides: Partial<RepositoryLoaders> = {}) {
+  return loaders({
+    metadata: async (repository) => ({ ...structuredClone(githubDataFixture.repo), nameWithOwner: repository, url: `https://github.com/${repository}` }),
+    issue: async (_repository, number) => ({ ...structuredClone(issueDetailFixture), number, ...reactionSnapshot(0) }),
+    pull: async (_repository, number) => reactionPull(number),
+    issueComments: async (_repository, number) => ({ items: [{ ...issueCommentsFixture[0]!, id: number === 421 ? 1101 : 101, ...reactionSnapshot(0) }], hasMore: false }),
+    pullContext: async () => reactionContext(),
+    ...overrides,
+  })
+}
+
+describe("reaction mutations", () => {
+  test("serialize each subject, deduplicate requests, isolate errors, and update only authoritative reaction fields", async () => {
+    const issueWrite = deferred<ReactionState>()
+    const commentWrite = deferred<ReactionState>()
+    const calls: { repository: string; target: ReactionTarget }[] = []
+    let fail = true
+    const session = createRepositorySession(reactionLoaders({ addReaction: async (repository, target) => {
+      calls.push({ repository, target })
+      if (target.kind === "issue") return issueWrite.promise
+      if (target.kind === "comment" && target.parent === "issue") return commentWrite.promise
+      if (target.kind === "pull" && fail) throw new Error("Permission denied")
+      return reactionSnapshot(target.kind === "review-comment" ? 3 : 5)
+    } }))
+    await session.load("owner/repo")
+    await session.loadIssue(412)
+    await session.loadPull(421)
+    session.updateIssueDraft(412, { body: "Independent draft" })
+    const body: ReactionTarget = { kind: "issue", number: 412 }
+    const comment: ReactionTarget = { kind: "comment", parent: "issue", number: 412, id: 101 }
+    const first = session.addReaction(body, "heart")
+    expect(session.addReaction(body, "heart")).toBe(first)
+    await expect(session.addReaction(body, "rocket")).rejects.toThrow("already in progress")
+    const second = session.addReaction(comment, "heart")
+    await Bun.sleep(0)
+    expect(calls).toHaveLength(2)
+    expect(session.reactionAction(body).operation.status).toBe("loading")
+    issueWrite.resolve(reactionSnapshot(7))
+    commentWrite.resolve(reactionSnapshot(8))
+    await Promise.all([first, second])
+    expect(session.issueDetail()?.resource.value).toMatchObject({ title: issueDetailFixture.title, reactions: { heart: 7 }, viewerReactions: ["heart"] })
+    expect(session.issueDetail()?.comments.value).toMatchObject({ page: 1, hasMore: false, items: [{ id: 101, reactions: { heart: 8 } }] })
+    const pull: ReactionTarget = { kind: "pull", number: 421 }
+    await expect(session.addReaction(pull, "heart")).rejects.toThrow("Permission denied")
+    expect(session.pullDetail()?.resource.value?.reactions).toEqual({ heart: 0 })
+    expect(session.reactionAction(pull).operation).toEqual({ status: "error", message: "Permission denied" })
+    expect(session.reactionAction(body).operation.status).toBe("idle")
+    fail = false
+    await session.addReaction(pull, "heart")
+    await session.addReaction({ kind: "comment", parent: "pull", number: 421, id: 1101 }, "heart")
+    const untouched = session.pullDetail()!.context.value!.threads[1]
+    await session.addReaction({ kind: "review-comment", number: 421, id: "RC1" }, "heart")
+    expect(session.pullDetail()?.resource.value?.reactions).toEqual({ heart: 5 })
+    expect(session.pullDetail()?.comments.value?.items[0]?.reactions).toEqual({ heart: 5 })
+    expect(session.pullDetail()?.context.value?.threads[0]?.comments[0]?.reactions).toEqual({ heart: 3 })
+    expect(session.pullDetail()?.context.value?.threads[1]).toBe(untouched)
+    expect(session.issueAction(412).body).toBe("Independent draft")
+    expect(calls.every((call) => call.repository === "owner/repo")).toBe(true)
+    const count = calls.length
+    await expect(session.addReaction({ kind: "comment", parent: "issue", number: 412, id: 999 }, "heart")).rejects.toThrow("Load this message")
+    expect(calls).toHaveLength(count)
+  })
+
+  test("old issue description and duplicate comment pages cannot roll back writes, while newer reads remain authoritative", async () => {
+    const oldHeader = deferred<IssueDetail>()
+    const oldPage = deferred<{ items: IssueComment[]; hasMore: boolean }>()
+    let reads = 0
+    let fresh = false
+    const session = createRepositorySession(reactionLoaders({
+      issue: async () => ++reads === 2 ? oldHeader.promise : { ...issueDetailFixture, ...reactionSnapshot(fresh ? 4 : 0), viewerReactions: [] },
+      issueComments: async (_repository, _number, page = 1) => page === 2 ? oldPage.promise
+        : { items: [{ ...issueCommentsFixture[0]!, ...reactionSnapshot(fresh ? 2 : 0), viewerReactions: [] }], hasMore: true },
+      addReaction: async (_repository, target) => reactionSnapshot(target.kind === "issue" ? 9 : 7),
+    }))
+    await session.load("owner/repo")
+    await session.loadIssue(412)
+    const refresh = session.loadIssue(412)
+    await session.addReaction({ kind: "issue", number: 412 }, "heart")
+    expect(session.issueDetail()?.resource.status).toBe("loading")
+    oldHeader.resolve({ ...issueDetailFixture, title: "Updated issue title", ...reactionSnapshot(0) })
+    await refresh
+    expect(session.issueDetail()?.resource.value).toMatchObject({ title: "Updated issue title", reactions: { heart: 9 } })
+    const pagination = session.loadMoreIssueComments()
+    await session.addReaction({ kind: "comment", parent: "issue", number: 412, id: 101 }, "heart")
+    oldPage.resolve({ items: [{ ...issueCommentsFixture[0]!, body: "Edited comment", ...reactionSnapshot(0) }, issueCommentsFixture[1]!], hasMore: false })
+    await pagination
+    expect(session.issueDetail()?.comments.value).toMatchObject({ page: 2, hasMore: false })
+    expect(session.issueDetail()?.comments.value?.items[0]).toMatchObject({ body: "Edited comment", reactions: { heart: 7 }, viewerReactions: ["heart"] })
+    fresh = true
+    await session.loadIssue(412)
+    expect(session.issueDetail()?.resource.value?.reactions).toEqual({ heart: 4 })
+    expect(session.issueDetail()?.resource.value?.viewerReactions).toEqual([])
+    expect(session.issueDetail()?.comments.value?.items[0]?.reactions).toEqual({ heart: 2 })
+    expect(session.issueDetail()?.comments.value?.items[0]?.viewerReactions).toEqual([])
+  })
+
+  test("PR refresh, pagination, thread reads and read failures preserve confirmed reactions without replacing other fields", async () => {
+    let phase = "initial"
+    let header = deferred<PullRequestDetail>()
+    const comments = deferred<{ items: IssueComment[]; hasMore: boolean }>()
+    const context = deferred<PullContext>()
+    const next = deferred<{ items: IssueComment[]; hasMore: boolean }>()
+    let server = reactionPull()
+    let value = 7
+    const comment = { ...issueCommentsFixture[0]!, id: 1101, ...reactionSnapshot(0) }
+    const session = createRepositorySession(reactionLoaders({
+      pull: async () => phase === "metadata" || phase === "failed" ? header.promise : structuredClone(server),
+      issueComments: async (_repository, _number, page = 1) => phase === "details" ? comments.promise : phase === "pagination" && page === 2 ? next.promise
+        : { items: [structuredClone(comment)], hasMore: true },
+      pullContext: async () => phase === "details" ? context.promise : reactionContext(),
+      addReaction: async (_repository, target) => {
+        if (target.kind === "pull") server = { ...server, ...reactionSnapshot(value) }
+        return reactionSnapshot(value)
+      },
+    }))
+    await session.load("owner/repo")
+    await session.loadPull(421)
+    phase = "metadata"
+    let refresh = session.loadPull(421)
+    await session.addReaction({ kind: "pull", number: 421 }, "heart")
+    header.resolve({ ...reactionPull(), title: "Delayed PR title" })
+    await refresh
+    expect(session.pullDetail()?.resource.value).toMatchObject({ title: "Delayed PR title", reactions: { heart: 7 } })
+    phase = "details"
+    refresh = session.loadPull(421)
+    await Bun.sleep(0) // Let the description read start the independent comment/context requests.
+    value = 5
+    await session.addReaction({ kind: "comment", parent: "pull", number: 421, id: 1101 }, "heart")
+    value = 3
+    await session.addReaction({ kind: "review-comment", number: 421, id: "RC1" }, "heart")
+    comments.resolve({ items: [{ ...comment, body: "Fresh comment body" }], hasMore: true })
+    const oldContext = reactionContext()
+    oldContext.threads[0]!.isResolved = true
+    context.resolve(oldContext)
+    await refresh
+    expect(session.pullDetail()?.comments.value?.items[0]).toMatchObject({ body: "Fresh comment body", reactions: { heart: 5 } })
+    expect(session.pullDetail()?.context.value?.threads[0]).toMatchObject({ isResolved: true, comments: [{ reactions: { heart: 3 } }] })
+    phase = "pagination"
+    const pagination = session.loadMorePullComments()
+    value = 8
+    await session.addReaction({ kind: "comment", parent: "pull", number: 421, id: 1101 }, "heart")
+    next.resolve({ items: [{ ...comment, body: "Duplicate from next page" }], hasMore: false })
+    await pagination
+    expect(session.pullDetail()?.comments.value?.items[0]).toMatchObject({ body: "Duplicate from next page", reactions: { heart: 8 } })
+    phase = "failed"
+    header = deferred<PullRequestDetail>()
+    refresh = session.loadPull(421)
+    value = 9
+    await session.addReaction({ kind: "pull", number: 421 }, "heart")
+    await session.addReaction({ kind: "comment", parent: "pull", number: 421, id: 1101 }, "heart")
+    await session.addReaction({ kind: "review-comment", number: 421, id: "RC1" }, "heart")
+    header.reject(new Error("PR read unavailable"))
+    await refresh
+    expect(session.pullDetail()?.resource.status).toBe("error")
+    expect(session.pullDetail()?.resource.value?.reactions).toEqual({ heart: 9 })
+    expect(session.pullDetail()?.comments.value?.items[0]?.reactions).toEqual({ heart: 9 })
+    expect(session.pullDetail()?.context.value?.threads[0]?.comments[0]?.reactions).toEqual({ heart: 9 })
+  })
+
+  test("clear, replacement and repository roundtrips ignore late success/failure without clearing a newer request", async () => {
+    for (const mode of ["clear", "replace", "repository", "identity"]) for (const failure of [false, true]) {
+      const old = deferred<ReactionState>()
+      const current = deferred<ReactionState>()
+      let calls = 0
+      let identity = 0
+      const session = createRepositorySession(reactionLoaders({
+        issue: async (_repository, number) => ({ ...issueDetailFixture, number, nodeId: `I${number}-${identity}`, ...reactionSnapshot(0) }),
+        addReaction: async () => ++calls === 1 ? old.promise : current.promise,
+      }))
+      await session.load("owner/repo")
+      await session.loadIssue(412)
+      const target: ReactionTarget = { kind: "issue", number: 412 }
+      const pending = session.addReaction(target, "heart").catch(() => undefined)
+      await Bun.sleep(0)
+      if (mode === "repository") { await session.load("owner/other"); await session.load("owner/repo") }
+      else if (mode === "replace") await session.loadIssue(407)
+      else if (mode === "identity") identity++
+      else session.clearIssue()
+      await session.loadIssue(412)
+      const newer = session.addReaction(target, "heart")
+      await Bun.sleep(0)
+      if (failure) old.reject(new Error("Obsolete failure"))
+      else old.resolve(reactionSnapshot(99))
+      await pending
+      expect(session.issueDetail()?.resource.value?.reactions).toEqual({ heart: 0 })
+      expect(session.reactionAction(target).operation.status).toBe("loading")
+      current.resolve(reactionSnapshot(7))
+      await newer
+      expect(session.issueDetail()?.resource.value?.reactions).toEqual({ heart: 7 })
+      expect(session.reactionAction(target).operation.status).toBe("idle")
+    }
+  })
+
+  test("posted-comment reactions survive reopening and assignment writes preserve reaction fields and independent drafts", async () => {
+    const assignment = deferred<IssueDetail>()
+    let server = { ...structuredClone(issueDetailFixture), ...reactionSnapshot(0) }
+    const posted = { ...issueCommentsFixture[0]!, id: 999, body: "Posted", createdAt: "2026-10-01T00:00:00Z" }
+    let posts = 0
+    const session = createRepositorySession(reactionLoaders({
+      issue: async () => structuredClone(server),
+      issueComments: async () => ({ items: [issueCommentsFixture[0]!], hasMore: true }),
+      createIssueComment: async () => { posts++; server.commentCount++; return structuredClone(posted) },
+      setIssueAssignees: async (_repository, _number, assignees) => { server = { ...server, assignees }; return assignment.promise },
+      addReaction: async (_repository, target) => {
+        if (target.kind === "issue") server = { ...server, ...reactionSnapshot(9) }
+        return reactionSnapshot(target.kind === "issue" ? 9 : 7)
+      },
+    }))
+    await session.load("owner/repo")
+    await session.loadIssue(412)
+    session.updateIssueDraft(412, { body: "Posted" })
+    await session.submitIssueAction(412, "comment")
+    await session.addReaction({ kind: "comment", parent: "issue", number: 412, id: 999 }, "heart")
+    session.updateIssueDraft(412, { body: "Independent draft", selectedAssignees: ["max"] })
+    const staleAssignment = { ...structuredClone(server), assignees: ["max"] }
+    const saving = session.submitIssueAction(412, "assignees")
+    await session.addReaction({ kind: "issue", number: 412 }, "heart")
+    assignment.resolve(staleAssignment)
+    const result = await saving
+    expect(result.issue).toMatchObject({ assignees: ["max"], reactions: { heart: 9 } })
+    expect(session.issueDetail()?.resource.value?.reactions).toEqual({ heart: 9 })
+    await Bun.sleep(0)
+    session.clearIssue()
+    await session.loadIssue(412)
+    expect(session.issueDetail()?.comments.value?.items.find((comment) => comment.id === 999)?.reactions).toEqual({ heart: 7 })
+    expect(session.issueAction(412).body).toBe("Independent draft")
+    expect(posts).toBe(1)
+  })
 })

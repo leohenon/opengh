@@ -27,7 +27,7 @@ import type {
 } from "../models"
 import { createGitHubDocuments } from "./documents"
 import { createGitHubPullContext } from "./pull-context"
-import { parseReactions } from "./reactions"
+import { createGitHubReactions, parseReactions, parseReactionState, reactionFields } from "./reactions"
 import { githubTransport, type GitHubTransport } from "./transport"
 
 const PAGE_SIZE = 30
@@ -54,6 +54,7 @@ type RepositoryResponse = {
 type UserResponse = { login: string } | null
 
 type IssueResponse = {
+  node_id?: string
   number: number
   state: string
   title: string
@@ -63,6 +64,7 @@ type IssueResponse = {
 }
 
 type IssueDetailResponse = IssueResponse & {
+  reactions?: unknown
   id?: number
   html_url: string
   body: string | null
@@ -77,6 +79,7 @@ type IssueDetailResponse = IssueResponse & {
 }
 
 type IssueCommentResponse = {
+  node_id?: string
   reactions?: unknown
   id: number
   user: UserResponse
@@ -300,8 +303,10 @@ function issueSummary(item: IssueResponse): IssueSummary {
 
 function issueDetail(item: IssueDetailResponse): IssueDetail {
   if ("pull_request" in item) throw new Error(`Issue #${item.number} is a pull request.`)
+  const reactions = parseReactions(item.reactions)
   return {
     ...issueSummary(item),
+    ...(typeof item.node_id === "string" && item.node_id.trim() ? { nodeId: item.node_id } : {}),
     url: item.html_url,
     body: item.body ?? "",
     updatedAt: item.updated_at,
@@ -317,12 +322,14 @@ function issueDetail(item: IssueDetailResponse): IssueDetail {
       },
     } : {}),
     commentCount: item.comments,
+    ...(reactions ? { reactions } : {}),
   }
 }
 
 function issueComment(item: IssueCommentResponse): IssueComment {
   return {
     id: item.id,
+    ...(typeof item.node_id === "string" && item.node_id.trim() ? { nodeId: item.node_id } : {}),
     author: item.user?.login ?? "ghost",
     authorAssociation: item.author_association ?? "NONE",
     body: item.body ?? "",
@@ -347,6 +354,7 @@ function commitSummary(item: CommitResponse): CommitSummary {
 export function createGitHubClient(transport: GitHubTransport) {
   const { documents, document } = createGitHubDocuments(transport)
   const { pullContext } = createGitHubPullContext(transport)
+  const { addReaction, bodyReactions, commentReactions } = createGitHubReactions(transport)
   const metadata = async (repository: string): Promise<Repo> => {
     const repo = await transport.json<RepositoryResponse>(`repos/${repository}`)
     return {
@@ -502,11 +510,14 @@ export function createGitHubClient(transport: GitHubTransport) {
         data?: { repository?: {
           isArchived: boolean
           viewerPermission: string | null
-          issue?: { viewerCanClose: boolean; viewerCanReopen: boolean; viewerCanAssign: boolean } | null
+          issue?: {
+            viewerCanClose: boolean; viewerCanReopen: boolean; viewerCanAssign: boolean
+            reactionGroups?: unknown; viewerCanReact?: unknown
+          } | null
         } | null }
         errors?: unknown[]
       }>(
-        `query($owner: String!, $name: String!) { repository(owner: $owner, name: $name) { isArchived viewerPermission issue(number: ${number}) { viewerCanClose viewerCanReopen viewerCanAssign } } }`,
+        `query($owner: String!, $name: String!) { repository(owner: $owner, name: $name) { isArchived viewerPermission issue(number: ${number}) { viewerCanClose viewerCanReopen viewerCanAssign ${reactionFields} } } }`,
         { owner: owner!, name: name! },
       )
       const repo = response.data?.repository
@@ -522,6 +533,8 @@ export function createGitHubClient(transport: GitHubTransport) {
         duplicate: writable && maintainer && repo.issue.viewerCanClose === true,
         assignees: writable && repo.issue.viewerCanAssign === true,
       }
+      const reactions = parseReactionState(repo.issue)
+      if (reactions) detail = { ...detail, ...reactions }
     } catch (error) {
       // Keep reading available, but retain login/restart guidance for the UI.
       detail.permissionsError = error instanceof Error ? error.message : "Issue action permissions could not be verified."
@@ -543,8 +556,9 @@ export function createGitHubClient(transport: GitHubTransport) {
     const items = await transport.json<IssueCommentResponse[]>(
       `repos/${repository}/issues/${number}/comments?per_page=100&page=${page}`,
     )
+    const reactions = await commentReactions(items)
     return {
-      items: items.map(issueComment),
+      items: items.map((item) => ({ ...issueComment(item), ...reactions.get(item.node_id ?? "") })),
       hasMore: items.length === 100,
     }
   }
@@ -883,8 +897,10 @@ export function createGitHubClient(transport: GitHubTransport) {
 
   const pull = async (repository: string, number: number): Promise<PullRequestDetail> => {
     const item = await transport.json<PullDetailResponse>(`repos/${repository}/pulls/${number}`)
+    const reactions = await bodyReactions(repository, number, "pull")
     return {
       ...issueSummary(item),
+      ...(typeof item.node_id === "string" && item.node_id.trim() ? { nodeId: item.node_id } : {}),
       merged: item.merged_at != null,
       draft: item.draft === true,
       url: item.html_url,
@@ -909,6 +925,7 @@ export function createGitHubClient(transport: GitHubTransport) {
         ...item.requested_teams.map((team) => team.name),
       ],
       mergeable: item.mergeable,
+      ...reactions,
     }
   }
 
@@ -993,7 +1010,7 @@ export function createGitHubClient(transport: GitHubTransport) {
     }
   }
 
-  return { metadata, documents, document, branches, commits, commitCount, commit, issues, workCounts, hasIssues, issueKind, issue, issueComments, createIssueComment, updateIssueState, assignableUsers, setIssueAssignees, markIssueDuplicate, issueReferences, issueTimeline, pulls, pull, pullCommits, pullContext, runs, run, runJobs }
+  return { metadata, documents, document, branches, commits, commitCount, commit, issues, workCounts, hasIssues, issueKind, issue, issueComments, createIssueComment, addReaction, updateIssueState, assignableUsers, setIssueAssignees, markIssueDuplicate, issueReferences, issueTimeline, pulls, pull, pullCommits, pullContext, runs, run, runJobs }
 }
 
 const client = createGitHubClient(githubTransport)
@@ -1026,3 +1043,4 @@ export const loadGitHubRuns = client.runs
 
 export const loadGitHubRun = client.run
 export const loadGitHubRunJobs = client.runJobs
+export const addGitHubReaction = client.addReaction

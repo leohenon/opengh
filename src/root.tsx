@@ -338,6 +338,8 @@ export function Root(props: {
               onLoadCommit={session.loadCommit}
               onLoadMoreCommitFiles={session.loadMoreCommitFiles}
               onCloseCommit={session.clearCommit}
+              getReactionAction={session.reactionAction}
+              onAddReaction={session.addReaction}
               issueDetail={session.issueDetail()}
               onLoadIssue={session.loadIssue}
               onLoadMoreIssueComments={session.loadMoreIssueComments}

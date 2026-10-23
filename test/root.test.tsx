@@ -54,6 +54,8 @@ function readySession() {
     retryPullCommits: idle,
     retryPullContext: idle,
     clearPull: () => {},
+    reactionAction: () => ({ operation: { status: "idle" as const } }),
+    addReaction: async () => { throw new Error("Adding reactions is unavailable.") },
     load: idle,
     refresh: idle,
     retryResource: idle,

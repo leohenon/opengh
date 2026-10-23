@@ -1,5 +1,5 @@
 import type { PullCheck, PullContext, PullReviewThread, ReviewThreadComment } from "../models"
-import { parseReactionGroups } from "./reactions"
+import { parseReactionGroups, parseReactionState, reactionFields } from "./reactions"
 import type { GitHubTransport } from "./transport"
 
 type ObjectValue = Record<string, unknown>
@@ -40,7 +40,7 @@ class HeadChangedError extends Error {
 const pageInfo = "pageInfo { hasNextPage endCursor }"
 const commentFields = `id author { login } authorAssociation body createdAt updatedAt url
   pullRequestReview { databaseId } replyTo { id }
-  reactionGroups { content users { totalCount } }`
+  ${reactionFields}`
 
 function comment(value: unknown): ReviewThreadComment {
   const node = object(value)
@@ -50,6 +50,7 @@ function comment(value: unknown): ReviewThreadComment {
     reviewId: node.pullRequestReview == null ? undefined : optionalNumber(object(node.pullRequestReview).databaseId),
     replyToId: node.replyTo == null ? undefined : text(object(node.replyTo).id),
     reactions: parseReactionGroups(node.reactionGroups),
+    ...parseReactionState(node),
   }
 }
 

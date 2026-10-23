@@ -4,27 +4,39 @@ import type { CommitSummary, IssueCloser, IssueComment, IssueReference, IssueSta
 import type { ResourceState } from "../../repository-state"
 import type { GitHubMarkdownContext } from "../github-markdown"
 import { relativeTime } from "../format"
-import { buildActivity } from "../activity"
+import { buildActivity, type ActivityEntry } from "../activity"
 import { useIcons } from "../icon-style"
 import { referenceColor, referenceIcon, referenceState } from "../issue-references"
 import { useTheme } from "../theme"
 import { useKeybindings } from "../keybindings"
 import { GitHubMarkdown } from "./github-markdown"
-import { Reactions } from "./reactions"
+import { type ReactionControls, Reactions, messageReactionMouse } from "./reactions"
 import { ReviewThread } from "./pull-review-threads"
 import { reviewColor } from "../pull-reviews"
 import { TimelineEntry, TimelineHeader, TimelineItem } from "./timeline-entry"
 import { TimelineCommits } from "./pull-commits"
 import { LoadingText } from "./loading-text"
 
-function Comment(props: { comment: IssueComment; syntaxStyle: SyntaxStyle; backgroundColor: string; context: GitHubMarkdownContext }) {
+function Comment(props: {
+  number?: number
+  subject?: "issue" | "pull"
+  reactionControls?: ReactionControls
+  interactive?: boolean
+  comment: IssueComment
+  syntaxStyle: SyntaxStyle
+  backgroundColor: string
+  context: GitHubMarkdownContext
+}) {
   const { colors } = useTheme()
   const icons = useIcons()
+  const reactionMouse = messageReactionMouse(() => props.number ? { kind: "comment", parent: props.subject ?? "issue", number: props.number,
+    id: props.comment.id, nodeId: props.comment.nodeId } : undefined, () => props.comment, () => props.comment.body,
+    () => props.reactionControls, () => props.interactive === true)
   const association = () => props.comment.authorAssociation === "NONE"
     ? "" : props.comment.authorAssociation.toLowerCase().replaceAll("_", " ")
   return (
     <TimelineEntry icon={icons().user} nodeOffset={2}>
-      <box width="100%" minWidth={0} flexShrink={0} backgroundColor={props.backgroundColor} paddingX={2} paddingY={1} flexDirection="column">
+      <box id={`message-comment-${props.subject}-${props.number}-${props.comment.id}`} {...reactionMouse} width="100%" minWidth={0} flexShrink={0} backgroundColor={props.backgroundColor} paddingX={2} paddingY={1} flexDirection="column">
         <TimelineHeader>
           <b><span style={{ fg: colors.text }}>{props.comment.author}</span></b> · {relativeTime(props.comment.createdAt)}
           {association() ? ` · ${association()}` : ""}
@@ -35,7 +47,9 @@ function Comment(props: { comment: IssueComment; syntaxStyle: SyntaxStyle; backg
             <GitHubMarkdown content={props.comment.body} syntaxStyle={props.syntaxStyle} backgroundColor={props.backgroundColor} context={props.context} preserveImages codePanels />
           </Show>
         </box>
-        <Reactions counts={props.comment.reactions} />
+        <Reactions counts={props.comment.reactions} viewerReactions={props.comment.viewerReactions} canReact={props.comment.canReact}
+          target={props.number ? { kind: "comment", parent: props.subject ?? "issue", number: props.number, id: props.comment.id, nodeId: props.comment.nodeId } : undefined}
+          controls={props.reactionControls} interactive={props.interactive} />
       </box>
     </TimelineEntry>
   )
@@ -210,6 +224,9 @@ function ReviewRequest(props: { event: PullReviewRequestEvent }) {
 
 export function DetailActivity(props: {
   commentCount: number
+  number?: number
+  reactionControls?: ReactionControls
+  interactive?: boolean
   commits?: ResourceState<CommitSummary[]>
   commitTotal?: number
   pullUrl?: string
@@ -236,6 +253,9 @@ export function DetailActivity(props: {
     comments: comments().value?.items ?? [], references: references().value ?? [],
     events: props.events ?? [], threads: props.threads ?? [], commits: props.commits?.value, pullUrl: props.pullUrl,
   }))
+  // Cache patches replace message objects. Key by subject, not object reference, to retain markdown/selection.
+  const entryKey = (entry: ActivityEntry) => `${"kind" in entry ? entry.kind : "comment"}:${entry.id}:${"nodeId" in entry ? entry.nodeId ?? "" : ""}`
+  const entries = createMemo(() => new Map(activity().map((entry) => [entryKey(entry), entry])))
   const loadedCommits = () => new Set([
     ...(props.commits?.value?.map((commit) => commit.sha.toLowerCase()) ?? []),
     ...(props.events?.filter((event) => event.kind === "commit-added").map((commit) => commit.sha.toLowerCase()) ?? []),
@@ -256,48 +276,55 @@ export function DetailActivity(props: {
       <Show when={props.commits?.status === "loading" && !props.commits.value}>
         <box width="100%" flexShrink={0} marginTop={1}><LoadingText text="Loading commits…" /></box>
       </Show>
-      <For each={activity()}>
-        {(entry, index) => (
-          <TimelineItem last={index() === activity().length - 1 && !props.hasFollowingItem}>
-            <Show when={index() === 0 || relativeTime(entry.createdAt) !== relativeTime(activity()[index() - 1]?.createdAt)}>
-              <text width="100%" flexShrink={0} marginTop={1} fg={colors.muted} attributes={TextAttributes.BOLD}>
-                {relativeTime(entry.createdAt)}
-              </text>
-            </Show>
-            <Switch>
-              <Match when={"kind" in entry && entry.kind === "commit-group" ? entry : undefined}>
-                {(group) => <TimelineCommits commits={group().commits} />}
-              </Match>
-              <Match when={"kind" in entry && entry.kind === "state" ? entry : undefined}>
-                {(event) => <StateChange event={event()} subject={props.subject ?? "issue"} repository={props.repository} />}
-              </Match>
-              <Match when={"kind" in entry && entry.kind === "force-push" ? entry : undefined}>
-                {(event) => <ForcePush event={event()} />}
-              </Match>
-              <Match when={"kind" in entry && entry.kind === "review" ? entry : undefined}>
-                {(review) => <Review review={review()} syntaxStyle={props.syntaxStyle} backgroundColor={props.backgroundColor} context={props.context} />}
-              </Match>
-              <Match when={"kind" in entry && entry.kind === "review-dismissed" ? entry : undefined}>
-                {(event) => <ReviewDismissal event={event()} />}
-              </Match>
-              <Match when={"kind" in entry && entry.kind === "draft" ? entry : undefined}>
-                {(event) => <DraftTransition event={event()} />}
-              </Match>
-              <Match when={"kind" in entry && entry.kind === "review-request" ? entry : undefined}>
-                {(event) => <ReviewRequest event={event()} />}
-              </Match>
-              <Match when={"kind" in entry && entry.kind === "review-thread" ? entry : undefined}>
-                {(thread) => <ReviewThread thread={thread()} syntaxStyle={props.syntaxStyle} backgroundColor={props.backgroundColor} context={props.context} />}
-              </Match>
-              <Match when={"kind" in entry && (entry.kind === "pull" || entry.kind === "issue" || entry.kind === "commit") ? entry : undefined}>
-                {(reference) => <ReferenceMention reference={reference()} repository={props.repository} />}
-              </Match>
-              <Match when={"author" in entry ? entry : undefined}>
-                {(comment) => <Comment comment={comment()} syntaxStyle={props.syntaxStyle} backgroundColor={props.backgroundColor} context={props.context} />}
-              </Match>
-            </Switch>
-          </TimelineItem>
-        )}
+      <For each={[...entries().keys()]}>
+        {(key, index) => {
+          const entry = () => entries().get(key)!
+          const match = <T extends ActivityEntry,>(predicate: (value: ActivityEntry) => value is T) => {
+            const value = entry()
+            return value && predicate(value) ? value : undefined
+          }
+          return (
+            <TimelineItem last={index() === activity().length - 1 && !props.hasFollowingItem}>
+              <Show when={index() === 0 || relativeTime(entry().createdAt) !== relativeTime(activity()[index() - 1]?.createdAt)}>
+                <text width="100%" flexShrink={0} marginTop={1} fg={colors.muted} attributes={TextAttributes.BOLD}>
+                  {relativeTime(entry().createdAt)}
+                </text>
+              </Show>
+              <Switch>
+                <Match when={match((entry) => "kind" in entry && entry.kind === "commit-group")}>
+                  {(group) => <TimelineCommits commits={group().commits} />}
+                </Match>
+                <Match when={match((entry) => "kind" in entry && entry.kind === "state")}>
+                  {(event) => <StateChange event={event()} subject={props.subject ?? "issue"} repository={props.repository} />}
+                </Match>
+                <Match when={match((entry) => "kind" in entry && entry.kind === "force-push")}>
+                  {(event) => <ForcePush event={event()} />}
+                </Match>
+                <Match when={match((entry) => "kind" in entry && entry.kind === "review")}>
+                  {(review) => <Review review={review()} syntaxStyle={props.syntaxStyle} backgroundColor={props.backgroundColor} context={props.context} />}
+                </Match>
+                <Match when={match((entry) => "kind" in entry && entry.kind === "review-dismissed")}>
+                  {(event) => <ReviewDismissal event={event()} />}
+                </Match>
+                <Match when={match((entry) => "kind" in entry && entry.kind === "draft")}>
+                  {(event) => <DraftTransition event={event()} />}
+                </Match>
+                <Match when={match((entry) => "kind" in entry && entry.kind === "review-request")}>
+                  {(event) => <ReviewRequest event={event()} />}
+                </Match>
+                <Match when={match((entry) => "kind" in entry && entry.kind === "review-thread")}>
+                  {(thread) => <ReviewThread number={props.number} reactionControls={props.reactionControls} interactive={props.interactive} thread={thread()} syntaxStyle={props.syntaxStyle} backgroundColor={props.backgroundColor} context={props.context} />}
+                </Match>
+                <Match when={match((entry) => "kind" in entry && (entry.kind === "pull" || entry.kind === "issue" || entry.kind === "commit"))}>
+                  {(reference) => <ReferenceMention reference={reference()} repository={props.repository} />}
+                </Match>
+                <Match when={match((entry) => "author" in entry)}>
+                  {(comment) => <Comment number={props.number} subject={props.subject} reactionControls={props.reactionControls} interactive={props.interactive} comment={comment()} syntaxStyle={props.syntaxStyle} backgroundColor={props.backgroundColor} context={props.context} />}
+                </Match>
+              </Switch>
+            </TimelineItem>
+          )
+        }}
       </For>
       <Show when={comments().status === "ready" && references().status === "ready" && (!props.commits || props.commits.status === "ready") && !props.threadsLoading && !props.threadsUnavailable && activity().length === 0}>
         <text width="100%" flexShrink={0} marginTop={1} fg={colors.muted}>No comments or references yet.</text>

@@ -20,6 +20,7 @@ import type {
   WorkflowRunSummary,
   WorkflowRunDetail,
   WorkflowJob,
+  ReactionKind,
 } from "./models"
 
 export type ResourcePhase = "load" | "pagination"
@@ -71,6 +72,8 @@ export type OperationState =
   | { status: "idle" }
   | { status: "loading" }
   | { status: "error"; message: string }
+
+export type ReactionActionState = { kind?: ReactionKind; operation: OperationState }
 
 export type IssueActionState = {
   selectedAssignees?: string[]

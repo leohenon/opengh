@@ -8,9 +8,9 @@ import { appColors, resolveTheme } from "../src/theme"
 import { ThemeProvider } from "../src/ui/theme"
 import { ContextMenu } from "../src/ui/components/context-menu"
 import { mouseClick } from "../src/ui/mouse"
-import type { CommitDetailState } from "../src/repository-state"
+import type { CommitDetailState, IssueActionState } from "../src/repository-state"
 import type { CommandSpec, LocalRepository } from "../src/command-actions"
-import { commitDetailFixture, githubDataFixture, repositoryOperationsFixture } from "./fixtures/github-data"
+import { commitDetailFixture, githubDataFixture, issueDetailFixture, repositoryOperationsFixture } from "./fixtures/github-data"
 import { clickControl } from "./fixtures/mouse"
 
 test("context menu is mouse-only, has no initial selection, and keeps wheel and dismissal behavior", async () => {
@@ -379,5 +379,70 @@ test("repository context Clone previews before running and follows local-reposit
     await right()
     expect(view.captureCharFrame()).not.toContain("Clone repository")
     expect(commands).toHaveLength(1)
+  } finally { view.renderer.destroy() }
+})
+
+test("message comment actions follow permission/pending guards and reopen the existing retained draft", async () => {
+  const [allowed, setAllowed] = createSignal(false)
+  const [action, setAction] = createSignal<IssueActionState>({ body: "Retained draft", reason: "completed", operation: { status: "idle" } })
+  const prepared: Array<{ number: number; kind: string }> = []
+  let submitted = 0
+  const view = await testRender(() => <App data={githubDataFixture} operations={repositoryOperationsFixture}
+    issueDetail={{ number: issueDetailFixture.number,
+      resource: { status: "ready", value: { ...issueDetailFixture, body: "Description.", nodeId: "I_412", canReact: true, permissions: { ...issueDetailFixture.permissions!, comment: allowed() } } },
+      comments: { status: "ready", value: { items: [], page: 1, hasMore: false } }, references: { status: "ready", value: [] } }}
+    getIssueAction={() => action()} onPrepareIssueAction={(number, kind) => { prepared.push({ number, kind }) }}
+    onIssueDraftChange={(_number, draft) => setAction((current) => ({ ...current, ...draft }))}
+    onSubmitIssueAction={async () => { submitted++; return {} }}
+    getReactionAction={() => ({ operation: { status: "idle" } })}
+    onAddReaction={async () => { throw new Error("Unexpected reaction") }}
+  />, { width: 100, height: 32 })
+  const right = async (id: string) => {
+    await view.flush()
+    const target = view.renderer.root.findDescendantById(id)!
+    await view.mockMouse.click(target.x + 1, target.y + 1, 2)
+    await view.flush()
+  }
+  const escape = async () => { view.mockInput.pressEscape(); await Bun.sleep(30); await view.flush() }
+  try {
+    await view.flush()
+    view.mockInput.pressKey("3")
+    view.mockInput.pressEnter()
+    await view.flush()
+    await right("issue-detail-scroll")
+    expect(view.captureCharFrame()).not.toContain("Add comment")
+    await escape()
+    setAllowed(true)
+    setAction((current) => ({ ...current, operation: { status: "loading" } }))
+    await right("issue-detail-description")
+    expect(view.captureCharFrame()).not.toContain("Add comment")
+    await escape()
+    setAction((current) => ({ ...current, operation: { status: "idle" } }))
+    await right("issue-detail-description")
+    expect(view.captureCharFrame()).toContain("Add comment")
+    expect((view.renderer.root.findDescendantById("context-menu-row-3")!.getChildren()[0] as TextRenderable).plainText).toBe("Back")
+    setAllowed(false) // Permission can disappear after the menu was opened.
+    await clickControl(view, "context-menu-row-2")
+    expect(prepared).toEqual([])
+    expect(view.renderer.root.findDescendantById("issue-action-submit")).toBeUndefined()
+    await escape()
+    setAllowed(true)
+    await right("issue-detail-scroll")
+    expect(view.captureCharFrame()).toContain("Add comment")
+    expect((view.renderer.root.findDescendantById("context-menu-row-3")!.getChildren()[0] as TextRenderable).plainText).toBe("Back")
+    expect(view.renderer.root.findDescendantById("context-menu-row-4")).toBeUndefined()
+    await clickControl(view, "context-menu-row-2")
+    expect(prepared).toEqual([{ number: 412, kind: "comment" }])
+    expect(view.captureCharFrame()).toContain("Retained draft")
+    expect(view.renderer.root.findDescendantById("context-menu")).toBeUndefined()
+    expect(submitted).toBe(0)
+    await view.mockMouse.click(0, 0)
+    await view.flush()
+    await right("issue-detail-description")
+    await clickControl(view, "context-menu-row-2")
+    expect(prepared).toHaveLength(2)
+    expect(view.captureCharFrame()).toContain("Retained draft")
+    expect(action().body).toBe("Retained draft")
+    expect(submitted).toBe(0)
   } finally { view.renderer.destroy() }
 })

@@ -6,7 +6,7 @@ import type { HintEntry } from "../keybindings"
 import { KeybindingsBoundary, useKeyActions, useKeybindings } from "./keybindings"
 import { cloneCommand, cloneDestination, matchesLocalRepository, type LocalRepository, type CommandSpec, type CommandTask } from "../command-actions"
 import { CommandDialog, type CommandAction } from "./components/command-dialog"
-import type { CommitDetail, DiffContent, DiffTarget, IssueActionKind, IssueActionResult, Paginated, ListState } from "../models"
+import type { CommitDetail, DiffContent, DiffTarget, IssueActionKind, IssueActionResult, Paginated, ListState, ReactionKind, ReactionState, ReactionTarget } from "../models"
 import { back, navigate, openDetail, openDiff, type InitialNavigation, type NavigationState, type Page } from "../navigation"
 import type {
   CommitDetailState,
@@ -14,12 +14,16 @@ import type {
   DiffState,
   IssueDetailState,
   IssueActionState,
+  ReactionActionState,
   PullDetailState,
   RepositoryData,
   RepositoryOperations,
   RepositoryResource,
   ResourceState,
 } from "../repository-state"
+import { reactionKey } from "../reactions"
+import { ReactionPicker, type ReactionMessage } from "./components/reaction-picker"
+import type { ReactionControls } from "./components/reactions"
 import { BranchPicker } from "./components/branch-picker"
 import { Header } from "./components/header"
 import { ContextMenu, type ContextMenuItem } from "./components/context-menu"
@@ -48,7 +52,7 @@ import { IconProvider } from "./icon-style"
 import { MotionProvider } from "./motion"
 import { MarkdownProvider } from "./markdown-preferences"
 
-type Overlay = "context-menu" | "help" | "branch-picker" | "settings" | "issue-references" | "issue-actions" | "issue-action" | "command" | "switch-repo"
+type Overlay = "context-menu" | "reactions" | "help" | "branch-picker" | "settings" | "issue-references" | "issue-actions" | "issue-action" | "command" | "switch-repo"
 type ToastState = { id: number; title: string; message: string; duration?: number; tone?: "error" | "success" | "info" }
 
 export type AppProps = {
@@ -86,6 +90,8 @@ export type AppProps = {
   onLoadCommit?: (sha: string) => Promise<void>
   onLoadMoreCommitFiles?: () => Promise<void>
   onCloseCommit?: () => void
+  getReactionAction?: (target: ReactionTarget) => ReactionActionState
+  onAddReaction?: (target: ReactionTarget, kind: ReactionKind) => Promise<ReactionState>
   issueDetail?: IssueDetailState
   onLoadIssue?: (number: number) => Promise<void>
   onLoadMoreIssueComments?: () => Promise<void>
@@ -306,6 +312,54 @@ function AppContent(props: AppProps) {
   const pullMenuItems = createMemo(() => referencedItems(pullDetail().references.value ?? [], {
     repository: data().repo.nameWithOwner, number: pullNumber() ?? 0,
   }))
+  const reactionMessages = createMemo<ReactionMessage[]>(() => {
+    if (diffTarget() || !props.onAddReaction || !props.getReactionAction) return []
+    const parent = activeIssueNumber() ? "issue" : "pull"
+    const detail = activeIssueNumber() ? issueDetail() : activePullNumber() ? pullDetail() : undefined
+    const body = detail?.resource.value
+    if (!detail || !body) return []
+    const number = detail.number
+    const messages: ReactionMessage[] = [{ target: { kind: parent, number, nodeId: body.nodeId }, state: body }]
+    for (const comment of detail.comments.value?.items ?? []) messages.push({
+      target: { kind: "comment", parent, number, id: comment.id, nodeId: comment.nodeId }, state: comment,
+    })
+    if (parent === "pull") for (const thread of pullDetail().context.value?.threads ?? []) for (const comment of thread.comments) messages.push({
+      target: { kind: "review-comment", number, id: comment.id, nodeId: comment.id }, state: comment,
+    })
+    return messages
+  })
+  const [reactionPicker, setReactionPicker] = createSignal<{ origin: NavigationState; repository: string; target: ReactionTarget }>()
+  const sameReactionTarget = (left: ReactionTarget, right: ReactionTarget) => reactionKey(left) === reactionKey(right) && left.nodeId === right.nodeId
+  const selectedReactionMessage = () => {
+    const target = reactionPicker()?.target
+    return target && reactionMessages().find((message) => sameReactionTarget(message.target, target))
+  }
+  const openReactions = (target: ReactionTarget) => {
+    const message = reactionMessages().find((message) => sameReactionTarget(message.target, target))
+    if (overlay() || !message || message.state.canReact === false || props.getReactionAction?.(target).operation.status === "loading") return
+    setReactionPicker({ origin: navigation(), repository: data().repo.nameWithOwner, target })
+    setOverlay("reactions")
+  }
+  const closeReactions = () => { setOverlay(); setReactionPicker() }
+  createEffect(() => {
+    const picker = reactionPicker()
+    if (overlay() !== "reactions" || !picker) return
+    if (navigation() !== picker.origin || data().repo.nameWithOwner !== picker.repository
+      || !reactionMessages().length || picker.target && !selectedReactionMessage()) closeReactions()
+  })
+  const addReaction = (target: ReactionTarget, kind: ReactionKind, fromPicker = false) => {
+    if (fromPicker ? overlay() !== "reactions" || !selectedReactionMessage()
+      || !sameReactionTarget(selectedReactionMessage()!.target, target) : overlay() !== undefined) return
+    const message = reactionMessages().find((message) => sameReactionTarget(message.target, target))
+    if (!message || message.state.canReact === false || message.state.viewerReactions?.includes(kind)
+      || props.getReactionAction?.(target).operation.status === "loading") return
+    // Session owns confirmation/error publication. No async popup, toast or focus effects can outlive this view.
+    void props.onAddReaction?.(target, kind).catch(() => {})
+  }
+  const reactionControls = (): ReactionControls | undefined => props.onAddReaction && props.getReactionAction ? {
+    action: props.getReactionAction, add: (target, kind) => addReaction(target, kind), open: openReactions,
+    context: openMessageContext,
+  } : undefined
   const activeMenuItems = () => activePullNumber() ? pullMenuItems() : issueMenuItems()
   const refreshPull = async (number: number) => {
     const detail = pullDetail()
@@ -726,6 +780,17 @@ function AppContent(props: AppProps) {
       run: () => openIssueAction("comment"),
       get disabled() { return !canActOnIssue("comment"); },
     }] : [];
+  const openMessageContext = (target: ReactionTarget, body: string, position: MousePosition) => {
+    const message = () => reactionMessages().find((message) => sameReactionTarget(message.target, target))
+    const current = message()
+    if (!current) return
+    openContextMenu(position, [
+      { label: "React", run: () => openReactions(target), get disabled() { return message()?.state.canReact === false || props.getReactionAction?.(target).operation.status === "loading" } },
+      { label: "Copy text", run: () => void copyToClipboard(body, "Text"), disabled: !body },
+      ...commentContextItems(),
+      ...backContextItems(),
+    ], () => !!message())
+  }
   const openRowContext = (kind: "commit" | "issue" | "pull" | "run", id: string | number, position: MousePosition) => {
     const valid = () => {
       if (kind === "commit") return page() === "commits" && !activeCommitSha() && !!data().commits.value?.items.some((commit) => commit.sha === id);
@@ -807,6 +872,7 @@ function AppContent(props: AppProps) {
     const close: HintEntry = ["dialog.close", "close"]
     const picker: HintEntry[] = [[["picker.up", "picker.down"], "select"], ["picker.accept", "open"], close]
     if (overlay() === "context-menu") return undefined
+    if (overlay() === "reactions") return hint(select, ["navigation.activate", "add"], close)
     if (overlay() === "issue-action") return issueActionHint()
     if (overlay() === "issue-actions") return hint(select, open, close)
     if (overlay() === "help") return hint(close)
@@ -1139,6 +1205,7 @@ function AppContent(props: AppProps) {
             <IssueScreen
               number={number}
               detail={issueDetail()}
+              reactionControls={reactionControls()}
               revealActivity={revealActivity()?.number === number ? revealActivity()?.id : undefined}
               defaultBranch={data().repo.defaultBranch}
               interactive={!diffTarget() && page() === "issues" && overlay() === undefined}
@@ -1154,6 +1221,7 @@ function AppContent(props: AppProps) {
             <PullScreen
               number={number}
               detail={pullDetail()}
+              reactionControls={reactionControls()}
               defaultBranch={data().repo.defaultBranch}
               interactive={!diffTarget() && page() === "pulls" && overlay() === undefined}
               showScrollbar={config().showScrollbars}
@@ -1198,6 +1266,11 @@ function AppContent(props: AppProps) {
       <Show when={overlay() === "context-menu" ? contextMenu() : undefined} keyed>
         {(menu) => <ContextMenu position={menu.position} items={menu.items} onClose={closeContextMenu}
           onSelect={(item) => { if (ownsContextMenu(menu)) { closeContextMenu(); item.run() } }} />}
+      </Show>
+      <Show when={overlay() === "reactions" ? selectedReactionMessage() : undefined}>
+        {(message) => <ReactionPicker message={message()}
+          action={props.getReactionAction!} onClose={closeReactions} showScrollbar={config().showScrollbars}
+          onAdd={(target, kind) => addReaction(target, kind, true)} />}
       </Show>
       <Show when={overlay() === "switch-repo"}>
         <SwitchRepositoryScreen

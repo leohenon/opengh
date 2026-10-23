@@ -5,6 +5,7 @@ import { createEffect, createMemo, For, onCleanup, Show } from "solid-js"
 import { defaultConfig, type DetailLayout } from "../../config"
 import type { IssueDetail, IssueReference } from "../../models"
 import type { IssueDetailState, ResourceState } from "../../repository-state"
+import { Reactions, messageReactionMouse, type ReactionControls } from "../components/reactions"
 import { DetailActivity } from "../components/detail-activity"
 import { MetadataField } from "../components/detail-metadata"
 import { GitHubMarkdown } from "../components/github-markdown"
@@ -80,6 +81,7 @@ function ReferencedPulls(props: { resource: ResourceState<IssueReference[]>; rep
 
 export function IssueScreen(props: {
   number: number
+  reactionControls?: ReactionControls
   detail: IssueDetailState
   revealActivity?: number
   interactive: boolean
@@ -106,6 +108,8 @@ export function IssueScreen(props: {
   })
   const markdownStyle = createReactiveMarkdownStyle(colors, theme)
   const issue = () => props.detail.resource.value
+  const reactionMouse = messageReactionMouse(() => issue() ? ({ kind: "issue", number: props.number, nodeId: issue()?.nodeId }) : undefined,
+    issue, () => issue()?.body ?? "", () => props.reactionControls, () => props.interactive)
   const repository = () => issue()?.url.split("/").slice(3, 5).join("/") ?? ""
   const markdownContext = (): GitHubMarkdownContext => ({
     repositoryUrl: issue()?.url.replace(/\/issues\/\d+$/, "") ?? "",
@@ -177,7 +181,7 @@ export function IssueScreen(props: {
                       <IssueMetadata issue={current()} compact />
                     </box>
                   </Show>
-                  <box width="100%" minWidth={0} flexShrink={0} backgroundColor={surface()} paddingX={2} paddingY={1} flexDirection="column">
+                  <box id="issue-detail-description" {...reactionMouse} width="100%" minWidth={0} flexShrink={0} backgroundColor={surface()} paddingX={2} paddingY={1} flexDirection="column">
                     <text width="100%" flexShrink={0} fg={colors.muted}>
                       {icons().user} <b><span style={{ fg: colors.text }}>{current().author}</span></b> · author
                     </text>
@@ -186,12 +190,15 @@ export function IssueScreen(props: {
                         <GitHubMarkdown content={current().body} syntaxStyle={markdownStyle()} backgroundColor={surface()} context={markdownContext()} preserveImages codePanels />
                       </Show>
                     </box>
+                    <Reactions counts={current().reactions} viewerReactions={current().viewerReactions} canReact={current().canReact}
+                      target={{ kind: "issue", number: props.number, nodeId: current().nodeId }} controls={props.reactionControls} interactive={props.interactive} />
                   </box>
                   <Show when={props.detail.resource.status === "error"}>
                     <text width="100%" flexShrink={0} marginTop={1} fg={colors.red}>× {failure(props.detail.resource)}</text>
                   </Show>
                   <box width="100%" minWidth={0} flexShrink={0} flexDirection="column">
                     <DetailActivity
+                      number={props.number} reactionControls={props.reactionControls} interactive={props.interactive}
                       commentCount={current().commentCount}
                       comments={props.detail.comments}
                       references={props.detail.references}

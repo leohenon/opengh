@@ -10,7 +10,7 @@ import { TimelineEntry } from "../components/timeline-entry"
 import { MetadataField } from "../components/detail-metadata"
 import { GitHubMarkdown } from "../components/github-markdown"
 import { ResourceStateView } from "../components/resource-state"
-import { Reactions } from "../components/reactions"
+import { Reactions, messageReactionMouse, type ReactionControls } from "../components/reactions"
 import { PullContextMetadata, PullReadinessPanel } from "../components/pull-context-panel"
 import { PullReviewSummary } from "../components/pull-review-summary"
 import { detailContentWidth } from "../detail-layout"
@@ -66,6 +66,7 @@ function PullMetadata(props: { pull: PullRequestDetail; compact: boolean; contex
 
 export function PullScreen(props: {
   number: number
+  reactionControls?: ReactionControls
   detail: PullDetailState
   interactive: boolean
   showScrollbar: boolean
@@ -83,6 +84,8 @@ export function PullScreen(props: {
     : pull()?.state === "closed" ? "Closed" : pull()?.draft ? "Draft" : "Open"
   const stateColor = () => pull()?.merged ? colors.purple
     : pull()?.state === "closed" ? colors.red : pull()?.draft ? colors.muted : colors.openState
+  const reactionMouse = messageReactionMouse(() => pull() ? ({ kind: "pull", number: props.number, nodeId: pull()?.nodeId }) : undefined,
+    pull, () => pull()?.body ?? "", () => props.reactionControls, () => props.interactive)
   const repository = () => pull()?.url.split("/").slice(3, 5).join("/") ?? ""
   const markdownContext = (): GitHubMarkdownContext => ({
     repositoryUrl: pull()?.url.replace(/\/pull\/\d+$/, "") ?? "",
@@ -148,7 +151,7 @@ export function PullScreen(props: {
                     <PullMetadata pull={current()} compact context={props.detail.context} events={props.detail.events ?? []} />
                   </box>
                 </Show>
-                <box id="pull-detail-description" width="100%" minWidth={0} flexShrink={0} backgroundColor={surface()} paddingX={2} paddingY={1} flexDirection="column">
+                <box {...reactionMouse} id="pull-detail-description" width="100%" minWidth={0} flexShrink={0} backgroundColor={surface()} paddingX={2} paddingY={1} flexDirection="column">
                   <text width="100%" flexShrink={0} fg={colors.muted}>
                     {icons().user} <b><span style={{ fg: colors.text }}>{current().author}</span></b> · author
                   </text>
@@ -157,7 +160,8 @@ export function PullScreen(props: {
                       <GitHubMarkdown content={current().body} syntaxStyle={markdownStyle()} backgroundColor={surface()} context={markdownContext()} preserveImages codePanels />
                     </Show>
                   </box>
-                  <Reactions counts={current().reactions} />
+                  <Reactions counts={current().reactions} viewerReactions={current().viewerReactions} canReact={current().canReact}
+                    target={{ kind: "pull", number: props.number, nodeId: current().nodeId }} controls={props.reactionControls} interactive={props.interactive} />
                 </box>
                 <Show when={props.detail.resource.status === "error"}>
                   <text width="100%" flexShrink={0} marginTop={1} fg={colors.red}>× {props.detail.resource.status === "error" ? props.detail.resource.message : ""}</text>
@@ -166,6 +170,7 @@ export function PullScreen(props: {
                   <PullContextMetadata context={props.detail.context.value!} compact repository={repository()} />
                 </Show>
                 <DetailActivity
+                  number={props.number} reactionControls={props.reactionControls} interactive={props.interactive}
                   commits={props.detail.commits}
                   commitTotal={current().commitCount}
                   pullUrl={current().url}

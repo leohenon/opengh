@@ -6,21 +6,27 @@ import type { GitHubMarkdownContext } from "../github-markdown"
 import { useIcons } from "../icon-style"
 import { useTheme } from "../theme"
 import { GitHubMarkdown } from "./github-markdown"
-import { Reactions } from "./reactions"
+import { type ReactionControls, Reactions, messageReactionMouse } from "./reactions"
 import { TimelineEntry, TimelineHeader } from "./timeline-entry"
 
 function ThreadComment(props: {
   comment: ReviewThreadComment
   reply: boolean
+  number?: number
+  reactionControls?: ReactionControls
+  interactive?: boolean
   syntaxStyle: SyntaxStyle
   backgroundColor: string
   context: GitHubMarkdownContext
 }) {
   const { colors } = useTheme()
+  const reactionMouse = messageReactionMouse(() => props.number ? { kind: "review-comment", number: props.number, id: props.comment.id,
+    nodeId: props.comment.id } : undefined, () => props.comment, () => props.comment.body,
+    () => props.reactionControls, () => props.interactive === true)
   const association = () => props.comment.authorAssociation && props.comment.authorAssociation !== "NONE"
     ? props.comment.authorAssociation.toLowerCase().replaceAll("_", " ") : ""
   return (
-    <box width="100%" minWidth={0} flexShrink={0} paddingLeft={props.reply ? 2 : 0} marginTop={1} flexDirection="column">
+    <box id={`message-review-${props.number}-${props.comment.id}`} {...reactionMouse} width="100%" minWidth={0} flexShrink={0} paddingLeft={props.reply ? 2 : 0} marginTop={1} flexDirection="column">
       <TimelineHeader>
         <b><span style={{ fg: colors.text }}>{props.comment.author || "ghost"}</span></b>
         {" · "}<a href={props.comment.url}>{relativeTime(props.comment.createdAt)}</a>
@@ -33,13 +39,18 @@ function ThreadComment(props: {
           <GitHubMarkdown content={props.comment.body} syntaxStyle={props.syntaxStyle} backgroundColor={props.backgroundColor} context={props.context} preserveImages codePanels />
         </Show>
       </box>
-      <Reactions counts={props.comment.reactions} />
+      <Reactions counts={props.comment.reactions} viewerReactions={props.comment.viewerReactions} canReact={props.comment.canReact}
+        target={props.number ? { kind: "review-comment", number: props.number, id: props.comment.id, nodeId: props.comment.id } : undefined}
+        controls={props.reactionControls} interactive={props.interactive} />
     </box>
   )
 }
 
 export function ReviewThread(props: {
   thread: PullReviewThread
+  number?: number
+  reactionControls?: ReactionControls
+  interactive?: boolean
   syntaxStyle: SyntaxStyle
   backgroundColor: string
   context: GitHubMarkdownContext
@@ -61,10 +72,13 @@ export function ReviewThread(props: {
           <Show when={props.thread.isOutdated}><span style={{ fg: colors.muted }}>{" [Outdated]"}</span></Show>
           <Show when={props.thread.resolvedBy}><span style={{ fg: colors.muted }}>{` · resolved by ${props.thread.resolvedBy}`}</span></Show>
         </text>
-        <For each={props.thread.comments} fallback={<text fg={colors.muted}>No comments available.</text>}>
-          {(comment, index) => (
-            <ThreadComment comment={comment} reply={!!comment.replyToId || index() > 0} syntaxStyle={props.syntaxStyle} backgroundColor={props.backgroundColor} context={props.context} />
-          )}
+        <For each={props.thread.comments.map((comment) => comment.id)} fallback={<text fg={colors.muted}>No comments available.</text>}>
+          {(id, index) => {
+            const comment = () => props.thread.comments.find((comment) => comment.id === id)!
+            return (
+              <ThreadComment number={props.number} reactionControls={props.reactionControls} interactive={props.interactive} comment={comment()} reply={!!comment().replyToId || index() > 0} syntaxStyle={props.syntaxStyle} backgroundColor={props.backgroundColor} context={props.context} />
+            )
+          }}
         </For>
       </box>
     </TimelineEntry>

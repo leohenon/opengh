@@ -7,6 +7,8 @@ import type { KeybindingOverrides } from "../src/keybindings"
 import { App } from "../src/ui/app"
 import { IssueActionDialog } from "../src/ui/components/issue-actions"
 import type { IssueActionState } from "../src/repository-state"
+import { ContextMenu } from "../src/ui/components/context-menu"
+import { ReactionPicker } from "../src/ui/components/reaction-picker"
 import { SearchablePicker } from "../src/ui/components/searchable-picker"
 import { KeybindingsProvider, KeyTextarea, useKeyActions } from "../src/ui/keybindings"
 import { githubDataFixture, repositoryOperationsFixture } from "./fixtures/github-data"
@@ -210,4 +212,39 @@ test("issue draft controls and confirmation hints follow remaps without leaking 
   expect(discarded).toBe(1)
   view.mockInput.pressKey("F4")
   expect(closed).toBe(1)
+})
+
+
+test("mouse menus and reaction picker respect remapped dialog and navigation actions", async () => {
+  const [screen, setScreen] = createSignal("context")
+  const reactions: string[] = []
+  let menuActions = 0
+  const view = await testRender(() => <KeybindingsProvider overrides={{
+    "dialog.close": ["f4"], "navigation.down": ["f2"], "navigation.activate": ["f9"],
+  }}>
+    <Show when={screen() === "context"} fallback={
+      <Show when={screen() === "reactions"} fallback={<text>Done</text>}>
+        <ReactionPicker message={{ target: { kind: "issue", number: 42 }, state: {} }}
+          action={() => ({ operation: { status: "idle" } })} showScrollbar={false}
+          onAdd={(_target, kind) => reactions.push(kind)} onClose={() => setScreen("done")} />
+      </Show>
+    }>
+      <ContextMenu position={{ x: 2, y: 2 }} items={[{ label: "Action", run: () => {} }]}
+        onSelect={() => menuActions++} onClose={() => setScreen("reactions")} />
+    </Show>
+  </KeybindingsProvider>, { width: 80, height: 24 })
+  active.push(view)
+  await view.flush()
+  view.mockInput.pressEnter()
+  view.mockInput.pressKey("F9")
+  expect(menuActions).toBe(0) // Context menus remain mouse-only.
+  view.mockInput.pressKey("F4")
+  await view.flush()
+  expect(screen()).toBe("reactions")
+  view.mockInput.pressKey("F2")
+  view.mockInput.pressKey("F9")
+  expect(reactions).toEqual(["-1"])
+  view.mockInput.pressKey("F4")
+  await view.flush()
+  expect(screen()).toBe("done")
 })
