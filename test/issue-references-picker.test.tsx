@@ -25,11 +25,12 @@ test("shows all unique references without hints and restores each tab's selectio
   expect(items[0]?.number).toBe(18)
   expect(items.find((item) => item.number === 8)?.title).toBe("pull title 8")
   let opened: IssueLinkReference | undefined
+  let openCalls = 0
   let copied: IssueLinkReference | undefined
   let closes = 0
   const view = await testRender(() => (
     <IssueReferencesPicker references={references} currentIssue={currentIssue} showScrollbar={false}
-      onOpen={(item) => { opened = item }} onCopy={(item) => { copied = item }} onClose={() => { closes++ }} />
+      onOpen={(item) => { opened = item; openCalls++ }} onCopy={(item) => { copied = item }} onClose={() => { closes++ }} />
   ), { width: 100, height: 28 })
   try {
     await view.flush()
@@ -67,14 +68,19 @@ test("shows all unique references without hints and restores each tab's selectio
     expect(opened?.number).toBe(12)
     expect(copied?.kind).toBe("issue")
     expect(copied?.number).toBe(12)
-    await clickControl(view, "references-copy")
-    expect(copied?.number).toBe(12)
-    await clickControl(view, "references-open")
+    expect(view.renderer.root.findDescendantById("references-copy")).toBeUndefined()
+    expect(view.renderer.root.findDescendantById("references-open")).toBeUndefined()
+    expect(view.renderer.root.findDescendantById("references-back")).toBeUndefined()
+    const row = view.captureCharFrame().split("\n").findIndex((line) => line.includes("issue title 12"))
+    expect(row).toBeGreaterThanOrEqual(0)
+    const beforeOpen = openCalls
+    await view.mockMouse.click(50, row)
+    expect(openCalls).toBe(beforeOpen + 1)
     expect(opened?.number).toBe(12)
     view.mockInput.pressArrow("left")
     await view.flush()
     expect(view.captureCharFrame()).toBe(pullFrame)
-    await clickControl(view, "references-back")
+    await view.mockMouse.click(0, 0); await view.flush()
     expect(closes).toBe(1)
   } finally {
     view.renderer.destroy()

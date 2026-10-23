@@ -2,7 +2,7 @@ import { CliRenderEvents, TextAttributes, type ScrollBoxRenderable } from "@open
 import { useRenderer, useTerminalDimensions } from "@opentui/solid"
 import { createEffect, createSignal, For, on, onCleanup, Show } from "solid-js"
 import type { Config } from "../../config"
-import { mouseClick } from "../mouse"
+import { mouseClick, mouseHover } from "../mouse"
 import { useTheme } from "../theme"
 import { Action } from "./action"
 import { Popup } from "./popup"
@@ -205,15 +205,16 @@ export function Settings(props: {
   const settingRow = (setting: Setting) => {
     const definition = settingDefinitions[setting]
     const active = () => selected() === setting
+    const hover = mouseHover(() => !busy(), () => setting)
     return (
       <box
         id={`setting-${setting}`}
-        {...mouseClick(() => changeSetting(setting, 1), () => !busy())}
+        {...mouseClick(() => changeSetting(setting, 1), () => !busy(), () => setting, hover)}
         height={rowHeight()}
         flexShrink={0}
         flexDirection="row"
         alignItems="flex-start"
-        backgroundColor={active() ? colors.panelHover : colors.panel}
+        backgroundColor={active() || hover.hovered() ? colors.panelHover : colors.panel}
         paddingLeft={1}
         paddingRight={1}
       >
@@ -315,7 +316,6 @@ export function Settings(props: {
           >
             <box height={1} flexShrink={0} flexDirection="row" justifyContent="space-between">
               <text fg={colors.text} attributes={TextAttributes.BOLD}>Settings</text>
-              <Action id="settings-close" disabled={busy()} onActivate={requestClose}>Close</Action>
             </box>
             <box height={1} flexShrink={0} />
             <scrollbox ref={(value) => { settingsScroll = value }} focusable={false} flexGrow={1} minHeight={0} scrollY scrollX={false} scrollbarOptions={{ visible: false }}>

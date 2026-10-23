@@ -15,6 +15,7 @@ import { App } from "./ui/app"
 import { ThemeProvider } from "./ui/theme"
 import { MotionProvider } from "./ui/motion"
 import { KeybindingsProvider, useKeyActions } from "./ui/keybindings"
+import { MouseSurface } from "./ui/components/mouse-surface"
 import { Toast } from "./ui/components/toast"
 import { SwitchRepositoryScreen } from "./ui/pages/switch-repository"
 import {
@@ -247,6 +248,7 @@ export function Root(props: {
     <RootShortcuts onInterrupt={() => commandCancel ? commandCancel() : quit()} onQuit={quit} onReload={() => void reloadConfig()} />
     <ThemeProvider name={config().theme} mode={config().colorMode}>
       <MotionProvider reduced={config().reducedMotion}>
+      <MouseSurface>
       <Show
         when={view() === "repository"}
       fallback={
@@ -259,6 +261,7 @@ export function Root(props: {
               message={current().message}
               onRetry={() => void resolveLaunch(current())}
               onSwitchRepository={showSwitcher}
+              showStatusBarHints={config().showStatusBarHints}
               onQuit={quit}
             />}
           </Match>
@@ -284,6 +287,7 @@ export function Root(props: {
               message={current().message}
               onRetry={() => void session.load(current().repository)}
               onSwitchRepository={showSwitcher}
+              showStatusBarHints={config().showStatusBarHints}
               onQuit={quit}
             />
           )}
@@ -382,6 +386,7 @@ export function Root(props: {
           onDismiss={() => setConfigWarningDismissed(true)}
         />
       </Show>
+      </MouseSurface>
       </MotionProvider>
     </ThemeProvider>
     </KeybindingsProvider>

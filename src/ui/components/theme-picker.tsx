@@ -1,10 +1,9 @@
 import { TextAttributes, type ScrollBoxRenderable } from "@opentui/core"
 import { createEffect, createMemo, createSignal, For, Show } from "solid-js"
 import { defaultTheme, themeNames, type ThemeName } from "../../theme"
-import { mouseClick } from "../mouse"
+import { mouseClick, mouseHover } from "../mouse"
 import { useTheme } from "../theme"
 import { KeyInput, useKeyActions } from "../keybindings"
-import { Action } from "./action"
 
 function fuzzyScore(value: string, query: string) {
   const target = value.toLowerCase()
@@ -124,16 +123,17 @@ export function ThemePicker(props: {
           <For each={themes()}>
             {(entry) => {
               const active = () => entry.theme === selected()
+              const hover = mouseHover(() => !busy(), () => entry.theme)
               return (
                 <box
                   id={`theme-${entry.theme}`}
-                  {...mouseClick(() => void choose(entry.theme), () => !busy())}
+                  {...mouseClick(() => void choose(entry.theme), () => !busy(), () => entry.theme, hover)}
                   height={1}
                   flexShrink={0}
                   flexDirection="row"
                   paddingLeft={1}
                   paddingRight={1}
-                  backgroundColor={active() ? colors.panelHover : colors.panel}
+                  backgroundColor={active() || hover.hovered() ? colors.panelHover : colors.panel}
                 >
                   <text width={2} fg={colors.blue}>{active() ? "›" : " "}</text>
                   <text
@@ -154,9 +154,6 @@ export function ThemePicker(props: {
         </Show>
       </scrollbox>
       <Show when={error()}>{(message) => <text fg={colors.red}>{message()}</text>}</Show>
-      <box height={1} flexShrink={0} flexDirection="row">
-        <Action id="theme-back" onActivate={requestClose} disabled={busy()}>Back</Action>
-      </box>
     </box>
   )
 }

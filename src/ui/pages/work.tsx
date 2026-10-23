@@ -9,7 +9,7 @@ import { ago, fitText } from "../format"
 import { issueIcon, pullRequestIcon } from "../issue-references"
 import { useTheme } from "../theme"
 import { useIcons } from "../icon-style"
-import { mouseClick } from "../mouse"
+import { mouseClick, type MousePosition } from "../mouse"
 
 export function WorkScreen(props: {
   kind: "issue" | "pull"
@@ -21,7 +21,7 @@ export function WorkScreen(props: {
   showScrollbar: boolean
   onEndReached?: () => void
   onStateChange?: (state: ListState) => void
-  onSelect?: (entry: IssueSummary | PullRequestSummary) => void
+  onContextMenu?: (entry: IssueSummary | PullRequestSummary, position: MousePosition) => void
   onOpen?: (entry: IssueSummary | PullRequestSummary) => void
   onOpenInBrowser?: (entry: IssueSummary | PullRequestSummary) => void
   onCopy?: (entry: IssueSummary | PullRequestSummary) => void
@@ -49,7 +49,7 @@ export function WorkScreen(props: {
             fg={props.state === "open" ? colors.openState : colors.muted}
             attributes={props.state === "open" ? TextAttributes.BOLD : TextAttributes.NONE}
             selectable={false}
-            {...mouseClick(() => props.onStateChange?.("open"), () => props.active && props.interactive)}
+            {...mouseClick(() => props.onStateChange?.("open"), () => props.active && props.interactive && Boolean(props.onStateChange))}
           >
             Open ({props.counts.open})
           </text>
@@ -57,7 +57,7 @@ export function WorkScreen(props: {
             fg={props.state === "closed" ? colors.closedState : colors.muted}
             attributes={props.state === "closed" ? TextAttributes.BOLD : TextAttributes.NONE}
             selectable={false}
-            {...mouseClick(() => props.onStateChange?.("closed"), () => props.active && props.interactive)}
+            {...mouseClick(() => props.onStateChange?.("closed"), () => props.active && props.interactive && Boolean(props.onStateChange))}
           >
             Closed ({props.counts.closed})
           </text>
@@ -74,7 +74,7 @@ export function WorkScreen(props: {
             resetKey={props.state}
             empty={`No ${props.state} ${props.kind === "issue" ? "issues" : "pull requests"}${page().hasMore ? " loaded yet" : ""}`}
             onEndReached={props.onEndReached}
-            onSelect={props.onSelect}
+            onContextMenu={props.onContextMenu}
             onActivate={props.onOpen}
             onOpenInBrowser={props.onOpenInBrowser}
             onCopy={props.onCopy}

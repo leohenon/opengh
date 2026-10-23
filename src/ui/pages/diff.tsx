@@ -6,8 +6,8 @@ import { createEffect, createMemo, createSignal, on, onCleanup, onMount, Show } 
 import type { DiffContent, DiffTarget } from "../../models"
 import type { ResourceState } from "../../repository-state"
 import { SelectableList } from "../components/selectable-list"
-import { ActionBar, type ActionItem } from "../components/action-bar"
-import { mouseClick } from "../mouse"
+import { mouseClick, mouseContextMenu, type MousePosition } from "../mouse"
+import type { ContextMenuItem } from "../components/context-menu"
 import { parseDiff, type DiffFile } from "../diff-model"
 import { mountHunk } from "../hunk-host"
 import { createScrollbarVisibility } from "../scrollbar-visibility"
@@ -42,6 +42,7 @@ export function DiffScreen(props: {
   onLoadFiles: () => void
   onMovePage?: (delta: number) => void
   onFocusChange?: (focus: DiffFocus) => void
+  onContextMenu?: (position: MousePosition, items: ContextMenuItem[]) => void
 }) {
   const renderer = useRenderer()
   const dimensions = useTerminalDimensions()
@@ -194,6 +195,10 @@ export function DiffScreen(props: {
   }
   const toggleLayout = () => setLayout(currentLayout() === "split" ? "unified" : "split")
   const toggleWrap = () => setWrap((value) => !value)
+  const contextMouse = mouseContextMenu((position) => props.onContextMenu?.(position, [
+    { label: "Change layout", run: toggleLayout, get disabled() { return !renderFile() } },
+    { label: "Toggle files", run: toggleSidebar },
+  ]), interactive, targetKey)
   const pan = (delta: number) => {
     if (wrap() || !renderFile()) return
     pending = undefined
@@ -223,6 +228,7 @@ export function DiffScreen(props: {
     setFocus("diff")
   }
   const bodyWheel = (event: MouseEvent) => {
+    contextMouse.onMouseScroll()
     bodyMouse.onMouseScroll()
     if (!interactive()) { event.stopPropagation(); return }
     pending = undefined
@@ -234,22 +240,15 @@ export function DiffScreen(props: {
       pan(sign * Math.max(1, Math.round((event.scroll?.delta ?? 1) * 4)))
     }
   }
-  const controls = createMemo<ActionItem[]>(() => [
-    { id: "diff-focus-files", label: "Files", run: focusFiles },
-    { id: "diff-focus-body", label: "Diff", run: () => setFocus("diff") },
-    { id: "diff-toggle-files", label: showFiles() ? "Hide files" : "Show files", run: toggleSidebar },
-    { id: "diff-previous-hunk", label: "Prev hunk", run: () => jump(-1), disabled: !hunkCount() || hunk() === 0 },
-    { id: "diff-next-hunk", label: "Next hunk", run: () => jump(1), disabled: !hunkCount() || hunk() >= hunkCount() - 1 },
-    { id: "diff-layout", label: currentLayout() === "split" ? "Split" : "Unified", run: toggleLayout, disabled: !renderFile() },
-    { id: "diff-wrap", label: wrap() ? "Wrap on" : "Wrap off", run: toggleWrap, disabled: !renderFile() },
-    { id: "diff-pan-left", label: "Pan ←", run: () => pan(-4), disabled: wrap() || offset() === 0 || !renderFile() },
-    { id: "diff-pan-right", label: "Pan →", run: () => pan(4), disabled: wrap() || offset() >= maxOffset() || !renderFile() },
-  ])
-  createEffect(() => { if (!interactive()) bodyMouse.onMouseDrag() })
-  useKeyboard(() => bodyMouse.onMouseDrag())
+  createEffect(() => { if (!interactive()) { bodyMouse.onMouseDrag(); contextMouse.onMouseDrag() } })
+  useKeyboard(() => {
+    contextMouse.onMouseDrag()
+    bodyMouse.onMouseDrag()
+  })
   const keys = useKeyActions({
     "diff.focus": () => {
       bodyMouse.onMouseDrag()
+      contextMouse.onMouseDrag()
       if (focus() === "diff") focusFiles()
       else setFocus("diff")
     },
@@ -294,7 +293,7 @@ export function DiffScreen(props: {
 
 
   return (
-    <box flexGrow={1} minHeight={0} minWidth={0} flexDirection="column" backgroundColor={colors.canvas}>
+    <box {...(props.onContextMenu ? contextMouse : {})} flexGrow={1} minHeight={0} minWidth={0} flexDirection="column" backgroundColor={colors.canvas}>
       <box height={1} flexShrink={0} flexDirection="row" backgroundColor={colors.header} overflow="hidden">
         <text flexShrink={0} fg={colors.blue}>{label()} </text>
         <text flexGrow={1} minWidth={0} height={1} wrapMode="none" truncate fg={colors.text}>
@@ -308,7 +307,6 @@ export function DiffScreen(props: {
           <text id="diff-position" flexShrink={0} fg={colors.muted}> hunk {hunk() + 1}/{hunkCount()} · col {wrap() ? 1 : offset() + 1}</text>
         </Show>
       </box>
-      <ActionBar id="diff-controls" actions={controls()} disabled={!interactive()} />
       <Show when={props.resource.status === "loading"}>
         <text height={1} flexShrink={0} fg={colors.muted}>Loading diff…</text>
       </Show>
@@ -336,7 +334,7 @@ export function DiffScreen(props: {
             items={parsed().files} itemKey={(file) => file.path} resetKey={targetKey()}
             active={interactive() && showFiles() && focus() === "files" && !error()}
             mouseActive={interactive() && showFiles() && !error()}
-            onMouseFocus={focusFiles}
+            onMouseFocus={() => { contextMouse.onMouseDrag(); focusFiles() }}
             showScrollbar={props.showScrollbar} rowHeight={1}
             empty={props.resource.status === "ready" && !error() ? "No changed files." : ""}
             onSelect={(file) => setPath(file.path)}
@@ -347,12 +345,17 @@ export function DiffScreen(props: {
         </box>
         <box id="diff-content-pane" visible={showBody()}
           {...bodyMouse}
-          onMouseDown={(event) => { bodyMouse.onMouseDown(event); focusBody(event) }}
+          onMouseDown={(event) => {
+            if (event.button !== MouseButton.LEFT) { bodyMouse.onMouseDrag(); return }
+            bodyMouse.onMouseDown(event)
+            focusBody(event)
+          }}
+          onMouseUp={(event) => { if (event.button === MouseButton.LEFT) bodyMouse.onMouseUp(event) }}
           border={["left"]} borderColor={focus() === "diff" ? colors.blue : colors.border}
           flexGrow={1} minHeight={0} minWidth={0} flexDirection="column">
           <scrollbox
             focusable={false}
-            onMouseScroll={(event) => { pending = undefined; if (interactive()) setFocus("diff"); event.stopPropagation() }}
+            onMouseScroll={(event) => { contextMouse.onMouseScroll(); pending = undefined; if (interactive()) setFocus("diff"); event.stopPropagation() }}
             viewportOptions={{ onMouseScroll: bodyWheel }}
             scrollbarOptions={{ onMouseScroll: bodyWheel, trackOptions: { onMouse: (event) => {
               if (event.type === "down") focusBody(event)

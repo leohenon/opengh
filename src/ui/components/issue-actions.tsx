@@ -10,7 +10,7 @@ import { GitHubMarkdown } from "./github-markdown"
 import { Popup } from "./popup"
 import { KeyInput, KeyTextarea, useKeyActions, useKeybindings } from "../keybindings"
 import { Action } from "./action"
-import { mouseClick } from "../mouse"
+import { mouseClick, mouseHover } from "../mouse"
 
 export function IssueActionsMenu(props: {
   number: number
@@ -41,16 +41,19 @@ export function IssueActionsMenu(props: {
     "navigation.activate": () => activate(),
   }, { priority: 100, modal: true })
   return (
-    <Popup width={52} height={items().length + 4} placement="center" zIndex={250} onClose={props.onClose}>
+    <Popup width={52} height={items().length + 5} placement="center" zIndex={250} onClose={props.onClose}>
       <box flexGrow={1} minHeight={0} paddingX={2} paddingBottom={1} flexDirection="column">
         <text height={1} flexShrink={0} fg={colors.text} attributes={TextAttributes.BOLD}>Issue #{props.number} · Actions</text>
         <box height={1} flexShrink={0} />
-        <Index each={items()}>{(item, index) => (
-          <box height={1} flexShrink={0} backgroundColor={active() === index ? colors.panelHover : colors.panel}
-            {...mouseClick(() => activate(index), () => true, () => item().kind)}>
-            <text selectable={false} fg={active() === index ? colors.blue : colors.text}>{active() === index ? "› " : "  "}{item().label}</text>
-          </box>
-        )}</Index>
+        <Index each={items()}>{(item, index) => {
+          const hover = mouseHover(() => true, () => item().kind)
+          return (
+            <box height={1} flexShrink={0} backgroundColor={active() === index || hover.hovered() ? colors.panelHover : colors.panel}
+              {...mouseClick(() => activate(index), () => true, () => item().kind, hover)}>
+              <text selectable={false} fg={active() === index ? colors.blue : colors.text}>{active() === index ? "› " : "  "}{item().label}</text>
+            </box>
+          )
+        }}</Index>
         <box flexGrow={1} minHeight={0} />
       </box>
     </Popup>
@@ -71,7 +74,6 @@ export function IssueActionDialog(props: {
   onSubmit(): void
   onDiscard(): void
   onHintChange(hint: string | undefined): void
-  onConfirmationChange?: (confirming: boolean) => void
   onClose(): void
 }) {
   const { colors, theme } = useTheme()
@@ -134,8 +136,7 @@ export function IssueActionDialog(props: {
     : retry() ? keys.hints(["dialog.submit", "retry"], ["dialog.discard", "discard"], ["dialog.close", "back"])
     : props.kind === "duplicate" ? keys.hints([["dialog.confirm", "dialog.submit"], "review"], ["dialog.discard", "discard"], ["dialog.close", "back"])
     : keys.hints([props.kind === "close" ? "dialog.changeReason" : "dialog.togglePreview", props.kind === "close" ? "change reason" : "preview"], ["dialog.submit", "submit"], ["dialog.discard", "discard"], ["dialog.close", "keep draft"])))
-  createEffect(() => props.onConfirmationChange?.(confirmSubmit()))
-  onCleanup(() => { props.onHintChange(undefined); props.onConfirmationChange?.(false) })
+  onCleanup(() => props.onHintChange(undefined))
 
   // Echoed typing must not replace the buffer (and reset its cursor/selection).
   createEffect(() => {
@@ -213,14 +214,8 @@ export function IssueActionDialog(props: {
           <Show when={retry()}>
             <text flexShrink={0} fg={colors.green}>Comment posted. Only the issue state change will be retried.</text>
           </Show>
-          <Show when={!retry() && hasPreview()}>
-            <box height={1} flexShrink={0} flexDirection="row" gap={2}>
-              <text fg={!previewing() ? colors.blue : colors.muted} selectable={false}
-                {...mouseClick(() => setPreview(false), () => !pending() && !confirmSubmit())}>Write</text>
-              <text fg={previewing() ? colors.blue : colors.muted} selectable={false}
-                {...mouseClick(() => setPreview(true), () => !pending() && !confirmSubmit())}>Preview</text>
-            </box>
-            <box height={1} flexShrink={0} />
+          <Show when={!retry() && previewing()}>
+            <text height={1} flexShrink={0} fg={colors.muted}>Preview</text>
           </Show>
           <Show when={props.kind === "duplicate"}>
             <box marginTop={1} flexShrink={0} flexDirection="column">
@@ -273,8 +268,6 @@ export function IssueActionDialog(props: {
           </Show>
           <box height={1} flexShrink={0} flexDirection="row" gap={2}>
             <Action id="issue-action-submit" disabled={!canSubmit() || confirmSubmit()} onActivate={requestSubmit}>{retry() ? "Retry" : "Submit"}</Action>
-            <Action id="issue-action-discard" disabled={pending() || confirmSubmit()} onActivate={discard}>Discard</Action>
-            <Action id="issue-action-back" disabled={pending()} onActivate={requestClose}>Back</Action>
           </box>
         </box>
       </Popup>
@@ -288,9 +281,7 @@ export function IssueActionDialog(props: {
             <box flexGrow={1} minHeight={0} />
             <box height={1} flexShrink={0} flexDirection="row" gap={2}>
               <Action id="issue-action-confirm" disabled={!canSubmit()} onActivate={confirm}>Confirm</Action>
-              <Action id="issue-action-confirm-back" disabled={pending()} onActivate={requestClose}>Back</Action>
             </box>
-            <text height={1} flexShrink={0} fg={colors.muted}>{keys.hints(["dialog.confirm", "confirm"], ["dialog.close", "back"])}</text>
           </box>
         </Popup>
       </Show>

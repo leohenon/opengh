@@ -110,10 +110,10 @@ export function OverviewScreen(props: {
                 fallback={(
                   <box flexDirection="row" gap={1}>
                     <text fg={colors.muted} selectable={false}
-                      {...mouseClick(() => props.onMoveDocument?.(-1), () => props.interactive !== false)}>‹</text>
+                      {...mouseClick(() => props.onMoveDocument?.(-1), () => props.interactive !== false && Boolean(props.onMoveDocument))}>‹</text>
                     <text fg={props.compactHeader ? colors.salmon : colors.text} attributes={TextAttributes.BOLD}>{currentLabel()}</text>
                     <text fg={colors.muted} selectable={false}
-                      {...mouseClick(() => props.onMoveDocument?.(1), () => props.interactive !== false)}>›</text>
+                      {...mouseClick(() => props.onMoveDocument?.(1), () => props.interactive !== false && Boolean(props.onMoveDocument))}>›</text>
                   </box>
                 )}
               >
@@ -123,7 +123,7 @@ export function OverviewScreen(props: {
                       fg={item.id === document()?.id ? props.compactHeader ? colors.salmon : colors.text : colors.muted}
                       attributes={item.id === document()?.id ? TextAttributes.BOLD : TextAttributes.NONE}
                       selectable={false}
-                      {...mouseClick(() => props.onSelectDocument?.(item.id), () => props.interactive !== false)}
+                      {...mouseClick(() => props.onSelectDocument?.(item.id), () => props.interactive !== false && Boolean(props.onSelectDocument))}
                     >
                       {item.label}
                     </text>
@@ -149,7 +149,7 @@ export function OverviewScreen(props: {
                     {(item) => (
                       <>
                         <text fg={item.id === document()?.id ? colors.salmon : colors.border} selectable={false}
-                          {...mouseClick(() => props.onSelectDocument?.(item.id), () => props.interactive !== false)}>
+                          {...mouseClick(() => props.onSelectDocument?.(item.id), () => props.interactive !== false && Boolean(props.onSelectDocument))}>
                           {"─".repeat(item.label.length)}
                         </text>
                         <text fg={colors.border}>──</text>

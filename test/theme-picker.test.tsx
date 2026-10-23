@@ -22,7 +22,7 @@ describe("ThemePicker", () => {
     const view = await testRender(() => <ThemeProvider name={config().theme}>
       <Settings config={config()} saving={saving()} onClose={() => { closes++ }}
         onChange={async (next) => { writes++; setConfig(next) }} />
-    </ThemeProvider>, { width: 100, height: 32 })
+    </ThemeProvider>, { width: 100, height: 60 })
     active.push(view)
     await view.flush()
     await clickControl(view, "setting-about-sidebar")
@@ -41,7 +41,7 @@ describe("ThemePicker", () => {
     await clickControl(view, "theme-dracula")
     expect(config().theme).toBe("dracula")
     expect(view.captureCharFrame()).toContain("Settings")
-    await clickControl(view, "settings-close")
+    await view.mockMouse.click(0, 0); await view.flush()
     expect(closes).toBe(1)
   })
 
@@ -67,8 +67,9 @@ describe("ThemePicker", () => {
     await view.flush()
     expect(closes).toBe(0)
     expect(view.captureCharFrame()).toContain("Themes")
+    expect(view.renderer.root.findDescendantById("theme-back")).toBeUndefined()
     expect(config().theme).toBe("github")
-    await clickControl(view, "theme-back")
+    view.mockInput.pressEscape(); await Bun.sleep(60); await view.flush()
     expect(view.captureCharFrame()).toContain("Themes")
 
     finish()
@@ -137,7 +138,7 @@ describe("ThemePicker", () => {
     view.mockInput.pressEscape()
     await Bun.sleep(30)
     expect(cancelled).toBe(1)
-    await clickControl(view, "theme-back")
+    view.mockInput.pressEscape(); await Bun.sleep(60); await view.flush()
     expect(cancelled).toBe(2)
   })
 })

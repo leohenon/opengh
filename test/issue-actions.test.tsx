@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { testRender } from "@opentui/solid";
-import type { ScrollBoxRenderable } from "@opentui/core";
+import type { ScrollBoxRenderable, TextRenderable } from "@opentui/core";
 import { createSignal } from "solid-js";
 import { defaultConfig } from "../src/config";
 import type { IssueActionResult, Paginated } from "../src/models";
@@ -145,25 +145,21 @@ test("issue action overlays isolate input and confirm comments, closing, reopeni
     view.mockInput.pressEnter();
     await settle();
     expect(action().body).toBe("**Draft** qrs?h1l,\n");
-    const lines = view.captureCharFrame().split("\n");
-    const tabRow = lines.findIndex(
-      (line) => line.includes("Write") && line.includes("Preview"),
-    );
-    expect(tabRow).toBeGreaterThan(-1);
-    const tabColumn = lines[tabRow]!.indexOf("Write");
-    expect(lines[tabRow + 1]!.slice(tabColumn, tabColumn + 82).trim()).toBe("");
-    expect(lines[tabRow + 2]).toContain("**Draft** qrs?h1l,");
-    for (const label of [
-      "Add comment",
-      "Markdown supported",
-      "Cancel",
-      "Discard draft",
-      "Post comment",
-    ])
+    expect(view.captureCharFrame()).toContain("**Draft** qrs?h1l,");
+    for (const label of ["Add comment", "Markdown supported", "Cancel", "Discard", "Write", "Preview"])
       expect(view.captureCharFrame()).not.toContain(label);
-    expect(
-      lines[tabRow - 1]!.slice(tabColumn).trimStart().startsWith(`#${number}`),
-    ).toBe(true);
+    expect(view.renderer.root.findDescendantById("issue-action-discard")).toBeUndefined();
+    expect(view.renderer.root.findDescendantById("issue-action-back")).toBeUndefined();
+    const submit = view.renderer.root.findDescendantById("issue-action-submit") as TextRenderable;
+    expect(submit.parent!.getChildrenCount()).toBe(1);
+    const idleBackground = submit.bg;
+    await view.mockMouse.moveTo(submit.x, submit.y);
+    await view.flush();
+    expect(submit.bg).not.toEqual(idleBackground);
+    expect(submitted).toEqual([]);
+    await view.mockMouse.moveTo(submit.x - 1, submit.y);
+    await view.flush();
+    expect(submit.bg).toEqual(idleBackground);
     expect(view.captureCharFrame()).not.toContain("ctrl+s submit");
     expect(view.captureCharFrame()).not.toContain(hint);
     setConfig((current) => ({ ...current, showStatusBarHints: true }));
@@ -175,20 +171,20 @@ test("issue action overlays isolate input and confirm comments, closing, reopeni
     expect(submitted).toEqual([]);
     expect(quit).toBe(0);
     expect(refresh).toBe(0);
-    await clickControl(view, "issue-action-back");
+    await view.mockMouse.click(0, 0); await view.flush();
     await settle();
-    expect(view.captureCharFrame()).not.toContain("Write");
+    expect(view.renderer.root.findDescendantById("issue-action-submit")).toBeUndefined();
     expect(action().body).toBe("**Draft** qrs?h1l,\n");
     view.mockInput.pressKey("c");
     await settle();
     expect(view.captureCharFrame()).toContain("**Draft** qrs?h1l,");
-    await clickControl(view, "issue-action-discard");
+    view.mockInput.pressKey("d", { ctrl: true });
+    await settle();
     expect(action().body).toBe("");
     await view.mockInput.typeText("**Draft** qrs?h1l,");
     view.mockInput.pressEnter();
-    const previewTab = view.captureCharFrame().split("\n").findIndex((line) => line.includes("Write") && line.includes("Preview"));
-    const previewColumn = view.captureCharFrame().split("\n")[previewTab]!.indexOf("Preview");
-    await view.mockMouse.click(previewColumn, previewTab);
+    await settle();
+    view.mockInput.pressTab();
     await settle();
     expect(view.captureCharFrame()).toContain("Draft");
     expect(action().body).toBe("**Draft** qrs?h1l,\n");
@@ -222,13 +218,13 @@ test("issue action overlays isolate input and confirm comments, closing, reopeni
     await settle();
     expect(submitted).toEqual([]);
     expect(view.captureCharFrame()).toContain(`Post comment to #${number}?`);
-    expect(statusLine()).not.toContain("enter confirm");
+    expect(statusLine()).toBe("enter confirm · esc back");
     expect(view.captureCharFrame().split("enter confirm · esc back")).toHaveLength(2);
     setConfig((current) => ({ ...current, showStatusBarHints: false }));
     await settle();
-    expect(view.captureCharFrame()).toContain("enter confirm · esc back");
+    expect(view.captureCharFrame()).not.toContain("enter confirm · esc back");
     expect(statusLine()).not.toContain("enter confirm");
-    await clickControl(view, "issue-action-confirm-back");
+    await view.mockMouse.click(0, 0); await view.flush();
     await settle();
     expect(view.captureCharFrame()).not.toContain(
       `Post comment to #${number}?`,
@@ -249,7 +245,7 @@ test("issue action overlays isolate input and confirm comments, closing, reopeni
     await settle();
     await view.mockMouse.click(0, 0);
     await settle();
-    expect(view.captureCharFrame()).toContain("Write");
+    expect(view.renderer.root.findDescendantById("issue-action-submit")).toBeDefined();
     expect(submitted).toEqual(["comment"]);
     expect(quit).toBe(0);
     expect(action().body).toBe("**Draft** qrs?h1l,\n");
@@ -446,7 +442,7 @@ test("assignee suggestions filter locally, preserve selection, retry and save in
     await Bun.sleep(220); await view.flush();
     expect(view.captureCharFrame()).toContain("Saving assignees…");
     await clickControl(view, "assignees-save");
-    await clickControl(view, "assignees-back");
+    expect(view.renderer.root.findDescendantById("assignees-back")).toBeUndefined();
     await view.mockMouse.click(0, 0); await settle();
     expect(view.captureCharFrame()).toContain(`Assignees · #${issueDetailFixture.number}`);
     view.mockInput.pressEscape(); view.mockInput.pressKey("s", { ctrl: true });

@@ -1,6 +1,7 @@
 import { MouseButton, RGBA } from "@opentui/core"
 import { useTerminalDimensions } from "@opentui/solid"
 import type { JSX } from "solid-js"
+import { mouseSurface } from "../mouse"
 import { useTheme } from "../theme"
 
 export function Popup(props: {
@@ -11,6 +12,7 @@ export function Popup(props: {
   onClose?: () => void
   children: JSX.Element
 }) {
+  const mouse = mouseSurface()
   const dimensions = useTerminalDimensions()
   const { colors } = useTheme()
   let dismissOnRelease = false
@@ -22,6 +24,7 @@ export function Popup(props: {
 
   return (
     <box
+      {...mouse}
       position="absolute"
       left={0}
       top={0}
@@ -33,7 +36,7 @@ export function Popup(props: {
       backgroundColor={RGBA.fromInts(0, 0, 0, 150)}
       onMouse={(event) => {
         event.stopPropagation()
-        if (event.type === "drag") dismissOnRelease = false
+        if (event.type === "drag" || event.type === "scroll") dismissOnRelease = false
       }}
       onMouseDown={(event) => {
         event.preventDefault()

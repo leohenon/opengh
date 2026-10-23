@@ -62,6 +62,8 @@ test("repository switch popup isolates input, preserves cancelled navigation, an
     else view.mockInput.pressKey("s")
     await settle()
     expect(view.captureCharFrame()).toContain("Switch repository")
+    expect(view.renderer.root.findDescendantById("picker-submit")).toBeUndefined()
+    expect(view.renderer.root.findDescendantById("picker-back")).toBeUndefined()
     expect(view.captureCharFrame()).not.toContain("s switch repo")
   }
   try {
@@ -100,10 +102,11 @@ test("repository switch popup isolates input, preserves cancelled navigation, an
     expect(browser).toBe(0)
     expect(view.renderer.isDestroyed).toBe(false)
     expect(loads).toHaveLength(1)
-    await clickControl(view, "picker-submit")
+    view.mockInput.pressEnter()
+    await settle()
     expect(view.captureCharFrame()).toContain("Enter owner/repository or a GitHub URL")
     expect(loads).toHaveLength(1)
-    await clickControl(view, "picker-cancel")
+    await escape()
     expect(view.captureCharFrame()).toBe(scrolled)
 
     // List selection and detail both survive cancellation.
@@ -178,7 +181,8 @@ test("repository switch popup isolates input, preserves cancelled navigation, an
     await switchPage()
     expect(view.captureCharFrame().indexOf("› owner / qrshly")).toBeGreaterThan(-1)
     await view.mockInput.typeText("https://github.com/owner/missing")
-    await clickControl(view, "picker-submit")
+    view.mockInput.pressEnter()
+    await settle()
     await settle()
     expect(loads.at(-1)).toBe("owner/missing")
     expect(view.captureCharFrame()).toContain("Repository not found")

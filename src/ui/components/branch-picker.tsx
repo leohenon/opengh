@@ -3,7 +3,6 @@ import { createMemo, createSignal } from "solid-js"
 import type { Paginated } from "../../models"
 import type { ResourceState } from "../../repository-state"
 import { useTheme } from "../theme"
-import { useKeybindings } from "../keybindings"
 import { SearchablePicker } from "./searchable-picker"
 
 function fuzzyScore(value: string, query: string) {
@@ -38,8 +37,6 @@ export function BranchPicker(props: {
   onClose: () => void
 }) {
   const { colors } = useTheme()
-  const keys = useKeybindings()
-  const withHint = (message: string, label: string) => [message, keys.hint("picker.accept", label)].filter(Boolean).join(" — ")
   const [query, setQuery] = createSignal("")
   const source = createMemo(() => {
     const loaded = props.branches.value?.items ?? []
@@ -57,7 +54,7 @@ export function BranchPicker(props: {
       return {
         kind: "load",
         key: "load-more",
-        label: withHint(pagination ? "Load failed" : "Refresh failed", "to retry"),
+        label: pagination ? "Load failed — Retry" : "Refresh failed — Retry",
         action: pagination ? "load-more" : "retry",
       }
     }
@@ -67,7 +64,7 @@ export function BranchPicker(props: {
       return { kind: "load", key: "load-more", label }
     }
     const label = query().trim() && !hasBranchMatch()
-      ? withHint("No matches loaded", "to load more")
+      ? "No matches loaded — Load more branches…"
       : "Load more branches…"
     return { kind: "load", key: "load-more", label, action: "load-more" }
   }
@@ -91,6 +88,7 @@ export function BranchPicker(props: {
       placeholder="Search branches"
       items={rows()}
       itemKey={(row) => row.key}
+      itemDisabled={(row) => row.kind === "branch" ? props.canSwitch === false : !row.action}
       match={(row, needle) => row.kind === "branch" ? fuzzyScore(row.branch, needle) : Number.MAX_SAFE_INTEGER}
       preferred={(row) => row.kind === "branch" && row.branch === props.current}
       height={22}
@@ -114,10 +112,8 @@ export function BranchPicker(props: {
               {row.kind === "branch" ? row.branch : row.label}
             </text>
           </box>
-          <text width={Math.max(10, Bun.stringWidth(keys.key("picker.accept")))} flexShrink={0} fg={colors.green}>
-            {row.kind === "branch" && row.branch === props.current
-              ? "✓ current"
-              : row.kind === "load" && row.action ? keys.key("picker.accept") : ""}
+          <text width={10} flexShrink={0} fg={colors.green}>
+            {row.kind === "branch" && row.branch === props.current ? "✓ current" : ""}
           </text>
         </>
       )}

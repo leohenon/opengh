@@ -153,7 +153,7 @@ describe("application root", () => {
       resolveLocalRepository: async () => undefined,
       loadRecentRepositories: async () => [], rememberRepository: async () => {},
       loadRepositoryTabs: async () => ({}), saveRepositoryTabs: async () => {},
-      loadConfig: async () => ({ ...defaultConfig }),
+      loadConfig: async () => ({ ...defaultConfig, showStatusBarHints: true, keybindings: { "view.refresh": ["f6"] } }),
       createRepositorySession: () => ({ ...readySession(),
         load: async () => { loads++ }, loadPull: async (number) => { pulls.push(number) },
       }),
@@ -163,6 +163,7 @@ describe("application root", () => {
     await settle()
     expect(view.captureCharFrame()).toContain("Could not open cli/cli#9999")
     expect(view.captureCharFrame()).toContain("Not Found (HTTP 404)")
+    expect(view.captureCharFrame()).toContain("f6 retry")
     expect(loads).toBe(0)
 
     view.mockInput.pressKey("s")
@@ -172,7 +173,7 @@ describe("application root", () => {
     await settle()
     expect(view.captureCharFrame()).toContain("Could not open cli/cli#9999")
     if (action === "retry") {
-      view.mockInput.pressKey("r")
+      view.mockInput.pressKey("F6")
       await settle()
       expect(view.captureCharFrame()).toContain("Pull request #9999")
       expect(lookups).toBe(2)

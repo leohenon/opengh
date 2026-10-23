@@ -10,6 +10,7 @@ import { Popup } from "./components/popup";
 import { Action } from "./components/action";
 import { SearchablePicker } from "./components/searchable-picker";
 import { useKeyActions, useKeybindings } from "./keybindings";
+import { StatusBar } from "./components/status-bar";
 import { useTheme } from "./theme";
 
 export function ResolvingRepository() {
@@ -70,6 +71,7 @@ export function RepositoryLoadError(props: {
   onRetry: () => void;
   onSwitchRepository?: () => void;
   onQuit?: () => void;
+  showStatusBarHints?: boolean;
 }) {
   const dimensions = useTerminalDimensions();
   const renderer = useRenderer();
@@ -102,14 +104,15 @@ export function RepositoryLoadError(props: {
           <text fg={colors.text}>{props.repository}</text>
           <text flexGrow={1} minHeight={0} fg={colors.red} wrapMode="word">{props.message}</text>
           <box height={1} flexShrink={0} flexDirection="row">
-            <Action id="repository-retry" onActivate={props.onRetry}>{keys.hint("view.refresh", "retry")}</Action>
-            <Show when={props.onSwitchRepository}>
-              <text fg={colors.muted}> · </text><Action id="repository-switch" onActivate={() => props.onSwitchRepository?.()}>{keys.hint("global.switchRepository", "switch repo")}</Action>
-            </Show>
-            <text fg={colors.muted}> · </text><Action id="repository-quit" onActivate={quit}>{keys.hint("global.quit", "quit")}</Action>
+            <Action id="repository-retry" onActivate={props.onRetry}>Retry</Action>
           </box>
         </box>
       </Popup>
+      <Show when={props.showStatusBarHints}>
+        <box position="absolute" bottom={0} width="100%" zIndex={101}>
+          <StatusBar hint={keys.hints(["view.refresh", "retry"], ...(props.onSwitchRepository ? [["global.switchRepository", "switch repository"] as const] : []), ["global.quit", "quit"])} />
+        </box>
+      </Show>
     </box>
   );
 }

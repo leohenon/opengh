@@ -8,7 +8,7 @@ import { useTheme } from "../theme"
 import { Popup } from "./popup"
 import { KeyInput, useKeyActions, useKeybindings } from "../keybindings"
 import { Action } from "./action"
-import { mouseClick } from "../mouse"
+import { mouseClick, mouseHover } from "../mouse"
 
 export function IssueAssigneesPicker(props: {
   number: number
@@ -102,6 +102,17 @@ export function IssueAssigneesPicker(props: {
     return Math.min(6, error().split("\n").reduce((rows, line) => rows + Math.ceil(Bun.stringWidth(line) / width) + 1, 0))
   }
   const popupHeight = () => Math.min(16, Math.max(1, rowCount() + (!filtered().length && !loading() ? 1 : 0)) + 7 + errorHeight())
+  const LoadRow = () => {
+    const enabled = () => !pending() && !loading() && canLoad()
+    const hover = mouseHover(enabled, () => filtered().length)
+    return (
+      <box id={`assignee-row-${filtered().length}`} height={1} flexShrink={0} flexDirection="row" paddingX={3}
+        backgroundColor={currentRow() === filtered().length || hover.hovered() ? colors.panelHover : colors.panel}
+        {...mouseClick(() => activate(filtered().length), enabled, () => filtered().length, hover)}>
+        <text fg={colors.blue}>{currentRow() === filtered().length ? "› " : "  "}{loading() ? "Loading users…" : props.users?.status === "error" ? "Retry loading users" : "Load more users…"}</text>
+      </box>
+    )
+  }
 
   return (
     <Popup width={44} height={popupHeight()} placement="center" zIndex={250} onClose={requestClose}>
@@ -121,22 +132,21 @@ export function IssueAssigneesPicker(props: {
           <Show when={!filtered().length && !loading()}>
             <text height={1} paddingLeft={3} fg={colors.muted}>No matching users.</text>
           </Show>
-          <Index each={filtered()}>{(login, index) => (
-            <box id={`assignee-row-${index}`} height={1} flexShrink={0} flexDirection="row" paddingX={3}
-              backgroundColor={currentRow() === index ? colors.panelHover : colors.panel}
-              {...mouseClick(() => activate(index), () => !pending(), () => login())}>
-              <text width={2} flexShrink={0} fg={colors.blue}>{currentRow() === index ? "›" : " "}</text>
-              <text height={1} wrapMode="none" flexGrow={1} fg={colors.muted}>
-                [{isSelected(login()) ? "x" : " "}] <span style={{ fg: colors.blue }}>@{login()}</span>
-              </text>
-            </box>
-          )}</Index>
+          <Index each={filtered()}>{(login, index) => {
+            const hover = mouseHover(() => !pending(), () => login())
+            return (
+              <box id={`assignee-row-${index}`} height={1} flexShrink={0} flexDirection="row" paddingX={3}
+                backgroundColor={currentRow() === index || hover.hovered() ? colors.panelHover : colors.panel}
+                {...mouseClick(() => activate(index), () => !pending(), () => login(), hover)}>
+                <text width={2} flexShrink={0} fg={colors.blue}>{currentRow() === index ? "›" : " "}</text>
+                <text height={1} wrapMode="none" flexGrow={1} fg={colors.muted}>
+                  [{isSelected(login()) ? "x" : " "}] <span style={{ fg: colors.blue }}>@{login()}</span>
+                </text>
+              </box>
+            )
+          }}</Index>
           <Show when={canLoad() || loading()}>
-            <box id={`assignee-row-${filtered().length}`} height={1} flexShrink={0} flexDirection="row" paddingX={3}
-              backgroundColor={currentRow() === filtered().length ? colors.panelHover : colors.panel}
-              {...mouseClick(() => activate(filtered().length), () => !pending() && !loading(), () => filtered().length)}>
-              <text fg={colors.blue}>{currentRow() === filtered().length ? "› " : "  "}{loading() ? "Loading users…" : props.users?.status === "error" ? "Retry loading users" : "Load more users…"}</text>
-            </box>
+            <LoadRow />
           </Show>
         </scrollbox>
         <Show when={error()}>
@@ -146,7 +156,6 @@ export function IssueAssigneesPicker(props: {
         </Show>
         <box height={1} flexShrink={0} flexDirection="row" gap={2} paddingX={4}>
           <Action id="assignees-save" disabled={pending()} onActivate={submit}>Save</Action>
-          <Action id="assignees-back" disabled={pending()} onActivate={requestClose}>Back</Action>
         </box>
       </box>
     </Popup>

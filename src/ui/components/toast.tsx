@@ -1,13 +1,12 @@
 import { useTerminalDimensions } from "@opentui/solid"
 import { onCleanup, onMount } from "solid-js"
 import { useTheme } from "../theme"
-import { Action } from "./action"
 
 export function Toast(props: {
   title: string
   message: string
-  duration?: number
   zIndex?: number
+  duration?: number
   tone?: "error" | "success" | "info"
   onDismiss: () => void
 }) {
@@ -23,6 +22,7 @@ export function Toast(props: {
 
   return (
     <box
+      id="toast"
       position="absolute"
       top={2}
       right={2}
@@ -42,10 +42,7 @@ export function Toast(props: {
         paddingLeft={2}
         paddingRight={2}
       >
-        <text flexGrow={1} minWidth={0} fg={colors.text} wrapMode="word">{content()}</text>
-      </box>
-      <box position="absolute" top={0} right={1} height={1}>
-        <Action id="toast-dismiss" onActivate={props.onDismiss}>×</Action>
+        <text selectable={false} flexGrow={1} minWidth={0} fg={colors.text} wrapMode="word">{content()}</text>
       </box>
     </box>
   )

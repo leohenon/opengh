@@ -2,6 +2,7 @@ import { MouseButton, type BoxRenderable, type ScrollBoxRenderable } from "@open
 import { useKeyboard } from "@opentui/solid"
 import { useKeyActions } from "../keybindings"
 import { createEffect, createMemo, createSignal, Index, onCleanup, Show, type Accessor, type JSX } from "solid-js"
+import { mouseHover, type MousePosition } from "../mouse"
 import { fitText } from "../format"
 import { scrollRowIntoView } from "../scroll-selection"
 import { ListLine } from "./list-line"
@@ -22,6 +23,7 @@ export function SelectableList<T>(props: {
   rowHeight?: number
   endThreshold?: number
   onEndReached?: () => void
+  onContextMenu?: (item: T, position: MousePosition) => void
   onActivate?: (item: T) => void
   onOpenInBrowser?: (item: T) => void
   onCopy?: (item: T) => void
@@ -33,7 +35,7 @@ export function SelectableList<T>(props: {
   const [selectedKey, setSelectedKey] = createSignal<ItemKey>()
   const [containerHeight, setContainerHeight] = createSignal(0)
   let selectedIndex = 0
-  let mousePress: { key: ItemKey; x: number; y: number } | undefined
+  let mousePress: { key: ItemKey; x: number; y: number; button: number } | undefined
   const mouseActive = () => props.mouseActive ?? props.active
   let followSelection = true
   let previousResetKey = props.resetKey
@@ -199,6 +201,7 @@ export function SelectableList<T>(props: {
           <Index each={props.items}>
             {(item, index) => {
               const active = () => selectedKey() === props.itemKey(item())
+              const hover = mouseHover(mouseActive, () => props.itemKey(item()))
               return (
                 <box
                   width="100%"
@@ -209,25 +212,27 @@ export function SelectableList<T>(props: {
                   flexDirection="row"
                   alignItems="flex-start"
                   paddingRight={1}
-                  backgroundColor={active() ? colors.panelHover : colors.canvas}
+                  {...hover.handlers}
+                  backgroundColor={active() ? colors.panelHover : hover.hovered() ? colors.panel : colors.canvas}
                   onMouseDown={(event) => {
                     mousePress = undefined
-                    if (!mouseActive() || event.button !== MouseButton.LEFT) return
+                    if (!mouseActive() || (event.button !== MouseButton.LEFT && (event.button !== MouseButton.RIGHT || !props.onContextMenu))) return
                     event.preventDefault()
                     event.stopPropagation()
                     props.onMouseFocus?.()
-                    mousePress = { key: props.itemKey(item()), x: event.x, y: event.y }
+                    mousePress = { key: props.itemKey(item()), x: event.x, y: event.y, button: event.button }
                   }}
                   onMouseUp={(event) => {
                     const press = mousePress
                     mousePress = undefined
                     const clicked = item()
-                    if (!press || !mouseActive() || event.button !== MouseButton.LEFT
+                    if (!press || !mouseActive() || event.button !== press.button
                       || press.key !== props.itemKey(clicked) || press.x !== event.x || press.y !== event.y) return
                     event.preventDefault()
                     event.stopPropagation()
                     selectIndex(index)
-                    props.onActivate?.(clicked)
+                    if (event.button === MouseButton.RIGHT) props.onContextMenu?.(clicked, { x: event.x, y: event.y })
+                    else props.onActivate?.(clicked)
                   }}
                 >
                   <text width={2} fg={colors.blue}>{active() ? "▌" : " "}</text>

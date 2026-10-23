@@ -85,6 +85,12 @@ describe("Popup", () => {
     await view.flush()
     expect(closes).toBe(0)
 
+    await view.mockMouse.pressDown(2, 2)
+    await view.mockMouse.scroll(2, 2, "down")
+    await view.mockMouse.release(2, 2)
+    await view.flush()
+    expect(closes).toBe(0)
+
     await view.mockMouse.click(2, 2)
     await view.flush()
     expect(closes).toBe(1)

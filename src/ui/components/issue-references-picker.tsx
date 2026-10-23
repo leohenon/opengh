@@ -9,7 +9,6 @@ import { useIcons } from "../icon-style"
 import { ListLine } from "./list-line"
 import { Popup } from "./popup"
 import { SelectableList } from "./selectable-list"
-import { Action } from "./action"
 import { mouseClick } from "../mouse"
 
 export function IssueReferencesPicker(props: {
@@ -26,8 +25,6 @@ export function IssueReferencesPicker(props: {
   const pulls = createMemo(() => items().filter((reference) => reference.kind === "pull"))
   const issues = createMemo(() => items().filter((reference) => reference.kind === "issue"))
   const [tab, setTab] = createSignal<"pull" | "issue">(pulls().length ? "pull" : "issue")
-  const [selectedKeys, setSelectedKeys] = createSignal<Partial<Record<"pull" | "issue", string>>>({})
-  const selected = () => (tab() === "pull" ? pulls() : issues()).find((item) => `${item.repository}#${item.number}` === selectedKeys()[tab()])
 
   useKeyActions({
     "references.switchTab": () => { setTab((current) => current === "pull" ? "issue" : "pull") },
@@ -66,7 +63,6 @@ export function IssueReferencesPicker(props: {
                 active={tab() === kind}
                 empty={kind === "pull" ? "No referenced pull requests" : "No referenced issues"}
                 showScrollbar={props.showScrollbar}
-                onSelect={(item) => setSelectedKeys((current) => ({ ...current, [kind]: `${item.repository}#${item.number}` }))}
                 onActivate={props.onOpen}
                 onOpenInBrowser={props.onOpen}
                 onCopy={props.onCopy}
@@ -88,11 +84,6 @@ export function IssueReferencesPicker(props: {
             </box>
           )}
         </For>
-        <box height={1} flexShrink={0} flexDirection="row" gap={2}>
-          <Action id="references-open" disabled={!selected()} onActivate={() => { const item = selected(); if (item) props.onOpen(item) }}>Open</Action>
-          <Action id="references-copy" disabled={!selected()} onActivate={() => { const item = selected(); if (item) props.onCopy(item) }}>Copy URL</Action>
-          <Action id="references-back" onActivate={props.onClose}>Back</Action>
-        </box>
       </box>
     </Popup>
   )

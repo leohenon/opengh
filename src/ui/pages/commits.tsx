@@ -10,7 +10,7 @@ import { SelectableList } from "../components/selectable-list"
 import { ago, fitText } from "../format"
 import { useTheme } from "../theme"
 import { useIcons } from "../icon-style"
-import { mouseClick } from "../mouse"
+import { mouseClick, type MousePosition } from "../mouse"
 
 export function CommitsScreen(props: {
   commits: ResourceState<Paginated<CommitSummary>>
@@ -22,7 +22,7 @@ export function CommitsScreen(props: {
   canOpenBranches?: boolean
   onOpenBranches?: () => void
   onEndReached?: () => void
-  onSelect?: (commit: CommitSummary) => void
+  onContextMenu?: (entry: CommitSummary, position: MousePosition) => void
   onOpenCommit?: (commit: CommitSummary) => void
   onOpenCommitInBrowser?: (commit: CommitSummary) => void
   onCopyCommitSha?: (commit: CommitSummary) => void
@@ -52,7 +52,7 @@ export function CommitsScreen(props: {
             </text>
           </Show>
           <box id="branch-dropdown" width={Bun.stringWidth(props.currentBranch) + 4} flexShrink={1} minWidth={0} flexDirection="row" overflow="hidden"
-            {...mouseClick(() => props.onOpenBranches?.(), () => props.active && props.interactive && props.canOpenBranches !== false)}>
+            {...mouseClick(() => props.onOpenBranches?.(), () => props.active && props.interactive && props.canOpenBranches !== false && Boolean(props.onOpenBranches))}>
             <box flexGrow={1} flexBasis={0} minWidth={0}>
               <ListLine fg={props.canOpenBranches === false ? colors.muted : colors.blue} attributes={TextAttributes.BOLD}>
                 {(width) => fitText(`${icons().branch} ${props.currentBranch}`, width)}
@@ -73,7 +73,7 @@ export function CommitsScreen(props: {
             resetKey={props.currentBranch}
             empty="No commits"
             onEndReached={props.onEndReached}
-            onSelect={props.onSelect}
+            onContextMenu={props.onContextMenu}
             onActivate={props.onOpenCommit}
             onOpenInBrowser={props.onOpenCommitInBrowser}
             onCopy={props.onCopyCommitSha}

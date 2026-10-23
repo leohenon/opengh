@@ -22,7 +22,8 @@ import type {
 } from "../repository-state"
 import { BranchPicker } from "./components/branch-picker"
 import { Header } from "./components/header"
-import { ActionBar, type ActionItem } from "./components/action-bar"
+import { ContextMenu, type ContextMenuItem } from "./components/context-menu"
+import { mouseContextMenu, type MousePosition } from "./mouse"
 import { IssueReferencesPicker } from "./components/issue-references-picker"
 import { IssueActionDialog, IssueActionsMenu } from "./components/issue-actions"
 import { IssueAssigneesPicker } from "./components/issue-assignees-picker"
@@ -47,7 +48,7 @@ import { IconProvider } from "./icon-style"
 import { MotionProvider } from "./motion"
 import { MarkdownProvider } from "./markdown-preferences"
 
-type Overlay = "help" | "branch-picker" | "settings" | "issue-references" | "issue-actions" | "issue-action" | "command" | "switch-repo"
+type Overlay = "context-menu" | "help" | "branch-picker" | "settings" | "issue-references" | "issue-actions" | "issue-action" | "command" | "switch-repo"
 type ToastState = { id: number; title: string; message: string; duration?: number; tone?: "error" | "success" | "info" }
 
 export type AppProps = {
@@ -139,10 +140,6 @@ function AppContent(props: AppProps) {
   const [pullState, setPullState] = createSignal<ListState>("open")
   const [pullRefresh, setPullRefresh] = createSignal<{ number: number }>()
   const [overviewDocument, setOverviewDocument] = createSignal<string>()
-  const [selectedCommit, setSelectedCommit] = createSignal<string>()
-  const [selectedIssue, setSelectedIssue] = createSignal<number>()
-  const [selectedPull, setSelectedPull] = createSignal<number>()
-  const [selectedRun, setSelectedRun] = createSignal<number>()
   const [diffFocus, setDiffFocus] = createSignal<Partial<Record<Page, DiffFocus>>>({})
   const [overlay, setOverlay] = createSignal<Overlay>()
   const [toast, setToast] = createSignal<ToastState>()
@@ -150,7 +147,6 @@ function AppContent(props: AppProps) {
   const [issueAction, setIssueAction] = createSignal<{ number: number; kind: IssueActionKind }>()
   const [issueActionHint, setIssueActionHint] = createSignal<string>()
   const [commandHint, setCommandHint] = createSignal<string>()
-  const [confirmationPopup, setConfirmationPopup] = createSignal(false)
   const [settingsHint, setSettingsHint] = createSignal<string>()
   const [revealActivity, setRevealActivity] = createSignal<{ number: number; id: number }>()
   const emptyIssueAction: IssueActionState = { body: "", reason: "completed", operation: { status: "idle" } }
@@ -179,6 +175,22 @@ function AppContent(props: AppProps) {
     setNavigation((state) => openDiff(state, target))
     void props.onLoadDiff?.(target)
   }
+  const openCommit = (sha: string) => {
+    setNavigation((state) => openDetail(state, { kind: "commit", sha }))
+    void props.onLoadCommit?.(sha)
+  }
+  const openIssue = (number: number) => {
+    setNavigation((state) => openDetail(state, { kind: "issue", number }))
+    void props.onLoadIssue?.(number)
+  }
+  const openPull = (number: number) => {
+    setNavigation((state) => openDetail(state, { kind: "pull", number }))
+    void props.onLoadPull?.(number)
+  }
+  const openRun = (id: number) => {
+    setNavigation((state) => openDetail(state, { kind: "run", id }));
+    void props.onLoadRun?.(id);
+  };
   const closeDiff = () => {
     const target = diffTarget()
     setNavigation(back)
@@ -574,6 +586,16 @@ function AppContent(props: AppProps) {
     initialPagePending = false
     setNavigation((state) => navigate(state, next))
   }
+  const canGoBack = () => Boolean(diffTarget() || navigation().details?.[page()]);
+  const goBack = () => {
+    if (diffTarget()) closeDiff();
+    else if (navigation().details?.[page()]) closeDetail();
+  };
+  const selectHeaderPage = (next: Page) => {
+    initialPagePending = false
+    if (next !== page()) return selectPage(next);
+    goBack();
+  };
   const movePage = (delta: number) => {
     const available = visibleTabs()
     const current = Math.max(0, available.findIndex((tab) => tab.page === page()))
@@ -620,7 +642,7 @@ function AppContent(props: AppProps) {
     }
   }
   let copying = false
-  const copyToClipboard = async (value: string, label: "SHA" | "URL") => {
+  const copyToClipboard = async (value: string, label: "SHA" | "URL" | "Text") => {
     if (copying) return
     copying = true
     const origin = navigation()
@@ -630,7 +652,7 @@ function AppContent(props: AppProps) {
       if (!copied && !renderer.copyToClipboardOSC52(value))
         throw new Error(`Clipboard unavailable. Enable OSC 52 or copy the ${label} manually.`)
       if (navigation() === origin) setToast(copied
-        ? { id: ++toastId, title: `${label} copied to clipboard`, message: value, duration: 2000, tone: "success" }
+        ? { id: ++toastId, title: `${label} copied to clipboard`, message: "", duration: 2000, tone: "success" }
         : { id: ++toastId, title: `${label} sent to terminal`, message: "Copy could not be confirmed. Your terminal/tmux must allow OSC 52 clipboard requests.", duration: 4000, tone: "info" })
     } catch (error) {
       if (!renderer.isDestroyed && navigation() === origin)
@@ -669,10 +691,6 @@ function AppContent(props: AppProps) {
     return props.onRefresh
   })
   const refreshCurrent = () => { clearRunFailures(); void refreshCallback()?.() }
-  const moreResource = () => activeRunId() ? runDetail().jobs : activeCommitSha() ? commitResource()
-    : activeIssueNumber() ? issueDetail().comments : activePullNumber() ? pullDetail().comments : undefined
-  const hasMore = () => activeRunId() ? runDetail().jobs.value?.hasMore : activeCommitSha() ? commitResource().value?.files.hasMore
-    : activeIssueNumber() ? issueDetail().comments.value?.hasMore : activePullNumber() ? pullDetail().comments.value?.hasMore : false
   const loadMoreCurrent = () => {
     clearRunFailures()
     if (activeRunId()) void props.onLoadMoreRunJobs?.()
@@ -685,49 +703,97 @@ function AppContent(props: AppProps) {
     const repository = data().repo.nameWithOwner
     openCommand({ title: `Clone ${repository}`, destination: cloneDestination(repository.split("/")[1]!, props.cwd!), command: (destination) => cloneCommand(repository, destination, props.cwd!) })
   }
-  const currentItem = createMemo<{ browser?: string | number; copy: string; copyLabel: "SHA" | "URL"; diff?: DiffTarget } | undefined>(() => {
-    const diff = diffTarget()
-    if (diff) return diff.kind === "commit" ? { browser: diff.sha, copy: diff.sha, copyLabel: "SHA" }
-      : { browser: diff.number, copy: pullUrl(diff.number), copyLabel: "URL" }
-    if (page() === "overview") return { copy: data().repo.url, copyLabel: "URL" }
-    if (page() === "commits") {
-      const sha = activeCommitSha() ?? data().commits.value?.items.find((item) => item.sha === selectedCommit())?.sha
-      return sha ? { browser: sha, copy: sha, copyLabel: "SHA", diff: { kind: "commit", sha } } : undefined
-    }
-    if (page() === "issues") {
-      const number = activeIssueNumber() ?? issues().value?.items.find((item) => item.number === selectedIssue())?.number
-      return number ? { browser: number, copy: issueUrl(number), copyLabel: "URL" } : undefined
-    }
-    if (page() === "pulls") {
-      const number = activePullNumber() ?? pulls().value?.items.find((item) => item.number === selectedPull())?.number
-      return number ? { browser: number, copy: pullUrl(number), copyLabel: "URL", diff: { kind: "pull", number } } : undefined
-    }
-    const id = activeRunId() ?? data().runs.value?.items.find((item) => item.id === selectedRun())?.id
-    return id ? { browser: `actions/runs/${id}`, copy: runUrl(id), copyLabel: "URL" } : undefined
+  const [contextMenu, setContextMenu] = createSignal<{
+    origin: NavigationState; repository: string; position: MousePosition; items: ContextMenuItem[]; valid: () => boolean
+  }>()
+  const closeContextMenu = () => { setOverlay(); setContextMenu() }
+  const ownsContextMenu = (menu: NonNullable<ReturnType<typeof contextMenu>>) => navigation() === menu.origin
+    && data().repo.nameWithOwner === menu.repository && menu.valid()
+  const openContextMenu = (position: MousePosition, items: ContextMenuItem[], valid: () => boolean) => {
+    if (overlay() || !valid()) return
+    setContextMenu({ origin: navigation(), repository: data().repo.nameWithOwner, position, items, valid })
+    setOverlay("context-menu")
+  }
+  createEffect(() => {
+    const menu = contextMenu()
+    if (overlay() === "context-menu" && menu && !ownsContextMenu(menu)) closeContextMenu()
   })
-  const pageActions = createMemo<ActionItem[]>(() => {
-    const actions: ActionItem[] = []
-    const item = currentItem()
-    if (diffTarget() || navigation().details?.[page()]) actions.push({ label: "Back", run: () => diffTarget() ? closeDiff() : closeDetail() })
-    const diff = diffTarget()
-    if (diff && diffResource().status === "error") actions.push({ label: "File list", run: () => void props.onLoadDiff?.(diff, true), disabled: !props.onLoadDiff })
-    if (item?.diff) actions.push({ label: "Diff", run: () => viewDiff(item.diff!), disabled: !props.onLoadDiff })
-    if (activeIssueNumber() && !diffTarget()) {
-      if (canActOnIssue("comment")) actions.push({ label: "Comment", run: () => openIssueAction("comment") })
-      if (hasIssueActions()) actions.push({ label: "Actions", run: () => setOverlay("issue-actions") })
+  const backContextItems = (): ContextMenuItem[] =>
+    canGoBack() ? [{ label: "Back", run: goBack }] : [];
+  const commentContextItems = (): ContextMenuItem[] =>
+    canActOnIssue("comment") ? [{
+      label: "Add comment",
+      run: () => openIssueAction("comment"),
+      get disabled() { return !canActOnIssue("comment"); },
+    }] : [];
+  const openRowContext = (kind: "commit" | "issue" | "pull" | "run", id: string | number, position: MousePosition) => {
+    const valid = () => {
+      if (kind === "commit") return page() === "commits" && !activeCommitSha() && !!data().commits.value?.items.some((commit) => commit.sha === id);
+      if (kind === "issue") return page() === "issues" && !activeIssueNumber() && !!issues().value?.items.some((issue) => issue.number === id);
+      if (kind === "pull") return page() === "pulls" && !activePullNumber() && !!pulls().value?.items.some((pull) => pull.number === id);
+      return page() === "actions" && !activeRunId() && !!data().runs.value?.items.some((run) => run.id === id);
+    };
+    const open = () => {
+      if (kind === "commit") openCommit(String(id));
+      else if (kind === "issue") openIssue(Number(id));
+      else if (kind === "pull") openPull(Number(id));
+      else openRun(Number(id));
+    };
+    const items: ContextMenuItem[] = [{ label: "Open", run: open }];
+    if (kind === "commit" || kind === "pull") items.push({
+      label: "View diff", disabled: !props.onLoadDiff,
+      run: () => viewDiff(kind === "commit" ? { kind, sha: String(id) } : { kind, number: Number(id) }),
+    });
+    const copy = kind === "commit" ? String(id) : kind === "issue" ? issueUrl(Number(id)) : kind === "pull" ? pullUrl(Number(id)) : runUrl(Number(id));
+    items.push(
+      { label: "Copy " + (kind === "commit" ? "SHA" : "URL"), run: () => void copyToClipboard(copy, kind === "commit" ? "SHA" : "URL") },
+      { label: "Open on GitHub", run: () => void openInBrowser(kind === "run" ? `actions/runs/${id}` : id), disabled: !props.onOpenInBrowser },
+    );
+    openContextMenu(position, items, valid);
+  };
+  const openPageContext = (position: MousePosition) => {
+    if (diffTarget()) {
+      openContextMenu(position, backContextItems(), canGoBack);
+      return;
     }
-    if (!diffTarget() && (activeIssueNumber() && issueMenuItems().length || activePullNumber() && pullMenuItems().length))
-      actions.push({ label: "References", run: () => setOverlay("issue-references") })
-    if (!diffTarget() && hasMore()) actions.push({ label: moreResource()?.status === "error" ? "Retry more" : "Load more", run: loadMoreCurrent, disabled: moreResource()?.status === "loading" })
-    if (item) {
-      actions.push({ label: "GitHub", run: () => void openInBrowser(item.browser, undefined, diffTarget() ? "diff" : undefined), disabled: !props.onOpenInBrowser })
-      actions.push({ label: `Copy ${item.copyLabel}`, run: () => void copyToClipboard(item.copy, item.copyLabel) })
+    const sha = activeCommitSha();
+    const issue = activeIssueNumber();
+    const pull = activePullNumber();
+    const run = activeRunId();
+    const items: ContextMenuItem[] = [];
+    if (sha) {
+      items.push(
+        { label: "View diff", run: () => viewDiff({ kind: "commit", sha }), disabled: !props.onLoadDiff },
+        { label: "Open on GitHub", run: () => void openInBrowser(sha), disabled: !props.onOpenInBrowser },
+        { label: "Copy SHA", run: () => void copyToClipboard(sha, "SHA") },
+      );
+    } else if (issue || pull) {
+      const number = (issue ?? pull)!;
+      if (pull) items.push({ label: "View diff", run: () => viewDiff({ kind: "pull", number }), disabled: !props.onLoadDiff });
+      items.push(
+        { label: "Open on GitHub", run: () => void openInBrowser(number), disabled: !props.onOpenInBrowser },
+        { label: "Copy URL", run: () => void copyToClipboard(issue ? issueUrl(number) : pullUrl(number), "URL") },
+      );
+    } else if (run) {
+      items.push(
+        { label: "Open on GitHub", run: () => void openInBrowser(`actions/runs/${run}`), disabled: !props.onOpenInBrowser },
+        { label: "Copy URL", run: () => void copyToClipboard(runUrl(run), "URL") },
+      );
+    } else if (page() === "overview") {
+      items.push(
+        { label: "Open on GitHub", run: () => void openInBrowser(), disabled: !props.onOpenInBrowser },
+        { label: "Copy repository URL", run: () => void copyToClipboard(data().repo.url, "URL") },
+      );
+      if (canClone()) items.push({
+        label: "Clone repository", run: cloneRepository,
+        get disabled() { return !canClone(); },
+      });
     }
-    actions.push({ label: activeResource()?.status === "error" ? "Retry" : "Refresh", run: refreshCurrent, disabled: !refreshCallback() || activeResource()?.status === "loading" || operations().refresh.status === "loading" })
-    if (page() === "overview" && canClone()) actions.push({ label: "Clone", run: cloneRepository })
-    actions.push({ label: "?", run: () => setOverlay("help") }, { label: "Options", run: () => setOverlay("settings") })
-    return actions
-  })
+    items.push(...commentContextItems(), ...backContextItems());
+    if (items.length) openContextMenu(position, items, () => true);
+  };
+  const pageMouse = mouseContextMenu(openPageContext, () => overlay() === undefined, navigation)
+  createEffect(() => { navigation(); overlay(); pageMouse.onMouseDrag() })
   const shortcutHint = () => {
     if (!config().showStatusBarHints) return undefined
     const hint = (...entries: HintEntry[]) => keys.hints(...entries)
@@ -740,6 +806,7 @@ function AppContent(props: AppProps) {
     const help: HintEntry = ["global.help", "help"]
     const close: HintEntry = ["dialog.close", "close"]
     const picker: HintEntry[] = [[["picker.up", "picker.down"], "select"], ["picker.accept", "open"], close]
+    if (overlay() === "context-menu") return undefined
     if (overlay() === "issue-action") return issueActionHint()
     if (overlay() === "issue-actions") return hint(select, open, close)
     if (overlay() === "help") return hint(close)
@@ -938,9 +1005,9 @@ function AppContent(props: AppProps) {
     <MarkdownProvider style={config().markdownStyle}>
     <box width={dimensions().width} height={dimensions().height} flexDirection="column" backgroundColor={colors.canvas}>
       <Header repo={data().repo} page={page()} tabs={visibleTabs()} workCounts={data().workCounts} compact={config().compactHeader} showTabCounts={config().showTabCounts}
-        interactive={overlay() === undefined} onSelect={selectPage}
+        interactive={overlay() === undefined} onSelect={selectHeaderPage}
         onOpenRepository={props.onSwitchRepository ? openRepositoryPicker : undefined} />
-      <ActionBar actions={pageActions()} disabled={overlay() !== undefined} />
+      <box {...pageMouse} flexGrow={1} minHeight={0} flexDirection="column">
       <box visible={!diffTarget()} flexGrow={1} minHeight={0} flexDirection="column">
       <box visible={page() === "overview"} flexGrow={1} minHeight={0}>
           <OverviewScreen
@@ -963,16 +1030,13 @@ function AppContent(props: AppProps) {
             commits={data().commits}
             commitCount={data().commitCount}
             currentBranch={data().currentBranch}
-            canOpenBranches={props.canSwitchBranch !== false && data().branches.value !== undefined}
+            canOpenBranches={props.canSwitchBranch !== false && (data().branches.value !== undefined || data().branches.status === "error")}
             onOpenBranches={openBranchPicker}
             active={page() === "commits" && !commitSha()}
             interactive={!diffTarget() && overlay() === undefined}
             showScrollbar={config().showScrollbars}
-            onSelect={(commit) => setSelectedCommit(commit.sha)}
-            onOpenCommit={(commit) => {
-              setNavigation((state) => openDetail(state, { kind: "commit", sha: commit.sha }))
-              void props.onLoadCommit?.(commit.sha)
-            }}
+            onContextMenu={(commit, position) => openRowContext("commit", commit.sha, position)}
+            onOpenCommit={(commit) => openCommit(commit.sha)}
             onOpenCommitInBrowser={(commit) => void openInBrowser(commit.sha)}
             onCopyCommitSha={(commit) => void copyToClipboard(commit.sha, "SHA")}
             onDiff={(commit) => viewDiff({ kind: "commit", sha: commit.sha })}
@@ -992,11 +1056,8 @@ function AppContent(props: AppProps) {
             active={page() === "issues" && !issueNumber()}
             interactive={!diffTarget() && overlay() === undefined}
             showScrollbar={config().showScrollbars}
-            onSelect={(issue) => setSelectedIssue(issue.number)}
-            onOpen={(issue) => {
-              setNavigation((state) => openDetail(state, { kind: "issue", number: issue.number }))
-              void props.onLoadIssue?.(issue.number)
-            }}
+            onContextMenu={(issue, position) => openRowContext("issue", issue.number, position)}
+            onOpen={(issue) => openIssue(issue.number)}
             onOpenInBrowser={(issue) => void openInBrowser(issue.number)}
             onCopy={(issue) => void copyToClipboard(issueUrl(issue.number), "URL")}
             onEndReached={() => {
@@ -1015,11 +1076,8 @@ function AppContent(props: AppProps) {
             active={page() === "pulls" && !pullNumber()}
             interactive={!diffTarget() && overlay() === undefined}
             showScrollbar={config().showScrollbars}
-            onSelect={(pull) => setSelectedPull(pull.number)}
-            onOpen={(pull) => {
-              setNavigation((state) => openDetail(state, { kind: "pull", number: pull.number }))
-              void props.onLoadPull?.(pull.number)
-            }}
+            onContextMenu={(pull, position) => openRowContext("pull", pull.number, position)}
+            onOpen={(pull) => openPull(pull.number)}
             onOpenInBrowser={(pull) => void openInBrowser(pull.number)}
             onCopy={(pull) => void copyToClipboard(pullUrl(pull.number), "URL")}
             onDiff={(pull) => viewDiff({ kind: "pull", number: pull.number })}
@@ -1033,11 +1091,8 @@ function AppContent(props: AppProps) {
           <box visible={page() === "actions" && !runId()} flexGrow={1} minHeight={0}>
             <ActionsScreen
               runs={data().runs}
-              onSelect={(run) => setSelectedRun(run.id)}
-              onOpenRun={(run) => {
-                setNavigation((state) => openDetail(state, { kind: "run", id: run.id }))
-                void props.onLoadRun?.(run.id)
-              }}
+              onOpenRun={(run) => openRun(run.id)}
+              onContextMenu={(run, position) => openRowContext("run", run.id, position)}
               onOpenRunInBrowser={(run) => void openInBrowser(`actions/runs/${run.id}`)}
               onCopyRunUrl={(run) => void copyToClipboard(runUrl(run.id), "URL")}
               active={page() === "actions" && !runId()}
@@ -1114,15 +1169,21 @@ function AppContent(props: AppProps) {
             <DiffScreen target={target} resource={resourceForDiff(target)} active={page() === owner}
               interactive={page() === owner && overlay() === undefined}
               onMovePage={movePage}
+              onContextMenu={(position, items) =>
+                openContextMenu(
+                  position,
+                  [...items, ...backContextItems()],
+                  () => page() === owner && navigation().diffs?.[owner] === target,
+                )
+              }
               onFocusChange={(focus) => setDiffFocus((current) => ({ ...current, [owner]: focus }))}
               showScrollbar={config().showScrollbars} onLoadFiles={() => void props.onLoadDiff?.(target, true)} />
           </box>}
         </Show>}
       </For>
-      <Show when={!confirmationPopup()}>
-        <StatusBar kind={status()} detail={statusDetail()} hint={shortcutHint()}
-          zIndex={overlay() && (config().showStatusBarHints || status()) ? 350 : 0} />
-      </Show>
+      </box>
+      <StatusBar kind={status()} detail={statusDetail()} hint={shortcutHint()}
+        zIndex={overlay() && (config().showStatusBarHints || status()) ? 350 : 0} />
       <Show when={toast()} keyed>
         {(current) => (
           <Toast
@@ -1133,6 +1194,10 @@ function AppContent(props: AppProps) {
             onDismiss={() => setToast((value) => value?.id === current.id ? undefined : value)}
           />
         )}
+      </Show>
+      <Show when={overlay() === "context-menu" ? contextMenu() : undefined} keyed>
+        {(menu) => <ContextMenu position={menu.position} items={menu.items} onClose={closeContextMenu}
+          onSelect={(item) => { if (ownsContextMenu(menu)) { closeContextMenu(); item.run() } }} />}
       </Show>
       <Show when={overlay() === "switch-repo"}>
         <SwitchRepositoryScreen
@@ -1152,7 +1217,6 @@ function AppContent(props: AppProps) {
         {(action) => <CommandDialog
           action={action}
           onHintChange={setCommandHint}
-          onConfirmationChange={setConfirmationPopup}
           onRun={props.onRunCommand!}
           onCaptureCancel={props.onCommandCaptureCancel}
           onCopy={props.onCopyToClipboard}
@@ -1198,7 +1262,6 @@ function AppContent(props: AppProps) {
             onSubmit={() => void submitIssueAction()}
             onDiscard={() => props.onDiscardIssueDraft?.(action.number)}
             onHintChange={setIssueActionHint}
-            onConfirmationChange={setConfirmationPopup}
             onClose={() => { setOverlay(); setIssueAction() }}
           />}>
           <IssueAssigneesPicker

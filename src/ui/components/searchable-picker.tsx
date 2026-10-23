@@ -4,8 +4,7 @@ import { useTheme } from "../theme"
 import { createScrollbarVisibility } from "../scrollbar-visibility"
 import { Popup } from "./popup"
 import { KeyInput, useKeyActions } from "../keybindings"
-import { Action } from "./action"
-import { mouseClick } from "../mouse"
+import { mouseClick, mouseHover } from "../mouse"
 
 type Match = number | undefined
 
@@ -100,7 +99,7 @@ export function SearchablePicker<T>(props: {
   return (
     <Popup
       width={props.width ?? 64}
-      height={props.height + (props.onSubmit ? 2 : 0)}
+      height={props.height}
       placement={props.placement}
       zIndex={100}
       onClose={props.onClose}
@@ -164,6 +163,9 @@ export function SearchablePicker<T>(props: {
                   {(item, index) => {
                     const active = () => props.itemKey(item()) === selectedKey()
                     const rowIndex = () => index
+                    const enabled = () => !props.itemDisabled?.(item())
+                    const identity = () => props.itemKey(item())
+                    const hover = mouseHover(enabled, identity)
                     return (
                       <box
                         id={`picker-row-${index}`}
@@ -172,8 +174,8 @@ export function SearchablePicker<T>(props: {
                         flexDirection="row"
                         paddingLeft={3}
                         paddingRight={3}
-                        backgroundColor={active() ? colors.panelHover : colors.panel}
-                        {...mouseClick(() => activate(index), () => !props.itemDisabled?.(item()), () => props.itemKey(item()))}
+                        backgroundColor={active() || hover.hovered() ? colors.panelHover : colors.panel}
+                        {...mouseClick(() => activate(index), enabled, identity, hover)}
                       >
                         <text width={2} fg={colors.blue}>{active() ? "›" : " "}</text>
                         {props.children(item(), active, rowIndex)}
@@ -183,12 +185,6 @@ export function SearchablePicker<T>(props: {
                 </Index>
               </Show>
             </scrollbox>
-          </box>
-        </Show>
-        <Show when={props.onSubmit}>
-          <box height={1} flexShrink={0} flexDirection="row" gap={2} paddingX={4}>
-            <Action id="picker-submit" onActivate={submit}>Open</Action>
-            <Action id="picker-cancel" onActivate={props.onClose}>Cancel</Action>
           </box>
         </Show>
       </box>

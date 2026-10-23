@@ -14,7 +14,7 @@ import { patchFixture } from "./fixtures/diff"
 import { parseDiff } from "../src/ui/diff-model"
 import { clickControl } from "./fixtures/mouse"
 
-test("mouse diff controls select hunks in place, isolate pane wheels, pan, wrap, and reach both narrow panes", async () => {
+test("mouse diff gestures select hunks in place, isolate pane wheels, pan, wrap, and reach both narrow panes", async () => {
   const setup = await createTestRenderer({ width: 110, height: 26 })
   initializeHunk(setup.renderer)
   const [interactive, setInteractive] = createSignal(true)
@@ -26,7 +26,8 @@ test("mouse diff controls select hunks in place, isolate pane wheels, pan, wrap,
     + Array.from({ length: 25 }, (_, index) => `diff --git a/file-${index}.txt b/file-${index}.txt\n--- a/file-${index}.txt\n+++ b/file-${index}.txt\n@@ -1 +1 @@\n-old\n+new\n`).join("")
   const file = parseDiff({ kind: "patch", patch }).files[0]!.body!
   const endColumn = Math.max(...file.metadata.additionLines.map((line) => Bun.stringWidth(line)), ...file.metadata.deletionLines.map((line) => Bun.stringWidth(line)))
-  await render(() => <box width="100%" height="100%"><DiffScreen target={{ kind: "commit", sha: "mouse" }}
+  await render(() => <box width="100%" height="100%">
+    <DiffScreen target={{ kind: "commit", sha: "mouse" }}
     resource={{ status: "ready", value: { kind: "patch", patch } }} interactive={interactive()} showScrollbar={false} onLoadFiles={() => {}} /></box>, setup.renderer)
   const settle = async () => { await setup.flush(); await setup.renderer.idle(); await setup.flush() }
   const files = () => setup.renderer.root.findDescendantById("diff-files-pane") as BoxRenderable
@@ -35,6 +36,7 @@ test("mouse diff controls select hunks in place, isolate pane wheels, pan, wrap,
   const codeRow = (text: string) => setup.captureCharFrame().split("\n").findIndex((line) => line.includes(text))
   try {
     await settle()
+    expect(setup.renderer.root.findDescendantById("diff-controls")).toBeUndefined()
     const focused = files().borderColor
     const x = body().viewport.x + 10
     const second = codeRow("second-old-0")
@@ -72,7 +74,7 @@ test("mouse diff controls select hunks in place, isolate pane wheels, pan, wrap,
     expect(position()).toContain("col 13")
     expect(body().scrollTop).toBe(0)
     expect(body().scrollLeft).toBe(0)
-    await clickControl(setup, "diff-wrap")
+    setup.mockInput.pressKey("w")
     await settle()
     await setup.mockMouse.click(x, codeRow("first-old-0"))
     await settle()
@@ -81,13 +83,13 @@ test("mouse diff controls select hunks in place, isolate pane wheels, pan, wrap,
     await setup.mockMouse.scroll(x, second, "right")
     await settle()
     expect(setup.captureCharFrame()).toBe(wrapped)
-    await clickControl(setup, "diff-wrap")
+    setup.mockInput.pressKey("w")
     await settle()
     expect(position()).toContain("col 13")
     for (let index = 0; index < 40; index++) await setup.mockMouse.scroll(x, second, "right", { delayMs: 0 })
     await settle()
     expect(position()).toContain(`col ${endColumn}`)
-    await clickControl(setup, "diff-layout")
+    setup.mockInput.pressKey("t")
     await settle()
     const secondHeader = setup.renderer.root.findDescendantById(`diff-hunk:${file.id}:1`)!
     await setup.mockMouse.click(x, secondHeader.y + 1)
@@ -99,7 +101,7 @@ test("mouse diff controls select hunks in place, isolate pane wheels, pan, wrap,
     await settle()
     expect(position()).toContain("hunk 1/3")
     expect(body().scrollTop).toBe(0)
-    await clickControl(setup, "diff-next-hunk")
+    setup.mockInput.pressKey("]")
     await settle()
     expect(position()).toContain("hunk 2/3")
     expect(body().scrollTop).toBeGreaterThan(0)
@@ -109,18 +111,18 @@ test("mouse diff controls select hunks in place, isolate pane wheels, pan, wrap,
     const top = body().scrollTop
     expect(top).toBeGreaterThan(jumpedTop)
     setInteractive(false)
-    await clickControl(setup, "diff-layout")
+    setup.mockInput.pressKey("t")
     await setup.mockMouse.scroll(x, body().viewport.y + 3, "down")
     await settle()
     expect(body().scrollTop).toBe(top)
     setInteractive(true)
-    await clickControl(setup, "diff-toggle-files")
+    setup.mockInput.pressKey("b")
     expect(files().visible).toBe(false)
     setup.resize(48, 26)
     await settle()
-    await clickControl(setup, "diff-focus-files")
+    setup.mockInput.pressTab()
     expect(files().visible).toBe(true)
-    await clickControl(setup, "diff-focus-body")
+    setup.mockInput.pressTab()
     expect(files().visible).toBe(false)
     expect(setup.renderer.root.findDescendantById("diff-content-pane")!.visible).toBe(true)
   } finally { setup.renderer.destroy(); await setup.renderer.closed }
@@ -290,10 +292,35 @@ test("numbered tabs retain independent diff viewers, geometry and scroll until E
     expect(setup.captureCharFrame()).toContain("←/→ tabs")
     setup.mockInput.pressKey("j") // Select the second changed file.
     setup.mockInput.pressEnter()
-    setup.mockInput.pressKey("t") // Unified, rather than the wide-screen default.
-    setup.mockInput.pressKey("w")
-    setup.mockInput.pressKey("b") // Hidden sidebar and full-width code.
     await settle()
+    const sharedRow = () => setup.captureCharFrame().split("\n").some((row) => row.includes("old-row-0") && row.includes("new-row-0"))
+    expect(sharedRow()).toBe(true) // The wide-screen default is split.
+    const diffMenu = async () => {
+      await settle()
+      const body = scroll("commits")
+      await setup.mockMouse.click(body.viewport.x + 10, body.viewport.y + 2, 2)
+      await settle()
+      expect(setup.captureCharFrame()).toContain("Change layout")
+      expect(setup.captureCharFrame()).toContain("Toggle files")
+    }
+    await diffMenu()
+    await clickControl(setup, "context-menu-row-0") // Change layout uses the same transition as t.
+    await settle()
+    expect(sharedRow()).toBe(false)
+    expect(setup.renderer.root.findDescendantById("context-menu")).toBeUndefined()
+    setup.mockInput.pressKey("w")
+    await diffMenu()
+    await clickControl(setup, "context-menu-row-1") // Toggle files uses the same transition as b.
+    await settle()
+    expect(setup.renderer.root.findDescendantById("diff-files-pane")!.visible).toBe(false)
+    await diffMenu()
+    await clickControl(setup, "context-menu-row-1")
+    await settle()
+    expect(setup.renderer.root.findDescendantById("diff-files-pane")!.visible).toBe(true)
+    await diffMenu()
+    await clickControl(setup, "context-menu-row-1")
+    await settle()
+    expect(setup.renderer.root.findDescendantById("diff-files-pane")!.visible).toBe(false)
     setup.mockInput.pressKey("]")
     setup.mockInput.pressKey("G")
     await settle()
@@ -387,6 +414,16 @@ test("D embeds diffs from commit and PR lists/details without losing their origi
   />, renderer)
   const settle = () => setup.flush()
   const escape = async () => { input.pressEscape(); await Bun.sleep(30); await settle() }
+  const menuDiff = async (id: string) => {
+    await settle()
+    const detail = renderer.root.findDescendantById(id)!
+    await setup.mockMouse.click(detail.x + 3, detail.y + 1, 2)
+    await settle()
+    expect(setup.captureCharFrame()).toContain("View diff")
+    expect(setup.captureCharFrame()).toContain("Back")
+    await clickControl(setup, "context-menu-row-0")
+    await settle()
+  }
   try {
     input.pressKey("2")
     input.pressKey("j")
@@ -430,8 +467,8 @@ test("D embeds diffs from commit and PR lists/details without losing their origi
     input.pressEnter()
     await settle()
     expect(commit()?.sha).toBe(secondCommit.sha)
-    input.pressKey("D")
-    await settle()
+    await menuDiff("commit-detail-scroll")
+    expect(requested.at(-1)).toEqual({ kind: "commit", sha: secondCommit.sha })
     expect(setup.captureCharFrame()).toContain("newValue")
     await escape()
     await settle()
@@ -450,8 +487,8 @@ test("D embeds diffs from commit and PR lists/details without losing their origi
     input.pressEnter()
     await settle()
     expect(pull()?.number).toBe(secondPull.number)
-    input.pressKey("D")
-    await settle()
+    await menuDiff("pull-detail-scroll")
+    expect(requested.at(-1)).toEqual({ kind: "pull", number: secondPull.number })
     expect(setup.captureCharFrame()).toContain("newValue")
     setup.resize(48, 28)
     await settle()

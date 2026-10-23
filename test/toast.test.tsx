@@ -25,6 +25,26 @@ describe("Toast", () => {
     expect(toast?.width).toBe(14)
   })
 
+  test("auto-dismisses without a visible countdown or close button", async () => {
+    const [visible, setVisible] = createSignal(true)
+    const view = await testRender(() => <box width={80} height={24}>
+      <Show when={visible()}><Toast title="Text copied to clipboard" message="" tone="success" duration={200} onDismiss={() => setVisible(false)} /></Show>
+    </box>, { width: 80, height: 24 })
+    active.push(view)
+    await view.flush()
+    const frame = view.captureCharFrame()
+    expect(view.renderer.root.findDescendantById("toast")!.getChildrenCount()).toBe(2)
+    expect(view.renderer.root.findDescendantById("toast-countdown")).toBeUndefined()
+    expect(view.renderer.root.findDescendantById("toast-dismiss")).toBeUndefined()
+    expect(frame).not.toContain("×")
+    await Bun.sleep(120)
+    await view.flush()
+    expect(view.captureCharFrame()).toBe(frame)
+    await Bun.sleep(100)
+    await view.flush()
+    expect(view.renderer.root.findDescendantById("toast")).toBeUndefined()
+  })
+
   test("appears without a backdrop and dismisses after its duration", async () => {
     const [visible, setVisible] = createSignal(true)
     const view = await testRender(

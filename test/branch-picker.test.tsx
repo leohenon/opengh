@@ -17,7 +17,8 @@ const readyBranches = (items: string[], hasMore = false): ResourceState<Paginate
 })
 
 describe("BranchPicker", () => {
-  test("pins and selects the current branch when opened", async () => {
+  test("pins the current branch without action buttons", async () => {
+    let closes = 0
     const view = await testRender(
       () => (
         <BranchPicker
@@ -27,7 +28,7 @@ describe("BranchPicker", () => {
           onSelect={() => {}}
           onLoadMore={async () => {}}
           onRetry={() => {}}
-          onClose={() => {}}
+          onClose={() => closes++}
         />
       ),
       { width: 100, height: 28 },
@@ -41,6 +42,11 @@ describe("BranchPicker", () => {
     expect(currentIndex).toBeGreaterThan(-1)
     expect(currentIndex).toBeLessThan(nextIndex)
     expect(lines[currentIndex]).toContain("›")
+    expect(view.renderer.root.findDescendantById("picker-submit")).toBeUndefined()
+    expect(view.renderer.root.findDescendantById("picker-cancel")).toBeUndefined()
+    expect(view.renderer.root.findDescendantById("picker-back")).toBeUndefined()
+    await view.mockMouse.click(0, 0); await view.flush()
+    expect(closes).toBe(1)
   })
 
   test("loads and retries from the final row without hiding loaded branches", async () => {
@@ -89,7 +95,7 @@ describe("BranchPicker", () => {
       value: { items: ["main", "next"], page: 1, hasMore: true },
     })
     await view.flush()
-    expect(view.captureCharFrame()).toContain("Load failed — enter to retry")
+    expect(view.captureCharFrame()).toContain("Load failed — Retry")
 
     await clickControl(view, "picker-row-2")
     expect(loads).toBe(2)
@@ -125,8 +131,9 @@ describe("BranchPicker", () => {
 
     const frame = view.captureCharFrame()
     expect(frame).toContain("main")
-    expect(frame).toContain("Refresh failed — enter to retry")
-    expect(frame).toContain("enter")
+    expect(frame).toContain("Refresh failed — Retry")
+    expect(frame).not.toContain("enter")
+    expect(frame).not.toContain("Enter")
 
     view.mockInput.pressArrow("down")
     view.mockInput.pressEnter()
@@ -188,8 +195,9 @@ describe("BranchPicker", () => {
     await view.mockInput.typeText("zzz")
     await view.flush()
     const frame = view.captureCharFrame()
-    expect(frame).toContain("No matches loaded — enter to load more")
-    expect(frame).toContain("enter")
+    expect(frame).toContain("No matches loaded — Load more branches…")
+    expect(frame).not.toContain("enter")
+    expect(frame).not.toContain("Enter")
 
     view.mockInput.pressEnter()
     await view.flush()

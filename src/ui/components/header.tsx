@@ -108,7 +108,7 @@ export function Header(props: {
         <box minWidth={0} overflow="hidden" flexGrow={1} flexDirection="row">
           <Show when={layout().before}>
             <text height={1} width={2} flexShrink={0} fg={colors.muted} selectable={false}
-              {...mouseClick(() => { const page = layout().previous; if (page) props.onSelect?.(page) }, () => props.interactive !== false)}>‹ </text>
+              {...mouseClick(() => { const page = layout().previous; if (page) props.onSelect?.(page) }, () => props.interactive !== false && Boolean(props.onSelect))}>‹ </text>
           </Show>
           <box flexDirection="row" gap={3} flexShrink={0}>
             <For each={layout().tabs}>
@@ -116,7 +116,7 @@ export function Header(props: {
                 const active = () => props.page === tab.page
                 return (
                   <box height={props.compact ? 1 : 2} width={Bun.stringWidth(tab.label)} flexShrink={0} flexDirection="column"
-                    {...mouseClick(() => props.onSelect?.(tab.page), () => props.interactive !== false)}>
+                    {...mouseClick(() => props.onSelect?.(tab.page), () => props.interactive !== false && Boolean(props.onSelect))}>
                     <text
                       height={1}
                       wrapMode="none"
@@ -136,13 +136,13 @@ export function Header(props: {
           </box>
           <Show when={layout().after}>
             <text height={1} width={2} flexShrink={0} fg={colors.muted} selectable={false}
-              {...mouseClick(() => { const page = layout().next; if (page) props.onSelect?.(page) }, () => props.interactive !== false)}> ›</text>
+              {...mouseClick(() => { const page = layout().next; if (page) props.onSelect?.(page) }, () => props.interactive !== false && Boolean(props.onSelect))}> ›</text>
           </Show>
         </box>
         <Show when={layout().repository !== "hidden"}>
           <Show when={layout().repository !== "button"} fallback={
             <text id="repository-dropdown" height={1} flexShrink={0} selectable={false} fg={props.interactive === false ? colors.muted : colors.blue}
-              {...mouseClick(() => props.onOpenRepository?.(), () => props.interactive !== false)}>{layout().switchLabel}</text>
+              {...mouseClick(() => props.onOpenRepository?.(), () => props.interactive !== false && Boolean(props.onOpenRepository))}>{layout().switchLabel}</text>
           }>
             <RepositoryName repo={props.repo} short={layout().repository === "short"} interactive={props.interactive} onOpen={props.onOpenRepository} />
           </Show>

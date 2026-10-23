@@ -49,7 +49,10 @@ describe("repository launcher", () => {
     expect(frame).toContain("Repository unavailable")
     expect(frame).toContain("cli/cli")
     expect(frame).toContain("API unavailable")
-    expect(frame).toContain("r retry · q quit")
+    expect(frame).toContain("Retry")
+    expect(frame).not.toContain("q quit")
+    expect(view.renderer.root.findDescendantById("repository-quit")).toBeUndefined()
+    expect(view.renderer.root.findDescendantById("repository-back")).toBeUndefined()
     expect(frame).not.toContain("╭")
 
     await view.mockMouse.click(1, 1)
@@ -59,9 +62,43 @@ describe("repository launcher", () => {
     expect(retries).toBe(1)
     expect(quits).toBe(1)
     await clickControl(view, "repository-retry")
-    await clickControl(view, "repository-quit")
     expect(retries).toBe(2)
-    expect(quits).toBe(2)
+    expect(quits).toBe(1)
+  })
+
+  test("load failure has no Back button and keyboard hints only in the opted-in status bar", async () => {
+    let backs = 0
+    const view = await testRender(() => (
+      <RepositoryLoadError repository="cli/cli" message="Unavailable" onRetry={() => {}}
+        onSwitchRepository={() => backs++} showStatusBarHints />
+    ), { width: 80, height: 16 })
+    active.push(view)
+    await view.flush()
+    const lines = view.captureCharFrame().trimEnd().split("\n")
+    expect(lines.at(-1)).toContain("r retry · s switch repository · q quit")
+    expect(lines.slice(0, -1).join("\n")).not.toContain("s switch repository")
+    expect(view.renderer.root.findDescendantById("repository-switch")).toBeUndefined()
+    expect(view.renderer.root.findDescendantById("repository-back")).toBeUndefined()
+    view.mockInput.pressKey("s")
+    expect(backs).toBe(1)
+  })
+
+  test("startup picker has no action buttons or inline hints and Escape still quits", async () => {
+    let quits = 0
+    const view = await testRender(
+      () => <RepositoryPicker recent={["cli/cli"]} onOpen={() => {}} onQuit={() => quits++} />,
+      { width: 80, height: 24 },
+    )
+    active.push(view)
+    await view.flush()
+    expect(view.renderer.root.findDescendantById("picker-submit")).toBeUndefined()
+    expect(view.renderer.root.findDescendantById("picker-back")).toBeUndefined()
+    expect(view.captureCharFrame()).not.toContain("Cancel")
+    expect(view.captureCharFrame()).not.toContain("esc")
+    view.mockInput.pressEscape()
+    await Bun.sleep(60)
+    await view.flush()
+    expect(quits).toBe(1)
   })
 
   test("opens a repository entered by the user", async () => {

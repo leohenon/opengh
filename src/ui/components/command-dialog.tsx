@@ -2,6 +2,7 @@ import type { ScrollBoxRenderable } from "@opentui/core"
 import { useRenderer } from "@opentui/solid"
 import { createEffect, createSignal, onCleanup, Show } from "solid-js"
 import { plainCommandOutput, type CommandSpec, type CommandTask } from "../../command-actions"
+import { mouseClick } from "../mouse"
 import { Popup } from "./popup"
 import { Action } from "./action"
 import { useTheme } from "../theme"
@@ -15,7 +16,6 @@ export function CommandDialog(props: {
   onCopy?: (output: string) => Promise<boolean>
   onCaptureCancel?: (cancel: (() => void) | undefined) => void
   onHintChange?: (hint: string | undefined) => void
-  onConfirmationChange?: (confirming: boolean) => void
   onClose(): void
 }) {
   const { colors } = useTheme()
@@ -37,8 +37,7 @@ export function CommandDialog(props: {
     ? keys.hints(...(props.action.destination !== undefined && !editing() ? [["command.editPath", "edit path"] as const] : []), ["dialog.confirm", "confirm"], ["dialog.close", "close"])
     : keys.hints([["navigation.up", "navigation.down"], "scroll"], ["command.copyOutput", "copy output"], [running() ? "global.interrupt" : "dialog.close", running() ? "cancel" : "close"])
   createEffect(() => props.onHintChange?.(hint()))
-  createEffect(() => props.onConfirmationChange?.(phase() === "Preview"))
-  onCleanup(() => { props.onHintChange?.(undefined); props.onConfirmationChange?.(false) })
+  onCleanup(() => props.onHintChange?.(undefined))
   const preview = () => {
     try { return props.action.command(destination()) } catch { return undefined }
   }
@@ -105,7 +104,7 @@ export function CommandDialog(props: {
         <text height={1} flexShrink={0} fg={colors.text}>{props.action.title}{phase() === "Preview" ? "?" : ` — ${phase()}`}</text>
         <Show when={phase() === "Preview"}>
           <box height={2} flexShrink={0} paddingTop={1}>
-            <Show when={editing()} fallback={<text fg={colors.muted}>{props.action.destination !== undefined ? `Into ${destination()}` : preview()?.cwd}</text>}>
+            <Show when={editing()} fallback={<text id="command-destination" fg={colors.muted} {...mouseClick(() => setEditing(true), () => phase() === "Preview" && props.action.destination !== undefined && !editing())}>{props.action.destination !== undefined ? `Into ${destination()}` : preview()?.cwd}</text>}>
               <KeyInput value={destination()} onInput={setDestination} focused textColor={colors.text} focusedTextColor={colors.text} backgroundColor={colors.panel} focusedBackgroundColor={colors.panel} cursorColor={colors.blue} />
             </Show>
           </box>
@@ -116,24 +115,14 @@ export function CommandDialog(props: {
           </scrollbox>
         </Show>
         <Show when={notice()}><text height={1} flexShrink={0} fg={colors.muted}>{notice()}</text></Show>
-        <box height={1} flexShrink={0} flexDirection="row" gap={2}>
-          <Show when={phase() === "Preview"} fallback={
-            <>
-              <Action id="command-copy" disabled={!output()} onActivate={() => void copy()}>Copy output</Action>
-              <Show when={running()} fallback={<Action id="command-close" onActivate={requestClose}>Close</Action>}>
-                <Action id="command-cancel" disabled={phase() === "Cancelling"} onActivate={cancel}>Cancel</Action>
-              </Show>
-            </>
-          }>
-            <Action id="command-confirm" onActivate={() => void run()}>Confirm</Action>
-            <Show when={props.action.destination !== undefined && !editing()}>
-              <Action id="command-edit" onActivate={() => setEditing(true)}>Edit path</Action>
+        <Show when={phase() === "Preview" || running()}>
+          <box height={2} paddingTop={1} flexShrink={0} flexDirection="row" gap={2}>
+            <Show when={phase() === "Preview"} fallback={
+              <Action id="command-cancel" disabled={phase() === "Cancelling"} onActivate={cancel}>Cancel</Action>
+            }>
+              <Action id="command-confirm" onActivate={() => void run()}>Confirm</Action>
             </Show>
-            <Action id="command-close" onActivate={requestClose}>Close</Action>
-          </Show>
-        </box>
-        <Show when={phase() === "Preview"}>
-          <text height={1} flexShrink={0} fg={colors.muted}>{hint()}</text>
+          </box>
         </Show>
       </box>
     </Popup>

@@ -197,7 +197,7 @@ export function Help(props: {
         </box>
 
         <box height={1} flexShrink={0} />
-        <scrollbox ref={(value) => { scroll = value }} flexGrow={1} minHeight={0} scrollY>
+        <scrollbox ref={(value) => { scroll = value }} focusable={false} flexGrow={1} minHeight={0} scrollY scrollX={false} scrollbarOptions={{ visible: false }}>
           <For each={shortcuts()}>
             {(shortcut) => <Shortcut keys={shortcut.keys} keyWidth={keyWidth()}>{shortcut.description}</Shortcut>}
           </For>

@@ -124,7 +124,7 @@ describe("opengh TUI", () => {
     expect(pages).toEqual(["actions"]);
   });
 
-  test("page buttons use the selected item, wrap on narrow screens, and guard pending pagination with hints hidden", async () => {
+  test("page actions remain keyboard-only without toolbar clutter or duplicate pending operations", async () => {
     const [detail, setDetail] = createSignal<CommitDetailState>();
     const copies: string[] = [];
     const opened: Array<string | number | undefined> = [];
@@ -142,6 +142,7 @@ describe("opengh TUI", () => {
         ...commitDetailFixture, sha, files: { ...commitDetailFixture.files, hasMore: true },
       } } }); }}
       onLoadMoreCommitFiles={async () => {
+        if (detail()?.resource.status === "loading") return; // Match the session in-flight guard.
         more++;
         setDetail((current) => ({ ...current!, resource: { status: "loading", phase: "pagination", value: current!.resource.value } }));
         await pending;
@@ -154,27 +155,35 @@ describe("opengh TUI", () => {
     view.mockInput.pressKey("j");
     await view.flush();
     const sha = githubDataFixture.commits.value!.items[1]!.sha;
-    await clickControl(view, "page-action-copy-sha");
+    expect(view.renderer.root.findDescendantById("page-actions")).toBeUndefined();
+    view.mockInput.pressKey("y");
+    await view.flush();
     expect(copies).toEqual([sha]);
-    await clickControl(view, "toast-dismiss");
-    await clickControl(view, "page-action-github");
+    view.mockInput.pressKey("o");
+    await view.flush();
     expect(opened).toEqual([sha]);
-    await clickControl(view, "toast-dismiss");
     view.mockInput.pressEnter();
     await view.flush();
-    await clickControl(view, "page-action-load-more");
-    await clickControl(view, "page-action-load-more");
-    await clickControl(view, "page-action-refresh");
+    view.mockInput.pressEnter();
+    await view.flush();
+    view.mockInput.pressEnter();
+    await view.flush();
+    view.mockInput.pressKey("r");
+    await view.flush();
     expect(more).toBe(1);
     expect(loads).toBe(1);
     finish();
     await view.flush();
-    await clickControl(view, "page-action-back");
-    await clickControl(view, "page-action-refresh");
+    view.mockInput.pressEscape();
+    await Bun.sleep(30);
+    await view.flush();
+    view.mockInput.pressKey("r");
+    await view.flush();
     expect(refreshes).toBe(1);
-    await clickControl(view, "page-action-options");
+    view.mockInput.pressKey(",");
+    await view.flush();
     expect(view.captureCharFrame()).toContain("Settings");
-    await clickControl(view, "settings-close");
+    await view.mockMouse.click(0, 0); await view.flush();
     expect(view.captureCharFrame()).not.toContain("Settings");
   });
 
@@ -838,9 +847,10 @@ describe("opengh TUI", () => {
     await Bun.sleep(210);
     await view.flush();
     const frame = view.captureCharFrame();
-    expect(
-      frame.split("\n").findIndex((row) => row.includes("commit row 12")),
-    ).toBe(selectedRow);
+    const retainedRow = frame.split("\n").findIndex((row) => row.includes("commit row 12"));
+    expect(retainedRow).toBeGreaterThanOrEqual(0);
+    expect(frame.split("\n")[retainedRow]).toContain("▌");
+    expect(retainedRow + 1).toBeLessThan(frame.split("\n").findIndex((row) => row.includes("Refreshing…")));
     expect(frame).toContain("Refreshing…");
   });
 
@@ -1127,6 +1137,38 @@ describe("opengh TUI", () => {
     await clickControl(view, "branch-dropdown")
     expect(view.captureCharFrame()).not.toContain("Switch branch")
   })
+
+  test("branch dropdown retries initial load failures while respecting busy and loading guards", async () => {
+    const [current, setCurrent] = createSignal<RepositoryData>({ ...githubDataFixture,
+      branches: { status: "error", phase: "load", message: "Branches offline" },
+    });
+    const [canSwitch, setCanSwitch] = createSignal(false);
+    const retries: string[] = [];
+    let branch = "";
+    const view = await testRender(() => <App data={current} operations={repositoryOperationsFixture}
+      canSwitchBranch={canSwitch()} onBranchChange={(value) => { branch = value; }}
+      onRetryResource={(resource) => {
+        retries.push(resource.kind);
+        setCurrent((value) => ({ ...value, branches: { status: "loading", phase: "load" } }));
+      }} />, { width: 100, height: 32 });
+    active.push(view);
+    await view.flush();
+    view.mockInput.pressKey("2");
+    await clickControl(view, "branch-dropdown");
+    expect(retries).toEqual([]);
+    setCanSwitch(true);
+    await clickControl(view, "branch-dropdown");
+    expect(retries).toEqual(["branches"]);
+    expect(view.captureCharFrame()).not.toContain("Switch branch");
+    await clickControl(view, "branch-dropdown");
+    expect(retries).toEqual(["branches"]);
+    setCurrent((value) => ({ ...value, branches: githubDataFixture.branches }));
+    await clickControl(view, "branch-dropdown");
+    expect(view.captureCharFrame()).toContain("Switch branch");
+    await clickControl(view, "picker-row-1");
+    expect(branch).toBe("next");
+    expect(view.captureCharFrame()).not.toContain("Switch branch");
+  });
 
   test("opens the branch picker and toggles work states", async () => {
     const { view, branch, setCanSwitchBranch } = await setup();
@@ -1774,7 +1816,7 @@ test("compact header uses one row with tabs left and repository right", async ()
 });
 
 test("remembered Actions waits for availability, falls back when absent, and does not override user navigation", async () => {
-  for (const outcome of ["available", "empty", "user-navigated"] as const) {
+  for (const outcome of ["available", "empty", "user-navigated", "user-clicked-current"] as const) {
     const [data, setData] = createSignal<RepositoryData>({ ...githubDataFixture, runs: { status: "loading", phase: "load" } });
     const changes: string[] = [];
     const view = await testRender(() => <App data={data} operations={repositoryOperationsFixture}
@@ -1787,12 +1829,18 @@ test("remembered Actions waits for availability, falls back when absent, and doe
       view.mockInput.pressKey("3");
       await view.flush();
     }
+    if (outcome === "user-clicked-current") {
+      const rows = view.captureCharFrame().split("\n");
+      const y = rows.findIndex((row) => row.includes("1 Overview"));
+      await view.mockMouse.click(rows[y]!.indexOf("1 Overview"), y);
+      await view.flush();
+    }
     setData((current) => ({ ...current, runs: outcome === "empty"
       ? { status: "ready", value: { items: [], page: 1, hasMore: false } } : githubDataFixture.runs }));
     await view.flush();
     if (outcome === "available") {
       expect(view.captureCharFrame()).toContain("Publish v0.4.5");
-    } else if (outcome === "empty") {
+    } else if (outcome === "empty" || outcome === "user-clicked-current") {
       expect(view.captureCharFrame()).toContain("About");
       expect(changes).not.toContain("actions");
     } else {

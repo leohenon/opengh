@@ -9,6 +9,7 @@ import { SelectableList } from "../components/selectable-list"
 import { ago, fitText } from "../format"
 import { useTheme } from "../theme"
 import { useIcons } from "../icon-style"
+import type { MousePosition } from "../mouse"
 import { runColor, runIcon, runState } from "../workflow-status"
 import { useLoadingGlyph } from "../motion"
 
@@ -18,7 +19,7 @@ export function ActionsScreen(props: {
   interactive: boolean
   showScrollbar: boolean
   onEndReached?: () => void
-  onSelect?: (run: WorkflowRunSummary) => void
+  onContextMenu?: (run: WorkflowRunSummary, position: MousePosition) => void
   onOpenRun?: (run: WorkflowRunSummary) => void
   onOpenRunInBrowser?: (run: WorkflowRunSummary) => void
   onCopyRunUrl?: (run: WorkflowRunSummary) => void
@@ -51,8 +52,8 @@ export function ActionsScreen(props: {
             showScrollbar={props.showScrollbar}
             empty="No workflow runs"
             onEndReached={props.onEndReached}
-            onSelect={props.onSelect}
             onActivate={props.onOpenRun}
+            onContextMenu={props.onContextMenu}
             onOpenInBrowser={props.onOpenRunInBrowser}
             onCopy={props.onCopyRunUrl}
           >
