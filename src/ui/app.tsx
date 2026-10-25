@@ -892,6 +892,12 @@ function AppContent(props: AppProps) {
     if (overlay() === "branch-picker" || overlay() === "switch-repo") return hint(...picker)
     if (overlay() === "issue-references") return hint(select, open, ["references.switchTab", "switch tabs"], copy, close)
     const common: HintEntry[] = [...(props.onSwitchRepository ? [["global.switchRepository", "switch repo"] as const] : []), help]
+    const resource = activeResource()
+    if (resource?.status === "loading" && resource.value === undefined) {
+      const detail = diffTarget() || activeRunId() || activeCommitSha() || activeIssueNumber() || activePullNumber()
+      const tabs: HintEntry = [["navigation.previousTab", "navigation.nextTab"], "tabs"]
+      return hint(...(detail ? [back] : []), ...(!diffTarget() ? [tabs] : []), ...common)
+    }
     if (diffTarget()) {
       const files = diffFocus()[page()] === "files"
       const horizontal: HintEntry = [files ? ["navigation.previousTab", "navigation.nextTab"] : ["diff.panLeft", "diff.panRight"], files ? "tabs" : "pan"]
@@ -902,18 +908,20 @@ function AppContent(props: AppProps) {
         ...(diffResource().status === "error" ? [["navigation.activate", "file list"] as const]
           : [["diff.toggleLayout", "layout"], ["diff.toggleWrap", "wrap"]] as const), help)
     }
-    if (activeRunId()) return hint(back, github, copy,
-      activeResource()?.status === "error" ? ["view.refresh", "retry"]
-        : runDetail().jobs.value?.hasMore ? ["navigation.activate", "load more"] : ["view.refresh", "refresh"], ...common)
+    if (activeRunId()) {
+      const load: HintEntry = resource?.status === "error" ? ["view.refresh", "retry"]
+        : runDetail().jobs.value?.hasMore ? ["navigation.activate", "load more"] : ["view.refresh", "refresh"]
+      return hint(back, github, copy, ...(resource?.status === "loading" ? [] : [load]), ...common)
+    }
     if (activeCommitSha()) {
       const retry = commitResource().status === "error"
-      const more = commitResource().value?.files.hasMore
+      const more = commitResource().status !== "loading" && commitResource().value?.files.hasMore
       const load: HintEntry[] = retry ? [["view.refresh", "retry"]] : more ? [["navigation.activate", "load more"]] : []
       return hint(back, diff, ...(dimensions().width < 60 && (retry || more) ? [] : [github, copy]), ...load, ...common)
     }
     if (activeIssueNumber()) {
       const retry = activeResource()?.status === "error"
-      const more = issueDetail().comments.value?.hasMore
+      const more = issueDetail().comments.status !== "loading" && issueDetail().comments.value?.hasMore
       const references = issueMenuItems().length
       const actions: HintEntry[] = [...(canActOnIssue("comment") ? [["issue.comment", "comment"] as const] : []),
         ...(hasIssueActions() ? [["issue.actions", "actions"] as const] : [])]
@@ -927,7 +935,7 @@ function AppContent(props: AppProps) {
     }
     if (activePullNumber()) {
       const retry = activeResource()?.status === "error"
-      const more = pullDetail().comments.value?.hasMore
+      const more = pullDetail().comments.status !== "loading" && pullDetail().comments.value?.hasMore
       const references = pullMenuItems().length
       const commentHints: HintEntry[] = canCommentOnPull() ? [["issue.comment", "comment"]] : []
       if (dimensions().width < 64) return hint(back, diff, ...commentHints,

@@ -32,7 +32,9 @@ export function StatusBar(props: { kind?: StatusKind; detail?: string; hint?: st
   const hint = () => {
     const parts = (props.hint ?? "").split(" · ")
     // Drop lower-priority shortcuts rather than clipping or renaming their labels.
-    while (parts.length && Bun.stringWidth(parts.join(" · ")) > dimensions().width - 4) parts.pop()
+    const message = loadingMessage()
+    const available = dimensions().width - 4 - (message ? Bun.stringWidth(message) + 5 : 0)
+    while (parts.length && Bun.stringWidth(parts.join(" · ")) > available) parts.pop()
     return parts.join(" · ")
   }
   const loadingMessage = () => {
@@ -47,14 +49,21 @@ export function StatusBar(props: { kind?: StatusKind; detail?: string; hint?: st
     <box
       height={1}
       flexShrink={0}
+      flexDirection="row"
+      overflow="hidden"
       zIndex={props.zIndex ?? 0}
       paddingLeft={2}
       paddingRight={2}
       backgroundColor={colors.canvas}
     >
-      <Show when={loadingMessage()} fallback={<text height={1} wrapMode="none" fg={colors.muted}>{hint()}</text>}>
-        {(message) => <LoadingText text={message()} />}
+      <Show when={loadingMessage()}>
+        {(message) => (
+          <box width={Math.min(Bun.stringWidth(message()) + 2, Math.max(0, dimensions().width - 4))} height={1} flexShrink={0} overflow="hidden">
+            <LoadingText text={message()} />
+          </box>
+        )}
       </Show>
+      <text height={1} wrapMode="none" fg={colors.muted}>{loadingMessage() && hint() ? " · " : ""}{hint()}</text>
     </box>
   )
 }
