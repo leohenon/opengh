@@ -50,7 +50,7 @@ export type IssueDetail = IssueSummary & Partial<ReactionState> & {
 export type IssueActionParent = "issue" | "pull"
 export type IssueCloseReason = "completed" | "not_planned"
 export type IssueActionKind = "comment" | "close" | "reopen" | "duplicate" | "assignees"
-export type IssueActionResult = { comment?: IssueComment; issue?: IssueDetail; duplicateOf?: number }
+export type IssueActionResult = { comment?: IssueComment; issue?: IssueDetail; pull?: PullRequestDetail; duplicateOf?: number }
 
 export const reactionKinds = ["+1", "-1", "laugh", "hooray", "confused", "heart", "rocket", "eyes"] as const
 export type ReactionKind = typeof reactionKinds[number]
@@ -255,10 +255,15 @@ export type PullContext = {
   warnings: string[]
 }
 
+export type PullMergeMethod = "merge" | "squash" | "rebase"
+export type PullMergeMessage = { headline: string; body: string }
+export type PullMergeDraft = PullMergeMessage & { headSha: string }
+
 export type PullRequestDetail = PullRequestSummary & Partial<ReactionState> & {
   nodeId?: string
   locked?: boolean
-  permissions?: { comment: boolean }
+  permissions?: { comment: boolean; close?: boolean; reopen?: boolean; assignees?: boolean; merge?: boolean }
+  merge?: { methods: PullMergeMethod[]; queueRequired: boolean }
   url: string
   body: string
   updatedAt: string

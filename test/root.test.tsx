@@ -49,6 +49,8 @@ function readySession() {
     submitIssueAction: async () => ({}),
     pullDetail: () => undefined,
     loadPull: idle,
+    mergePull: async () => { throw new Error("Merging is unavailable.") },
+    loadPullMergeMessage: async () => { throw new Error("Merge messages are unavailable.") },
     loadMorePullComments: idle,
     retryPullReferences: idle,
     retryPullCommits: idle,

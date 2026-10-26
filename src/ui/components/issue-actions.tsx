@@ -1,5 +1,5 @@
 import { TextAttributes, type ScrollBoxRenderable, type TextareaRenderable } from "@opentui/core"
-import { usePaste } from "@opentui/solid"
+import { usePaste, useTerminalDimensions } from "@opentui/solid"
 import { createEffect, createMemo, createSignal, Index, onCleanup, Show, untrack } from "solid-js"
 import type { IssueActionKind, IssueActionParent, IssueCloseReason } from "../../models"
 import type { IssueActionState } from "../../repository-state"
@@ -14,25 +14,41 @@ import { mouseClick, mouseHover } from "../mouse"
 
 export function IssueActionsMenu(props: {
   number: number
+  parent?: IssueActionParent
   state: "open" | "closed"
   permissions?: Partial<Record<IssueActionKind, boolean>>
   onSelect(kind: Exclude<IssueActionKind, "comment">): void
+  merge?: { reason?: string; checking?: boolean }
+  onMerge?(): void
+  onOpenGitHub?(): void
   onClose(): void
 }) {
   const { colors } = useTheme()
+  const dimensions = useTerminalDimensions()
+  const reasonHeight = () => props.merge?.reason && !props.merge.checking ? Math.ceil(Bun.stringWidth(props.merge.reason) / Math.max(1, Math.min(52, dimensions().width - 2) - 4)) : 0
   const [selected, setSelected] = createSignal(0)
   const items = createMemo(() => {
     const actions: { kind: Exclude<IssueActionKind, "comment">; label: string }[] = props.state === "open" ? [
-      { kind: "close", label: "Close issue…" },
+      { kind: "close", label: `Close ${props.parent === "pull" ? "PR" : "issue"}…` },
       { kind: "duplicate", label: "Mark as duplicate…" },
-    ] : [{ kind: "reopen", label: "Reopen issue…" }]
+    ] : [{ kind: "reopen", label: `Reopen ${props.parent === "pull" ? "PR" : "issue"}…` }]
     actions.push({ kind: "assignees", label: "Edit assignees…" })
-    return actions.filter((item) => props.permissions?.[item.kind])
+    const visible: { kind: Exclude<IssueActionKind, "comment"> | "merge" | "github"; label: string; disabled?: boolean }[] =
+      actions.filter((item) => !(props.parent === "pull" && item.kind === "duplicate") && props.permissions?.[item.kind])
+    if (props.merge) {
+      visible.unshift({ kind: "merge", label: "Merge…", disabled: !!props.merge.reason })
+      if (props.merge.reason && !props.merge.checking && props.onOpenGitHub) visible.push({ kind: "github", label: "Open on GitHub" })
+    }
+    return visible
   })
   const active = () => Math.min(selected(), items().length - 1)
   const activate = (index = active()) => {
     const item = items()[index]
-    if (item) { setSelected(index); props.onSelect(item.kind) }
+    if (!item || item.disabled) return
+    setSelected(index)
+    if (item.kind === "merge") props.onMerge?.()
+    else if (item.kind === "github") props.onOpenGitHub?.()
+    else props.onSelect(item.kind)
   }
   useKeyActions({
     "dialog.close": () => props.onClose(),
@@ -41,19 +57,23 @@ export function IssueActionsMenu(props: {
     "navigation.activate": () => activate(),
   }, { priority: 100, modal: true })
   return (
-    <Popup width={52} height={items().length + 5} placement="center" zIndex={250} onClose={props.onClose}>
+    <Popup width={52} height={items().length + 5 + (reasonHeight() ? reasonHeight() + 1 : 0)} placement="center" zIndex={250} onClose={props.onClose}>
       <box flexGrow={1} minHeight={0} paddingX={2} paddingBottom={1} flexDirection="column">
-        <text height={1} flexShrink={0} fg={colors.text} attributes={TextAttributes.BOLD}>Issue #{props.number} · Actions</text>
+        <text height={1} flexShrink={0} fg={colors.text} attributes={TextAttributes.BOLD}>{props.parent === "pull" ? "PR" : "Issue"} #{props.number} · Actions</text>
         <box height={1} flexShrink={0} />
         <Index each={items()}>{(item, index) => {
-          const hover = mouseHover(() => true, () => item().kind)
+          const hover = mouseHover(() => !item().disabled, () => item().kind)
           return (
-            <box height={1} flexShrink={0} backgroundColor={active() === index || hover.hovered() ? colors.panelHover : colors.panel}
-              {...mouseClick(() => activate(index), () => true, () => item().kind, hover)}>
-              <text selectable={false} fg={active() === index ? colors.blue : colors.text}>{active() === index ? "› " : "  "}{item().label}</text>
+            <box id={`issue-menu-${item().kind}`} height={1} flexShrink={0} backgroundColor={active() === index || hover.hovered() ? colors.panelHover : colors.panel}
+              {...mouseClick(() => activate(index), () => !item().disabled, () => item().kind, hover)}>
+              <text selectable={false} fg={item().disabled ? colors.muted : active() === index || hover.hovered() ? colors.blue : colors.text}
+                attributes={hover.hovered() ? TextAttributes.BOLD : TextAttributes.NONE}>{active() === index ? "› " : "  "}{item().label}</text>
             </box>
           )
         }}</Index>
+        <Show when={props.merge?.reason && !props.merge.checking}>
+          <text marginTop={1} height={reasonHeight()} flexShrink={0} wrapMode="word" fg={colors.muted}>{props.merge?.reason}</text>
+        </Show>
         <box flexGrow={1} minHeight={0} />
       </box>
     </Popup>
@@ -103,8 +123,10 @@ export function IssueActionDialog(props: {
     ? duplicateNumber() !== undefined && duplicateNumber() !== props.number
     : Boolean(retry()) || props.kind !== "comment" || Boolean(body().trim()))
   const action = () => retry() ?? props.kind
+  const subject = () => props.parent === "pull" ? "PR" : "issue"
+  const hasCloseReason = () => props.kind === "close" && props.parent !== "pull"
   const title = () => props.kind === "comment" ? `${props.parent === "pull" ? "PR " : ""}#${props.number}`
-    : `${props.kind === "duplicate" ? "Mark as duplicate" : props.kind === "close" ? "Close issue" : "Reopen issue"} · #${props.number}`
+    : `${props.kind === "duplicate" ? "Mark as duplicate" : props.kind === "close" ? `Close ${subject()}` : `Reopen ${subject()}`} · #${props.number}`
   const requestSubmit = () => { if (canSubmit()) setConfirmSubmit(true) }
   const requestClose = () => {
     if (pending()) return
@@ -124,9 +146,9 @@ export function IssueActionDialog(props: {
   const confirmation = () => {
     if (action() === "comment") return `Post comment to ${props.parent === "pull" ? "PR " : ""}#${props.number}?`
     if (action() === "duplicate") return `Close #${props.number} as a duplicate of #${duplicateNumber()}?`
-    if (retry()) return `Retry ${action() === "close" ? "closing" : "reopening"} issue #${props.number}?`
+    if (retry()) return `Retry ${action() === "close" ? "closing" : "reopening"} ${subject()} #${props.number}?`
     const verb = action() === "close" ? "close" : "reopen"
-    return `${body().trim() ? `Post comment and ${verb}` : action() === "close" ? "Close" : "Reopen"} issue #${props.number}?`
+    return `${body().trim() ? `Post comment and ${verb}` : action() === "close" ? "Close" : "Reopen"} ${subject()} #${props.number}?`
   }
   const changeReason = (reason: IssueCloseReason) => {
     if (!pending() && !retry() && !confirmSubmit()) props.onReasonChange(reason)
@@ -136,7 +158,7 @@ export function IssueActionDialog(props: {
     : confirmSubmit() ? keys.hints(["dialog.confirm", "confirm"], ["dialog.close", "back"])
     : retry() ? keys.hints(["dialog.submit", "retry"], ["dialog.discard", "discard"], ["dialog.close", "back"])
     : props.kind === "duplicate" ? keys.hints([["dialog.confirm", "dialog.submit"], "review"], ["dialog.discard", "discard"], ["dialog.close", "back"])
-    : keys.hints([props.kind === "close" ? "dialog.changeReason" : "dialog.togglePreview", props.kind === "close" ? "change reason" : "preview"], ["dialog.submit", "submit"], ["dialog.discard", "discard"], ["dialog.close", "keep draft"])))
+    : keys.hints([hasCloseReason() ? "dialog.changeReason" : "dialog.togglePreview", hasCloseReason() ? "change reason" : "preview"], ["dialog.submit", "submit"], ["dialog.discard", "discard"], ["dialog.close", "keep draft"])))
   onCleanup(() => props.onHintChange(undefined))
 
   // Echoed typing must not replace the buffer (and reset its cursor/selection).
@@ -165,7 +187,7 @@ export function IssueActionDialog(props: {
       requestSubmit()
     },
     "dialog.changeReason": () => {
-      if (props.kind !== "close") return false
+      if (!hasCloseReason()) return false
       changeReason(props.state.reason === "completed" ? "not_planned" : "completed")
     },
     "dialog.togglePreview": () => {
@@ -209,7 +231,7 @@ export function IssueActionDialog(props: {
           <Show when={props.locked && props.kind !== "duplicate"}>
             <text flexShrink={0} fg={colors.yellow}>Locked thread — commenting depends on your GitHub permissions.</text>
           </Show>
-          <Show when={props.kind === "close" && !retry()}>
+          <Show when={hasCloseReason() && !retry()}>
             <box height={1} flexShrink={0} flexDirection="row" gap={2}>
               <text fg={colors.muted}>Reason</text>
               <text fg={props.state.reason === "completed" ? colors.blue : colors.muted} selectable={false}
@@ -279,7 +301,7 @@ export function IssueActionDialog(props: {
         <Popup width={56} height={action() === "close" || action() === "duplicate" ? 6 : 5} placement="center" zIndex={300} onClose={requestClose}>
           <box flexGrow={1} minHeight={0} paddingX={2} paddingBottom={1} flexDirection="column">
             <text fg={colors.text} attributes={TextAttributes.BOLD}>{confirmation()}</text>
-            <Show when={action() === "close"}>
+            <Show when={action() === "close" && props.parent !== "pull"}>
               <text fg={colors.muted}>Reason: {props.state.reason === "completed" ? "Completed" : "Not planned"}</text>
             </Show>
             <box flexGrow={1} minHeight={0} />

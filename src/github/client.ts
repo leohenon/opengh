@@ -19,12 +19,15 @@ import type {
   ReviewTarget,
   ListState,
   PullRequestDetail,
+  PullMergeMethod,
+  PullMergeMessage,
   PullRequestSummary,
   Repo,
   WorkflowRunSummary,
   WorkflowRunDetail,
   WorkflowJob,
 } from "../models"
+import { pullMergeBlocker } from "../pull-merge"
 import { createGitHubDocuments } from "./documents"
 import { createGitHubPullContext } from "./pull-context"
 import { createGitHubReactions, parseReactions, parseReactionState, reactionFields } from "./reactions"
@@ -302,8 +305,8 @@ function issueSummary(item: IssueResponse): IssueSummary {
   }
 }
 
-function issueDetail(item: IssueDetailResponse): IssueDetail {
-  if ("pull_request" in item) throw new Error(`Issue #${item.number} is a pull request.`)
+function issueDetail(item: IssueDetailResponse, allowPullRequest = false): IssueDetail {
+  if (!allowPullRequest && "pull_request" in item) throw new Error(`Issue #${item.number} is a pull request.`)
   const reactions = parseReactions(item.reactions)
   return {
     ...issueSummary(item),
@@ -597,14 +600,15 @@ export function createGitHubClient(transport: GitHubTransport) {
     const item = await transport.mutate<IssueDetailResponse>(
       `repos/${repository}/issues/${number}`, "PATCH", { assignees },
     )
-    const detail = issueDetail(item)
+    // GitHub manages PR assignees through the issues endpoint too.
+    const detail = issueDetail(item, true)
     const requested = new Set(assignees.map((login) => login.toLowerCase()))
     const confirmed = new Set(detail.assignees.map((login) => login.toLowerCase()))
     if (detail.number !== number || requested.size !== confirmed.size
       || [...requested].some((login) => !confirmed.has(login))) {
       throw new Error("GitHub did not confirm the requested assignees. Check the issue and your permissions on GitHub before retrying.")
     }
-    return withIssuePermissions(repository, number, detail)
+    return "pull_request" in item ? detail : withIssuePermissions(repository, number, detail)
   }
 
   const markIssueDuplicate = async (
@@ -901,7 +905,7 @@ export function createGitHubClient(transport: GitHubTransport) {
     const [owner, name] = repository.split("/")
     try {
       const response = record(await transport.graphql<unknown>(
-        `query($owner: String!, $name: String!) { repository(owner: $owner, name: $name) { isArchived viewerPermission pullRequest(number: ${number}) { id } } }`,
+        `query($owner: String!, $name: String!) { repository(owner: $owner, name: $name) { isArchived viewerPermission mergeCommitAllowed squashMergeAllowed rebaseMergeAllowed pullRequest(number: ${number}) { id viewerCanClose viewerCanReopen viewerCanAssign isMergeQueueEnabled } } }`,
         { owner: owner!, name: name! },
       ))
       if (response?.errors != null && (!Array.isArray(response.errors) || response.errors.length)) return detail
@@ -911,7 +915,23 @@ export function createGitHubClient(transport: GitHubTransport) {
         || repo.viewerPermission !== null && typeof repo.viewerPermission !== "string"
         || detail.nodeId !== undefined && detail.nodeId !== id) return detail
       const maintainer = ["WRITE", "MAINTAIN", "ADMIN"].includes(typeof repo.viewerPermission === "string" ? repo.viewerPermission : "")
-      detail.permissions = { comment: repo.isArchived === false && (detail.locked === false || maintainer) }
+      const capabilities = record(repo.pullRequest)
+      const writable = repo.isArchived === false
+      detail.permissions = {
+        comment: repo.isArchived === false && (detail.locked === false || maintainer),
+        close: writable && !detail.merged && capabilities?.viewerCanClose === true,
+        reopen: writable && !detail.merged && capabilities?.viewerCanReopen === true,
+        assignees: writable && capabilities?.viewerCanAssign === true,
+        merge: writable && maintainer,
+      }
+      if (typeof capabilities?.isMergeQueueEnabled === "boolean"
+        && [repo.mergeCommitAllowed, repo.squashMergeAllowed, repo.rebaseMergeAllowed].every(value => typeof value === "boolean")) {
+        const methods: PullMergeMethod[] = []
+        if (repo.mergeCommitAllowed) methods.push("merge")
+        if (repo.squashMergeAllowed) methods.push("squash")
+        if (repo.rebaseMergeAllowed) methods.push("rebase")
+        detail.merge = { methods, queueRequired: capabilities.isMergeQueueEnabled }
+      }
     } catch {
       // Permission lookup failures must not prevent read-only browsing.
     }
@@ -921,7 +941,77 @@ export function createGitHubClient(transport: GitHubTransport) {
   const pull = async (repository: string, number: number): Promise<PullRequestDetail> => {
     const item = await transport.json<PullDetailResponse>(`repos/${repository}/pulls/${number}`)
     const reactions = await bodyReactions(repository, number, "pull")
-    return withPullPermissions(repository, number, {
+    return withPullPermissions(repository, number, { ...pullDetail(item), ...reactions })
+  }
+
+  const pullMergeMessage = async (repository: string, number: number, expectedHeadSha: string): Promise<PullMergeMessage> => {
+    if (!/^[a-z\d_.-]+\/[a-z\d_.-]+$/i.test(repository)
+      || repository.split("/").some(part => part === "." || part === "..")
+      || !Number.isSafeInteger(number) || number <= 0) throw new Error("Invalid pull request.")
+    if (!transport.graphql) throw new Error("Pull request merge messages are unavailable.")
+    if (!/^[a-f\d]{40}$/i.test(expectedHeadSha)) throw new Error("Expected head commit is unavailable.")
+    const [owner, name] = repository.split("/")
+    const response = record(await transport.graphql<unknown>(
+      `query($owner: String!, $name: String!) { repository(owner: $owner, name: $name) { pullRequest(number: ${number}) { id number headRefOid viewerMergeHeadlineText(mergeType: SQUASH) viewerMergeBodyText(mergeType: SQUASH) } } }`,
+      { owner: owner!, name: name! },
+    ))
+    if (response?.errors != null && (!Array.isArray(response.errors) || response.errors.length))
+      throw new Error("GitHub could not load the squash commit message. Try again.")
+    const pull = record(record(record(response?.data)?.repository)?.pullRequest)
+    if (typeof pull?.id !== "string" || !pull.id.trim() || pull.number !== number
+      || typeof pull.viewerMergeHeadlineText !== "string" || !pull.viewerMergeHeadlineText.trim()
+      || /[\r\n]/.test(pull.viewerMergeHeadlineText) || typeof pull.viewerMergeBodyText !== "string")
+      throw new Error("GitHub returned an invalid squash commit message. Try again.")
+    if (pull.headRefOid !== expectedHeadSha) throw new Error("Head changed; refresh the pull request before merging.")
+    return { headline: pull.viewerMergeHeadlineText, body: pull.viewerMergeBodyText }
+  }
+
+  const mergePull = async (repository: string, number: number, method: PullMergeMethod, expectedHeadSha: string, message?: PullMergeMessage): Promise<PullRequestDetail> => {
+    if (message !== undefined) {
+      if (method !== "squash") throw new Error("Custom commit messages are only supported for squash merges.")
+      if (typeof message?.headline !== "string" || !message.headline.trim() || /[\r\n]/.test(message.headline))
+        throw new Error("Commit headline must be nonblank and single-line.")
+      if (typeof message.body !== "string") throw new Error("Commit body must be text.")
+    }
+    if (!/^[a-z\d_.-]+\/[a-z\d_.-]+$/i.test(repository)
+      || repository.split("/").some(part => part === "." || part === "..")
+      || !Number.isSafeInteger(number) || number <= 0) throw new Error("Invalid pull request.")
+    if (!transport.graphql) throw new Error("Pull request merging is unavailable.")
+    if (!/^[a-f\d]{40}$/i.test(expectedHeadSha)) throw new Error("Expected head commit is unavailable.")
+    const [fresh, context] = await Promise.all([pull(repository, number), pullContext(repository, number)])
+    if (fresh.number !== number || !fresh.nodeId) throw new Error("Pull request identity could not be verified.")
+    if (fresh.headSha !== expectedHeadSha) throw new Error("Head changed; refresh the pull request before merging.")
+    const blocker = pullMergeBlocker(fresh, context)
+    if (blocker) throw new Error(blocker)
+    if (!fresh.merge?.methods.includes(method)) throw new Error("The selected merge method is not enabled.")
+    // No administrator path or queue mutation. GitHub remains the final authority.
+    const response = record(await transport.graphql<unknown>(
+      `mutation($id: ID!, $head: GitObjectID!, $method: PullRequestMergeMethod!${message !== undefined ? ", $commitHeadline: String!, $commitBody: String!" : ""}) { mergePullRequest(input: {pullRequestId: $id, expectedHeadOid: $head, mergeMethod: $method${message !== undefined ? ", commitHeadline: $commitHeadline, commitBody: $commitBody" : ""}}) { pullRequest { id number state merged headRefOid mergedAt closedAt updatedAt } } }`,
+      { id: fresh.nodeId, head: expectedHeadSha, method: method.toUpperCase(),
+        ...(message !== undefined ? { commitHeadline: message.headline, commitBody: message.body } : {}) },
+    ))
+    const confirmed = record(record(record(response?.data)?.mergePullRequest)?.pullRequest)
+    if (confirmed?.id === fresh.nodeId && confirmed.number === number && confirmed.state === "MERGED"
+      && confirmed.merged === true && confirmed.headRefOid === expectedHeadSha
+      && typeof confirmed.mergedAt === "string" && Number.isFinite(Date.parse(confirmed.mergedAt))) {
+      // Use the confirmed mutation snapshot: a later read failure must not undo success.
+      return { ...fresh, state: "closed", merged: true, mergedAt: confirmed.mergedAt,
+        closedAt: typeof confirmed.closedAt === "string" ? confirmed.closedAt : confirmed.mergedAt,
+        updatedAt: typeof confirmed.updatedAt === "string" ? confirmed.updatedAt : confirmed.mergedAt,
+        permissions: { ...fresh.permissions!, close: false, reopen: false } }
+    }
+    const errors = Array.isArray(response?.errors) ? response.errors.map(error => record(error)?.message)
+      .filter((message): message is string => typeof message === "string") : []
+    throw new Error(errors.join(" · ") || "GitHub did not confirm the merge. Check the pull request on GitHub before retrying.")
+  }
+
+  const updatePullState = async (repository: string, number: number, state: ListState): Promise<PullRequestDetail> => {
+    if (!transport.mutate) throw new Error("GitHub transport does not support mutations.")
+    const item = await transport.mutate<PullDetailResponse>(`repos/${repository}/pulls/${number}`, "PATCH", { state })
+    return withPullPermissions(repository, number, pullDetail(item))
+  }
+
+  const pullDetail = (item: PullDetailResponse): PullRequestDetail => ({
       ...issueSummary(item),
       ...(typeof item.node_id === "string" && item.node_id.trim() ? { nodeId: item.node_id } : {}),
       merged: item.merged_at != null,
@@ -949,9 +1039,7 @@ export function createGitHubClient(transport: GitHubTransport) {
         ...item.requested_teams.map((team) => team.name),
       ],
       mergeable: item.mergeable,
-      ...reactions,
     })
-  }
 
   const pullCommits = async (repository: string, number: number): Promise<CommitSummary[]> => {
     const commits: CommitSummary[] = []
@@ -1034,7 +1122,7 @@ export function createGitHubClient(transport: GitHubTransport) {
     }
   }
 
-  return { metadata, documents, document, branches, commits, commitCount, commit, issues, workCounts, hasIssues, issueKind, issue, issueComments, createIssueComment, addReaction, updateIssueState, assignableUsers, setIssueAssignees, markIssueDuplicate, issueReferences, issueTimeline, pulls, pull, pullCommits, pullContext, runs, run, runJobs }
+  return { metadata, documents, document, branches, commits, commitCount, commit, issues, workCounts, hasIssues, issueKind, issue, issueComments, createIssueComment, addReaction, updateIssueState, updatePullState, assignableUsers, setIssueAssignees, markIssueDuplicate, issueReferences, issueTimeline, pulls, pull, pullMergeMessage, mergePull, pullCommits, pullContext, runs, run, runJobs }
 }
 
 const client = createGitHubClient(githubTransport)
@@ -1054,6 +1142,9 @@ export const loadGitHubIssue = client.issue
 export const loadGitHubIssueComments = client.issueComments
 export const createGitHubIssueComment = client.createIssueComment
 export const updateGitHubIssueState = client.updateIssueState
+export const updateGitHubPullState = client.updatePullState
+export const mergeGitHubPull = client.mergePull
+export const loadGitHubPullMergeMessage = client.pullMergeMessage
 export const loadGitHubAssignableUsers = client.assignableUsers
 export const setGitHubIssueAssignees = client.setIssueAssignees
 export const markGitHubIssueDuplicate = client.markIssueDuplicate

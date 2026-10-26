@@ -120,6 +120,7 @@ export function Help(props: {
         return [
           entry("item.diff", "view diff"),
           entry("navigation.back", "back to pull requests"),
+          ...(props.hasIssueActions ? [entry("issue.actions", "PR actions")] : []),
           ...(props.canComment ? [entry("issue.comment", "add comment")] : []),
           entry("item.open", "open on GitHub"),
           entry("item.copy", "copy pull request URL"),

@@ -6,7 +6,7 @@ import type { HintEntry } from "../keybindings"
 import { KeybindingsBoundary, useKeyActions, useKeybindings } from "./keybindings"
 import { cloneCommand, cloneDestination, matchesLocalRepository, type LocalRepository, type CommandSpec, type CommandTask } from "../command-actions"
 import { CommandDialog, type CommandAction } from "./components/command-dialog"
-import type { CommitDetail, DiffContent, DiffTarget, IssueActionKind, IssueActionParent, IssueActionResult, Paginated, ListState, ReactionKind, ReactionState, ReactionTarget } from "../models"
+import type { CommitDetail, DiffContent, DiffTarget, IssueActionKind, IssueActionParent, IssueActionResult, Paginated, ListState, PullMergeDraft, PullMergeMessage, PullMergeMethod, PullRequestDetail, ReactionKind, ReactionState, ReactionTarget } from "../models"
 import { back, navigate, openDetail, openDiff, type InitialNavigation, type NavigationState, type Page } from "../navigation"
 import type {
   CommitDetailState,
@@ -31,6 +31,8 @@ import { mouseContextMenu, type MousePosition } from "./mouse"
 import { IssueReferencesPicker } from "./components/issue-references-picker"
 import { IssueActionDialog, IssueActionsMenu } from "./components/issue-actions"
 import { IssueAssigneesPicker } from "./components/issue-assignees-picker"
+import { PullMergeDialog } from "./components/pull-merge-dialog"
+import { pullMergeBlocker } from "../pull-merge"
 import { Help } from "./components/help"
 import { Settings } from "./components/settings"
 import { StatusBar, type StatusKind } from "./components/status-bar"
@@ -53,7 +55,7 @@ import { IconProvider } from "./icon-style"
 import { MotionProvider } from "./motion"
 import { MarkdownProvider } from "./markdown-preferences"
 
-type Overlay = "context-menu" | "reactions" | "help" | "branch-picker" | "settings" | "issue-references" | "issue-actions" | "issue-action" | "command" | "switch-repo"
+type Overlay = "context-menu" | "reactions" | "help" | "branch-picker" | "settings" | "issue-references" | "issue-actions" | "issue-action" | "pull-merge" | "command" | "switch-repo"
 type ToastState = { id: number; title: string; message: string; duration?: number; tone?: "error" | "success" | "info" }
 
 export type AppProps = {
@@ -105,6 +107,8 @@ export type AppProps = {
   onIssueDraftChange?: (number: number, draft: Partial<Pick<IssueActionState, "body" | "reason" | "duplicateTarget" | "selectedAssignees">>, parent?: IssueActionParent) => void
   onDiscardIssueDraft?: (number: number, parent?: IssueActionParent) => void
   onSubmitIssueAction?: (number: number, kind: IssueActionKind, parent?: IssueActionParent) => Promise<IssueActionResult>
+  onMergePull?: (number: number, method: PullMergeMethod, expectedHeadSha: string, message?: PullMergeMessage) => Promise<PullRequestDetail>
+  onLoadPullMergeMessage?: (number: number, expectedHeadSha: string) => Promise<PullMergeDraft>
   pullDetail?: PullDetailState
   onLoadPull?: (number: number) => Promise<void>
   onLoadMorePullComments?: () => Promise<void>
@@ -153,6 +157,8 @@ function AppContent(props: AppProps) {
   const [commandAction, setCommandAction] = createSignal<CommandAction>()
   const [issueAction, setIssueAction] = createSignal<{ number: number; kind: IssueActionKind; parent?: IssueActionParent }>()
   const [pendingIssueActions, setPendingIssueActions] = createSignal<Array<NonNullable<ReturnType<typeof issueAction>> & { repository: string }>>([])
+  const [mergeTarget, setMergeTarget] = createSignal<{ repository: string; number: number; headSha: string }>()
+  const [pendingMerges, setPendingMerges] = createSignal<Array<{ repository: string; number: number }>>([])
   const [issueActionHint, setIssueActionHint] = createSignal<string>()
   const [commandHint, setCommandHint] = createSignal<string>()
   const [settingsHint, setSettingsHint] = createSignal<string>()
@@ -249,19 +255,21 @@ function AppContent(props: AppProps) {
       && issueDetail().resource.status !== "loading"
       && props.getIssueAction?.(number).operation.status !== "loading")
   }
-  const hasIssueActions = () => canActOnIssue(issueDetail().resource.value?.state === "closed" ? "reopen" : "close") || canActOnIssue("duplicate")
-    || canActOnIssue("assignees")
+  const actionDetail = () => activePullNumber() ? pullDetail().resource.value : issueDetail().resource.value
+  const canAct = (kind: IssueActionKind) => activePullNumber() ? canActOnPull(kind) : canActOnIssue(kind)
+  const hasIssueActions = () => canAct(actionDetail()?.state === "closed" ? "reopen" : "close") || canAct("duplicate") || canAct("assignees") || canOfferMerge()
   const openIssueAction = (kind: IssueActionKind) => {
-    const number = activeIssueNumber()
-    if (!number || !canActOnIssue(kind) || props.getIssueAction?.(number).operation.status === "loading") return
-    props.onPrepareIssueAction?.(number, kind)
-    setIssueAction({ number, kind })
+    const number = activePullNumber() ?? activeIssueNumber()
+    const parent = activePullNumber() ? "pull" : undefined
+    if (!number || !canAct(kind)) return
+    props.onPrepareIssueAction?.(number, kind, parent)
+    setIssueAction({ number, kind, parent })
     setOverlay("issue-action")
   }
   const submitIssueAction = async () => {
     const action = issueAction()
     if (!action || !props.onSubmitIssueAction) return
-    if (action.parent === "pull" ? action.kind !== "comment" || action.number !== activePullNumber() || !canCommentOnPull()
+    if (action.parent === "pull" ? action.number !== activePullNumber() || !canActOnPull(action.kind)
       : action.number !== activeIssueNumber() || !canActOnIssue(action.kind)) return
     const repository = data().repo.nameWithOwner
     const retry = props.getIssueAction?.(action.number, action.parent).retry
@@ -275,13 +283,13 @@ function AppContent(props: AppProps) {
       if ((result.comment || retry) && (action.parent === "pull" ? activePullNumber() : activeIssueNumber()) === action.number)
         setRevealActivity({ number: action.number, id: ++revealId, parent: action.parent })
       setToast({ id: ++toastId, title: action.kind === "comment" ? "Comment posted"
-        : action.kind === "assignees" ? "Issue assignees updated"
-        : action.kind === "duplicate" ? "Issue marked as duplicate" : action.kind === "close" ? "Issue closed" : "Issue reopened",
+        : action.kind === "assignees" ? `${action.parent === "pull" ? "PR" : "Issue"} assignees updated`
+        : action.kind === "duplicate" ? "Issue marked as duplicate" : `${action.parent === "pull" ? "PR" : "Issue"} ${action.kind === "close" ? "closed" : "reopened"}`,
         message: result.duplicateOf ? `#${action.number} → #${result.duplicateOf}` : `#${action.number}`, duration: 2000, tone: "success" })
     } catch (error) {
       if (!disposed && !renderer.isDestroyed && data().repo.nameWithOwner === repository) {
         const operation = props.getIssueAction?.(action.number, action.parent).operation
-        setToast({ id: ++toastId, title: action.parent === "pull" ? "Comment failed" : "Issue action failed",
+        setToast({ id: ++toastId, title: action.parent === "pull" ? "PR action failed" : "Issue action failed",
           message: operation?.status === "error" ? operation.message : error instanceof Error ? error.message : "Unknown error" })
       }
     } finally {
@@ -312,12 +320,58 @@ function AppContent(props: AppProps) {
   const pullDetail = createMemo<PullDetailState>(() => props.pullDetail && props.pullDetail.number === pullNumber()
     ? props.pullDetail
     : { number: pullNumber() ?? 0, resource: { status: "loading", phase: "load" }, commits: { status: "loading", phase: "load" }, context: { status: "loading", phase: "load" }, comments: { status: "loading", phase: "load" }, references: { status: "loading", phase: "load" } })
-  const canCommentOnPull = () => {
+  const canActOnPull = (kind: IssueActionKind) => {
     const number = activePullNumber()
-    return Boolean(number && props.onSubmitIssueAction && pullDetail().resource.value?.permissions?.comment
+    const pull = pullDetail().resource.value
+    if (kind === "duplicate" || ((kind === "close" || kind === "reopen") && pull?.merged)) return false
+    return Boolean(number && props.onSubmitIssueAction && pull?.permissions?.[kind]
       && pullDetail().resource.status !== "loading"
       && props.getIssueAction?.(number, "pull").operation.status !== "loading")
   }
+  const canOfferMerge = () => {
+    const pull = pullDetail().resource.value
+    return !!(activePullNumber() && props.onMergePull && pull?.permissions?.merge && pull.state === "open" && pull.draft === false && !pull.merged)
+  }
+  const checkingMerge = () => pullDetail().resource.status === "loading" || pullDetail().context.status === "loading"
+  const mergeBlocker = () => {
+    if (!canOfferMerge()) return "Merge permission unavailable or this PR is no longer eligible."
+    if (checkingMerge()) return "Checking mergeability…"
+    if (pullDetail().resource.status !== "ready" || pullDetail().context.status !== "ready")
+      return "Merge readiness unavailable; refresh the PR or check GitHub."
+    if (props.getIssueAction?.(activePullNumber()!, "pull").operation.status === "loading") return "Another PR action is in progress."
+    return pullMergeBlocker(pullDetail().resource.value!, pullDetail().context.status === "ready" ? pullDetail().context.value : undefined)
+  }
+  const mergeDialogBlocker = () => {
+    const target = mergeTarget()
+    if (!target || target.repository !== data().repo.nameWithOwner || target.number !== activePullNumber()) return "The PR changed; reopen the merge dialog."
+    if (target.headSha !== pullDetail().resource.value?.headSha) return "New commits detected; reopen the merge dialog to review them."
+    return mergeBlocker()
+  }
+  const openMerge = () => {
+    const pull = pullDetail().resource.value
+    if (mergeBlocker() || !pull?.headSha) return
+    setMergeTarget({ repository: data().repo.nameWithOwner, number: pull.number, headSha: pull.headSha })
+    setOverlay("pull-merge")
+  }
+  const closeMerge = () => { setOverlay(); setMergeTarget() }
+  const submitMerge = async (method: PullMergeMethod, headSha: string, message?: PullMergeMessage) => {
+    const target = mergeTarget()
+    if (!target || !props.onMergePull || mergeDialogBlocker() || headSha !== target.headSha) return
+    setPendingMerges((current) => [...current, target])
+    closeMerge()
+    try {
+      await props.onMergePull(target.number, method, headSha, message)
+      if (disposed || renderer.isDestroyed || data().repo.nameWithOwner !== target.repository) return
+      setToast({ id: ++toastId, title: "PR merged", message: `#${target.number}`, duration: 2000, tone: "success" })
+    } catch (error) {
+      if (!disposed && !renderer.isDestroyed && data().repo.nameWithOwner === target.repository)
+        setToast({ id: ++toastId, title: "Merge failed", message: error instanceof Error ? error.message : "Check the PR on GitHub before retrying." })
+    } finally {
+      setPendingMerges((current) => current.filter((pending) => pending !== target))
+    }
+  }
+  createEffect(() => { if (overlay() === "issue-actions" && !hasIssueActions()) setOverlay() })
+  const canCommentOnPull = () => canActOnPull("comment")
   const canComment = () => canActOnIssue("comment") || canCommentOnPull()
   const openComment = () => {
     if (!activePullNumber()) return openIssueAction("comment")
@@ -478,17 +532,20 @@ function AppContent(props: AppProps) {
     return undefined
   }
   const statusKind = (): StatusKind | undefined => {
+    if (pendingMerges().some((pending) => pending.repository === data().repo.nameWithOwner)) return "merging-pull"
     const pendingAction = pendingIssueActions().find((action) => action.repository === data().repo.nameWithOwner)
     if (pendingAction)
       return pendingAction.kind === "assignees" ? "updating-issue"
         : pendingAction.kind === "duplicate" ? "marking-duplicate" : pendingAction.kind === "comment" ? "posting-comment"
-        : pendingAction.kind === "close" ? "closing-issue" : "reopening-issue"
+        : pendingAction.kind === "close" ? pendingAction.parent === "pull" ? "closing-pull" : "closing-issue"
+          : pendingAction.parent === "pull" ? "reopening-pull" : "reopening-issue"
     if (overlay() === "issue-action") {
       const action = issueAction()
       if (action && props.getIssueAction?.(action.number, action.parent).operation.status === "loading")
         return action.kind === "assignees" ? "updating-issue"
           : action.kind === "duplicate" ? "marking-duplicate" : action.kind === "comment" ? "posting-comment"
-          : action.kind === "close" ? "closing-issue" : "reopening-issue"
+          : action.kind === "close" ? action.parent === "pull" ? "closing-pull" : "closing-issue"
+            : action.parent === "pull" ? "reopening-pull" : "reopening-issue"
       return undefined
     }
     if (overlay() === "issue-actions") return undefined
@@ -649,7 +706,7 @@ function AppContent(props: AppProps) {
   createEffect(() => {
     if (visibleTabs().some((tab) => tab.page === page())) return
     setNavigation((state) => navigate(back(state), "overview"))
-    if (overlay() === "issue-references" || overlay() === "issue-actions" || overlay() === "issue-action") { setOverlay(); setIssueAction() }
+    if (overlay() === "issue-references" || overlay() === "issue-actions" || overlay() === "issue-action" || overlay() === "pull-merge") { setOverlay(); setIssueAction(); setMergeTarget() }
   })
 
   createEffect(() => {
@@ -806,7 +863,7 @@ function AppContent(props: AppProps) {
       get disabled() { return !canComment(); },
     }] : [];
   const issueActionsContextItems = (): ContextMenuItem[] =>
-    activeIssueNumber() && !diffTarget() && hasIssueActions() ? [{
+    (activeIssueNumber() || activePullNumber()) && !diffTarget() && hasIssueActions() ? [{
       label: "Actions…",
       run: () => { if (hasIssueActions()) setOverlay("issue-actions"); },
       get disabled() { return !hasIssueActions(); },
@@ -905,7 +962,7 @@ function AppContent(props: AppProps) {
     const picker: HintEntry[] = [[["picker.up", "picker.down"], "select"], ["picker.accept", "open"], close]
     if (overlay() === "context-menu") return undefined
     if (overlay() === "reactions") return hint(select, ["navigation.activate", "add"], close)
-    if (overlay() === "issue-action") return issueActionHint()
+    if (overlay() === "issue-action" || overlay() === "pull-merge") return issueActionHint()
     if (overlay() === "issue-actions") return hint(select, open, close)
     if (overlay() === "help") return hint(close)
     if (overlay() === "settings") return settingsHint()
@@ -958,7 +1015,8 @@ function AppContent(props: AppProps) {
       const retry = activeResource()?.status === "error"
       const more = pullDetail().comments.status !== "loading" && pullDetail().comments.value?.hasMore
       const references = pullMenuItems().length
-      const commentHints: HintEntry[] = canCommentOnPull() ? [["issue.comment", "comment"]] : []
+      const commentHints: HintEntry[] = [...(canCommentOnPull() ? [["issue.comment", "comment"] as const] : []),
+        ...(hasIssueActions() ? [["issue.actions", "actions"] as const] : [])]
       if (dimensions().width < 64) return hint(back, diff, ...commentHints,
         retry ? ["view.refresh", "retry"] : more ? ["navigation.activate", "load more"]
           : references ? ["detail.references", "references"] : github, ...common)
@@ -1072,7 +1130,7 @@ function AppContent(props: AppProps) {
       }
     },
     "issue.comment": () => { if (diffTarget() || !canComment()) return false; openComment() },
-    "issue.actions": () => { if (!activeIssueNumber() || diffTarget() || !hasIssueActions()) return false; setOverlay("issue-actions") },
+    "issue.actions": () => { if (!(activeIssueNumber() || activePullNumber()) || diffTarget() || !hasIssueActions()) return false; setOverlay("issue-actions") },
     "detail.references": () => { if (diffTarget() || !(activeIssueNumber() || activePullNumber()) || !activeMenuItems().length) return false; setOverlay("issue-references") },
     "command.clone": () => {
       if (page() !== "overview" || !canClone()) return false
@@ -1352,14 +1410,29 @@ function AppContent(props: AppProps) {
           command={page() === "overview" && canClone() ? "clone repository" : undefined}
         />
       </Show>
-      <Show when={overlay() === "issue-actions" && activeIssueNumber() && hasIssueActions()}>
+      <Show when={overlay() === "issue-actions" && (activeIssueNumber() || activePullNumber()) && hasIssueActions()}>
         <IssueActionsMenu
-          number={activeIssueNumber()!}
-          state={issueDetail().resource.value?.state ?? "open"}
-          permissions={issueDetail().resource.value?.permissions}
+          number={(activePullNumber() ?? activeIssueNumber())!}
+          parent={activePullNumber() ? "pull" : "issue"}
+          state={actionDetail()?.state ?? "open"}
+          permissions={{ close: canAct("close"), reopen: canAct("reopen"), duplicate: canAct("duplicate"), assignees: canAct("assignees") }}
+          merge={canOfferMerge() ? { reason: mergeBlocker(), checking: checkingMerge() } : undefined}
+          onMerge={openMerge}
+          onOpenGitHub={props.onOpenInBrowser ? () => { setOverlay(); void openInBrowser(activePullNumber()) } : undefined}
           onSelect={openIssueAction}
           onClose={() => setOverlay()}
         />
+      </Show>
+      <Show when={overlay() === "pull-merge" ? mergeTarget() : undefined} keyed>
+        {(target) => <PullMergeDialog number={target.number} headSha={target.headSha}
+          methods={pullDetail().resource.value?.merge?.methods ?? []}
+          reason={mergeDialogBlocker()} checking={checkingMerge()}
+          onLoadMessage={async () => {
+            if (!props.onLoadPullMergeMessage) throw new Error("Loading GitHub's commit message is unavailable.")
+            return props.onLoadPullMergeMessage(target.number, target.headSha)
+          }}
+          onSubmit={(method, headSha, message) => void submitMerge(method, headSha, message)}
+          onHintChange={setIssueActionHint} onClose={closeMerge} />}
       </Show>
       <Show when={overlay() === "issue-action" ? issueAction() : undefined} keyed>
         {(action) => <Show when={action.kind === "assignees"}
@@ -1382,11 +1455,11 @@ function AppContent(props: AppProps) {
           />}>
           <IssueAssigneesPicker
             number={action.number}
-            state={props.getIssueAction?.(action.number) ?? emptyIssueAction}
+            state={props.getIssueAction?.(action.number, action.parent) ?? emptyIssueAction}
             users={props.assignableUsers}
             showScrollbar={config().showScrollbars}
             onLoadMore={() => void props.onLoadAssignableUsers?.()}
-            onChange={(selectedAssignees) => props.onIssueDraftChange?.(action.number, { selectedAssignees })}
+            onChange={(selectedAssignees) => props.onIssueDraftChange?.(action.number, { selectedAssignees }, action.parent)}
             onSubmit={() => void submitIssueAction()}
             onHintChange={setIssueActionHint}
             onClose={() => { setOverlay(); setIssueAction() }}

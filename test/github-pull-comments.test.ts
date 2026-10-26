@@ -33,6 +33,48 @@ const bodyReactions = { data: { repository: { pullRequest: {
 } } } }
 
 describe("PR conversation comments", () => {
+  test("accepts PR assignment responses from the issues endpoint when assigning and clearing", async () => {
+    for (const assignees of [["author"], []]) {
+      let permissionQueries = 0
+      const client = createGitHubClient({ ...rest(),
+        async mutate<T>(path: string, method: "POST" | "PATCH", input: Record<string, unknown>) {
+          expect([path, method, input]).toEqual(["repos/owner/repo/issues/42", "PATCH", { assignees }])
+          return { ...pull, pull_request: { url: "https://api.github.com/repos/owner/repo/pulls/42" },
+            assignees: assignees.map((login) => ({ login })) } as T
+        },
+        async graphql<T>(): Promise<T> { permissionQueries++; throw new Error("Unexpected permission query") },
+      })
+      expect(await client.setIssueAssignees("owner/repo", 42, assignees)).toMatchObject({ number: 42, assignees })
+      expect(permissionQueries).toBe(0)
+      // Browsing an issue must still reject a PR returned by the issues endpoint.
+      const issueClient = createGitHubClient({ ...rest(), async json<T>() {
+        return { ...pull, pull_request: {} } as T
+      } })
+      await expect(issueClient.issue("owner/repo", 42)).rejects.toThrow("is a pull request")
+    }
+  })
+
+  test("PATCHes PR state without issue state_reason and maps actual action permissions", async () => {
+    for (const state of ["closed", "open"] as const) {
+      for (const merged of [false, true]) {
+        const client = createGitHubClient({ ...rest(),
+          async mutate<T>(path: string, method: "POST" | "PATCH", input: Record<string, unknown>) {
+            expect([path, method, input]).toEqual(["repos/owner/repo/pulls/42", "PATCH", { state }])
+            return { ...pull, state, merged_at: merged ? date : null } as T
+          },
+          async graphql<T>() {
+            const response = permissionResponse()
+            Object.assign(response.data.repository.pullRequest, { viewerCanClose: true, viewerCanReopen: true, viewerCanAssign: true })
+            return response as T
+          },
+        })
+        const updated = await client.updatePullState("owner/repo", 42, state)
+        expect(updated).toMatchObject({ state, merged, headBranch: "topic", baseBranch: "main",
+          permissions: { comment: true, close: !merged, reopen: !merged, assignees: true } })
+      }
+    }
+  })
+
   test("derives comment permission from PR existence, archive state, lock and viewer permission", async () => {
     for (const [locked, permission, archived, expected] of [
       [false, "READ", false, true], [true, "READ", false, false],
@@ -48,11 +90,11 @@ describe("PR conversation comments", () => {
         expect(query).not.toContain("issue(")
         expect(query).not.toContain("viewerCanComment")
         if (query.includes("BodyReactions")) return bodyReactions as T
-        expect(query).toContain("isArchived viewerPermission pullRequest(number: 42) { id }")
+        expect(query).toContain("isArchived viewerPermission pullRequest(number: 42) { id viewerCanClose viewerCanReopen viewerCanAssign }")
         return permissionResponse(archived, permission) as T
       } })
       const detail = await client.pull("owner/repo", 42)
-      expect(detail.permissions).toEqual({ comment: expected })
+      expect(detail.permissions).toEqual({ comment: expected, close: false, reopen: false, assignees: false })
       expect(detail.locked).toBe(locked)
       expect(detail).toMatchObject({ body: "PR body", reactions: { heart: 3 }, viewerReactions: ["heart"], canReact: true })
       expect(queries).toHaveLength(2)

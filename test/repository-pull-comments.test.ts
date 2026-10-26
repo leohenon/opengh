@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import type { IssueActionKind, IssueComment, PullRequestDetail } from "../src/models"
+import type { IssueComment, PullRequestDetail } from "../src/models"
 import { createRepositorySession, type RepositoryLoaders } from "../src/repository-session"
 import { commitDetailFixture, githubDataFixture, issueCommentsFixture, issueDetailFixture, pullContextFixture } from "./fixtures/github-data"
 
@@ -43,6 +43,98 @@ async function setup(overrides: Partial<RepositoryLoaders> = {}) {
 }
 
 describe("pull request conversation comments", () => {
+  test("close/reopen retries only the state write after a confirmed comment", async () => {
+    let current = { ...pull(), permissions: { comment: true, close: true, reopen: true, assignees: true } }
+    let comments = 0
+    let writes = 0
+    const session = await setup({
+      pull: async () => ({ ...current, reactions: { heart: 2 }, viewerReactions: ["heart"], canReact: true }),
+      pulls: async (_repo, state) => ({ items: current.state === state ? [current] : [], hasMore: false }),
+      workCounts: async () => ({ issues: 1, pulls: current.state === "open" ? 1 : 0 }),
+      createIssueComment: async () => { comments++; return comment },
+      updatePullState: async (_repo, _number, state) => {
+        if (++writes === 1) throw new Error("Offline")
+        current = { ...current, state }
+        return current
+      },
+    })
+    await expect(session.submitIssueAction(421, "close", "pull")).rejects.toThrow("Comment posted, but closing failed")
+    expect(session.issueAction(421, "pull")).toMatchObject({ body: "", retry: "close" })
+    session.updateIssueDraft(421, { body: "must not post" }, "pull")
+    await expect(session.submitIssueAction(421, "comment", "pull")).rejects.toThrow("pending action")
+    expect((await session.submitIssueAction(421, "close", "pull")).pull?.state).toBe("closed")
+    expect(session.pullDetail()?.resource.value).toMatchObject({ state: "closed", commentCount: 2,
+      reactions: { heart: 2 }, viewerReactions: ["heart"], canReact: true })
+    await Bun.sleep(0)
+    const state = session.state()
+    expect(state.status === "ready" && state.data.pulls.closed.value?.items[0]?.number).toBe(421)
+    expect(state.status === "ready" && state.data.workCounts.value?.pulls).toBe(0)
+    expect((await session.submitIssueAction(421, "reopen", "pull")).pull?.state).toBe("open")
+    expect(comments).toBe(1)
+    expect(writes).toBe(3)
+  })
+
+  test("assignees initialize from PR, validate suggestions, preserve merged PR fields and never post drafts", async () => {
+    let comments = 0
+    const calls: string[][] = []
+    const original = { ...pull(), merged: true, state: "closed" as const, assignees: ["alice"], permissions: { comment: true, close: true, reopen: true, assignees: true } }
+    const session = await setup({
+      pull: async () => original,
+      assignableUsers: async () => ({ items: ["bob"], hasMore: false }),
+      createIssueComment: async () => { comments++; return comment },
+      setIssueAssignees: async (_repo, number, assignees) => {
+        calls.push(assignees)
+        return { ...issueDetailFixture, number, assignees, commentCount: 999 }
+      },
+    })
+    session.prepareIssueAction(421, "assignees", "pull")
+    expect(session.issueAction(421, "pull").selectedAssignees).toEqual(["alice"])
+    await Bun.sleep(0)
+    session.updateIssueDraft(421, { selectedAssignees: ["unknown"] }, "pull")
+    await expect(session.submitIssueAction(421, "assignees", "pull")).rejects.toThrow("suggested users")
+    session.updateIssueDraft(421, { selectedAssignees: ["bob", "BOB"] }, "pull")
+    const result = await session.submitIssueAction(421, "assignees", "pull")
+    expect(result.pull).toMatchObject({ ...original, assignees: ["bob"], updatedAt: issueDetailFixture.updatedAt })
+    expect(calls).toEqual([["bob"]])
+    expect(comments).toBe(0)
+    expect(session.issueAction(421, "pull").body).toBe(comment.body)
+    await expect(session.submitIssueAction(421, "reopen", "pull")).rejects.toThrow("Merged")
+  })
+
+  test("an overlapping stale PR read reloads after a state write instead of undoing it", async () => {
+    const write = deferred<PullRequestDetail>()
+    const read = deferred<PullRequestDetail>()
+    let reads = 0
+    const session = await setup({
+      pull: async () => ++reads === 1 ? { ...pull(), permissions: { comment: true, close: true } }
+        : reads === 2 ? read.promise : { ...pull(), state: "closed" },
+      updatePullState: async () => write.promise,
+    })
+    session.updateIssueDraft(421, { body: "" }, "pull")
+    const writing = session.submitIssueAction(421, "close", "pull")
+    const refreshing = session.loadPull(421)
+    write.resolve({ ...pull(), state: "closed" })
+    await writing
+    read.resolve(pull())
+    await refreshing
+    expect(session.pullDetail()?.resource.value?.state).toBe("closed")
+    expect(reads).toBe(3)
+  })
+
+  test("late PR state writes cannot mutate another repository", async () => {
+    const pending = deferred<PullRequestDetail>()
+    const session = await setup({ pull: async () => ({ ...pull(), permissions: { comment: true, close: true } }), updatePullState: async () => pending.promise })
+    session.updateIssueDraft(421, { body: "" }, "pull")
+    const writing = session.submitIssueAction(421, "close", "pull")
+    await expect(session.submitIssueAction(421, "close", "pull")).rejects.toThrow("already in progress")
+    await session.load("owner/other")
+    await session.loadPull(421)
+    const before = session.pullDetail()
+    pending.resolve({ ...pull(), state: "closed" })
+    await writing
+    expect(session.pullDetail()).toBe(before)
+  })
+
   test("posts via issue comment loader once, guards pending drafts, and preserves PR context", async () => {
     const pending = deferred<IssueComment>()
     const calls: unknown[][] = []
@@ -99,15 +191,13 @@ describe("pull request conversation comments", () => {
     expect(calls).toBe(0)
   })
 
-  test("rejects non-comment pull actions before mutation and isolates issue and repository drafts", async () => {
+  test("rejects duplicate pull actions before mutation and isolates issue and repository drafts", async () => {
     const session = await setup()
     session.updateIssueDraft(421, { body: "issue draft" })
     const before = session.issueAction(421, "pull")
-    for (const kind of ["close", "reopen", "assignees", "duplicate"] as IssueActionKind[]) {
-      expect(() => session.prepareIssueAction(421, kind, "pull")).toThrow("Only comments")
-      await expect(session.submitIssueAction(421, kind, "pull")).rejects.toThrow("Only comments")
-      expect(session.issueAction(421, "pull")).toBe(before)
-    }
+    expect(() => session.prepareIssueAction(421, "duplicate", "pull")).toThrow("duplicates")
+    await expect(session.submitIssueAction(421, "duplicate", "pull")).rejects.toThrow("duplicates")
+    expect(session.issueAction(421, "pull")).toBe(before)
     session.discardIssueDraft(421, "pull")
     expect(session.issueAction(421).body).toBe("issue draft")
     await session.load("owner/other")

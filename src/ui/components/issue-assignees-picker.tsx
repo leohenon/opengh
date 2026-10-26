@@ -98,10 +98,10 @@ export function IssueAssigneesPicker(props: {
   ].filter(Boolean).join("\n")
   const errorHeight = () => {
     if (!error()) return 0
-    const width = Math.max(1, Math.min(44, dimensions().width - 2) - 8)
+    const width = Math.max(1, Math.min(80, dimensions().width - 2) - 8)
     return Math.min(6, error().split("\n").reduce((rows, line) => rows + Math.ceil(Bun.stringWidth(line) / width) + 1, 0))
   }
-  const popupHeight = () => Math.min(16, Math.max(1, rowCount() + (!filtered().length && !loading() ? 1 : 0)) + 8 + errorHeight())
+  const popupHeight = () => Math.min(20, Math.max(1, rowCount() + (!filtered().length && !loading() ? 1 : 0))) + 9 + errorHeight()
   const LoadRow = () => {
     const enabled = () => !pending() && !loading() && canLoad()
     const hover = mouseHover(enabled, () => filtered().length)
@@ -115,18 +115,21 @@ export function IssueAssigneesPicker(props: {
   }
 
   return (
-    <Popup width={44} height={popupHeight()} placement="center" zIndex={250} onClose={requestClose}>
+    <Popup width={80} height={popupHeight()} placement="center" zIndex={250} onClose={requestClose}>
       <box flexGrow={1} minHeight={0} flexDirection="column" paddingBottom={1}>
         <box flexShrink={0} paddingX={4} flexDirection="column">
           <text height={1} fg={colors.text} attributes={TextAttributes.BOLD}>Assignees · #{props.number}</text>
           <box height={2} flexShrink={0} paddingTop={1}>
-            <KeyInput flexGrow={1} minWidth={0} focused={!pending()} value={query()}
+            <KeyInput width="100%" focused={!pending()} value={query()} placeholder="Search assignable users…"
               placeholderColor={colors.muted} textColor={colors.text} focusedTextColor={colors.text} cursorColor={colors.blue}
               focusedBackgroundColor={colors.panel}
               onInput={(value) => { if (!pending()) { setQuery(value); setActive(0) } }} />
           </box>
         </box>
         <box height={1} flexShrink={0} />
+        <box height={1} flexShrink={0} paddingX={4}>
+          <text fg={colors.text} attributes={TextAttributes.BOLD}>Assignable users</text>
+        </box>
         <scrollbox ref={(value) => { list = value; bindScrollbar(value); setListReady(true) }}
           focusable={false} flexGrow={1} minHeight={0} paddingX={1} scrollY>
           <Show when={!filtered().length && !loading()}>
@@ -139,9 +142,8 @@ export function IssueAssigneesPicker(props: {
                 backgroundColor={currentRow() === index || hover.hovered() ? colors.panelHover : colors.panel}
                 {...mouseClick(() => activate(index), () => !pending(), () => login(), hover)}>
                 <text width={2} flexShrink={0} fg={colors.blue}>{currentRow() === index ? "›" : " "}</text>
-                <text height={1} wrapMode="none" flexGrow={1} fg={colors.muted}>
-                  [{isSelected(login()) ? "x" : " "}] <span style={{ fg: colors.blue }}>@{login()}</span>
-                </text>
+                <text height={1} minWidth={0} wrapMode="none" truncate flexGrow={1} flexShrink={1} fg={colors.blue} attributes={TextAttributes.BOLD}>@{login()}</text>
+                <text width={10} flexShrink={0} fg={colors.green}>{isSelected(login()) ? "✓ selected" : ""}</text>
               </box>
             )
           }}</Index>

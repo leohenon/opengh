@@ -9,6 +9,9 @@ export type StatusKind =
   | "loading-resource"
   | "loading-more"
   | "posting-comment"
+  | "merging-pull"
+  | "closing-pull"
+  | "reopening-pull"
   | "closing-issue"
   | "reopening-issue"
   | "marking-duplicate"
@@ -20,6 +23,9 @@ const loadingMessages: Record<StatusKind, string> = {
   "loading-resource": "Loading…",
   "loading-more": "Loading more…",
   "posting-comment": "Posting comment…",
+  "merging-pull": "Merging PR…",
+  "closing-pull": "Closing PR…",
+  "reopening-pull": "Reopening PR…",
   "closing-issue": "Closing issue…",
   "reopening-issue": "Reopening issue…",
   "marking-duplicate": "Marking duplicate…",

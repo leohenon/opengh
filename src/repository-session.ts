@@ -23,6 +23,9 @@ import {
   loadGitHubRunJobs,
   createGitHubIssueComment,
   updateGitHubIssueState,
+  updateGitHubPullState,
+  mergeGitHubPull,
+  loadGitHubPullMergeMessage,
   setGitHubIssueAssignees,
   loadGitHubAssignableUsers,
   markGitHubIssueDuplicate,
@@ -30,6 +33,7 @@ import {
 } from "./github/client"
 import { GitHubApiError } from "./github/transport"
 import { loadGitHubDiff } from "./github/diff"
+import { pullMergeBlocker } from "./pull-merge"
 import { reactionKey, reactionParent, validateReactionKind } from "./reactions"
 import type {
   CommitDetail,
@@ -48,6 +52,9 @@ import type {
   ListState,
   Paginated,
   PullRequestDetail,
+  PullMergeMethod,
+  PullMergeMessage,
+  PullMergeDraft,
   PullContext,
   PullRequestSummary,
   Repo,
@@ -94,6 +101,9 @@ export type RepositoryLoaders = {
   issueReferences(repository: string, number: number): Promise<IssueReference[]>
   createIssueComment?(repository: string, number: number, body: string): Promise<IssueComment>
   updateIssueState?(repository: string, number: number, state: ListState, reason?: IssueCloseReason): Promise<IssueDetail>
+  updatePullState?(repository: string, number: number, state: ListState): Promise<PullRequestDetail>
+  pullMergeMessage?(repository: string, number: number, expectedHeadSha: string): Promise<PullMergeMessage>
+  mergePull?(repository: string, number: number, method: PullMergeMethod, expectedHeadSha: string, message?: PullMergeMessage): Promise<PullRequestDetail>
   setIssueAssignees?(repository: string, number: number, assignees: string[]): Promise<IssueDetail>
   assignableUsers?(repository: string, page?: number): Promise<Page<string>>
   markIssueDuplicate?(repository: string, number: number, canonicalNumber: number): Promise<IssueDetail>
@@ -126,6 +136,8 @@ export type RepositorySession = {
   clearCommit(): void
   pullDetail: Accessor<PullDetailState | undefined>
   loadPull(number: number): Promise<void>
+  loadPullMergeMessage(number: number, expectedHeadSha: string): Promise<PullMergeDraft>
+  mergePull(number: number, method: PullMergeMethod, expectedHeadSha: string, message?: PullMergeMessage): Promise<PullRequestDetail>
   loadMorePullComments(): Promise<void>
   retryPullReferences(): Promise<void>
   retryPullCommits(): Promise<void>
@@ -171,6 +183,9 @@ const defaultLoaders: RepositoryLoaders = {
   issueReferences: loadGitHubIssueReferences,
   createIssueComment: createGitHubIssueComment,
   updateIssueState: updateGitHubIssueState,
+  updatePullState: updateGitHubPullState,
+  mergePull: mergeGitHubPull,
+  pullMergeMessage: loadGitHubPullMergeMessage,
   setIssueAssignees: setGitHubIssueAssignees,
   assignableUsers: loadGitHubAssignableUsers,
   markIssueDuplicate: markGitHubIssueDuplicate,
@@ -313,9 +328,11 @@ export function createRepositorySession(loaders: RepositoryLoaders = defaultLoad
   const issueKey = (repository: string, number: number, parent: IssueActionParent = "issue") => `${repository.toLowerCase()}#${number}${parent === "pull" ? ":pull" : ""}`
   const postedComments = new Map<string, IssueComment[]>()
   const issueWriteRevision = new Map<string, number>()
+  const pullActionRevision = new Map<string, number>()
   const confirmIssueWrite = (key: string) => issueWriteRevision.set(key, (issueWriteRevision.get(key) ?? 0) + 1)
   let repositoryScope = 0
   const issueListGeneration: Record<ListState, number> = { open: 0, closed: 0 }
+  const pullListGeneration: Record<ListState, number> = { open: 0, closed: 0 }
   const [pullDetail, setPullDetail] = createSignal<PullDetailState>()
   let pullGeneration = 0
   let issueGeneration = 0
@@ -564,8 +581,10 @@ export function createRepositorySession(loaders: RepositoryLoaders = defaultLoad
   }
 
   const fetchPulls = async (repository: string, listState: ListState, request: number, pageCount = 1) => {
+    const listRequest = ++pullListGeneration[listState]
     try {
       const result = await loadPageSet(pageCount, (page) => loaders.pulls(repository, listState, page), (item) => item.number)
+      if (listRequest !== pullListGeneration[listState]) return
       updateReady(setState, request, generation, repository, (current) => ({
         ...current,
         data: {
@@ -574,6 +593,7 @@ export function createRepositorySession(loaders: RepositoryLoaders = defaultLoad
         },
       }))
     } catch (error) {
+      if (listRequest !== pullListGeneration[listState]) return
       updateReady(setState, request, generation, repository, (current) => ({
         ...current,
         data: {
@@ -804,15 +824,17 @@ export function createRepositorySession(loaders: RepositoryLoaders = defaultLoad
   }
 
   const fetchPullReferences = async (repository: string, number: number, request: number, previous?: IssueReference[]) => {
+    const key = issueKey(repository, number, "pull")
+    const revision = pullActionRevision.get(key)
     try {
       const timeline = loaders.issueTimeline
         ? await loaders.issueTimeline(repository, number)
         : { references: await loaders.issueReferences(repository, number), events: [] }
-      if (request !== pullGeneration) return
+      if (request !== pullGeneration || revision !== pullActionRevision.get(key)) return
       setPullDetail((current) => current?.number === number
         ? { ...current, references: { status: "ready", value: timeline.references }, events: timeline.events } : current)
     } catch (error) {
-      if (request !== pullGeneration) return
+      if (request !== pullGeneration || revision !== pullActionRevision.get(key)) return
       setPullDetail((current) => current?.number === number ? { ...current, references: failedResource(error, previous) } : current)
     }
   }
@@ -887,8 +909,14 @@ export function createRepositorySession(loaders: RepositoryLoaders = defaultLoad
     try {
       const key = issueKey(repository, number, "pull")
       let writeRevision = issueWriteRevision.get(key)
+      let actionRevision = pullActionRevision.get(key)
       let loaded = await (loaders.pull ?? loadGitHubPull)(repository, number)
       if (request !== pullGeneration) return
+      while (actionRevision !== pullActionRevision.get(key)) {
+        actionRevision = pullActionRevision.get(key)
+        loaded = await (loaders.pull ?? loadGitHubPull)(repository, number)
+        if (request !== pullGeneration) return
+      }
       // Retain confirmed comment metadata without discarding fresh permissions or PR state.
       while (writeRevision !== issueWriteRevision.get(key)) {
         const confirmed = pullDetail()?.resource.value
@@ -1149,11 +1177,12 @@ export function createRepositorySession(loaders: RepositoryLoaders = defaultLoad
     setIssueActions((actions) => ({ ...actions, [key]: update(actions[key] ?? emptyIssueAction) }))
   }
   const prepareIssueAction = (number: number, kind: IssueActionKind, parent: IssueActionParent = "issue") => {
-    if (parent === "pull" && kind !== "comment") throw new Error("Only comments are supported for pull requests.")
+    if (parent === "pull" && kind === "duplicate") throw new Error("Pull requests cannot be marked as duplicates.")
     updateAction(issueKey(state().repository, number, parent), (action) => {
       if (action.operation.status === "loading" || action.retry === kind) return action
       // Selecting a new action must not resume a different failed state change.
-      const issue = issueDetail()?.number === number ? issueDetail()?.resource.value : undefined
+      const detail = parent === "pull" ? pullDetail() : issueDetail()
+      const issue = detail?.number === number ? detail.resource.value : undefined
       const selectedAssignees = issue && kind === "assignees" ? [...issue.assignees] : action.selectedAssignees
       return { ...action, selectedAssignees, retry: undefined, operation: idle() }
     })
@@ -1266,10 +1295,212 @@ export function createRepositorySession(loaders: RepositoryLoaders = defaultLoad
     }
   }
 
+  const reconcilePullState = (repository: string, number: number, updated: PullRequestDetail, scope: number, reactionRead: number) => {
+    const key = issueKey(repository, number, "pull")
+    confirmIssueWrite(key)
+    pullActionRevision.set(key, (pullActionRevision.get(key) ?? 0) + 1)
+    if (scope !== repositoryScope || state().repository !== repository) return updated
+    updated = withReactionFields({ kind: "pull", number }, updated, reactionRead)
+    setPullDetail((latest) => latest?.number === number
+      ? { ...latest, resource: { status: "ready", value: updated }, references: loadingResource(latest.references.value) } : latest)
+    if (pullDetail()?.number === number)
+      void fetchPullReferences(repository, number, pullGeneration, pullDetail()?.references.value)
+    setState((latest) => {
+      if (latest.status !== "ready" || latest.repository !== repository) return latest
+      const lists = { ...latest.data.pulls }
+      for (const listState of ["open", "closed"] as const) {
+        const resource = lists[listState]
+        if (!resource.value) continue
+        const items = resource.value.items.filter((item) => item.number !== number)
+        if (listState === updated.state) {
+          const { title, author, createdAt, state, merged, draft } = updated
+          items.push({ number, title, author, createdAt, state, merged, draft })
+          items.sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt))
+        }
+        lists[listState] = loadingResource({ ...resource.value, items })
+      }
+      return { ...latest, data: { ...latest.data, pulls: lists } }
+    })
+    const latest = state()
+    if (latest.status === "ready") {
+      void fetchPulls(repository, "open", repositoryGeneration, latest.data.pulls.open.value?.page)
+      void fetchPulls(repository, "closed", repositoryGeneration, latest.data.pulls.closed.value?.page)
+      void fetchWorkCounts(repository, repositoryGeneration)
+    }
+    return updated
+  }
+
+  const loadPullMergeMessage = async (number: number, expectedHeadSha: string): Promise<PullMergeDraft> => {
+    const current = state()
+    const detail = pullDetail()
+    if (current.status !== "ready" || detail?.number !== number || detail.resource.status !== "ready"
+      || detail.resource.value.number !== number)
+      throw new Error("Reload the pull request successfully before editing its merge message.")
+    const key = issueKey(current.repository, number, "pull")
+    const action = issueActions()[key] ?? emptyIssueAction
+    if (action.operation.status === "loading") throw new Error("A pull request action is already in progress.")
+    if (!/^[a-f\d]{40}$/i.test(expectedHeadSha) || detail.resource.value.headSha !== expectedHeadSha)
+      throw new Error("Head changed; refresh the pull request before merging.")
+    if (!loaders.pullMergeMessage) throw new Error("Pull request merge messages are unavailable.")
+    const scope = repositoryScope
+    const revision = pullActionRevision.get(key)
+    const message = await loaders.pullMergeMessage(current.repository, number, expectedHeadSha)
+    const latest = pullDetail()
+    if (scope !== repositoryScope || state().repository !== current.repository
+      || latest?.number !== number || latest.resource.status !== "ready"
+      || revision !== pullActionRevision.get(key))
+      throw new Error("Pull request changed while loading the merge message. Try again.")
+    const saved = issueActions()[key] ?? emptyIssueAction
+    if (saved.operation.status === "loading") throw new Error("A pull request action is already in progress.")
+    if (latest.resource.value.headSha !== expectedHeadSha)
+      throw new Error("Head changed; refresh the pull request before merging.")
+    return { ...message, headSha: expectedHeadSha }
+  }
+
+  const mergePull = async (number: number, method: PullMergeMethod, expectedHeadSha: string, message?: PullMergeMessage): Promise<PullRequestDetail> => {
+    const current = state()
+    const detail = pullDetail()
+    const pull = detail?.resource.value
+    if (current.status !== "ready" || detail?.number !== number || !pull || detail.resource.status !== "ready")
+      throw new Error("Reload the pull request successfully before merging.")
+    const repository = current.repository
+    const key = issueKey(repository, number, "pull")
+    const action = issueActions()[key] ?? emptyIssueAction
+    if (action.operation.status === "loading") throw new Error("A pull request action is already in progress.")
+    if (action.retry) throw new Error("Retry or discard the pending action first.")
+    const scope = repositoryScope
+    const reactionRead = reactionRevision
+    updateAction(key, draft => ({ ...draft, operation: loading() }))
+    try {
+      const blocker = pullMergeBlocker(pull, detail.context.status === "ready" ? detail.context.value : undefined)
+      if (blocker) throw new Error(blocker)
+      if (pull.headSha !== expectedHeadSha) throw new Error("Head changed; refresh the pull request before merging.")
+      if (!pull.merge?.methods.includes(method)) throw new Error("The selected merge method is not enabled.")
+      if (!loaders.mergePull) throw new Error("Pull request merging is unavailable.")
+      if (message !== undefined) {
+        if (method !== "squash") throw new Error("Custom commit messages are only supported for squash merges.")
+        if (typeof message?.headline !== "string" || !message.headline.trim() || /[\r\n]/.test(message.headline))
+          throw new Error("Commit headline must be nonblank and single-line.")
+        if (typeof message.body !== "string") throw new Error("Commit body must be text.")
+      }
+      const loaded = await loaders.mergePull(repository, number, method, expectedHeadSha, message)
+      if (loaded.number !== number || !loaded.merged || loaded.state !== "closed" || loaded.headSha !== expectedHeadSha
+        || pull.nodeId !== undefined && loaded.nodeId !== pull.nodeId)
+        throw new Error("GitHub did not confirm the merge. Check GitHub before retrying.")
+      const updated = reconcilePullState(repository, number, loaded, scope, reactionRead)
+      // Merge is independent of the comment/assignee drafts.
+      updateAction(key, draft => ({ ...draft, operation: idle() }))
+      return updated
+    } catch (error) {
+      const message = actionError(error, pull.locked ?? false, "pull request")
+      updateAction(key, draft => ({ ...draft, operation: { status: "error", message } }))
+      if (scope === repositoryScope && state().repository === repository && pullDetail()?.number === number)
+        void loadPull(number)
+      throw new Error(message)
+    }
+  }
+
+  const submitPullAction = async (number: number, kind: "close" | "reopen" | "assignees"): Promise<IssueActionResult> => {
+    const current = state()
+    const detail = pullDetail()
+    const pull = detail?.resource.value
+    if (current.status !== "ready" || detail?.number !== number || !pull || detail.resource.status !== "ready")
+      throw new Error("Reload the pull request successfully before taking action.")
+    const repository = current.repository
+    const key = issueKey(repository, number, "pull")
+    const action = issueActions()[key] ?? emptyIssueAction
+    if (action.operation.status === "loading") throw new Error("A pull request action is already in progress.")
+    if (action.retry && action.retry !== kind) throw new Error("Retry or discard the pending action first.")
+    const scope = repositoryScope
+    const result: IssueActionResult = {}
+    updateAction(key, (draft) => ({ ...draft, operation: loading() }))
+    try {
+      if (pull.merged && kind !== "assignees") throw new Error("Merged pull requests cannot be closed or reopened.")
+      if (!pull.permissions?.[kind]) throw new Error("You do not have permission to perform this pull request action.")
+      if (kind === "assignees") {
+        if (!loaders.setIssueAssignees) throw new Error("Assigning pull requests is unavailable.")
+        if (!action.selectedAssignees) throw new Error("Open the assignee picker before saving.")
+        const allowed = new Set([...pull.assignees, ...(assignableUsers()?.value?.items ?? [])].map((login) => login.toLowerCase()))
+        if (action.selectedAssignees.some((login) => !allowed.has(login.toLowerCase())))
+          throw new Error("Select assignees from the suggested users.")
+        const seen = new Set<string>()
+        const selected = action.selectedAssignees.filter((login) => {
+          const key = login.toLowerCase()
+          if (seen.has(key)) return false
+          seen.add(key)
+          return true
+        })
+        if (selected.length > 10) throw new Error("A pull request can have at most 10 assignees.")
+        const reactionRead = reactionRevision
+        const loaded = await loaders.setIssueAssignees(repository, number, selected)
+        const confirmed = new Set(loaded.assignees.map((login) => login.toLowerCase()))
+        if (loaded.number !== number || confirmed.size !== selected.length || selected.some((login) => !confirmed.has(login.toLowerCase())))
+          throw new Error("GitHub did not confirm the requested assignees.")
+        // The issues endpoint cannot supply PR-specific fields or permissions.
+        const latest = scope === repositoryScope && state().repository === repository && pullDetail()?.number === number
+          ? pullDetail()?.resource.value ?? pull : pull
+        const updated = reconcilePullState(repository, number, { ...latest, assignees: loaded.assignees, updatedAt: loaded.updatedAt }, scope, reactionRead)
+        updateAction(key, (draft) => ({ ...draft, selectedAssignees: undefined, operation: idle() }))
+        return { pull: updated }
+      }
+      if (!loaders.updatePullState) throw new Error("Pull request state changes are unavailable.")
+      if (!action.retry && action.body.trim()) {
+        if (!pull.permissions.comment) throw new Error("You do not have permission to comment on this pull request.")
+        if (!loaders.createIssueComment) throw new Error("Commenting is unavailable.")
+        const comment = await loaders.createIssueComment(repository, number, action.body)
+        result.comment = comment
+        confirmIssueWrite(key)
+        postedComments.set(key, [...(postedComments.get(key) ?? []), comment])
+        updateAction(key, (draft) => ({ ...draft, body: "", retry: kind }))
+        if (scope === repositoryScope && state().repository === repository) setPullDetail((latest) => {
+          if (latest?.number !== number) return latest
+          const comments = latest.comments.value ?? { items: [], page: 0, hasMore: true }
+          const items = [...comments.items.filter((item) => item.id !== comment.id), comment]
+            .sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt))
+          return {
+            ...latest,
+            resource: latest.resource.value ? { ...latest.resource, value: {
+              ...latest.resource.value, commentCount: Math.max(latest.resource.value.commentCount, pull.commentCount + 1),
+              updatedAt: Date.parse(latest.resource.value.updatedAt) >= Date.parse(comment.createdAt) ? latest.resource.value.updatedAt : comment.createdAt,
+            } } : latest.resource,
+            comments: { ...latest.comments, value: { ...comments, items } },
+          }
+        })
+      }
+      const nextState = kind === "close" ? "closed" : "open"
+      const reactionRead = reactionRevision
+      const loaded = await loaders.updatePullState(repository, number, nextState)
+      if (loaded.number !== number || loaded.state !== nextState || loaded.merged)
+        throw new Error("GitHub did not confirm the requested pull request state.")
+      const latest = scope === repositoryScope && state().repository === repository && pullDetail()?.number === number
+        ? pullDetail()?.resource.value : undefined
+      const previous = latest ?? pull
+      result.pull = reconcilePullState(repository, number, { ...loaded,
+        reactions: loaded.reactions ?? previous.reactions,
+        viewerReactions: loaded.viewerReactions ?? previous.viewerReactions,
+        canReact: loaded.canReact ?? previous.canReact,
+        commentCount: Math.max(loaded.commentCount, previous.commentCount),
+        updatedAt: Date.parse(loaded.updatedAt) >= Date.parse(previous.updatedAt) ? loaded.updatedAt : previous.updatedAt,
+      }, scope, reactionRead)
+      updateAction(key, () => ({ ...emptyIssueAction, reason: action.reason }))
+      return result
+    } catch (error) {
+      const retry = issueActions()[key]?.retry
+      const failure = actionError(error, pull.locked ?? false, "pull request")
+      const message = retry ? `Comment posted, but ${retry === "close" ? "closing" : "reopening"} failed. ${failure}` : failure
+      updateAction(key, (draft) => ({ ...draft, operation: { status: "error", message } }))
+      throw new Error(message)
+    }
+  }
+
   const submitIssueAction = async (number: number, kind: IssueActionKind, parent: IssueActionParent = "issue"): Promise<IssueActionResult> => {
     if (parent === "pull") {
-      if (kind !== "comment") throw new Error("Only comments are supported for pull requests.")
-      return submitPullComment(number)
+      if (kind === "duplicate") throw new Error("Pull requests cannot be marked as duplicates.")
+      if (kind === "comment") {
+        if (issueAction(number, "pull").retry) throw new Error("Retry or discard the pending action first.")
+        return submitPullComment(number)
+      }
+      return submitPullAction(number, kind)
     }
     const current = state()
     const detail = issueDetail()
@@ -1750,12 +1981,14 @@ export function createRepositorySession(loaders: RepositoryLoaders = defaultLoad
     const repository = current.repository
     const request = repositoryGeneration
     const nextPage = value.page + 1
+    const listRequest = pullListGeneration[listState]
     setState({
       ...current,
       data: { ...current.data, pulls: { ...current.data.pulls, [listState]: loadingResource(value, "pagination") } },
     })
     try {
       const result = await loaders.pulls(repository, listState, nextPage)
+      if (listRequest !== pullListGeneration[listState]) return
       updateReady(setState, request, generation, repository, (latest) => {
         const latestValue = latest.data.pulls[listState].value
         if (!latestValue || latestValue.page !== nextPage - 1) return latest
@@ -1779,7 +2012,8 @@ export function createRepositorySession(loaders: RepositoryLoaders = defaultLoad
         ...latest,
         data: {
           ...latest.data,
-          pulls: { ...latest.data.pulls, [listState]: failedResource(error, latest.data.pulls[listState].value, "pagination") },
+          pulls: listRequest !== pullListGeneration[listState] ? latest.data.pulls
+            : { ...latest.data.pulls, [listState]: failedResource(error, latest.data.pulls[listState].value, "pagination") },
         },
       }))
     }
@@ -1802,6 +2036,8 @@ export function createRepositorySession(loaders: RepositoryLoaders = defaultLoad
     clearCommit,
     pullDetail,
     loadPull,
+    mergePull,
+    loadPullMergeMessage,
     loadMorePullComments,
     retryPullReferences,
     retryPullCommits,

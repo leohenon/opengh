@@ -14,6 +14,7 @@ import { IssueAssigneesPicker } from "../src/ui/components/issue-assignees-picke
 import { clickControl } from "./fixtures/mouse";
 import {
   githubDataFixture,
+  pullContextFixture,
   issueCommentsFixture,
   issueDetailFixture,
   repositoryOperationsFixture,
@@ -411,10 +412,11 @@ test("assignee suggestions filter locally, preserve selection, retry and save in
     expect(view.captureCharFrame()).toContain("Edit assignees…");
     expect(view.captureCharFrame()).not.toContain("Reopen issue…");
     view.mockInput.pressEnter(); await settle();
-    expect(view.captureCharFrame()).toContain("[x] @max");
-    expect(view.captureCharFrame()).toContain("[x] @jane");
+    expect(view.captureCharFrame()).toMatch(/@max +✓ selected/);
+    expect(view.captureCharFrame()).toMatch(/@jane +✓ selected/);
     await view.mockInput.typeText("@jo"); await settle();
-    expect(view.captureCharFrame()).toContain("[ ] @john");
+    expect(view.captureCharFrame()).toContain("@john");
+    expect(view.captureCharFrame()).not.toMatch(/@john +✓ selected/);
     expect(view.captureCharFrame()).not.toContain("@kate");
     expect(view.captureCharFrame()).not.toContain("@max");
     expect(action().selectedAssignees).toEqual(["max", "jane"]);
@@ -527,5 +529,62 @@ test("assignee picker limits selection to ten while allowing removal", async () 
     expect(view.captureCharFrame()).not.toContain("Maximum 10 assignees.");
     view.mockInput.pressEnter(); await settle();
     expect(action().selectedAssignees).toHaveLength(10);
+  } finally { view.renderer.destroy(); }
+});
+
+test("PR actions route close, reopen and assignees to PR drafts and hide state actions when merged", async () => {
+  const summary = githubDataFixture.pulls.open.value!.items[0]!;
+  const [state, setState] = createSignal<"open" | "closed">("open");
+  const [merged, setMerged] = createSignal(false);
+  const [action, setAction] = createSignal<IssueActionState>({ body: "", reason: "completed", operation: { status: "idle" } });
+  const submitted: string[] = [];
+  const view = await testRender(() => <App data={githubDataFixture} operations={repositoryOperationsFixture}
+    config={{ ...defaultConfig, showStatusBarHints: true }}
+    pullDetail={{ number: summary.number, resource: { status: "ready", value: {
+      ...summary, state: state(), merged: merged(), url: `${githubDataFixture.repo.url}/pull/${summary.number}`, body: "PR body",
+      updatedAt: summary.createdAt, baseBranch: "main", headBranch: "feature", additions: 0, deletions: 0,
+      changedFiles: 0, commitCount: 0, commentCount: 0, labels: [], assignees: ["jane"], reviewers: [], mergeable: null,
+      permissions: { comment: true, close: true, reopen: true, assignees: true },
+    } }, comments: { status: "ready", value: { items: [], page: 1, hasMore: false } },
+      commits: { status: "ready", value: [] }, context: { status: "ready", value: pullContextFixture }, references: { status: "ready", value: [] } }}
+    getIssueAction={(_number, parent) => parent === "pull" ? action() : { body: "Issue draft", reason: "completed", operation: { status: "idle" } }}
+    assignableUsers={{ status: "ready", value: { items: ["jane", "john"], page: 1, hasMore: false } }}
+    onPrepareIssueAction={(_number, kind, parent) => {
+      expect(parent).toBe("pull");
+      if (kind === "assignees") setAction((draft) => ({ ...draft, selectedAssignees: ["jane"] }));
+    }}
+    onIssueDraftChange={(_number, draft, parent) => { expect(parent).toBe("pull"); setAction((current) => ({ ...current, ...draft })); }}
+    onSubmitIssueAction={async (number, kind, parent) => {
+      expect(number).toBe(summary.number); expect(parent).toBe("pull"); submitted.push(kind);
+      if (kind === "close") setState("closed");
+      if (kind === "reopen") setState("open");
+      return {};
+    }} />, { width: 110, height: 34 });
+  const settle = async () => { await Bun.sleep(40); await view.flush(); };
+  try {
+    view.mockInput.pressKey("4"); view.mockInput.pressEnter(); await settle();
+    expect(view.captureCharFrame()).toContain("a actions");
+    for (const verb of ["Close", "Reopen"]) {
+      view.mockInput.pressKey("a"); await settle();
+      expect(view.captureCharFrame()).toContain(`${verb} PR…`);
+      expect(view.captureCharFrame()).not.toContain("Mark as duplicate");
+      view.mockInput.pressEnter(); await settle();
+      expect(view.captureCharFrame()).not.toContain("Not planned");
+      await clickControl(view, "issue-action-submit");
+      expect(view.captureCharFrame()).toContain(`${verb} PR #${summary.number}?`);
+      await clickControl(view, "issue-action-confirm"); await settle();
+    }
+    setMerged(true); setState("closed");
+    await view.mockMouse.click(1, 10, 2); await settle();
+    expect(view.captureCharFrame()).toContain("Actions…");
+    await clickControl(view, "context-menu-row-4"); await settle();
+    expect(view.captureCharFrame()).not.toContain("Reopen PR");
+    expect(view.captureCharFrame()).toContain("Edit assignees…");
+    view.mockInput.pressEnter(); await settle();
+    expect(view.captureCharFrame()).toMatch(/@jane +✓ selected/);
+    await clickControl(view, "assignee-row-1");
+    expect(action().selectedAssignees).toEqual(["jane", "john"]);
+    await clickControl(view, "assignees-save"); await settle();
+    expect(submitted).toEqual(["close", "reopen", "assignees"]);
   } finally { view.renderer.destroy(); }
 });
