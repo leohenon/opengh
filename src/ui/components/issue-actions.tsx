@@ -88,7 +88,7 @@ export function IssueActionDialog(props: {
   const bindScrollbar = createScrollbarVisibility(() => props.showScrollbar)
   const pending = () => props.state.operation.status === "loading"
   const retry = () => props.state.retry === props.kind ? props.state.retry : undefined
-  const hasPreview = () => props.kind === "comment" || props.kind === "reopen"
+  const hasPreview = () => props.kind === "comment" || props.kind === "reopen" || props.kind === "close"
   const previewing = () => hasPreview() && preview()
   const writing = () => !previewing() && !confirmSubmit() && !pending() && !retry()
   const duplicateNumber = () => {
@@ -192,13 +192,19 @@ export function IssueActionDialog(props: {
     <>
       <Popup
         width={props.kind === "duplicate" ? 56 : props.kind === "close" ? 64 : 86}
-        height={props.kind === "duplicate" ? props.state.operation.status === "error" ? 10 : 7 : props.kind === "close" ? 10 : 26}
+        height={props.kind === "duplicate" ? props.state.operation.status === "error" ? 11 : 8 : props.kind === "close" ? 11 : 27}
         placement="center" zIndex={250}
         onClose={requestClose}
       >
         <box flexGrow={1} minHeight={0} paddingX={2} paddingBottom={1} flexDirection="column">
           <box height={1} flexShrink={0} flexDirection="row" justifyContent="space-between">
-            <text fg={colors.text} attributes={TextAttributes.BOLD}>{title()}</text>
+            <text flexGrow={1} minWidth={0} wrapMode="none" fg={colors.text} attributes={TextAttributes.BOLD}>{title()}</text>
+            <Show when={hasPreview() && !retry()}>
+              <box width={7} height={1} flexShrink={0} alignItems="flex-end">
+                <Action id="issue-action-preview" disabled={pending() || confirmSubmit()}
+                  onActivate={() => setPreview((value) => !value)}>{previewing() ? "Write" : "Preview"}</Action>
+              </box>
+            </Show>
           </box>
           <Show when={props.locked && props.kind !== "duplicate"}>
             <text flexShrink={0} fg={colors.yellow}>Locked thread — commenting depends on your GitHub permissions.</text>
@@ -215,9 +221,6 @@ export function IssueActionDialog(props: {
           <Show when={retry()}>
             <text flexShrink={0} fg={colors.green}>Comment posted. Only the issue state change will be retried.</text>
           </Show>
-          <Show when={!retry() && previewing()}>
-            <text height={1} flexShrink={0} fg={colors.muted}>Preview</text>
-          </Show>
           <Show when={props.kind === "duplicate"}>
             <box marginTop={1} flexShrink={0} flexDirection="column">
               <KeyInput value={props.state.duplicateTarget ?? ""} placeholder="#123" maxLength={17}
@@ -230,7 +233,7 @@ export function IssueActionDialog(props: {
             </box>
           </Show>
           <Show when={props.kind !== "duplicate"}>
-            <box flexGrow={1} minHeight={0} marginTop={props.kind === "close" ? 1 : 0} flexDirection="column" overflow="hidden">
+            <box flexGrow={1} minHeight={0} marginTop={1} flexDirection="column" overflow="hidden">
               <KeyTextarea
                 ref={(value) => { writer = value }}
                 initialValue={props.state.body}
@@ -267,7 +270,7 @@ export function IssueActionDialog(props: {
           <Show when={props.state.operation.status === "error"}>
             <text flexShrink={0} fg={colors.red}>{props.state.operation.status === "error" ? props.state.operation.message : ""}</text>
           </Show>
-          <box height={1} flexShrink={0} flexDirection="row" gap={2}>
+          <box height={1} flexShrink={0} flexDirection="row" gap={2} marginTop={1}>
             <Action id="issue-action-submit" disabled={!canSubmit() || confirmSubmit()} onActivate={requestSubmit}>{retry() ? "Retry" : "Submit"}</Action>
           </box>
         </box>

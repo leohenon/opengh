@@ -101,7 +101,7 @@ export function IssueAssigneesPicker(props: {
     const width = Math.max(1, Math.min(44, dimensions().width - 2) - 8)
     return Math.min(6, error().split("\n").reduce((rows, line) => rows + Math.ceil(Bun.stringWidth(line) / width) + 1, 0))
   }
-  const popupHeight = () => Math.min(16, Math.max(1, rowCount() + (!filtered().length && !loading() ? 1 : 0)) + 7 + errorHeight())
+  const popupHeight = () => Math.min(16, Math.max(1, rowCount() + (!filtered().length && !loading() ? 1 : 0)) + 8 + errorHeight())
   const LoadRow = () => {
     const enabled = () => !pending() && !loading() && canLoad()
     const hover = mouseHover(enabled, () => filtered().length)
@@ -154,7 +154,7 @@ export function IssueAssigneesPicker(props: {
             <text width="100%" wrapMode="word" fg={colors.red}>{error()}</text>
           </scrollbox>
         </Show>
-        <box height={1} flexShrink={0} flexDirection="row" gap={2} paddingX={4}>
+        <box height={1} flexShrink={0} flexDirection="row" gap={2} paddingX={4} marginTop={1}>
           <Action id="assignees-save" disabled={pending()} onActivate={submit}>Save</Action>
         </box>
       </box>

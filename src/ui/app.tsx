@@ -152,6 +152,7 @@ function AppContent(props: AppProps) {
   const [toast, setToast] = createSignal<ToastState>()
   const [commandAction, setCommandAction] = createSignal<CommandAction>()
   const [issueAction, setIssueAction] = createSignal<{ number: number; kind: IssueActionKind; parent?: IssueActionParent }>()
+  const [pendingIssueActions, setPendingIssueActions] = createSignal<Array<NonNullable<ReturnType<typeof issueAction>> & { repository: string }>>([])
   const [issueActionHint, setIssueActionHint] = createSignal<string>()
   const [commandHint, setCommandHint] = createSignal<string>()
   const [settingsHint, setSettingsHint] = createSignal<string>()
@@ -264,19 +265,27 @@ function AppContent(props: AppProps) {
       : action.number !== activeIssueNumber() || !canActOnIssue(action.kind)) return
     const repository = data().repo.nameWithOwner
     const retry = props.getIssueAction?.(action.number, action.parent).retry
+    const pendingAction = { ...action, repository }
+    setPendingIssueActions((current) => [...current, pendingAction])
+    setOverlay()
+    setIssueAction()
     try {
       const result = await props.onSubmitIssueAction(action.number, action.kind, action.parent)
-      if (disposed || renderer.isDestroyed || data().repo.nameWithOwner !== repository || issueAction() !== action) return
-      if (result.comment || retry) setRevealActivity({ number: action.number, id: ++revealId, parent: action.parent })
-      setOverlay()
-      setIssueAction()
+      if (disposed || renderer.isDestroyed || data().repo.nameWithOwner !== repository) return
+      if ((result.comment || retry) && (action.parent === "pull" ? activePullNumber() : activeIssueNumber()) === action.number)
+        setRevealActivity({ number: action.number, id: ++revealId, parent: action.parent })
       setToast({ id: ++toastId, title: action.kind === "comment" ? "Comment posted"
         : action.kind === "assignees" ? "Issue assignees updated"
         : action.kind === "duplicate" ? "Issue marked as duplicate" : action.kind === "close" ? "Issue closed" : "Issue reopened",
         message: result.duplicateOf ? `#${action.number} → #${result.duplicateOf}` : `#${action.number}`, duration: 2000, tone: "success" })
     } catch (error) {
-      if (!disposed && !renderer.isDestroyed && issueAction() === action && props.getIssueAction?.(action.number, action.parent).operation.status !== "error")
-        setToast({ id: ++toastId, title: action.parent === "pull" ? "Comment failed" : "Issue action failed", message: error instanceof Error ? error.message : "Unknown error" })
+      if (!disposed && !renderer.isDestroyed && data().repo.nameWithOwner === repository) {
+        const operation = props.getIssueAction?.(action.number, action.parent).operation
+        setToast({ id: ++toastId, title: action.parent === "pull" ? "Comment failed" : "Issue action failed",
+          message: operation?.status === "error" ? operation.message : error instanceof Error ? error.message : "Unknown error" })
+      }
+    } finally {
+      setPendingIssueActions((current) => current.filter((pending) => pending !== pendingAction))
     }
   }
   const refreshIssue = async (number: number) => {
@@ -469,6 +478,11 @@ function AppContent(props: AppProps) {
     return undefined
   }
   const statusKind = (): StatusKind | undefined => {
+    const pendingAction = pendingIssueActions().find((action) => action.repository === data().repo.nameWithOwner)
+    if (pendingAction)
+      return pendingAction.kind === "assignees" ? "updating-issue"
+        : pendingAction.kind === "duplicate" ? "marking-duplicate" : pendingAction.kind === "comment" ? "posting-comment"
+        : pendingAction.kind === "close" ? "closing-issue" : "reopening-issue"
     if (overlay() === "issue-action") {
       const action = issueAction()
       if (action && props.getIssueAction?.(action.number, action.parent).operation.status === "loading")
@@ -791,6 +805,12 @@ function AppContent(props: AppProps) {
       run: openComment,
       get disabled() { return !canComment(); },
     }] : [];
+  const issueActionsContextItems = (): ContextMenuItem[] =>
+    activeIssueNumber() && !diffTarget() && hasIssueActions() ? [{
+      label: "Actions…",
+      run: () => { if (hasIssueActions()) setOverlay("issue-actions"); },
+      get disabled() { return !hasIssueActions(); },
+    }] : [];
   const openMessageContext = (target: ReactionTarget, body: string, position: MousePosition) => {
     const message = () => reactionMessages().find((message) => sameReactionTarget(message.target, target))
     const current = message()
@@ -799,6 +819,7 @@ function AppContent(props: AppProps) {
       { label: "React", run: () => openReactions(target), get disabled() { return message()?.state.canReact === false || props.getReactionAction?.(target).operation.status === "loading" } },
       { label: "Copy text", run: () => void copyToClipboard(body, "Text"), disabled: !body },
       ...commentContextItems(),
+      ...issueActionsContextItems(),
       ...backContextItems(),
     ], () => !!message())
   }
@@ -865,7 +886,7 @@ function AppContent(props: AppProps) {
         get disabled() { return !canClone(); },
       });
     }
-    items.push(...commentContextItems(), ...backContextItems());
+    items.push(...commentContextItems(), ...issueActionsContextItems(), ...backContextItems());
     if (items.length) openContextMenu(position, items, () => true);
   };
   const pageMouse = mouseContextMenu(openPageContext, () => overlay() === undefined, navigation)
