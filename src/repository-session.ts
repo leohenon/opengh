@@ -24,6 +24,7 @@ import {
   createGitHubIssueComment,
   updateGitHubIssueState,
   updateGitHubPullState,
+  updateGitHubPullDraft,
   mergeGitHubPull,
   loadGitHubPullMergeMessage,
   setGitHubIssueAssignees,
@@ -102,6 +103,7 @@ export type RepositoryLoaders = {
   createIssueComment?(repository: string, number: number, body: string): Promise<IssueComment>
   updateIssueState?(repository: string, number: number, state: ListState, reason?: IssueCloseReason): Promise<IssueDetail>
   updatePullState?(repository: string, number: number, state: ListState): Promise<PullRequestDetail>
+  updatePullDraft?(repository: string, number: number, draft: boolean): Promise<PullRequestDetail>
   pullMergeMessage?(repository: string, number: number, expectedHeadSha: string): Promise<PullMergeMessage>
   mergePull?(repository: string, number: number, method: PullMergeMethod, expectedHeadSha: string, message?: PullMergeMessage): Promise<PullRequestDetail>
   setIssueAssignees?(repository: string, number: number, assignees: string[]): Promise<IssueDetail>
@@ -136,6 +138,7 @@ export type RepositorySession = {
   clearCommit(): void
   pullDetail: Accessor<PullDetailState | undefined>
   loadPull(number: number): Promise<void>
+  updatePullDraft(number: number, draft: boolean): Promise<PullRequestDetail>
   loadPullMergeMessage(number: number, expectedHeadSha: string): Promise<PullMergeDraft>
   mergePull(number: number, method: PullMergeMethod, expectedHeadSha: string, message?: PullMergeMessage): Promise<PullRequestDetail>
   loadMorePullComments(): Promise<void>
@@ -184,6 +187,7 @@ const defaultLoaders: RepositoryLoaders = {
   createIssueComment: createGitHubIssueComment,
   updateIssueState: updateGitHubIssueState,
   updatePullState: updateGitHubPullState,
+  updatePullDraft: updateGitHubPullDraft,
   mergePull: mergeGitHubPull,
   pullMergeMessage: loadGitHubPullMergeMessage,
   setIssueAssignees: setGitHubIssueAssignees,
@@ -335,6 +339,7 @@ export function createRepositorySession(loaders: RepositoryLoaders = defaultLoad
   const pullListGeneration: Record<ListState, number> = { open: 0, closed: 0 }
   const [pullDetail, setPullDetail] = createSignal<PullDetailState>()
   let pullGeneration = 0
+  let pullDraftGeneration = 0
   let issueGeneration = 0
   let issueReferencesGeneration = 0
   let commitGeneration = 0
@@ -852,13 +857,18 @@ export function createRepositorySession(loaders: RepositoryLoaders = defaultLoad
 
   const fetchPullContext = async (repository: string, number: number, request: number, previous?: PullContext) => {
     const revision = reactionRevision
+    const draftGeneration = pullDraftGeneration
     try {
       const loaded = await loaders.pullContext(repository, number)
-      if (request !== pullGeneration) return
+      if (request !== pullGeneration || draftGeneration !== pullDraftGeneration) return
+      const current = pullDetail()
+      const draft = current?.number === number ? current.resource.value?.draft : undefined
+      if (typeof draft === "boolean" && typeof loaded.readiness.isDraft === "boolean" && draft !== loaded.readiness.isDraft)
+        throw new Error("Merge readiness does not match the PR stage yet. Refresh the pull request.")
       const value = withThreadReactions(number, loaded, revision)
       setPullDetail((current) => current?.number === number ? { ...current, context: { status: "ready", value } } : current)
     } catch (error) {
-      if (request !== pullGeneration) return
+      if (request !== pullGeneration || draftGeneration !== pullDraftGeneration) return
       setPullDetail((current) => current?.number === number ? { ...current, context: failedResource(error, current.context.value ?? previous) } : current)
     }
   }
@@ -898,6 +908,7 @@ export function createRepositorySession(loaders: RepositoryLoaders = defaultLoad
     const revision = reactionRevision
     const repository = current.repository
     const request = ++pullGeneration
+    const draftGeneration = pullDraftGeneration
     const value = previous?.number === number ? previous.resource.value : undefined
     let comments = previous?.number === number ? previous.comments.value : undefined
     const references = previous?.number === number ? previous.references.value : undefined
@@ -911,11 +922,11 @@ export function createRepositorySession(loaders: RepositoryLoaders = defaultLoad
       let writeRevision = issueWriteRevision.get(key)
       let actionRevision = pullActionRevision.get(key)
       let loaded = await (loaders.pull ?? loadGitHubPull)(repository, number)
-      if (request !== pullGeneration) return
+      if (request !== pullGeneration || draftGeneration !== pullDraftGeneration) return
       while (actionRevision !== pullActionRevision.get(key)) {
         actionRevision = pullActionRevision.get(key)
         loaded = await (loaders.pull ?? loadGitHubPull)(repository, number)
-        if (request !== pullGeneration) return
+        if (request !== pullGeneration || draftGeneration !== pullDraftGeneration) return
       }
       // Retain confirmed comment metadata without discarding fresh permissions or PR state.
       while (writeRevision !== issueWriteRevision.get(key)) {
@@ -946,7 +957,7 @@ export function createRepositorySession(loaders: RepositoryLoaders = defaultLoad
         fetchPullContext(repository, number, request, context),
       ])
     } catch (error) {
-      if (request === pullGeneration) setPullDetail((latest) => ({ number, resource: failedResource(error, latest?.resource.value ?? value),
+      if (request === pullGeneration && draftGeneration === pullDraftGeneration) setPullDetail((latest) => ({ number, resource: failedResource(error, latest?.resource.value ?? value),
         comments: previous?.number === number ? { ...previous.comments, ...(latest?.comments.value ? { value: latest.comments.value } : {}) }
           : { status: "ready", value: { items: [], page: 1, hasMore: false } },
         references: previous?.number === number ? previous.references : { status: "ready", value: [] },
@@ -1328,6 +1339,68 @@ export function createRepositorySession(loaders: RepositoryLoaders = defaultLoad
       void fetchWorkCounts(repository, repositoryGeneration)
     }
     return updated
+  }
+
+  const updatePullDraft = async (number: number, draft: boolean): Promise<PullRequestDetail> => {
+    const current = state()
+    const detail = pullDetail()
+    const pull = detail?.resource.value
+    if (current.status !== "ready" || detail?.number !== number || !pull || detail.resource.status !== "ready")
+      throw new Error("Reload the pull request successfully before changing its stage.")
+    const repository = current.repository
+    const key = issueKey(repository, number, "pull")
+    const action = issueActions()[key] ?? emptyIssueAction
+    if (action.operation.status === "loading") throw new Error("A pull request action is already in progress.")
+    if (action.retry) throw new Error("Retry or discard the pending action first.")
+    const scope = repositoryScope
+    const reactionRead = reactionRevision
+    updateAction(key, value => ({ ...value, operation: loading() }))
+    try {
+      if (typeof draft !== "boolean" || pull.state !== "open" || pull.merged || pull.draft !== !draft)
+        throw new Error("Pull request stage changed; refresh before trying again.")
+      if (pull.permissions?.[draft ? "markDraft" : "markReady"] !== true)
+        throw new Error("You do not have permission to change this pull request's stage.")
+      if (!loaders.updatePullDraft) throw new Error("Pull request draft changes are unavailable.")
+      const loaded = await loaders.updatePullDraft(repository, number, draft)
+      if (loaded.number !== number || loaded.draft !== draft || loaded.state !== "open" || loaded.merged
+        || pull.nodeId !== undefined && loaded.nodeId !== pull.nodeId)
+        throw new Error("GitHub did not confirm the draft change. Check GitHub before retrying.")
+      const here = scope === repositoryScope && state().repository === repository
+      // Draft transitions invalidate context even when the head commit is unchanged.
+      if (here && pullDetail()?.number === number) ++pullDraftGeneration
+      const updated = reconcilePullState(repository, number, loaded, scope, reactionRead)
+      if (here && pullDetail()?.number === number) {
+        const request = pullGeneration
+        const generation = pullDraftGeneration
+        const revision = pullActionRevision.get(key)
+        setPullDetail(latest => latest?.number === number ? { ...latest, context: loadingResource<PullContext>() } : latest)
+        void fetchPullContext(repository, number, request)
+        // Refresh capabilities, but never replace a confirmed stage with an eventually-consistent read.
+        void (async () => {
+          try {
+            const fresh = await (loaders.pull ?? loadGitHubPull)(repository, number)
+            if (scope !== repositoryScope || request !== pullGeneration || generation !== pullDraftGeneration
+              || revision !== pullActionRevision.get(key) || fresh.number !== number || fresh.nodeId !== loaded.nodeId
+              || fresh.draft !== draft || fresh.state !== loaded.state || fresh.merged !== loaded.merged
+              || fresh.headSha !== loaded.headSha) return
+            setPullDetail(latest => latest?.number === number && latest.resource.value ? { ...latest,
+              resource: { ...latest.resource, value: { ...latest.resource.value, permissions: fresh.permissions, merge: fresh.merge } } } : latest)
+          } catch {
+            // The confirmed transition remains successful when capability refresh is unavailable.
+          }
+        })()
+        // An overlapping full refresh may have been invalidated before starting these resources.
+        const latest = pullDetail()
+        if (latest?.comments.status === "loading") void fetchPullComments(repository, number, request, latest.comments.value?.page ?? 1, latest.comments.value)
+        if (latest?.commits.status === "loading") void fetchPullCommits(repository, number, request, latest.commits.value)
+      }
+      updateAction(key, value => ({ ...value, operation: idle() }))
+      return updated
+    } catch (error) {
+      const message = actionError(error, pull.locked ?? false, "pull request")
+      updateAction(key, value => ({ ...value, operation: { status: "error", message } }))
+      throw new Error(message)
+    }
   }
 
   const loadPullMergeMessage = async (number: number, expectedHeadSha: string): Promise<PullMergeDraft> => {
@@ -2037,6 +2110,7 @@ export function createRepositorySession(loaders: RepositoryLoaders = defaultLoad
     pullDetail,
     loadPull,
     mergePull,
+    updatePullDraft,
     loadPullMergeMessage,
     loadMorePullComments,
     retryPullReferences,

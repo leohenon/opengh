@@ -32,6 +32,7 @@ import { IssueReferencesPicker } from "./components/issue-references-picker"
 import { IssueActionDialog, IssueActionsMenu } from "./components/issue-actions"
 import { IssueAssigneesPicker } from "./components/issue-assignees-picker"
 import { PullMergeDialog } from "./components/pull-merge-dialog"
+import { PullDraftDialog } from "./components/pull-draft-dialog"
 import { pullMergeBlocker } from "../pull-merge"
 import { Help } from "./components/help"
 import { Settings } from "./components/settings"
@@ -55,7 +56,7 @@ import { IconProvider } from "./icon-style"
 import { MotionProvider } from "./motion"
 import { MarkdownProvider } from "./markdown-preferences"
 
-type Overlay = "context-menu" | "reactions" | "help" | "branch-picker" | "settings" | "issue-references" | "issue-actions" | "issue-action" | "pull-merge" | "command" | "switch-repo"
+type Overlay = "context-menu" | "reactions" | "help" | "branch-picker" | "settings" | "issue-references" | "issue-actions" | "issue-action" | "pull-merge" | "pull-draft" | "command" | "switch-repo"
 type ToastState = { id: number; title: string; message: string; duration?: number; tone?: "error" | "success" | "info" }
 
 export type AppProps = {
@@ -109,6 +110,7 @@ export type AppProps = {
   onSubmitIssueAction?: (number: number, kind: IssueActionKind, parent?: IssueActionParent) => Promise<IssueActionResult>
   onMergePull?: (number: number, method: PullMergeMethod, expectedHeadSha: string, message?: PullMergeMessage) => Promise<PullRequestDetail>
   onLoadPullMergeMessage?: (number: number, expectedHeadSha: string) => Promise<PullMergeDraft>
+  onUpdatePullDraft?: (number: number, draft: boolean) => Promise<PullRequestDetail>
   pullDetail?: PullDetailState
   onLoadPull?: (number: number) => Promise<void>
   onLoadMorePullComments?: () => Promise<void>
@@ -159,6 +161,8 @@ function AppContent(props: AppProps) {
   const [pendingIssueActions, setPendingIssueActions] = createSignal<Array<NonNullable<ReturnType<typeof issueAction>> & { repository: string }>>([])
   const [mergeTarget, setMergeTarget] = createSignal<{ repository: string; number: number; headSha: string }>()
   const [pendingMerges, setPendingMerges] = createSignal<Array<{ repository: string; number: number }>>([])
+  const [draftTarget, setDraftTarget] = createSignal<{ repository: string; number: number; draft: boolean }>()
+  const [pendingDraftUpdates, setPendingDraftUpdates] = createSignal<Array<NonNullable<ReturnType<typeof draftTarget>>>>([])
   const [issueActionHint, setIssueActionHint] = createSignal<string>()
   const [commandHint, setCommandHint] = createSignal<string>()
   const [settingsHint, setSettingsHint] = createSignal<string>()
@@ -257,7 +261,7 @@ function AppContent(props: AppProps) {
   }
   const actionDetail = () => activePullNumber() ? pullDetail().resource.value : issueDetail().resource.value
   const canAct = (kind: IssueActionKind) => activePullNumber() ? canActOnPull(kind) : canActOnIssue(kind)
-  const hasIssueActions = () => canAct(actionDetail()?.state === "closed" ? "reopen" : "close") || canAct("duplicate") || canAct("assignees") || canOfferMerge()
+  const hasIssueActions = () => canAct(actionDetail()?.state === "closed" ? "reopen" : "close") || canAct("duplicate") || canAct("assignees") || canOfferMerge() || canChangeDraft(true) || canChangeDraft(false)
   const openIssueAction = (kind: IssueActionKind) => {
     const number = activePullNumber() ?? activeIssueNumber()
     const parent = activePullNumber() ? "pull" : undefined
@@ -327,6 +331,39 @@ function AppContent(props: AppProps) {
     return Boolean(number && props.onSubmitIssueAction && pull?.permissions?.[kind]
       && pullDetail().resource.status !== "loading"
       && props.getIssueAction?.(number, "pull").operation.status !== "loading")
+  }
+  const canChangeDraft = (draft: boolean) => {
+    const number = activePullNumber()
+    const pull = pullDetail().resource.value
+    return !!(number && props.onUpdatePullDraft && pull?.state === "open" && !pull.merged && pull.draft === !draft
+      && pull.permissions?.[draft ? "markDraft" : "markReady"] && pullDetail().resource.status === "ready"
+      && props.getIssueAction?.(number, "pull").operation.status !== "loading")
+  }
+  const draftChangeAvailable = () => {
+    const target = draftTarget()
+    return !!(target && target.repository === data().repo.nameWithOwner && target.number === activePullNumber() && canChangeDraft(target.draft))
+  }
+  const openDraftChange = (draft: boolean) => {
+    if (!canChangeDraft(draft)) return
+    setDraftTarget({ repository: data().repo.nameWithOwner, number: activePullNumber()!, draft })
+    setOverlay("pull-draft")
+  }
+  const closeDraftChange = () => { setOverlay(); setDraftTarget() }
+  const submitDraftChange = async () => {
+    const target = draftTarget()
+    if (!target || !props.onUpdatePullDraft || !draftChangeAvailable()) return
+    setPendingDraftUpdates((current) => [...current, target])
+    closeDraftChange()
+    try {
+      await props.onUpdatePullDraft(target.number, target.draft)
+      if (disposed || renderer.isDestroyed || data().repo.nameWithOwner !== target.repository) return
+      setToast({ id: ++toastId, title: target.draft ? "PR marked as draft" : "PR ready for review", message: `#${target.number}`, duration: 2000, tone: "success" })
+    } catch (error) {
+      if (!disposed && !renderer.isDestroyed && data().repo.nameWithOwner === target.repository)
+        setToast({ id: ++toastId, title: "PR stage change failed", message: error instanceof Error ? error.message : "Check the PR on GitHub before retrying." })
+    } finally {
+      setPendingDraftUpdates((current) => current.filter((pending) => pending !== target))
+    }
   }
   const canOfferMerge = () => {
     const pull = pullDetail().resource.value
@@ -532,6 +569,8 @@ function AppContent(props: AppProps) {
     return undefined
   }
   const statusKind = (): StatusKind | undefined => {
+    const pendingDraft = pendingDraftUpdates().find((pending) => pending.repository === data().repo.nameWithOwner)
+    if (pendingDraft) return pendingDraft.draft ? "marking-draft" : "marking-ready"
     if (pendingMerges().some((pending) => pending.repository === data().repo.nameWithOwner)) return "merging-pull"
     const pendingAction = pendingIssueActions().find((action) => action.repository === data().repo.nameWithOwner)
     if (pendingAction)
@@ -706,7 +745,7 @@ function AppContent(props: AppProps) {
   createEffect(() => {
     if (visibleTabs().some((tab) => tab.page === page())) return
     setNavigation((state) => navigate(back(state), "overview"))
-    if (overlay() === "issue-references" || overlay() === "issue-actions" || overlay() === "issue-action" || overlay() === "pull-merge") { setOverlay(); setIssueAction(); setMergeTarget() }
+    if (overlay() === "issue-references" || overlay() === "issue-actions" || overlay() === "issue-action" || overlay() === "pull-merge" || overlay() === "pull-draft") { setOverlay(); setIssueAction(); setMergeTarget(); setDraftTarget() }
   })
 
   createEffect(() => {
@@ -962,7 +1001,7 @@ function AppContent(props: AppProps) {
     const picker: HintEntry[] = [[["picker.up", "picker.down"], "select"], ["picker.accept", "open"], close]
     if (overlay() === "context-menu") return undefined
     if (overlay() === "reactions") return hint(select, ["navigation.activate", "add"], close)
-    if (overlay() === "issue-action" || overlay() === "pull-merge") return issueActionHint()
+    if (overlay() === "issue-action" || overlay() === "pull-merge" || overlay() === "pull-draft") return issueActionHint()
     if (overlay() === "issue-actions") return hint(select, open, close)
     if (overlay() === "help") return hint(close)
     if (overlay() === "settings") return settingsHint()
@@ -1418,10 +1457,16 @@ function AppContent(props: AppProps) {
           permissions={{ close: canAct("close"), reopen: canAct("reopen"), duplicate: canAct("duplicate"), assignees: canAct("assignees") }}
           merge={canOfferMerge() ? { reason: mergeBlocker(), checking: checkingMerge() } : undefined}
           onMerge={openMerge}
+          draftAction={canChangeDraft(true) ? "draft" : canChangeDraft(false) ? "ready" : undefined}
+          onChangeDraft={openDraftChange}
           onOpenGitHub={props.onOpenInBrowser ? () => { setOverlay(); void openInBrowser(activePullNumber()) } : undefined}
           onSelect={openIssueAction}
           onClose={() => setOverlay()}
         />
+      </Show>
+      <Show when={overlay() === "pull-draft" ? draftTarget() : undefined} keyed>
+        {(target) => <PullDraftDialog number={target.number} draft={target.draft} disabled={!draftChangeAvailable()}
+          onSubmit={() => void submitDraftChange()} onClose={closeDraftChange} onHintChange={setIssueActionHint} />}
       </Show>
       <Show when={overlay() === "pull-merge" ? mergeTarget() : undefined} keyed>
         {(target) => <PullMergeDialog number={target.number} headSha={target.headSha}

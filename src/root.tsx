@@ -355,6 +355,7 @@ export function Root(props: {
               onDiscardIssueDraft={session.discardIssueDraft}
               onSubmitIssueAction={session.submitIssueAction}
               onMergePull={session.mergePull}
+              onUpdatePullDraft={session.updatePullDraft}
               onLoadPullMergeMessage={session.loadPullMergeMessage}
               pullDetail={session.pullDetail()}
               onLoadPull={session.loadPull}

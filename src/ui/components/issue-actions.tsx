@@ -20,6 +20,8 @@ export function IssueActionsMenu(props: {
   onSelect(kind: Exclude<IssueActionKind, "comment">): void
   merge?: { reason?: string; checking?: boolean }
   onMerge?(): void
+  draftAction?: "draft" | "ready"
+  onChangeDraft?(draft: boolean): void
   onOpenGitHub?(): void
   onClose(): void
 }) {
@@ -33,8 +35,10 @@ export function IssueActionsMenu(props: {
       { kind: "duplicate", label: "Mark as duplicate…" },
     ] : [{ kind: "reopen", label: `Reopen ${props.parent === "pull" ? "PR" : "issue"}…` }]
     actions.push({ kind: "assignees", label: "Edit assignees…" })
-    const visible: { kind: Exclude<IssueActionKind, "comment"> | "merge" | "github"; label: string; disabled?: boolean }[] =
+    const visible: { kind: Exclude<IssueActionKind, "comment"> | "merge" | "github" | "draft" | "ready"; label: string; disabled?: boolean }[] =
       actions.filter((item) => !(props.parent === "pull" && item.kind === "duplicate") && props.permissions?.[item.kind])
+    if (props.parent === "pull" && props.state === "open" && props.draftAction)
+      visible.unshift({ kind: props.draftAction, label: props.draftAction === "draft" ? "Mark as draft…" : "Ready for review…" })
     if (props.merge) {
       visible.unshift({ kind: "merge", label: "Merge…", disabled: !!props.merge.reason })
       if (props.merge.reason && !props.merge.checking && props.onOpenGitHub) visible.push({ kind: "github", label: "Open on GitHub" })
@@ -48,6 +52,7 @@ export function IssueActionsMenu(props: {
     setSelected(index)
     if (item.kind === "merge") props.onMerge?.()
     else if (item.kind === "github") props.onOpenGitHub?.()
+    else if (item.kind === "draft" || item.kind === "ready") props.onChangeDraft?.(item.kind === "draft")
     else props.onSelect(item.kind)
   }
   useKeyActions({

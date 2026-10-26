@@ -262,7 +262,7 @@ export type PullMergeDraft = PullMergeMessage & { headSha: string }
 export type PullRequestDetail = PullRequestSummary & Partial<ReactionState> & {
   nodeId?: string
   locked?: boolean
-  permissions?: { comment: boolean; close?: boolean; reopen?: boolean; assignees?: boolean; merge?: boolean }
+  permissions?: { comment: boolean; close?: boolean; reopen?: boolean; assignees?: boolean; merge?: boolean; markDraft?: boolean; markReady?: boolean }
   merge?: { methods: PullMergeMethod[]; queueRequired: boolean }
   url: string
   body: string

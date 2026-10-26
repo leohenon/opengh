@@ -50,6 +50,7 @@ function readySession() {
     pullDetail: () => undefined,
     loadPull: idle,
     mergePull: async () => { throw new Error("Merging is unavailable.") },
+    updatePullDraft: async () => { throw new Error("Changing PR stage is unavailable.") },
     loadPullMergeMessage: async () => { throw new Error("Merge messages are unavailable.") },
     loadMorePullComments: idle,
     retryPullReferences: idle,

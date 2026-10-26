@@ -9,6 +9,8 @@ export type StatusKind =
   | "loading-resource"
   | "loading-more"
   | "posting-comment"
+  | "marking-draft"
+  | "marking-ready"
   | "merging-pull"
   | "closing-pull"
   | "reopening-pull"
@@ -23,6 +25,8 @@ const loadingMessages: Record<StatusKind, string> = {
   "loading-resource": "Loading…",
   "loading-more": "Loading more…",
   "posting-comment": "Posting comment…",
+  "marking-draft": "Marking PR as draft…",
+  "marking-ready": "Marking PR ready for review…",
   "merging-pull": "Merging PR…",
   "closing-pull": "Closing PR…",
   "reopening-pull": "Reopening PR…",
