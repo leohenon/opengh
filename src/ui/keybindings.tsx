@@ -1,10 +1,12 @@
-import type { CliRenderer, KeyEvent, TextareaRenderable } from "@opentui/core"
+import type { CliRenderer, KeyEvent, MouseEvent, PasteEvent, TextareaRenderable } from "@opentui/core"
 import { useKeyboard, useRenderer, type InputProps, type TextareaProps } from "@opentui/solid"
-import { createContext, createMemo, onCleanup, splitProps, useContext, type JSX } from "solid-js"
+import { createContext, createEffect, createMemo, on, onCleanup, splitProps, useContext, type JSX } from "solid-js"
 import {
   formatBinding, formatHints, keyActions, matchesKey, resolveKeybindings,
   type HintEntry, type KeyAction, type KeybindingOverrides,
 } from "../keybindings"
+import { indentEditor } from "./editor-indent"
+import { createEditorHistory } from "./editor-history"
 
 export type KeyHandlers = Partial<Record<KeyAction, (event: KeyEvent) => unknown>>
 export type KeyHandlerOptions = { when?: () => boolean; priority?: number; modal?: boolean }
@@ -88,10 +90,17 @@ export function useKeyActions(handlers: KeyHandlers, options: KeyHandlerOptions 
 // OpenTUI merges custom bindings with its defaults. Suspending only native shortcuts
 // is essential: [] must really disable an editing action, while typing/paste stay native.
 const editorActions = keyActions.filter((action) => action.startsWith("editor."))
-function edit(event: KeyEvent, editor: TextareaRenderable, keys: Keybindings, multiline: boolean) {
-  const action = [...editorActions.filter((id) => multiline || id !== "editor.newline"), ...(!multiline ? ["input.submit" as const] : [])]
+const multilineActions = new Set(["editor.newline", "editor.indent", "editor.outdent"])
+function edit(event: KeyEvent, editor: TextareaRenderable, keys: Keybindings, multiline: boolean, history: ReturnType<typeof createEditorHistory>) {
+  if (event.eventType === "release") return
+  const action = [...editorActions.filter((id) => multiline || !multilineActions.has(id)), ...(!multiline ? ["input.submit" as const] : [])]
     .find((id) => keys.matches(event, id))
-  if (!action) return
+  if (!action) {
+    history.record("typing", () => {
+      if (editor.handleKeyPress(event)) event.preventDefault()
+    })
+    return
+  }
   event.preventDefault()
   const select = { select: true }
   const actions: Record<string, () => unknown> = {
@@ -108,39 +117,89 @@ function edit(event: KeyEvent, editor: TextareaRenderable, keys: Keybindings, mu
     "delete-line": () => editor.deleteLine(), "delete-to-line-end": () => editor.deleteToLineEnd(),
     "delete-to-line-start": () => editor.deleteToLineStart(), "backspace": () => editor.deleteCharBackward(),
     "delete": () => editor.deleteChar(), "newline": () => editor.newLine(),
-    "undo": () => editor.undo(), "redo": () => editor.redo(),
+    "indent": () => indentEditor(editor), "outdent": () => indentEditor(editor, true),
+    "undo": () => history.undo(), "redo": () => history.redo(),
     "word-forward": () => editor.moveWordForward(), "word-backward": () => editor.moveWordBackward(),
     "select-word-forward": () => editor.moveWordForward(select), "select-word-backward": () => editor.moveWordBackward(select),
     "delete-word-forward": () => editor.deleteWordForward(), "delete-word-backward": () => editor.deleteWordBackward(),
     "select-all": () => editor.selectAll(), "submit": () => editor.submit(),
   }
-  actions[action.slice(action.indexOf(".") + 1)]?.()
+  const perform = () => { actions[action.slice(action.indexOf(".") + 1)]?.() }
+  if (action === "editor.undo" || action === "editor.redo") perform()
+  else history.record(action === "editor.backspace" ? "backspace" : action === "editor.delete" ? "delete" : undefined, perform)
 }
 
-export function KeyInput(props: InputProps) {
+const editorHistories = new WeakMap<TextareaRenderable, ReturnType<typeof createEditorHistory>>()
+
+// Treat external-editor replacements as one undoable edit, not a new session.
+export function replaceEditorText(editor: TextareaRenderable, text: string) {
+  const replace = () => editor.replaceText(text)
+  const history = editorHistories.get(editor)
+  if (history) history.record(undefined, replace)
+  else replace()
+}
+
+function useEditorHandlers(keys: Keybindings, multiline: boolean) {
+  let editor: TextareaRenderable
+  let history: ReturnType<typeof createEditorHistory>
+  onCleanup(() => {
+    editor?.off("blurred", history.boundary)
+    if (editor) editorHistories.delete(editor)
+  })
+  return {
+    attach(value: TextareaRenderable) {
+      editor = value
+      editor.traits = { suspend: true }
+      history = createEditorHistory(editor, () => {
+        if (!multiline) editor.emit("input", editor.plainText)
+      })
+      editorHistories.set(editor, history)
+      editor.on("blurred", history.boundary)
+    },
+    reset() { history?.reset() },
+    key(event: KeyEvent) { edit(event, editor, keys, multiline, history) },
+    mouseDown(event: MouseEvent, handler?: TextareaProps["onMouseDown"]) {
+      history.boundary()
+      handler?.call(editor, event)
+    },
+    paste(event: PasteEvent, handler?: TextareaProps["onPaste"]) {
+      handler?.call(editor, event)
+      if (event.defaultPrevented) return
+      history.record(undefined, () => editor.handlePaste(event))
+      event.preventDefault()
+    },
+  }
+}
+
+// Change the key to start a fresh draft, even if its text is unchanged.
+type EditorSession = { historyKey?: unknown }
+
+export function KeyInput(props: InputProps & EditorSession) {
   const keys = useKeybindings()
-  const [local, rest] = splitProps(props, ["ref", "onKeyDown"])
-  let input: TextareaRenderable
+  const [local, rest] = splitProps(props, ["ref", "onKeyDown", "onPaste", "onMouseDown", "historyKey"])
+  const editing = useEditorHandlers(keys, false)
+  createEffect(on(() => local.historyKey, () => editing.reset()))
   return <input {...rest} ref={(value) => {
-    input = value
-    value.traits = { suspend: true }
+    editing.attach(value)
     if (typeof local.ref === "function") local.ref(value)
   }} onKeyDown={(event) => {
     local.onKeyDown?.(event)
-    if (!event.defaultPrevented) edit(event, input, keys, false)
-  }} />
+    if (!event.defaultPrevented) editing.key(event)
+  }} onPaste={(event) => editing.paste(event, local.onPaste)}
+    onMouseDown={(event) => editing.mouseDown(event, local.onMouseDown)} />
 }
 
-export function KeyTextarea(props: TextareaProps) {
+export function KeyTextarea(props: TextareaProps & EditorSession) {
   const keys = useKeybindings()
-  const [local, rest] = splitProps(props, ["ref", "onKeyDown"])
-  let textarea: TextareaRenderable
+  const [local, rest] = splitProps(props, ["ref", "onKeyDown", "onPaste", "onMouseDown", "historyKey"])
+  const editing = useEditorHandlers(keys, true)
+  createEffect(on(() => local.historyKey, () => editing.reset()))
   return <textarea {...rest} ref={(value) => {
-    textarea = value
-    value.traits = { suspend: true }
+    editing.attach(value)
     if (typeof local.ref === "function") local.ref(value)
   }} onKeyDown={(event) => {
     local.onKeyDown?.(event)
-    if (!event.defaultPrevented) edit(event, textarea, keys, true)
-  }} />
+    if (!event.defaultPrevented) editing.key(event)
+  }} onPaste={(event) => editing.paste(event, local.onPaste)}
+    onMouseDown={(event) => editing.mouseDown(event, local.onMouseDown)} />
 }

@@ -5,6 +5,8 @@ import { mouseSurface } from "../mouse"
 import { useTheme } from "../theme"
 
 export function Popup(props: {
+  fullscreen?: boolean
+  reserveStatusBar?: boolean
   width?: number
   height: number
   zIndex?: number
@@ -16,9 +18,10 @@ export function Popup(props: {
   const dimensions = useTerminalDimensions()
   const { colors } = useTheme()
   let dismissOnRelease = false
-  const width = () => Math.max(1, Math.min(props.width ?? 64, dimensions().width - 2))
-  const height = () => Math.max(1, Math.min(props.height, dimensions().height - 2))
-  const top = () => props.placement === "center"
+  const width = () => props.fullscreen ? dimensions().width : Math.max(1, Math.min(props.width ?? 64, dimensions().width - 2))
+  // Reserve the application status row only when it is meant to be visible.
+  const height = () => props.fullscreen ? Math.max(1, dimensions().height - (props.reserveStatusBar === false ? 0 : 1)) : Math.max(1, Math.min(props.height, dimensions().height - 2))
+  const top = () => props.fullscreen ? 0 : props.placement === "center"
     ? Math.max(0, Math.floor((dimensions().height - height()) / 2))
     : Math.max(0, Math.min(Math.floor(dimensions().height / 4), dimensions().height - height() - 1))
 
@@ -29,7 +32,7 @@ export function Popup(props: {
       left={0}
       top={0}
       width={dimensions().width}
-      height={dimensions().height}
+      height={props.fullscreen ? height() : dimensions().height}
       zIndex={props.zIndex ?? 100}
       alignItems="center"
       paddingTop={top()}

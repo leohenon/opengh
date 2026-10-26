@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test"
 import { testRender } from "@opentui/solid"
+import type { TextareaRenderable } from "@opentui/core"
 import { createSignal } from "solid-js"
 import { defaultConfig } from "../src/config"
 import type { PullMergeMessage, PullMergeMethod, PullRequestDetail } from "../src/models"
@@ -77,6 +78,8 @@ test("merge UI hides unauthorized actions, explains blockers, confirms methods a
     await view.mockInput.typeText("Custom description")
     view.mockInput.pressEnter()
     await view.mockInput.typeText("Second line")
+    const bodyEditor = view.renderer.root.findDescendantById("merge-message-body") as TextareaRenderable
+    const headlineEditor = view.renderer.root.findDescendantById("merge-message-headline") as TextareaRenderable
     await clickControl(view, "merge-message-continue")
     expect(view.captureCharFrame()).toContain("Custom squash title")
     expect(view.captureCharFrame()).toContain("Second line")
@@ -88,6 +91,17 @@ test("merge UI hides unauthorized actions, explains blockers, confirms methods a
     expect(calls).toEqual([])
     view.mockInput.pressEscape(); await settle()
     expect(view.captureCharFrame()).toContain("Custom squash title")
+    expect(view.renderer.root.findDescendantById("merge-message-body")).toBe(bodyEditor)
+    expect(view.renderer.root.findDescendantById("merge-message-headline")).toBe(headlineEditor)
+    view.mockInput.pressKey("z", { ctrl: true }); await settle()
+    expect(bodyEditor.plainText).toBe("Custom description\n")
+    view.mockInput.pressKey(".", { ctrl: true }); await settle()
+    expect(bodyEditor.plainText).toBe("Custom description\nSecond line")
+    view.mockInput.pressTab(); await settle()
+    view.mockInput.pressKey("z", { ctrl: true }); await settle()
+    expect(headlineEditor.plainText).toBe("")
+    view.mockInput.pressKey(".", { ctrl: true }); await settle()
+    expect(headlineEditor.plainText).toBe("Custom squash title")
     view.mockInput.pressEscape(); await settle()
     view.mockInput.pressEscape(); await settle()
     view.mockInput.pressKey("a"); await settle()
@@ -98,6 +112,8 @@ test("merge UI hides unauthorized actions, explains blockers, confirms methods a
     expect(view.captureCharFrame()).not.toContain("Custom squash title")
     expect(view.captureCharFrame()).not.toContain("Custom description")
     expect(defaultLoads).toBe(2)
+    view.mockInput.pressKey("z", { ctrl: true }); await settle()
+    expect(view.captureCharFrame()).toContain("GitHub default title")
     await clickControl(view, "merge-message-continue")
     await clickControl(view, "merge-confirm")
     expect(calls).toEqual([[summary.number, "squash", "b".repeat(40), { headline: "GitHub default title", body: "GitHub default description" }]])

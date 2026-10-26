@@ -89,7 +89,7 @@ export function PullMergeDialog(props: {
     ? keys.hints(["dialog.confirm", "merge"], ["dialog.close", "back"])
     : stage() === "edit" ? loading() ? keys.hints(["dialog.close", "back"])
       : loadError() ? keys.hints(["dialog.submit", "retry"], ["dialog.close", "back"])
-      : keys.hints([["dialog.nextField", "dialog.previousField"], "field"], ["dialog.submit", "review"], ["dialog.close", "back"])
+      : keys.hints(["dialog.submit", "review"], [["dialog.nextField", "dialog.previousField"], "field"], ["dialog.close", "back"])
     : keys.hints([["navigation.up", "navigation.down"], "method"], ["navigation.activate", "select"], ["dialog.close", "cancel"])))
   onCleanup(() => { disposed = true; props.onHintChange(undefined) })
   useKeyActions({
@@ -128,27 +128,29 @@ export function PullMergeDialog(props: {
             }}</For>
           </box>
         </Show>
-        <Show when={stage() === "edit"}>
-          <Show when={loading()}><text marginTop={1} fg={colors.muted}>Loading GitHub's commit message…</text></Show>
-          <Show when={loadError()}>
-            <text marginTop={1} fg={colors.red} wrapMode="word">{loadError()}</text>
-            <Action id="merge-message-retry" onActivate={() => void loadMessage()}>Retry loading message</Action>
-          </Show>
-          <Show when={!!message() && !loading()}>
-            <text height={1} flexShrink={0} marginTop={1} fg={colors.muted}>Commit title</text>
-            <KeyInput id="merge-message-headline" width="100%" value={message()?.headline ?? ""}
-              focused={field() === "headline"} onMouseDown={() => setField("headline")} onSubmit={() => setField("body")}
-              textColor={colors.text} focusedTextColor={colors.text} backgroundColor={colors.panel} focusedBackgroundColor={colors.panel} cursorColor={colors.blue}
-              onInput={(headline) => changeMessage({ headline })} />
-            <text height={1} flexShrink={0} marginTop={1} fg={colors.muted}>Description (optional)</text>
-            <KeyTextarea id="merge-message-body" ref={(value) => { writer = value }} initialValue={message()?.body ?? ""}
-              flexGrow={1} minHeight={1} width="100%" wrapMode="word" focused={field() === "body"} onMouseDown={() => setField("body")}
-              textColor={colors.text} focusedTextColor={colors.text} backgroundColor={colors.panel} focusedBackgroundColor={colors.panel} cursorColor={colors.blue}
-              onContentChange={() => { if (writer && stage() === "edit") changeMessage({ body: writer.plainText }) }} />
-          </Show>
-          <box flexGrow={message() ? 0 : 1} minHeight={1} />
-          <box height={1} flexShrink={0}>
-            <Action id="merge-message-continue" disabled={!available() || loading() || !validMessage()} onActivate={reviewMessage}>Continue</Action>
+        <Show when={stage() !== "methods" && method() === "squash"}>
+          <box visible={stage() === "edit"} flexGrow={1} minHeight={0} flexDirection="column">
+            <Show when={loading()}><text marginTop={1} fg={colors.muted}>Loading GitHub's commit message…</text></Show>
+            <Show when={loadError()}>
+              <text marginTop={1} fg={colors.red} wrapMode="word">{loadError()}</text>
+              <Action id="merge-message-retry" onActivate={() => void loadMessage()}>Retry loading message</Action>
+            </Show>
+            <Show when={!!message() && !loading()}>
+              <text height={1} flexShrink={0} marginTop={1} fg={colors.muted}>Commit title</text>
+              <KeyInput id="merge-message-headline" width="100%" value={message()?.headline ?? ""}
+                focused={stage() === "edit" && field() === "headline"} onMouseDown={() => setField("headline")} onSubmit={() => setField("body")}
+                textColor={colors.text} focusedTextColor={colors.text} backgroundColor={colors.panel} focusedBackgroundColor={colors.panel} cursorColor={colors.blue}
+                onInput={(headline) => changeMessage({ headline })} />
+              <text height={1} flexShrink={0} marginTop={1} fg={colors.muted}>Description (optional)</text>
+              <KeyTextarea id="merge-message-body" ref={(value) => { writer = value }} initialValue={message()?.body ?? ""}
+                flexGrow={1} minHeight={1} width="100%" wrapMode="word" focused={stage() === "edit" && field() === "body"} onMouseDown={() => setField("body")}
+                textColor={colors.text} focusedTextColor={colors.text} backgroundColor={colors.panel} focusedBackgroundColor={colors.panel} cursorColor={colors.blue}
+                onContentChange={() => { if (writer && stage() === "edit") changeMessage({ body: writer.plainText }) }} />
+            </Show>
+            <box flexGrow={message() ? 0 : 1} minHeight={1} />
+            <box height={1} flexShrink={0}>
+              <Action id="merge-message-continue" disabled={!available() || loading() || !validMessage()} onActivate={reviewMessage}>Continue</Action>
+            </box>
           </box>
         </Show>
         <Show when={stage() === "confirm"}>

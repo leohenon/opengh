@@ -115,6 +115,9 @@ export function Root(props: {
   const [configError, setConfigError] = createSignal("")
   const [configWarningDismissed, setConfigWarningDismissed] = createSignal(false)
   const session = services.createRepositorySession()
+  const [dismissedDraftError, setDismissedDraftError] = createSignal<string>()
+  createEffect(() => { if (!session.draftSaveError?.()) setDismissedDraftError(undefined) })
+  onCleanup(() => session.flushDrafts?.())
   const [localRepository, setLocalRepository] = createSignal<LocalRepository>()
   let commandCancel: (() => void) | undefined
   const refreshLocalRepository = async () => { setLocalRepository(await services.resolveLocalRepository(props.cwd)) }
@@ -123,6 +126,7 @@ export function Root(props: {
   const quit = () => {
     if (quitting) return
     quitting = true
+    session.flushDrafts?.()
     const pending = flushRepositoryTabs()
     if (pending) void pending.finally(() => renderer.destroy())
     else renderer.destroy()
@@ -375,6 +379,10 @@ export function Root(props: {
           )}
         </Match>
         </Switch>
+      </Show>
+      <Show when={session.draftSaveError?.() && session.draftSaveError?.() !== dismissedDraftError()}>
+        <Toast title="Draft not saved locally" message={session.draftSaveError?.() ?? ""}
+          zIndex={400} onDismiss={() => setDismissedDraftError(session.draftSaveError?.())} />
       </Show>
       <Show when={configReloaded()}>
         <Toast

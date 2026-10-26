@@ -164,6 +164,9 @@ function AppContent(props: AppProps) {
   const [draftTarget, setDraftTarget] = createSignal<{ repository: string; number: number; draft: boolean }>()
   const [pendingDraftUpdates, setPendingDraftUpdates] = createSignal<Array<NonNullable<ReturnType<typeof draftTarget>>>>([])
   const [issueActionHint, setIssueActionHint] = createSignal<string>()
+  const [issueEditorExpanded, setIssueEditorExpanded] = createSignal(false)
+  const fullscreenEditorOpen = () => overlay() === "issue-action"
+    && ["comment", "close", "reopen"].includes(issueAction()?.kind ?? "") && issueEditorExpanded()
   const [commandHint, setCommandHint] = createSignal<string>()
   const [settingsHint, setSettingsHint] = createSignal<string>()
   const [revealActivity, setRevealActivity] = createSignal<{ number: number; id: number; parent?: IssueActionParent }>()
@@ -1390,7 +1393,7 @@ function AppContent(props: AppProps) {
       </For>
       </box>
       <StatusBar kind={status()} detail={statusDetail()} hint={shortcutHint()}
-        zIndex={overlay() && (config().showStatusBarHints || status()) ? 350 : 0} />
+        zIndex={overlay() && (config().showStatusBarHints || (status() && !fullscreenEditorOpen())) ? 350 : 0} />
       <Show when={toast()} keyed>
         {(current) => (
           <Toast
@@ -1487,6 +1490,9 @@ function AppContent(props: AppProps) {
             parent={action.parent}
             state={props.getIssueAction?.(action.number, action.parent) ?? emptyIssueAction}
             showScrollbar={config().showScrollbars}
+            showStatusBarHints={config().showStatusBarHints}
+            expanded={action.kind !== "duplicate" && issueEditorExpanded()}
+            onExpandedChange={setIssueEditorExpanded}
             locked={action.parent === "pull" ? pullDetail().resource.value?.locked : issueDetail().resource.value?.locked}
             repositoryUrl={data().repo.url}
             defaultBranch={data().repo.defaultBranch}

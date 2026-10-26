@@ -50,9 +50,11 @@ export const keybindingDefinitions = {
   "dialog.close": binding(["esc"], "Close / cancel dialog"),
   "dialog.confirm": binding(["enter"], "Confirm"),
   "dialog.submit": binding(["ctrl+s"], "Submit / save / review"),
-  "dialog.discard": binding(["ctrl+d"], "Discard draft"),
-  "dialog.togglePreview": binding(["tab", "shift+tab"], "Toggle write / preview"),
-  "dialog.changeReason": binding(["tab", "shift+tab"], "Change close reason"),
+  "dialog.discard": binding(["ctrl+d"], "Clear draft"),
+  "dialog.toggleExpanded": binding(["ctrl+o"], "Expand / restore editor"),
+  "dialog.externalEditor": binding(["ctrl+g"], "Open draft in external editor"),
+  "dialog.togglePreview": binding(["ctrl+p"], "Toggle write / preview"),
+  "dialog.changeReason": binding(["alt+r"], "Change close reason"),
   "dialog.nextField": binding(["tab"], "Next field"),
   "dialog.previousField": binding(["shift+tab"], "Previous field"),
   "references.switchTab": binding(["tab", "shift+tab", "left", "right"], "Switch reference tabs"),
@@ -87,9 +89,11 @@ export const keybindingDefinitions = {
   "editor.delete-to-line-start": binding(["ctrl+u"], "Delete to line start"),
   "editor.backspace": binding(["backspace", "shift+backspace"], "Delete previous character"),
   "editor.delete": binding(["delete", "shift+delete", "ctrl+d"], "Delete next character"),
+  "editor.indent": binding(["tab"], "Indent text / selected lines"),
+  "editor.outdent": binding(["shift+tab"], "Outdent current / selected lines"),
   "editor.newline": binding(["enter"], "Insert newline (multiline)"),
-  "editor.undo": binding(["ctrl+-", "ctrl+_", "super+z"], "Undo"),
-  "editor.redo": binding(["ctrl+.", "ctrl+^", "super+shift+z"], "Redo"),
+  "editor.undo": binding(["ctrl+z", "super+z", "ctrl+-", "ctrl+_"], "Undo"),
+  "editor.redo": binding(["ctrl+shift+z", "super+shift+z", "ctrl+.", "ctrl+^"], "Redo"),
   "editor.word-forward": binding(["alt+f", "alt+right", "ctrl+right"], "Next word"),
   "editor.word-backward": binding(["alt+b", "alt+left", "ctrl+left"], "Previous word"),
   "editor.select-word-forward": binding(["alt+shift+f", "alt+shift+right"], "Select next word"),
@@ -192,7 +196,8 @@ const items: KeyAction[] = ["navigation.activate", "item.open", "item.copy", "vi
 const browse: KeyAction[] = [...globalActions, ...navigationActions, ...tabs, ...items]
 const dialogs: KeyAction[] = ["global.interrupt", "global.reloadConfig", "dialog.close"]
 const picker: KeyAction[] = [...dialogs, "picker.up", "picker.down", "picker.accept"]
-const editor = keyActions.filter((action) => action.startsWith("editor.") && action !== "editor.newline")
+const multilineActions: KeyAction[] = ["editor.newline", "editor.indent", "editor.outdent"]
+const editor = keyActions.filter((action) => action.startsWith("editor.") && !multilineActions.includes(action))
 export const keybindingContexts: Record<string, KeyAction[]> = {
   overview: [...browse.filter((action) => action !== "navigation.activate"), "overview.nextDocument", "overview.previousDocument", "command.clone"],
   commits: [...browse, "item.diff", "commits.chooseBranch"],
@@ -212,16 +217,16 @@ export const keybindingContexts: Record<string, KeyAction[]> = {
   mergeMethods: [...dialogs, "navigation.up", "navigation.down", "navigation.activate", "dialog.submit"],
   mergeMessage: [...dialogs, "dialog.submit", "dialog.nextField", "dialog.previousField"],
   mergeConfirmation: [...dialogs, "dialog.confirm", "navigation.up", "navigation.down", "navigation.pageUp", "navigation.pageDown"],
-  writer: [...dialogs, "dialog.submit", "dialog.discard", "dialog.togglePreview"],
-  closeIssue: [...dialogs, "dialog.submit", "dialog.discard", "dialog.changeReason"],
+  writer: [...dialogs, "dialog.submit", "dialog.discard", "dialog.togglePreview", "dialog.toggleExpanded", "dialog.externalEditor", "editor.indent", "editor.outdent"],
+  closeIssue: [...dialogs, "dialog.submit", "dialog.discard", "dialog.changeReason", "dialog.togglePreview", "editor.indent", "editor.outdent", "dialog.toggleExpanded", "dialog.externalEditor"],
   duplicate: [...dialogs, "dialog.submit", "dialog.discard", "dialog.confirm"],
-  preview: [...dialogs, ...navigationActions, "dialog.submit", "dialog.discard", "dialog.togglePreview"],
+  preview: [...dialogs, ...navigationActions, "dialog.submit", "dialog.discard", "dialog.togglePreview", "dialog.toggleExpanded", "dialog.externalEditor"],
   confirmation: [...dialogs, "dialog.confirm"],
   help: [...dialogs, ...navigationActions, "global.quit", "global.help"],
   commandPreview: [...dialogs, "dialog.confirm", "command.editPath"],
   commandOutput: [...dialogs, ...navigationActions, "command.copyOutput"],
   singleLineEditor: ["global.interrupt", "global.reloadConfig", ...editor, "input.submit"],
-  multilineEditor: ["global.interrupt", "global.reloadConfig", ...editor, "editor.newline"],
+  multilineEditor: ["global.interrupt", "global.reloadConfig", ...editor, ...multilineActions],
 }
 
 export function validateKeybindingConflicts(bindings: ResolvedKeybindings) {

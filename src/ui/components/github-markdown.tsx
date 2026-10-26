@@ -142,6 +142,29 @@ export function GitHubMarkdown(props: { content: string; syntaxStyle: SyntaxStyl
         block = context.defaultRender()
       }
       if (!block) return undefined
+      if (token.type === "list") {
+        // Core 0.6.6 skips checkbox tokens and always draws a normal list marker.
+        const decorateTasks = (list: Extract<typeof token, { type: "list" }>, node: Renderable): void => {
+          list.items.forEach((item, index) => {
+            const row = node.getChildren()[index]
+            if (!row) return
+            const [marker, content] = row.getChildren()
+            if (typeof item.checked === "boolean" && marker instanceof TextRenderable) {
+              const scope = item.checked ? "markup.list.checked" : "markup.list.unchecked"
+              const style = syntaxStyle.mergeStyles(scope)
+              marker.content = item.checked ? "☑ " : "☐ "
+              marker.fg = style.fg ?? foreground
+              marker.attributes = style.attributes
+            }
+            const children = item.tokens.filter((child) => child.type !== "checkbox" && child.type !== "space")
+            children.forEach((child, childIndex) => {
+              const nested = content?.getChildren()[childIndex]
+              if (child.type === "list" && nested) decorateTasks(child as Extract<typeof child, { type: "list" }>, nested)
+            })
+          })
+        }
+        decorateTasks(token as Extract<typeof token, { type: "list" }>, block)
+      }
       if (token.type === "heading" && block instanceof CodeRenderable)
         block.baseHighlight = `markup.heading.${token.depth}`
       block.marginTop = 0

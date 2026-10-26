@@ -1,4 +1,4 @@
-import type { CodeRenderable, SimpleHighlight, TextChunk } from "@opentui/core"
+import { TextAttributes, type CodeRenderable, type SimpleHighlight, type TextChunk } from "@opentui/core"
 import remarkGfm from "remark-gfm"
 import remarkParse from "remark-parse"
 import { unified } from "unified"
@@ -26,10 +26,12 @@ export function compactMarkdownLinks(block: CodeRenderable, options: { padInline
   let source = ""
   let links: Array<{ start: number; end: number; labelStart: number; labelEnd: number; url: string }> = []
   let inlineCode: Array<{ start: number; end: number }> = []
+  let deleted: Array<{ start: number; end: number }> = []
   block.onHighlight = (highlights, context) => {
     source = context.content
     inlineCode = []
     links = []
+    deleted = []
     const tree = parser.parse(source)
     const markers: SimpleHighlight[] = []
     visit(tree, "text", (node) => {
@@ -43,6 +45,11 @@ export function compactMarkdownLinks(block: CodeRenderable, options: { padInline
       // only, so inline code and fenced examples keep their literal backslashes.
       for (const match of text.matchAll(/\\[!"#$%&'()*+,\-./:;<=>?@[\]\\^_`{|}~]/g))
         markers.push([start + match.index!, start + match.index! + 1, "conceal", { conceal: "", isInjection: true }])
+    })
+    visit(tree, "delete", (node) => {
+      const start = node.position?.start.offset
+      const end = node.position?.end.offset
+      if (start !== undefined && end !== undefined) deleted.push({ start, end })
     })
     if (options.padInlineCode) visit(tree, "inlineCode", (node) => {
       const start = node.position?.start.offset
@@ -85,6 +92,12 @@ export function compactMarkdownLinks(block: CodeRenderable, options: { padInline
         if (inside.length > 1) padding.set(inside.at(-1)!, { before: false, after: true })
       }
     }
+    // SyntaxStyle in OpenTUI 0.6.6 cannot represent strikethrough attributes.
+    chunks.forEach((chunk, index) => {
+      const range = context.sourceRanges?.[index]
+      if (range && deleted.some((span) => range.start >= span.start && range.end <= span.end))
+        chunk.attributes = (chunk.attributes ?? 0) | TextAttributes.STRIKETHROUGH
+    })
     const result = await linkify?.(chunks, context) ?? chunks
     let offset = 0
     for (const chunk of result) {

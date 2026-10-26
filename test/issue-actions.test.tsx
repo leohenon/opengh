@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import { testRender } from "@opentui/solid";
-import type { ScrollBoxRenderable, TextRenderable } from "@opentui/core";
-import { createSignal } from "solid-js";
+import type { ScrollBoxRenderable, TextareaRenderable, TextRenderable } from "@opentui/core";
+import { createSignal, Show } from "solid-js";
 import { defaultConfig } from "../src/config";
 import type { IssueActionResult, Paginated } from "../src/models";
 import type {
@@ -10,6 +10,9 @@ import type {
   ResourceState,
 } from "../src/repository-state";
 import { App } from "../src/ui/app";
+import { StatusBar } from "../src/ui/components/status-bar";
+import { IssueActionDialog } from "../src/ui/components/issue-actions";
+import { KeybindingsProvider, replaceEditorText } from "../src/ui/keybindings";
 import { IssueAssigneesPicker } from "../src/ui/components/issue-assignees-picker";
 import { clickControl } from "./fixtures/mouse";
 import {
@@ -33,7 +36,7 @@ test("issue action overlays isolate input and confirm comments, closing, reopeni
     showStatusBarHints: false,
     showScrollbars: false,
   });
-  const hint = "tab preview · ctrl+s submit · ctrl+d discard · esc keep draft";
+  const hint = "ctrl+s submit · ctrl+p preview · ctrl+o expand · ctrl+g editor · ctrl+d clear · esc keep draft";
   const [detail, setDetail] = createSignal<IssueDetailState>({
     number,
     resource: { status: "ready", value: issueDetailFixture },
@@ -152,7 +155,7 @@ test("issue action overlays isolate input and confirm comments, closing, reopeni
     expect(view.renderer.root.findDescendantById("issue-action-discard")).toBeUndefined();
     expect(view.renderer.root.findDescendantById("issue-action-back")).toBeUndefined();
     const submit = view.renderer.root.findDescendantById("issue-action-submit") as TextRenderable;
-    expect(submit.parent!.getChildrenCount()).toBe(1);
+    expect(view.renderer.root.findDescendantById("issue-action-preview")).toBeUndefined();
     const idleBackground = submit.bg;
     await view.mockMouse.moveTo(submit.x, submit.y);
     await view.flush();
@@ -185,7 +188,7 @@ test("issue action overlays isolate input and confirm comments, closing, reopeni
     await view.mockInput.typeText("**Draft** qrs?h1l,");
     view.mockInput.pressEnter();
     await settle();
-    view.mockInput.pressTab();
+    view.mockInput.pressKey("p", { ctrl: true });
     await settle();
     expect(view.captureCharFrame()).toContain("Draft");
     expect(action().body).toBe("**Draft** qrs?h1l,\n");
@@ -212,7 +215,7 @@ test("issue action overlays isolate input and confirm comments, closing, reopeni
     await settle();
     expect(previewScroll.verticalScrollBar.visible).toBe(false);
     setAction((current) => ({ ...current, body: draft }));
-    view.mockInput.pressTab();
+    view.mockInput.pressKey("p", { ctrl: true });
     await settle();
     await clickControl(view, "issue-action-submit");
     view.mockInput.pressKey("s", { ctrl: true });
@@ -284,13 +287,13 @@ test("issue action overlays isolate input and confirm comments, closing, reopeni
     await settle();
     expect(view.captureCharFrame()).toContain(`Close issue · #${number}`);
     expect(view.captureCharFrame()).not.toContain("Reopen issue");
-    expect(statusLine()).toContain("tab change reason");
+    expect(statusLine()).toContain("alt+r change reason");
     expect(view.captureCharFrame()).not.toContain("Preview");
-    view.mockInput.pressTab();
+    view.mockInput.pressKey("r", { meta: true });
     expect(action().reason).toBe("not_planned");
-    view.mockInput.pressTab();
+    view.mockInput.pressKey("r", { meta: true });
     expect(action().reason).toBe("completed");
-    view.mockInput.pressTab();
+    view.mockInput.pressKey("r", { meta: true });
     expect(action().reason).toBe("not_planned");
     view.mockInput.pressArrow("left");
     view.mockInput.pressArrow("right");
@@ -587,4 +590,99 @@ test("PR actions route close, reopen and assignees to PR drafts and hide state a
     await clickControl(view, "assignees-save"); await settle();
     expect(submitted).toEqual(["close", "reopen", "assignees"]);
   } finally { view.renderer.destroy(); }
+});
+
+test("comment editor preserves its cursor indicator and draft across expansion and preview", async () => {
+  const [state, setState] = createSignal<IssueActionState>({
+    body: "First line\nSecond line", reason: "completed", operation: { status: "idle" },
+  });
+  const [hint, setHint] = createSignal("");
+  const [showHints, setShowHints] = createSignal(true);
+  const [expanded, setExpanded] = createSignal(false);
+  const [open, setOpen] = createSignal(true);
+  const view = await testRender(() => <KeybindingsProvider><box width="100%" height="100%" flexDirection="column">
+    <box flexGrow={1} />
+    <StatusBar hint={showHints() ? hint() : undefined} zIndex={showHints() ? 350 : 0} />
+    <Show when={open()}><IssueActionDialog number={42} kind="comment" state={state()} showScrollbar={false} showStatusBarHints={showHints()}
+      expanded={expanded()} onExpandedChange={setExpanded}
+      repositoryUrl="https://github.com/owner/repo"
+      onBodyChange={(body) => setState((value) => ({ ...value, body }))}
+      onReasonChange={() => {}} onDuplicateTargetChange={() => {}} onSubmit={() => {}}
+      onDiscard={() => {}} onClose={() => setOpen(false)} onHintChange={(value) => setHint(value ?? "")} /></Show>
+  </box></KeybindingsProvider>, { width: 100, height: 32 });
+  try {
+    await view.flush();
+    const writer = view.renderer.root.findDescendantById("issue-comment-writer") as TextareaRenderable;
+    expect(hint()).toStartWith("ctrl+s submit · ctrl+p preview · ctrl+o expand");
+    expect(hint()).not.toContain("ctrl+l");
+    expect(view.renderer.root.findDescendantById("issue-comment-lines")).toBeUndefined();
+    expect(view.renderer.root.findDescendantById("issue-action-line-numbers")).toBeUndefined();
+    expect(view.renderer.root.findDescendantById("issue-action-preview")).toBeUndefined();
+    const compactWidth = writer.width;
+    view.mockInput.pressKey("o", { ctrl: true });
+    await view.flush();
+    expect(writer.width).toBeGreaterThan(compactWidth);
+    const expandedFrame = view.captureCharFrame();
+    expect(expandedFrame.split("ctrl+s submit")).toHaveLength(2);
+    expect(expandedFrame.split("\n")[31]).toContain("ctrl+p preview");
+    const hintedHeight = writer.height;
+    setShowHints(false);
+    await view.flush();
+    expect(writer.height).toBe(hintedHeight + 1);
+    expect(view.captureCharFrame()).not.toContain("ctrl+s submit");
+    setShowHints(true);
+    await view.flush();
+    expect(writer.height).toBe(hintedHeight);
+    expect(view.renderer.root.findDescendantById("issue-comment-writer")).toBe(writer);
+    view.mockInput.pressKey("o", { ctrl: true });
+    await view.flush();
+    expect(writer.width).toBe(compactWidth);
+    writer.setCursor(1, 3);
+    await view.flush();
+    expect(view.captureCharFrame()).toContain("Ln 2, Col 4");
+    expect(writer.logicalCursor).toMatchObject({ row: 1, col: 3 });
+    expect(writer.plainText).toBe(state().body);
+    view.mockInput.pressKey("p", { ctrl: true });
+    await view.flush();
+    expect(view.renderer.root.findDescendantById("issue-comment-preview-scroll")).toBeDefined();
+    expect(hint()).toContain("ctrl+p write");
+    expect(hint()).not.toContain("ctrl+l");
+    view.mockInput.pressKey("p", { ctrl: true });
+    await view.flush();
+    expect(writer.plainText).toBe(state().body);
+    expect(view.captureCharFrame()).toContain("Ln 2, Col 4");
+    const beforeExternalEdit = writer.plainText;
+    replaceEditorText(writer, "# Edited externally");
+    await view.flush();
+    expect(state().body).toBe("# Edited externally");
+    view.mockInput.pressKey("z", { ctrl: true });
+    await view.flush();
+    expect(state().body).toBe(beforeExternalEdit);
+
+    view.mockInput.pressKey("o", { ctrl: true });
+    await view.flush();
+    const expandedWidth = writer.width;
+    expect(hint()).toContain("esc keep draft");
+    view.mockInput.pressEscape();
+    await Bun.sleep(40);
+    await view.flush();
+    expect(view.renderer.root.findDescendantById("issue-comment-writer")).toBeUndefined();
+    expect(expanded()).toBe(true);
+    setOpen(true);
+    await view.flush();
+    const reopened = view.renderer.root.findDescendantById("issue-comment-writer") as TextareaRenderable;
+    expect(reopened.width).toBe(expandedWidth);
+    expect(reopened.plainText).toBe(beforeExternalEdit);
+    view.mockInput.pressKey("o", { ctrl: true });
+    await view.flush();
+    expect(reopened.width).toBe(compactWidth);
+    view.mockInput.pressEscape();
+    await Bun.sleep(40);
+    await view.flush();
+    setOpen(true);
+    await view.flush();
+    expect((view.renderer.root.findDescendantById("issue-comment-writer") as TextareaRenderable).width).toBe(compactWidth);
+  } finally {
+    view.renderer.destroy();
+  }
 });

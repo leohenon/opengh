@@ -106,8 +106,10 @@ Use characters (`j`, `G`, `?`), named keys (`enter`, `esc`, `up`), or modifier c
     "dialog.confirm": ["enter"],
     "dialog.submit": ["ctrl+s"],
     "dialog.discard": ["ctrl+d"],
-    "dialog.togglePreview": ["tab", "shift+tab"],
-    "dialog.changeReason": ["tab", "shift+tab"],
+    "dialog.toggleExpanded": ["ctrl+o"],
+    "dialog.externalEditor": ["ctrl+g"],
+    "dialog.togglePreview": ["ctrl+p"],
+    "dialog.changeReason": ["alt+r"],
     "references.switchTab": ["tab", "shift+tab", "left", "right"],
     "settings.previousValue": ["left"],
     "settings.nextValue": ["right"],
@@ -141,9 +143,11 @@ Use characters (`j`, `G`, `?`), named keys (`enter`, `esc`, `up`), or modifier c
     "editor.delete-to-line-start": ["ctrl+u"],
     "editor.backspace": ["backspace", "shift+backspace"],
     "editor.delete": ["delete", "shift+delete", "ctrl+d"],
+    "editor.indent": ["tab"],
+    "editor.outdent": ["shift+tab"],
     "editor.newline": ["enter"],
-    "editor.undo": ["ctrl+-", "ctrl+_", "super+z"],
-    "editor.redo": ["ctrl+.", "ctrl+^", "super+shift+z"],
+    "editor.undo": ["ctrl+z", "super+z", "ctrl+-", "ctrl+_"],
+    "editor.redo": ["ctrl+shift+z", "super+shift+z", "ctrl+.", "ctrl+^"],
     "editor.word-forward": ["alt+f", "alt+right", "ctrl+right"],
     "editor.word-backward": ["alt+b", "alt+left", "ctrl+left"],
     "editor.select-word-forward": ["alt+shift+f", "alt+shift+right"],
@@ -159,6 +163,33 @@ Use characters (`j`, `G`, `?`), named keys (`enter`, `esc`, `up`), or modifier c
   }
 }
 ```
+
+## Text editing
+
+While a text field is focused, **Ctrl+Z** (or **Cmd+Z**) undoes edits and
+**Ctrl+Shift+Z** (or **Cmd+Shift+Z**) redoes them.
+
+- Continuous typing or repeated Backspace/Delete is one undo step. A 750 ms pause, navigation, mouse click, focus change, or switch between typing/backward/forward deletion starts another.
+- Paste, selection replacement, and word/line deletion are separate steps.
+- Undo/redo restores the cursor and selection. A new edit clears redo history.
+- Each field retains up to 100 steps through field switching and Write/Preview or merge review.
+- Discarding or starting a new draft clears history; submitted changes cannot be undone.
+
+These shortcuts are not app-wide actions.
+
+## Markdown composer
+
+- **Ctrl+O** expands/restores the composer without replacing the editing buffer.
+- **Ctrl+G** edits the draft with `$VISUAL`, then `$EDITOR`, falling back to `vi`. Configure GUI editors to wait (for example `code --wait`). Returning imports the text as one undoable edit; cancelling/failure preserves the draft.
+- **Ctrl+D** clears the draft; **Esc** closes the composer while keeping the draft. Reopening remembers whether it was expanded.
+- **Tab / Shift+Tab** indents/outdents text or selected lines by two spaces.
+- **Alt+R** changes the close reason, leaving Tab available for indentation.
+- In the comment composer, **Ctrl+P** toggles the Markdown preview. The shortcut is shown in the status bar; there is no preview button.
+- **Ctrl+S** reviews the submission before posting; it does not send on the first press.
+
+Markdown source is highlighted using the active theme, with punctuation kept visible. Expanding, previewing, and returning from an external editor preserve the editing session.
+
+Drafts are saved locally in `~/.config/opengh/drafts/` (or `$XDG_CONFIG_HOME/opengh/drafts/`) per repository, issue/PR, and action, and restored after restart. Failed submissions keep the draft. A successful comment clears the posted text; if a close/reopen step fails afterward, only that state change is retried. Local-save failures display a warning and retain the draft in memory.
 
 ## Terminal compatibility
 

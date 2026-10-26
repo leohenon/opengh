@@ -33,6 +33,7 @@ import {
   addGitHubReaction,
 } from "./github/client"
 import { GitHubApiError } from "./github/transport"
+import { createDiskDraftStore, type DraftKind, type DraftStore, type IssueDraft } from "./drafts"
 import { loadGitHubDiff } from "./github/diff"
 import { pullMergeBlocker } from "./pull-merge"
 import { reactionKey, reactionParent, validateReactionKind } from "./reactions"
@@ -123,6 +124,8 @@ export type RepositoryLoaders = {
 
 export type RepositorySession = {
   state: Accessor<RepositoryState>
+  flushDrafts?(): void
+  draftSaveError?: Accessor<string | undefined>
   reactionAction(target: ReactionTarget): ReactionActionState
   addReaction(target: ReactionTarget, kind: ReactionKind): Promise<ReactionState>
   diffs?: Accessor<Partial<Record<DiffTarget["kind"], DiffState>>>
@@ -286,7 +289,47 @@ function updateReady(
 
 // Owns repository data and async coordination; pages only receive state and callbacks.
 // Generations reject obsolete repository/branch results; reloads retain usable data.
-export function createRepositorySession(loaders: RepositoryLoaders = defaultLoaders): RepositorySession {
+export function createRepositorySession(
+  loaders: RepositoryLoaders = defaultLoaders,
+  draftStore: DraftStore | undefined = loaders === defaultLoaders ? createDiskDraftStore() : undefined,
+): RepositorySession {
+  const [draftSaveError, setDraftSaveError] = createSignal<string>()
+  const draftErrors = new Map<string, string>()
+  const publishDraftError = () => setDraftSaveError(draftErrors.values().next().value)
+  const activeDraftKinds = new Map<string, DraftKind>()
+  const unpreparedDraftEdits = new Set<string>()
+  const savedDrafts = new Map<string, IssueDraft>()
+  const dirtyDrafts = new Map<string, IssueDraft>()
+  let draftTimer: ReturnType<typeof setTimeout> | undefined
+  const flushDrafts = () => {
+    clearTimeout(draftTimer)
+    draftTimer = undefined
+    if (!draftStore) return
+    for (const [key, draft] of dirtyDrafts) {
+      try {
+        draftStore.save(key, draft)
+        dirtyDrafts.delete(key)
+        draftErrors.delete(`save:${key}`)
+      } catch (error) {
+        draftErrors.set(`save:${key}`, `Draft save failed: ${messageFrom(error)}. Draft retained in memory; automatic local saving is unavailable.`)
+      }
+    }
+    publishDraftError()
+  }
+  const draftSnapshot = (action: IssueActionState): IssueDraft => ({ body: action.body, reason: action.reason, retry: action.retry })
+  const saveDraft = (key: string, action: IssueActionState) => {
+    const kind = activeDraftKinds.get(key)
+    if (!draftStore || !kind) return
+    const draftKey = `${key}:${kind}`
+    const draft = draftSnapshot(action)
+    const previous = savedDrafts.get(draftKey)
+    if (previous?.body === draft.body && previous.reason === draft.reason && previous.retry === draft.retry) return
+    savedDrafts.set(draftKey, draft)
+    dirtyDrafts.set(draftKey, draft)
+    clearTimeout(draftTimer)
+    draftTimer = setTimeout(flushDrafts, 200)
+    draftTimer.unref?.()
+  }
   const [state, setState] = createSignal<RepositoryState>({ status: "loading", repository: "" })
   const [runDetail, setRunDetail] = createSignal<RunDetailState>()
   let runGeneration = 0
@@ -1184,27 +1227,67 @@ export function createRepositorySession(loaders: RepositoryLoaders = defaultLoad
   }
 
   const issueAction = (number: number, parent: IssueActionParent = "issue") => issueActions()[issueKey(state().repository, number, parent)] ?? emptyIssueAction
-  const updateAction = (key: string, update: (action: IssueActionState) => IssueActionState) => {
-    setIssueActions((actions) => ({ ...actions, [key]: update(actions[key] ?? emptyIssueAction) }))
+  const updateAction = (key: string, update: (action: IssueActionState) => IssueActionState, confirmed = false) => {
+    setIssueActions((actions) => {
+      const action = update(actions[key] ?? emptyIssueAction)
+      saveDraft(key, action)
+      return { ...actions, [key]: action }
+    })
+    // Persist the cleared text/retry marker before any second GitHub write or UI work.
+    if (confirmed) flushDrafts()
   }
   const prepareIssueAction = (number: number, kind: IssueActionKind, parent: IssueActionParent = "issue") => {
     if (parent === "pull" && kind === "duplicate") throw new Error("Pull requests cannot be marked as duplicates.")
-    updateAction(issueKey(state().repository, number, parent), (action) => {
+    const key = issueKey(state().repository, number, parent)
+    const current = issueActions()[key]
+    if (draftStore && current?.operation.status !== "loading" && (kind === "comment" || kind === "close" || kind === "reopen")) {
+      const previousKind = activeDraftKinds.get(key)
+      if (previousKind !== kind) {
+        if (previousKind && current) saveDraft(key, current)
+        const draftKey = `${key}:${kind}`
+        let draft = savedDrafts.get(draftKey)
+        // Callers may already have edited the current draft before first prepare.
+        // Never replace such edits with a lazy disk restore.
+        const hasEdits = !previousKind && current && unpreparedDraftEdits.has(key)
+        if (!draft && hasEdits) draft = draftSnapshot(current)
+        if (!draft) {
+          try {
+            draft = draftStore.load(draftKey)
+            draftErrors.delete(`load:${draftKey}`)
+          } catch (error) {
+            draftErrors.set(`load:${draftKey}`, `Draft load failed: ${messageFrom(error)}`)
+          }
+          publishDraftError()
+        }
+        activeDraftKinds.set(key, kind)
+        const restored = { ...emptyIssueAction, ...draft, selectedAssignees: current?.selectedAssignees, duplicateTarget: current?.duplicateTarget }
+        setIssueActions((actions) => ({ ...actions, [key]: restored }))
+        if (hasEdits) saveDraft(key, restored)
+        else savedDrafts.set(draftKey, draftSnapshot(restored))
+        unpreparedDraftEdits.delete(key)
+      }
+    }
+    updateAction(key, (action) => {
       if (action.operation.status === "loading" || action.retry === kind) return action
       // Selecting a new action must not resume a different failed state change.
       const detail = parent === "pull" ? pullDetail() : issueDetail()
       const issue = detail?.number === number ? detail.resource.value : undefined
       const selectedAssignees = issue && kind === "assignees" ? [...issue.assignees] : action.selectedAssignees
-      return { ...action, selectedAssignees, retry: undefined, operation: idle() }
+      return { ...action, selectedAssignees, retry: draftStore ? action.retry : undefined, operation: idle() }
     })
     if (kind === "assignees" && !assignableUsers()) void loadAssignableUsers()
   }
   const updateIssueDraft = (number: number, draft: Partial<Pick<IssueActionState, "body" | "reason" | "duplicateTarget" | "selectedAssignees">>, parent: IssueActionParent = "issue") => {
-    updateAction(issueKey(state().repository, number, parent), (action) => action.operation.status === "loading" || action.retry
-      ? action : { ...action, ...draft, operation: idle() })
+    const key = issueKey(state().repository, number, parent)
+    updateAction(key, (action) => {
+      if (action.operation.status === "loading" || action.retry) return action
+      if (!activeDraftKinds.has(key) && (draft.body !== undefined || draft.reason !== undefined)) unpreparedDraftEdits.add(key)
+      return { ...action, ...draft, operation: idle() }
+    })
   }
   const discardIssueDraft = (number: number, parent: IssueActionParent = "issue") => {
     updateAction(issueKey(state().repository, number, parent), (action) => action.operation.status === "loading" ? action : emptyIssueAction)
+    flushDrafts()
   }
 
   const actionError = (error: unknown, locked: boolean, subject = "issue") => {
@@ -1281,7 +1364,7 @@ export function createRepositorySession(loaders: RepositoryLoaders = defaultLoad
       confirmIssueWrite(key)
       postedComments.set(key, [...(postedComments.get(key) ?? []), comment])
       // Settle the original repository's draft even after navigating away.
-      updateAction(key, (draft) => ({ ...draft, body: "", operation: idle() }))
+      updateAction(key, (draft) => ({ ...draft, body: "", operation: idle() }), true)
       if (stillHere()) {
         setPullDetail((latest) => {
           if (latest?.number !== number) return latest
@@ -1524,7 +1607,7 @@ export function createRepositorySession(loaders: RepositoryLoaders = defaultLoad
         result.comment = comment
         confirmIssueWrite(key)
         postedComments.set(key, [...(postedComments.get(key) ?? []), comment])
-        updateAction(key, (draft) => ({ ...draft, body: "", retry: kind }))
+        updateAction(key, (draft) => ({ ...draft, body: "", retry: kind }), true)
         if (scope === repositoryScope && state().repository === repository) setPullDetail((latest) => {
           if (latest?.number !== number) return latest
           const comments = latest.comments.value ?? { items: [], page: 0, hasMore: true }
@@ -1555,7 +1638,7 @@ export function createRepositorySession(loaders: RepositoryLoaders = defaultLoad
         commentCount: Math.max(loaded.commentCount, previous.commentCount),
         updatedAt: Date.parse(loaded.updatedAt) >= Date.parse(previous.updatedAt) ? loaded.updatedAt : previous.updatedAt,
       }, scope, reactionRead)
-      updateAction(key, () => ({ ...emptyIssueAction, reason: action.reason }))
+      updateAction(key, () => ({ ...emptyIssueAction, reason: action.reason }), true)
       return result
     } catch (error) {
       const retry = issueActions()[key]?.retry
@@ -1641,7 +1724,7 @@ export function createRepositorySession(loaders: RepositoryLoaders = defaultLoad
         confirmIssueWrite(key)
         postedComments.set(key, [...(postedComments.get(key) ?? []), comment])
         // Clear only after confirmation. Save the retry target before the second write.
-        updateAction(key, (draft) => ({ ...draft, body: "", ...(kind !== "comment" ? { retry: kind } : {}) }))
+        updateAction(key, (draft) => ({ ...draft, body: "", ...(kind !== "comment" ? { retry: kind } : {}) }), true)
         if (stillHere()) setIssueDetail((latest) => {
           if (latest?.number !== number) return latest
           const comments = latest.comments.value ?? { items: [], page: 0, hasMore: true }
@@ -1664,7 +1747,7 @@ export function createRepositorySession(loaders: RepositoryLoaders = defaultLoad
         if (updated.state !== nextState) throw new Error("GitHub did not change the issue state. Check your permissions on GitHub.")
         result.issue = reconcileIssueState(repository, number, updated, scope, reactionRead)
       }
-      updateAction(key, () => ({ ...emptyIssueAction, reason: action.reason }))
+      updateAction(key, () => ({ ...emptyIssueAction, reason: action.reason }), true)
       return result
     } catch (error) {
       const retry = issueActions()[key]?.retry
@@ -2094,6 +2177,8 @@ export function createRepositorySession(loaders: RepositoryLoaders = defaultLoad
 
   return {
     state,
+    flushDrafts,
+    draftSaveError,
     reactionAction,
     addReaction,
     diffs,

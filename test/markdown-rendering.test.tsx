@@ -377,6 +377,49 @@ test("minimal Markdown switches live without losing structure, links, or literal
 }, 15_000)
 
 
+test("task markers, deleted text, and lower headings render semantic styles in rich and minimal Markdown", async () => {
+  const [style, setStyle] = createSignal<MarkdownStyle>("rich")
+  const view = await testRender(() => <ThemeProvider name="github"><MarkdownProvider style={style()}>
+    <MarkdownSample content={`#### Fourth
+
+##### Fifth
+
+###### Sixth
+
+~~Obsolete~~ and current.
+
+- [x] Finished
+- [ ] Pending
+  - [x] Nested finished`} />
+  </MarkdownProvider></ThemeProvider>, { width: 80, height: 30 })
+  try {
+    for (const preference of ["rich", "minimal", "rich"] as const) {
+      setStyle(preference)
+      await settle(view)
+      const frame = view.captureCharFrame()
+      expect(frame).toContain("☑ Finished")
+      expect(frame).toContain("☐ Pending")
+      expect(frame).toContain("☑ Nested finished")
+      expect(frame).not.toContain("[x]")
+      const spans = view.captureSpans().lines.flatMap((line) => line.spans)
+      const span = (text: string) => spans.find((item) => item.text.trim() === text || item.text.trim().startsWith(`${text} `))!
+      expect(span("Obsolete").attributes & TextAttributes.STRIKETHROUGH).not.toBe(0)
+      expect(span("Fourth").attributes & TextAttributes.UNDERLINE).not.toBe(0)
+      expect(span("Fifth").attributes & TextAttributes.BOLD).not.toBe(0)
+      expect(span("Sixth").attributes & TextAttributes.ITALIC).not.toBe(0)
+      expect(span("Fourth").attributes & TextAttributes.BOLD).toBe(0)
+      const checked = span("☑")
+      const unchecked = span("☐")
+      expect(checked.attributes & TextAttributes.BOLD).not.toBe(0)
+      if (preference === "minimal") {
+        const foreground = RGBA.fromHex(resolveTheme("github", "dark").text)
+        for (const text of ["☑", "☐", "Obsolete", "Fourth", "Fifth", "Sixth"])
+          expect(span(text).fg).toEqual(foreground)
+      } else expect(checked.fg.equals(unchecked.fg)).toBe(false)
+    }
+  } finally { view.renderer.destroy() }
+}, 15_000)
+
 test("Markdown hierarchy, compact examples, and inline padding respect rich and minimal styles", async () => {
   const [style, setStyle] = createSignal<MarkdownStyle>("rich")
   const content = `# Bun
