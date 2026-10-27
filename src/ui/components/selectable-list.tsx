@@ -18,6 +18,7 @@ export function SelectableList<T>(props: {
   mouseActive?: boolean
   onMouseFocus?: () => void
   showScrollbar?: boolean
+  backgroundColor?: string
   resetKey?: string | number
   empty: string
   rowHeight?: number
@@ -186,7 +187,7 @@ export function SelectableList<T>(props: {
         height={listHeight()}
         flexShrink={0}
         minHeight={0}
-        backgroundColor={colors.canvas}
+        backgroundColor={props.backgroundColor ?? colors.canvas}
         scrollX={false}
         scrollY
       >
@@ -213,7 +214,7 @@ export function SelectableList<T>(props: {
                   alignItems="flex-start"
                   paddingRight={1}
                   {...hover.handlers}
-                  backgroundColor={active() ? colors.panelHover : hover.hovered() ? colors.panel : colors.canvas}
+                  backgroundColor={active() ? colors.panelHover : hover.hovered() ? colors.panel : props.backgroundColor ?? colors.canvas}
                   onMouseDown={(event) => {
                     mousePress = undefined
                     if (!mouseActive() || (event.button !== MouseButton.LEFT && (event.button !== MouseButton.RIGHT || !props.onContextMenu))) return

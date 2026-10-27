@@ -12,6 +12,7 @@ import { GitHubMarkdown } from "../components/github-markdown"
 import type { GitHubMarkdownContext } from "../github-markdown"
 import { ResourceStateView } from "../components/resource-state"
 import { ago, relativeTime } from "../format"
+import { mouseClick } from "../mouse"
 import { detailContentWidth } from "../detail-layout"
 import { issueIcon, referenceColor, referenceIcon, referenceState, referencedPulls } from "../issue-references"
 import { createReactiveMarkdownStyle } from "../markdown-style"
@@ -50,7 +51,7 @@ function IssueDates(props: { issue: IssueDetail; compact: boolean }) {
   )
 }
 
-function ReferencedPulls(props: { resource: ResourceState<IssueReference[]>; repository: string }) {
+function ReferencedPulls(props: { resource: ResourceState<IssueReference[]>; repository: string; interactive: boolean; onOpenReference?: (reference: IssueReference) => void }) {
   const { colors } = useTheme()
   const icons = useIcons()
   const pulls = createMemo(() => referencedPulls(props.resource.value ?? []))
@@ -61,9 +62,18 @@ function ReferencedPulls(props: { resource: ResourceState<IssueReference[]>; rep
         <For each={pulls().slice(0, 3)}>
           {(reference) => (
             <box width="100%" minWidth={0} flexShrink={0} marginTop={1}>
-              <text width="100%" flexShrink={0} fg={referenceColor(colors, reference)}>
-                <a href={reference.url}>{referenceIcon(reference, icons())} #{reference.number} · {referenceState(reference)}</a>
-              </text>
+              <Show when={props.onOpenReference} fallback={(
+                <text width="100%" flexShrink={0} fg={referenceColor(colors, reference)}>
+                  <Show when={props.interactive} fallback={<>{referenceIcon(reference, icons())} #{reference.number} · {referenceState(reference)}</>}>
+                    <a href={reference.url}>{referenceIcon(reference, icons())} #{reference.number} · {referenceState(reference)}</a>
+                  </Show>
+                </text>
+              )}>
+                <text width="100%" flexShrink={0} fg={referenceColor(colors, reference)}
+                  {...mouseClick(() => props.onOpenReference?.(reference), () => props.interactive && Boolean(props.onOpenReference), () => reference)}>
+                  {referenceIcon(reference, icons())} #{reference.number} · {referenceState(reference)}
+                </text>
+              </Show>
               <Show when={reference.repository !== props.repository}>
                 <text width="100%" flexShrink={0} fg={colors.muted}>{reference.repository}</text>
               </Show>
@@ -82,6 +92,7 @@ function ReferencedPulls(props: { resource: ResourceState<IssueReference[]>; rep
 export function IssueScreen(props: {
   number: number
   reactionControls?: ReactionControls
+  onOpenReference?: (reference: IssueReference) => void
   detail: IssueDetailState
   revealActivity?: number
   timelineCollapsed?: boolean
@@ -204,6 +215,7 @@ export function IssueScreen(props: {
                       commentCount={current().commentCount}
                       comments={props.detail.comments}
                       references={props.detail.references}
+                      onOpenReference={props.onOpenReference}
                       events={props.detail.events}
                       subject="issue"
                       repository={repository()}
@@ -221,7 +233,7 @@ export function IssueScreen(props: {
                 <Show when={wide()}>
                   <box width={32} flexShrink={0} minWidth={0} backgroundColor={surface()} paddingX={2} paddingY={1} flexDirection="column">
                     <IssueMetadata issue={current()} compact={false} />
-                    <ReferencedPulls resource={props.detail.references} repository={repository()} />
+                    <ReferencedPulls resource={props.detail.references} repository={repository()} interactive={props.interactive} onOpenReference={props.onOpenReference} />
                     <IssueDates issue={current()} compact={false} />
                   </box>
                 </Show>

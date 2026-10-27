@@ -6,8 +6,8 @@ import type { HintEntry } from "../keybindings"
 import { KeybindingsBoundary, useKeyActions, useKeybindings } from "./keybindings"
 import { cloneCommand, cloneDestination, matchesLocalRepository, type LocalRepository, type CommandSpec, type CommandTask } from "../command-actions"
 import { CommandDialog, type CommandAction } from "./components/command-dialog"
-import type { CommitDetail, DiffContent, DiffTarget, IssueActionKind, IssueActionParent, IssueActionResult, Paginated, ListState, PullMergeDraft, PullMergeMessage, PullMergeMethod, PullRequestDetail, PullReviewThread, ReactionKind, ReactionState, ReactionTarget } from "../models"
-import { back, navigate, openDetail, openDiff, type InitialNavigation, type NavigationState, type Page } from "../navigation"
+import type { IssueReference, CommitDetail, DiffContent, DiffTarget, IssueActionKind, IssueActionParent, IssueActionResult, Paginated, ListState, PullMergeDraft, PullMergeMessage, PullMergeMethod, PullRequestDetail, PullReviewThread, ReactionKind, ReactionState, ReactionTarget } from "../models"
+import { back, navigate, openDetail, openDiff, type DetailTarget, type InitialNavigation, type NavigationState, type Page } from "../navigation"
 import type {
   CommitDetailState,
   RunDetailState,
@@ -82,6 +82,7 @@ export type AppProps = {
   recentRepositories?: readonly string[]
   onRefreshRecentRepositories?: () => Promise<void>
   onSwitchRepository?: (repository: string) => void
+  onOpenReference?: (repository: string, detail: DetailTarget) => void
   onRetryResource?: (resource: RepositoryResource) => void
   canSwitchBranch?: boolean
   onBranchChange?: (branch: string) => void
@@ -137,6 +138,14 @@ export function App(props: AppProps) {
 
 function AppContent(props: AppProps) {
   const renderer = useRenderer()
+  // OpenTUI installs a renderer selection listener for every scrollbox. Retained
+  // tabs, detail panes and popup lists can legitimately exceed Node's default 10.
+  const listenerLimit = renderer.getMaxListeners()
+  const appListenerLimit = Math.max(listenerLimit, 32)
+  if (listenerLimit > 0) renderer.setMaxListeners(appListenerLimit)
+  onCleanup(() => {
+    if (listenerLimit > 0 && renderer.getMaxListeners() === appListenerLimit) renderer.setMaxListeners(listenerLimit)
+  })
   const { colors } = useTheme()
   const dimensions = useTerminalDimensions()
   // Startup intent and preferences are sampled once; later writes must not navigate.
@@ -235,6 +244,18 @@ function AppContent(props: AppProps) {
     setNavigation((state) => openDetail(state, { kind: "pull", number }))
     void props.onLoadPull?.(number)
   }
+  const openReference = (reference: IssueReference) => {
+    setOverlay()
+    const detail: DetailTarget = reference.kind === "commit" ? { kind: "commit", sha: reference.sha }
+      : { kind: reference.kind, number: reference.number }
+    if (reference.repository.toLowerCase() !== data().repo.nameWithOwner.toLowerCase()) {
+      props.onOpenReference?.(reference.repository, detail)
+      return
+    }
+    if (detail.kind === "commit") openCommit(detail.sha)
+    else if (detail.kind === "pull") openPull(detail.number)
+    else if (detail.kind === "issue") openIssue(detail.number)
+  }
   const openRun = (id: number) => {
     setNavigation((state) => openDetail(state, { kind: "run", id }));
     void props.onLoadRun?.(id);
@@ -270,7 +291,9 @@ function AppContent(props: AppProps) {
   const issueDetail = createMemo<IssueDetailState>(() => props.issueDetail && props.issueDetail.number === issueNumber()
     ? props.issueDetail
     : { number: issueNumber() ?? 0, resource: { status: "loading", phase: "load" }, comments: { status: "loading", phase: "load" }, references: { status: "loading", phase: "load" } })
-  const issueMenuItems = createMemo(() => referencedItems(issueDetail().references.value ?? [], {
+  const issueMenuItems = createMemo(() => referencedItems([
+    ...(issueDetail().references.value ?? []), ...(issueDetail().resource.value?.references ?? []),
+  ], {
     repository: data().repo.nameWithOwner, number: issueNumber() ?? 0,
   }))
   const issueDetailPart = () => {
@@ -579,7 +602,9 @@ function AppContent(props: AppProps) {
     if (detail.references.status !== "ready") return "references"
     return "pull"
   }
-  const pullMenuItems = createMemo(() => referencedItems(pullDetail().references.value ?? [], {
+  const pullMenuItems = createMemo(() => referencedItems([
+    ...(pullDetail().references.value ?? []), ...(pullDetail().resource.value?.references ?? []),
+  ], {
     repository: data().repo.nameWithOwner, number: pullNumber() ?? 0,
   }))
   const reactionMessages = createMemo<ReactionMessage[]>(() => {
@@ -630,7 +655,8 @@ function AppContent(props: AppProps) {
     action: props.getReactionAction, add: (target, kind) => addReaction(target, kind), open: openReactions,
     context: openMessageContext,
   } : undefined
-  const activeMenuItems = () => activePullNumber() ? pullMenuItems() : issueMenuItems()
+  const commitMenuItems = createMemo(() => referencedItems(commitResource().value?.references ?? []))
+  const activeMenuItems = () => activeCommitSha() ? commitMenuItems() : activePullNumber() ? pullMenuItems() : issueMenuItems()
   const refreshPull = async (number: number) => {
     const detail = pullDetail()
     if (pullRefresh()?.number === number
@@ -1027,6 +1053,12 @@ function AppContent(props: AppProps) {
       run: () => { if (hasIssueActions()) setOverlay("issue-actions"); },
       get disabled() { return !hasIssueActions(); },
     }] : [];
+  const referencesContextItems = (): ContextMenuItem[] =>
+    (activeIssueNumber() || activePullNumber() || activeCommitSha()) && !diffTarget() && activeMenuItems().length ? [{
+      label: "References…",
+      run: () => { if (activeMenuItems().length) setOverlay("issue-references") },
+      get disabled() { return !activeMenuItems().length },
+    }] : []
   const timelineContextItems = (): ContextMenuItem[] =>
     (activeIssueNumber() || activePullNumber()) && !diffTarget() ? [{
       label: timelineCollapsed() ? "Expand" : "Collapse",
@@ -1041,6 +1073,7 @@ function AppContent(props: AppProps) {
       { label: "Copy text", run: () => void copyToClipboard(body, "Text"), disabled: !body },
       ...commentContextItems(),
       ...issueActionsContextItems(),
+      ...referencesContextItems(),
       ...timelineContextItems(),
       ...backContextItems(),
     ], () => !!message())
@@ -1108,7 +1141,7 @@ function AppContent(props: AppProps) {
         get disabled() { return !canClone(); },
       });
     }
-    items.push(...commentContextItems(), ...issueActionsContextItems(), ...timelineContextItems(), ...backContextItems());
+    items.push(...commentContextItems(), ...issueActionsContextItems(), ...referencesContextItems(), ...timelineContextItems(), ...backContextItems());
     if (items.length) openContextMenu(position, items, () => true);
   };
   const pageMouse = mouseContextMenu(openPageContext, () => overlay() === undefined, navigation)
@@ -1137,7 +1170,7 @@ function AppContent(props: AppProps) {
     if (overlay() === "issue-references") return hint(open, select, ["references.switchTab", "switch tabs"], copy, close)
     // Arrays are priority lists, identical at every terminal width. The footer
     // fits whole hints without hiding recovery/primary actions behind copy/open.
-    const common: HintEntry[] = [help, ...(props.onSwitchRepository ? [["global.switchRepository", "switch repo"] as const] : [])]
+    const common: HintEntry[] = [...(props.onSwitchRepository ? [["global.switchRepository", "switch repo"] as const] : []), help]
     const resource = activeResource()
     if (resource?.status === "loading" && resource.value === undefined) {
       const detail = diffTarget() || activeRunId() || activeCommitSha() || activeIssueNumber() || activePullNumber()
@@ -1165,7 +1198,8 @@ function AppContent(props: AppProps) {
     if (activeRunId()) return hint(back, ...retry,
       ...more(runDetail().jobs.status !== "loading" && runDetail().jobs.value?.hasMore), ...refresh, github, copy, ...common)
     if (activeCommitSha()) return hint(back, ...retry,
-      ...more(commitResource().status !== "loading" && commitResource().value?.files.hasMore), diff, ...refresh, github, copy, ...common)
+      ...more(commitResource().status !== "loading" && commitResource().value?.files.hasMore), diff,
+      ...(commitMenuItems().length ? [["detail.references", "references"] as const] : []), ...refresh, github, copy, ...common)
     if (activeIssueNumber()) return hint(back, ...retry,
       ...more(issueDetail().comments.status !== "loading" && issueDetail().comments.value?.hasMore),
       ...(canActOnIssue("comment") ? [["issue.comment", "comment"] as const] : []),
@@ -1313,7 +1347,7 @@ function AppContent(props: AppProps) {
       if (diffTarget() || !(activeIssueNumber() || activePullNumber())) return false
       setTimelineCollapsed((collapsed) => !collapsed)
     },
-    "detail.references": () => { if (diffTarget() || !(activeIssueNumber() || activePullNumber()) || !activeMenuItems().length) return false; setOverlay("issue-references") },
+    "detail.references": () => { if (diffTarget() || !(activeIssueNumber() || activePullNumber() || activeCommitSha()) || !activeMenuItems().length) return false; setOverlay("issue-references") },
     "command.clone": () => {
       if (page() !== "overview" || !canClone()) return false
       const repository = data().repo.nameWithOwner
@@ -1486,6 +1520,7 @@ function AppContent(props: AppProps) {
             <IssueScreen
               number={number}
               detail={issueDetail()}
+              onOpenReference={openReference}
               timelineCollapsed={timelineCollapsed()}
               reactionControls={reactionControls()}
               revealActivity={revealActivity()?.parent !== "pull" && revealActivity()?.number === number ? revealActivity()?.id : undefined}
@@ -1503,6 +1538,7 @@ function AppContent(props: AppProps) {
             <PullScreen
               number={number}
               detail={pullDetail()}
+              onOpenReference={openReference}
               timelineCollapsed={timelineCollapsed()}
               revealActivity={revealActivity()?.parent === "pull" && revealActivity()?.number === number ? revealActivity()?.id : undefined}
               reactionControls={reactionControls()}
@@ -1686,12 +1722,12 @@ function AppContent(props: AppProps) {
           />
         </Show>}
       </Show>
-      <Show when={overlay() === "issue-references" && (activeIssueNumber() || activePullNumber())}>
+      <Show when={overlay() === "issue-references" && (activeIssueNumber() || activePullNumber() || activeCommitSha())}>
         <IssueReferencesPicker
-          references={(activePullNumber() ? pullDetail() : issueDetail()).references.value ?? []}
-          currentIssue={{ repository: data().repo.nameWithOwner, number: (activeIssueNumber() ?? activePullNumber())! }}
+          references={activeMenuItems()}
+          currentIssue={activeCommitSha() ? undefined : { repository: data().repo.nameWithOwner, number: (activeIssueNumber() ?? activePullNumber())! }}
           showScrollbar={config().showScrollbars}
-          onOpen={(reference) => { setOverlay(); void openInBrowser(reference.number, reference.repository) }}
+          onOpen={openReference}
           onCopy={(reference) => { setOverlay(); void copyToClipboard(reference.url, "URL") }}
           onClose={() => setOverlay()}
         />

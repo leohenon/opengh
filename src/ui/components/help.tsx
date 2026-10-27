@@ -87,6 +87,7 @@ export function Help(props: {
         return [
           entry("navigation.back", "back to commits"),
           ...(props.hasMoreFiles ? [entry("navigation.activate", "load more files")] : []),
+          ...(props.hasReferences ? [entry("detail.references", "open references")] : []),
           entry("item.diff", "view diff"),
           entry("item.open", "open on GitHub"),
           entry("item.copy", "copy commit SHA"),

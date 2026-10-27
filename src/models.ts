@@ -32,6 +32,7 @@ export type IssueSummary = {
 }
 
 export type IssueDetail = IssueSummary & Partial<ReactionState> & {
+  references?: IssueReference[]
   nodeId?: string
   url: string
   body: string
@@ -264,6 +265,7 @@ export type PullMergeMessage = { headline: string; body: string }
 export type PullMergeDraft = PullMergeMessage & { headSha: string }
 
 export type PullRequestDetail = PullRequestSummary & Partial<ReactionState> & {
+  references?: IssueReference[]
   nodeId?: string
   locked?: boolean
   permissions?: { comment: boolean; close?: boolean; reopen?: boolean; assignees?: boolean; merge?: boolean; markDraft?: boolean; markReady?: boolean }
@@ -347,6 +349,7 @@ export type CommitFile = {
 }
 
 export type CommitDetail = CommitSummary & {
+  references?: IssueReference[]
   fullMessage: string
   committer?: { name: string; date: string }
   additions: number

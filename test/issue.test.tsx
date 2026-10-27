@@ -3,6 +3,7 @@ import { testRender } from "@opentui/solid"
 import { createSignal } from "solid-js"
 import type { CommitDetailState, IssueDetailState } from "../src/repository-state"
 import type { IssueDetail, IssueReference } from "../src/models"
+import type { DetailTarget } from "../src/navigation"
 import { App } from "../src/ui/app"
 import { IssueScreen } from "../src/ui/pages/issue"
 import { commitDetailFixture, githubDataFixture, issueDetailFixture, issueCommentsFixture, issuePullReferenceFixture, repositoryOperationsFixture } from "./fixtures/github-data"
@@ -206,7 +207,7 @@ test("zero-comment issues still show PR mentions and open the correct source rep
   const [detail, setDetail] = createSignal<IssueDetailState>()
   let loads = 0
   let retries = 0
-  let opened: { target?: string | number; repository?: string } = {}
+  let opened: { detail?: DetailTarget; repository?: string } = {}
   let copied = ""
   const view = await testRender(() => (
     <App data={githubDataFixture} operations={repositoryOperationsFixture} issueDetail={detail()}
@@ -221,7 +222,7 @@ test("zero-comment issues still show PR mentions and open the correct source rep
         retries++
         setDetail((current) => ({ ...current!, references: { status: "ready", value: [issuePullReferenceFixture] } }))
       }}
-      onOpenInBrowser={async (target, repository) => { opened = { target, repository } }}
+      onOpenReference={(repository, detail) => { opened = { detail, repository } }}
       onCopyToClipboard={async (value) => { copied = value; return true }}
     />
   ), { width: 120, height: 36 })
@@ -251,7 +252,7 @@ test("zero-comment issues still show PR mentions and open the correct source rep
   await view.flush()
   view.mockInput.pressEnter()
   await view.flush()
-  expect(opened).toEqual({ target: 77, repository: "other/repo" })
+  expect(opened).toEqual({ detail: { kind: "pull", number: 77 }, repository: "other/repo" })
   expect(view.renderer.root.findDescendantById("references-tab-pull")).toBeUndefined()
   expect(detail()?.number).toBe(number)
   view.mockInput.pressKey("p")
@@ -371,7 +372,7 @@ test("mixed references render chronologically and the references menu includes i
       title: "Commit reference title", url: `https://github.com/anomalyco/opentui/commit/${"a".repeat(40)}`,
       actor: "max", createdAt: "2026-04-12T12:00:00Z" },
   ]
-  let opened: { target?: string | number; repository?: string } = {}
+  let opened: { detail?: DetailTarget; repository?: string } = {}
   const view = await testRender(() => (
     <App data={githubDataFixture} operations={repositoryOperationsFixture} issueDetail={detail()}
       onLoadIssue={async () => {
@@ -381,7 +382,7 @@ test("mixed references render chronologically and the references menu includes i
           references: { status: "ready", value: references },
         })
       }}
-      onOpenInBrowser={async (target, repository) => { opened = { target, repository } }}
+      onOpenReference={(repository, detail) => { opened = { detail, repository } }}
     />
   ), { width: 120, height: 40 })
   active.push(view)
@@ -403,7 +404,7 @@ test("mixed references render chronologically and the references menu includes i
   expect(view.captureCharFrame()).toContain("PRs (0)")
   view.mockInput.pressEnter()
   await view.flush()
-  expect(opened).toEqual({ target: 8, repository: "other/repo" })
+  expect(opened).toEqual({ detail: { kind: "issue", number: 8 }, repository: "other/repo" })
   view.mockInput.pressKey("?")
   await view.flush()
   expect(view.captureCharFrame()).toContain("open references")
@@ -419,5 +420,5 @@ test("mixed references render chronologically and the references menu includes i
   expect(view.captureCharFrame()).toContain("#77 Fix viewport focus after resize")
   view.mockInput.pressEnter()
   await view.flush()
-  expect(opened).toEqual({ target: 77, repository: "other/repo" })
+  expect(opened).toEqual({ detail: { kind: "pull", number: 77 }, repository: "other/repo" })
 })

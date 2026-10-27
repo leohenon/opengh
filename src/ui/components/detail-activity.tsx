@@ -4,6 +4,7 @@ import type { CommitSummary, IssueCloser, IssueComment, IssueReference, IssueSta
 import type { ResourceState } from "../../repository-state"
 import type { GitHubMarkdownContext } from "../github-markdown"
 import { relativeTime } from "../format"
+import { mouseClick } from "../mouse"
 import { buildActivity, type ActivityEntry } from "../activity"
 import { useIcons } from "../icon-style"
 import { referenceColor, referenceIcon, referenceState } from "../issue-references"
@@ -57,7 +58,7 @@ function Comment(props: {
   )
 }
 
-function ReferenceMention(props: { reference: IssueReference; repository: string }) {
+function ReferenceMention(props: { reference: IssueReference; repository: string; interactive?: boolean; onOpenReference?: (reference: IssueReference) => void }) {
   const { colors } = useTheme()
   const icons = useIcons()
   const identifier = () => {
@@ -76,9 +77,18 @@ function ReferenceMention(props: { reference: IssueReference; repository: string
           </Show>
         </TimelineHeader>
         <box width="100%" minWidth={0} flexShrink={0} paddingLeft={2}>
-          <text width="100%" flexShrink={0} fg={colors.blue}>
-            <a href={props.reference.url}>{props.reference.title}</a>
-          </text>
+          <Show when={props.onOpenReference} fallback={(
+            <text width="100%" flexShrink={0} fg={colors.blue}>
+              <Show when={props.interactive !== false} fallback={props.reference.title}>
+                <a href={props.reference.url}>{props.reference.title}</a>
+              </Show>
+            </text>
+          )}>
+            <text width="100%" flexShrink={0} fg={colors.blue}
+              {...mouseClick(() => props.onOpenReference?.(props.reference), () => props.interactive !== false && Boolean(props.onOpenReference), () => props.reference)}>
+              {props.reference.title}
+            </text>
+          </Show>
         </box>
       </box>
     </TimelineEntry>
@@ -235,6 +245,7 @@ export function DetailActivity(props: {
   pullUrl?: string
   comments: ResourceState<Paginated<IssueComment>>
   references: ResourceState<IssueReference[]>
+  onOpenReference?: (reference: IssueReference) => void
   events?: readonly IssueTimelineEvent[]
   threads?: readonly PullReviewThread[]
   threadsLoading?: boolean
@@ -317,7 +328,7 @@ export function DetailActivity(props: {
                   {(thread) => <ReviewThread collapsed={props.collapsed} number={props.number} reactionControls={props.reactionControls} interactive={props.interactive} thread={thread()} syntaxStyle={props.syntaxStyle} backgroundColor={props.backgroundColor} context={props.context} />}
                 </Match>
                 <Match when={match((entry) => "kind" in entry && (entry.kind === "pull" || entry.kind === "issue" || entry.kind === "commit"))}>
-                  {(reference) => <ReferenceMention reference={reference()} repository={props.repository} />}
+                  {(reference) => <ReferenceMention reference={reference()} repository={props.repository} interactive={props.interactive} onOpenReference={props.onOpenReference} />}
                 </Match>
                 <Match when={match((entry) => "author" in entry)}>
                   {(comment) => <Comment collapsed={props.collapsed} number={props.number} subject={props.subject} reactionControls={props.reactionControls} interactive={props.interactive} comment={comment()} syntaxStyle={props.syntaxStyle} backgroundColor={props.backgroundColor} context={props.context} />}

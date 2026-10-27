@@ -2,7 +2,15 @@ import type { IssuePullReference, IssueReference, ListState, PullRequestSummary 
 import { unicodeIcons, type IconSet } from "./icons"
 import type { AppColors } from "../theme"
 
-export type IssueLinkReference = Extract<IssueReference, { kind: "pull" | "issue" }>
+export type IssueLinkReference = IssueReference
+
+export function referenceKey(reference: IssueReference): string {
+  return `${reference.repository.toLowerCase()}:${reference.kind === "commit" ? reference.sha.toLowerCase() : reference.number}`
+}
+
+export function referenceIdentifier(reference: IssueReference): string {
+  return reference.kind === "commit" ? reference.sha.slice(0, 7) : `#${reference.number}`
+}
 
 export function referencedItems(
   references: readonly IssueReference[],
@@ -10,9 +18,9 @@ export function referencedItems(
 ): IssueLinkReference[] {
   const latest = new Map<string, IssueLinkReference>()
   for (const reference of references) {
-    if (reference.kind === "commit") continue
-    if (currentIssue && reference.repository === currentIssue.repository && reference.number === currentIssue.number) continue
-    const key = `${reference.repository}#${reference.number}`
+    if (reference.kind !== "commit" && currentIssue
+      && reference.repository.toLowerCase() === currentIssue.repository.toLowerCase() && reference.number === currentIssue.number) continue
+    const key = referenceKey(reference)
     const previous = latest.get(key)
     if (!previous || Date.parse(reference.createdAt) > Date.parse(previous.createdAt)) latest.set(key, reference)
   }

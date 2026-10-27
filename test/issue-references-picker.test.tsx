@@ -21,9 +21,9 @@ test("shows all unique references without hints and restores each tab's selectio
   ]
   const currentIssue = { repository: "owner/repo", number: 30 }
   const items = referencedItems(references, currentIssue)
-  expect(items).toHaveLength(16)
-  expect(items[0]?.number).toBe(18)
-  expect(items.find((item) => item.number === 8)?.title).toBe("pull title 8")
+  expect(items).toHaveLength(17)
+  expect(items[0]?.kind).toBe("commit")
+  expect(items.find((item) => item.kind !== "commit" && item.number === 8)?.title).toBe("pull title 8")
   let opened: IssueLinkReference | undefined
   let openCalls = 0
   let copied: IssueLinkReference | undefined
@@ -38,6 +38,7 @@ test("shows all unique references without hints and restores each tab's selectio
     expect(initial).toContain("References")
     expect(initial).toContain("PRs (8)")
     expect(initial).toContain("Issues (8)")
+    expect(initial).toContain("Commits (1)")
     expect(initial).toContain("pull title 8")
     for (const hint of ["esc", "enter", "Tab", "copy", "older duplicate", "commit title", "issue title 30"]) {
       expect(initial).not.toContain(hint)
@@ -59,15 +60,15 @@ test("shows all unique references without hints and restores each tab's selectio
     await view.flush()
     expect(view.captureCharFrame()).toBe(pullFrame)
     view.mockInput.pressEnter()
-    expect(opened?.number).toBe(1)
+    expect((opened?.kind !== "commit" ? opened?.number : undefined)).toBe(1)
     expect(opened?.kind).toBe("pull")
     await clickControl(view, "references-tab-issue")
     expect(view.captureCharFrame()).toBe(issueFrame)
     view.mockInput.pressKey("o")
     view.mockInput.pressKey("y")
-    expect(opened?.number).toBe(12)
+    expect((opened?.kind !== "commit" ? opened?.number : undefined)).toBe(12)
     expect(copied?.kind).toBe("issue")
-    expect(copied?.number).toBe(12)
+    expect((copied?.kind !== "commit" ? copied?.number : undefined)).toBe(12)
     expect(view.renderer.root.findDescendantById("references-copy")).toBeUndefined()
     expect(view.renderer.root.findDescendantById("references-open")).toBeUndefined()
     expect(view.renderer.root.findDescendantById("references-back")).toBeUndefined()
@@ -76,10 +77,14 @@ test("shows all unique references without hints and restores each tab's selectio
     const beforeOpen = openCalls
     await view.mockMouse.click(50, row)
     expect(openCalls).toBe(beforeOpen + 1)
-    expect(opened?.number).toBe(12)
+    expect((opened?.kind !== "commit" ? opened?.number : undefined)).toBe(12)
     view.mockInput.pressArrow("left")
     await view.flush()
     expect(view.captureCharFrame()).toBe(pullFrame)
+    await clickControl(view, "references-tab-commit")
+    expect(view.captureCharFrame()).toContain("commit title")
+    view.mockInput.pressEnter()
+    expect(opened?.kind).toBe("commit")
     await view.mockMouse.click(0, 0); await view.flush()
     expect(closes).toBe(1)
   } finally {

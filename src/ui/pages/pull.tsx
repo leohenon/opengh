@@ -3,7 +3,7 @@ import { useRenderer, useTerminalDimensions } from "@opentui/solid"
 import { useKeyActions } from "../keybindings"
 import { createEffect, createMemo, onCleanup, Show } from "solid-js"
 import { defaultConfig, type DetailLayout } from "../../config"
-import type { PullRequestDetail, PullContext, IssueTimelineEvent } from "../../models"
+import type { PullRequestDetail, PullContext, IssueTimelineEvent, IssueReference } from "../../models"
 import type { PullDetailState, ResourceState } from "../../repository-state"
 import { DetailActivity } from "../components/detail-activity"
 import { TimelineEntry } from "../components/timeline-entry"
@@ -67,6 +67,7 @@ function PullMetadata(props: { pull: PullRequestDetail; compact: boolean; contex
 export function PullScreen(props: {
   number: number
   reactionControls?: ReactionControls
+  onOpenReference?: (reference: IssueReference) => void
   detail: PullDetailState
   revealActivity?: number
   timelineCollapsed?: boolean
@@ -190,6 +191,7 @@ export function PullScreen(props: {
                   commentCount={current().commentCount}
                   comments={props.detail.comments}
                   references={props.detail.references}
+                  onOpenReference={props.onOpenReference}
                   events={props.detail.events}
                   threads={props.detail.context.value?.threads}
                   threadsLoading={props.detail.context.status === "loading"}

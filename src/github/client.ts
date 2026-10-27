@@ -32,6 +32,7 @@ import { createGitHubDocuments } from "./documents"
 import { createGitHubPullContext } from "./pull-context"
 import { createGitHubReactions, parseReactions, parseReactionState, reactionFields } from "./reactions"
 import { githubTransport, type GitHubTransport } from "./transport"
+import { parseTextReferences } from "./text-references"
 
 const PAGE_SIZE = 30
 const BRANCH_PAGE_SIZE = 100
@@ -63,7 +64,10 @@ type IssueResponse = {
   title: string
   user: UserResponse
   created_at: string
-  pull_request?: unknown
+  pull_request?: { merged_at?: string | null } | null
+  draft?: boolean
+  merged?: boolean
+  merged_at?: string | null
 }
 
 type IssueDetailResponse = IssueResponse & {
@@ -422,12 +426,67 @@ export function createGitHubClient(transport: GitHubTransport) {
     return count
   }
 
+  const textReferences = async (
+    repository: string, text: string, source: { actor: string; createdAt: string; number?: number; sha?: string }, markdown = false,
+  ): Promise<IssueReference[]> => {
+    const sameRepository = (target: string) => target.toLowerCase() === repository.toLowerCase()
+    const isSelfCommit = (target: string, sha: string) => sameRepository(target) && source.sha !== undefined
+      && source.sha.toLowerCase().startsWith(sha.toLowerCase())
+    const candidates = parseTextReferences(text, repository, markdown).filter(ref => ref.kind === "issue"
+      ? !(sameRepository(ref.repository) && ref.number === source.number)
+      : !isSelfCommit(ref.repository, ref.sha))
+    const results: (IssueReference | undefined)[] = new Array(candidates.length)
+    let next = 0
+    // Bound concurrent requests without dropping references from longer messages.
+    await Promise.all(Array.from({ length: Math.min(4, candidates.length) }, async () => {
+      while (next < candidates.length) {
+        const index = next++
+        const ref = candidates[index]!
+        try {
+          const shared = { repository: ref.repository, actor: source.actor, createdAt: source.createdAt }
+          if (ref.kind === "commit") {
+            const item = await transport.json<CommitResponse>(`repos/${ref.repository}/commits/${ref.sha}`)
+            if (!/^[a-f\d]{40}$/i.test(item.sha) || isSelfCommit(ref.repository, item.sha)) continue
+            const sha = item.sha.toLowerCase()
+            results[index] = { ...shared, kind: "commit", sha,
+              id: `outgoing:${ref.repository}:commit:${sha}`,
+              title: firstLine(item.commit.message, "No commit message."),
+              url: `https://github.com/${ref.repository}/commit/${sha}` }
+          } else {
+            const item = await transport.json<IssueResponse>(`repos/${ref.repository}/issues/${ref.number}`)
+            const kind = item.pull_request != null ? "pull" : "issue"
+            const common = { ...shared, number: item.number, title: item.title,
+              id: `outgoing:${ref.repository}:${kind}:${item.number}`,
+              url: `https://github.com/${ref.repository}/${kind === "pull" ? "pull" : "issues"}/${item.number}`,
+              state: item.state === "closed" ? "closed" as const : "open" as const }
+            results[index] = kind === "pull"
+              ? { ...common, kind, merged: item.merged === true || item.merged_at != null || item.pull_request?.merged_at != null,
+                draft: item.draft === true }
+              : { ...common, kind }
+          }
+        } catch {
+          // Deleted, private, ambiguous, or unavailable targets must not hide the source detail.
+        }
+      }
+      return undefined
+    }))
+    // Short and full SHAs can resolve to the same commit.
+    const unique = new Map<string, IssueReference>()
+    for (const ref of results) if (ref && !unique.has(ref.id)) unique.set(ref.id, ref)
+    return [...unique.values()]
+  }
+
   const commit = async (repository: string, sha: string, page = 1): Promise<CommitDetail> => {
     const item = await transport.json<CommitDetailResponse>(
       `repos/${repository}/commits/${encodeURIComponent(sha)}?per_page=100&page=${page}`,
     )
+    const summary = commitSummary(item)
+    const references = page === 1 ? await textReferences(repository, item.commit.message, {
+      sha: item.sha, actor: summary.author, createdAt: summary.date,
+    }) : []
     return {
-      ...commitSummary(item),
+      ...summary,
+      ...(references.length ? { references } : {}),
       fullMessage: item.commit.message,
       ...(item.commit.committer ? {
         committer: {
@@ -553,7 +612,11 @@ export function createGitHubClient(transport: GitHubTransport) {
 
   const issue = async (repository: string, number: number): Promise<IssueDetail> => {
     const item = await transport.json<IssueDetailResponse>(`repos/${repository}/issues/${number}`)
-    return withIssuePermissions(repository, number, issueDetail(item))
+    const detail = issueDetail(item)
+    const references = await textReferences(repository, detail.body, {
+      number: detail.number, actor: detail.author, createdAt: detail.createdAt,
+    }, true)
+    return withIssuePermissions(repository, number, { ...detail, ...(references.length ? { references } : {}) })
   }
 
   const issueComments = async (repository: string, number: number, page = 1): Promise<Page<IssueComment>> => {
@@ -943,7 +1006,11 @@ export function createGitHubClient(transport: GitHubTransport) {
   const pull = async (repository: string, number: number): Promise<PullRequestDetail> => {
     const item = await transport.json<PullDetailResponse>(`repos/${repository}/pulls/${number}`)
     const reactions = await bodyReactions(repository, number, "pull")
-    return withPullPermissions(repository, number, { ...pullDetail(item), ...reactions })
+    const detail = pullDetail(item)
+    const references = await textReferences(repository, detail.body, {
+      number: detail.number, actor: detail.author, createdAt: detail.createdAt,
+    }, true)
+    return withPullPermissions(repository, number, { ...detail, ...reactions, ...(references.length ? { references } : {}) })
   }
 
   const pullMergeMessage = async (repository: string, number: number, expectedHeadSha: string): Promise<PullMergeMessage> => {
