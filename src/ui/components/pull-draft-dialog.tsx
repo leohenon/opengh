@@ -21,14 +21,11 @@ export function PullDraftDialog(props: {
   useKeyActions({ "dialog.confirm": submit, "dialog.close": props.onClose }, { priority: 150, modal: true })
 
   return (
-    <Popup width={64} height={(props.draft ? 6 : 8) + (props.disabled ? 2 : 0)} placement="center" zIndex={250} onClose={props.onClose}>
+    <Popup width={64} height={6 + (props.disabled ? 2 : 0)} placement="center" zIndex={250} onClose={props.onClose}>
       <box flexGrow={1} minHeight={0} paddingX={2} paddingBottom={1} flexDirection="column">
         <text fg={colors.text} attributes={TextAttributes.BOLD} wrapMode="word">
           Mark PR #{props.number} {props.draft ? "as draft" : "ready for review"}?
         </text>
-        <Show when={!props.draft}>
-          <text marginTop={1} fg={colors.muted} wrapMode="word">This may request code-owner reviews and trigger automation.</text>
-        </Show>
         <Show when={props.disabled}>
           <text marginTop={1} fg={colors.yellow} wrapMode="word">This action is no longer available. Refresh the PR.</text>
         </Show>

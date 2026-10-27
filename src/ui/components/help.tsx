@@ -10,16 +10,16 @@ import { Popup } from "./popup";
 type ShortcutEntry = { actions: KeyAction[]; description: string };
 const entry = (action: KeyAction | KeyAction[], description: string): ShortcutEntry => ({ actions: typeof action === "string" ? [action] : action, description });
 
-const commonShortcuts: ShortcutEntry[] = [
-  entry(["navigation.down", "navigation.up"], "move / scroll"),
+const navigationShortcuts: ShortcutEntry[] = [
+  entry(["navigation.up", "navigation.down"], "move / scroll"),
   entry(["navigation.halfPageUp", "navigation.halfPageDown"], "half-page up / down"),
-  entry(["navigation.pageUp", "navigation.pageDown"], "page up / down"),
   entry(["navigation.first", "navigation.last"], "jump to top / bottom"),
-  entry("view.refresh", "refresh / retry"),
-  entry("global.switchRepository", "switch repository"),
-  entry("global.reloadConfig", "reload configuration"),
-  entry("global.settings", "settings"),
+];
+const applicationShortcuts: ShortcutEntry[] = [
   entry("global.help", "toggle help"),
+  entry("global.switchRepository", "switch repository"),
+  entry("global.settings", "settings"),
+  entry("global.reloadConfig", "reload configuration"),
   entry(["global.quit", "global.interrupt"], "quit"),
 ];
 
@@ -42,7 +42,6 @@ function Shortcut(props: { keys: string; keyWidth: number; children: JSX.Element
 export function Help(props: {
   onClose: () => void;
   view: Page | "run" | "commit" | "issue" | "pull" | "diff";
-  tabCount: number;
   hasDocumentTabs?: boolean;
   hasMoreFiles?: boolean;
   hasMoreComments?: boolean;
@@ -78,19 +77,19 @@ export function Help(props: {
         ];
       case "commits":
         return [
-          entry("item.diff", "view diff"),
           entry("navigation.activate", "open commit"),
           entry("commits.chooseBranch", "choose branch"),
+          entry("item.diff", "view diff"),
           entry("item.open", "open on GitHub"),
           entry("item.copy", "copy commit SHA"),
         ];
       case "commit":
         return [
-          entry("item.diff", "view diff"),
           entry("navigation.back", "back to commits"),
+          ...(props.hasMoreFiles ? [entry("navigation.activate", "load more files")] : []),
+          entry("item.diff", "view diff"),
           entry("item.open", "open on GitHub"),
           entry("item.copy", "copy commit SHA"),
-          ...(props.hasMoreFiles ? [entry("navigation.activate", "load more files")] : []),
         ];
       case "issues":
         return [
@@ -102,32 +101,32 @@ export function Help(props: {
       case "issue":
         return [
           entry("navigation.back", "back to issues"),
+          ...(props.hasMoreComments ? [entry("navigation.activate", "load more comments")] : []),
           ...(props.canComment ? [entry("issue.comment", "add comment")] : []),
           ...(props.hasIssueActions ? [entry("issue.actions", "issue actions")] : []),
           entry("item.open", "open on GitHub"),
           entry("item.copy", "copy issue URL"),
           ...(props.hasReferences ? [entry("detail.references", "open references")] : []),
-          ...(props.hasMoreComments ? [entry("navigation.activate", "load more comments")] : []),
         ];
       case "pulls":
         return [
-          entry("item.diff", "view diff"),
           entry("navigation.activate", "open pull request"),
           entry("work.toggleState", "toggle open/closed"),
+          entry("item.diff", "view diff"),
           entry("item.open", "open on GitHub"),
           entry("item.copy", "copy pull request URL"),
         ];
       case "pull":
         return [
-          entry("item.diff", "view diff"),
           entry("navigation.back", "back to pull requests"),
+          ...(props.hasMoreComments ? [entry("navigation.activate", "load more comments")] : []),
+          ...(props.canComment ? [entry("issue.comment", "add comment")] : []),
           ...(props.canReview ? [entry("review.open", "review pull request")] : []),
           ...(props.hasIssueActions ? [entry("issue.actions", "PR actions")] : []),
-          ...(props.canComment ? [entry("issue.comment", "add comment")] : []),
+          entry("item.diff", "view diff"),
           entry("item.open", "open on GitHub"),
           entry("item.copy", "copy pull request URL"),
           ...(props.hasReferences ? [entry("detail.references", "open references")] : []),
-          ...(props.hasMoreComments ? [entry("navigation.activate", "load more comments")] : []),
         ];
       case "actions":
         return [
@@ -146,27 +145,38 @@ export function Help(props: {
         return [];
     }
   });
-  const tabActions = (): KeyAction[] => ["navigation.tab1", "navigation.tab2", "navigation.tab3", "navigation.tab4", "navigation.tab5"].slice(0, props.tabCount) as KeyAction[];
   const shortcuts = createMemo(() => {
+    const pageEntries = viewShortcuts();
+    const primaryActions: KeyAction[] = ["navigation.back", "navigation.activate", "issue.comment", "review.open", "issue.actions"];
+    const primary = pageEntries.filter((item) => item.actions.some((action) => primaryActions.includes(action)));
+    const external = pageEntries.filter((item) => item.actions.includes("item.open") || item.actions.includes("item.copy"));
+    const options = pageEntries.filter((item) => !primary.includes(item) && !external.includes(item));
+    // Stable sections across every page: primary actions, navigation/options,
+    // external actions, then app controls. Numbered tab keys are in the header.
     const entries = props.view === "diff" ? [
       entry("navigation.back", "close diff; return to origin"),
       entry("diff.focus", "switch files / diff focus"),
-      ...(props.canReview ? [entry("review.open", "review pull request")] : []),
-      entry("diff.toggleFiles", "toggle sidebar; hide → diff focus"),
       entry("navigation.activate", "files → diff; error → file list"),
-      entry(tabActions(), "switch tabs; retain diff state"),
-      entry(["diff.previousHunk", "diff.nextHunk"], "previous / next hunk"),
+      ...(props.canReview ? [entry("review.open", "review pull request")] : []),
+      ...navigationShortcuts,
       entry(["navigation.previousTab", "navigation.nextTab"], "files: switch tabs"),
       entry(["diff.panLeft", "diff.panRight"], "diff: horizontal pan"),
+      entry(["diff.previousHunk", "diff.nextHunk"], "previous / next hunk"),
+      entry("diff.toggleFiles", "toggle sidebar; hide → diff focus"),
       entry("diff.toggleLayout", "toggle split / unified"),
       entry("diff.toggleWrap", "toggle line wrapping"),
+      entry("view.refresh", "refresh / retry"),
       entry("item.open", "open diff on GitHub"),
-      ...commonShortcuts,
+      ...applicationShortcuts,
     ] : [
-      ...viewShortcuts(),
-      entry([...tabActions(), "navigation.previousTab", "navigation.nextTab"], "switch tabs"),
+      ...primary,
+      ...navigationShortcuts,
+      entry(["navigation.previousTab", "navigation.nextTab"], "switch tabs"),
+      ...options,
       ...(props.command ? [entry("command.clone", props.command)] : []),
-      ...commonShortcuts,
+      entry("view.refresh", "refresh / retry"),
+      ...external,
+      ...applicationShortcuts,
     ];
     return entries.flatMap(({ actions, description }) => {
       const label = [...new Set(actions.map((action) => keys.key(action, true)).filter(Boolean))].join(" / ");

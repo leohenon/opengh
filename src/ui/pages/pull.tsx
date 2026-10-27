@@ -176,7 +176,9 @@ export function PullScreen(props: {
                   <text width="100%" flexShrink={0} marginTop={1} fg={colors.red}>× {props.detail.resource.status === "error" ? props.detail.resource.message : ""}</text>
                 </Show>
                 <Show when={props.detail.context.value && !wide()}>
-                  <PullContextMetadata context={props.detail.context.value!} compact repository={repository()} />
+                  <box id="pull-detail-context" width="100%" minWidth={0} flexShrink={0} marginTop={1}>
+                    <PullContextMetadata context={props.detail.context.value!} compact repository={repository()} />
+                  </box>
                 </Show>
                 <DetailActivity
                   number={props.number} reactionControls={props.reactionControls} interactive={props.interactive}

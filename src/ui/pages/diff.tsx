@@ -359,7 +359,7 @@ export function DiffScreen(props: {
     contextMouse.onMouseDrag()
     bodyMouse.onMouseDrag()
   })
-  const keys = useKeyActions({
+  useKeyActions({
     "review.open": () => { if (!props.review) return false; props.review.onOpenReview() },
     "diff.focus": () => {
       bodyMouse.onMouseDrag()
@@ -434,10 +434,10 @@ export function DiffScreen(props: {
         </Show>
       </box>
       <Show when={error()}>
-        <text width="100%" flexShrink={0} fg={colors.red}>{[error(), keys.hints(["view.refresh", "retry"], ["navigation.activate", "file list"], ["item.open", "GitHub"])].filter(Boolean).join(" · ")}</text>
+        <text width="100%" flexShrink={0} fg={colors.red}>{error()}</text>
       </Show>
       <Show when={parsed().notice}>
-        <text width="100%" flexShrink={0} fg={colors.muted}>{[parsed().notice, props.resource.value?.kind === "files" ? keys.hint("view.refresh", "retry full diff") : ""].filter(Boolean).join(" · ")}</text>
+        <text width="100%" flexShrink={0} fg={colors.muted}>{parsed().notice}</text>
       </Show>
       <box flexGrow={1} minHeight={0} minWidth={0} flexDirection="row">
         <box

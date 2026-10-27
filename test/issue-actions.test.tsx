@@ -274,7 +274,7 @@ test("issue action overlays isolate input and confirm comments, closing, reopeni
     view.mockInput.pressKey("a");
     await settle();
     expect(view.captureCharFrame()).toContain("Close issue");
-    expect(statusLine()).toBe("↑/↓ select · enter open · esc close");
+    expect(statusLine()).toBe("enter open · ↑/↓ select · esc close");
     expect(view.captureCharFrame()).toContain("Mark as duplicate");
     await view.mockMouse.click(0, 0);
     await settle();
@@ -287,13 +287,11 @@ test("issue action overlays isolate input and confirm comments, closing, reopeni
     await settle();
     expect(view.captureCharFrame()).toContain(`Close issue · #${number}`);
     expect(view.captureCharFrame()).not.toContain("Reopen issue");
-    expect(statusLine()).toContain("alt+r change reason");
+    expect(statusLine()).toContain("enter select");
     expect(view.captureCharFrame()).not.toContain("Preview");
-    view.mockInput.pressKey("r", { meta: true });
-    expect(action().reason).toBe("not_planned");
-    view.mockInput.pressKey("r", { meta: true });
-    expect(action().reason).toBe("completed");
-    view.mockInput.pressKey("r", { meta: true });
+    view.mockInput.pressArrow("down"); await settle();
+    expect(view.captureCharFrame()).toContain("› Not planned…");
+    view.mockInput.pressEnter(); await settle();
     expect(action().reason).toBe("not_planned");
     view.mockInput.pressArrow("left");
     view.mockInput.pressArrow("right");
@@ -437,12 +435,15 @@ test("assignee suggestions filter locally, preserve selection, retry and save in
     expect(candidateCalls).toBe(2);
     expect(view.captureCharFrame()).not.toContain("Retry loading users");
     await clickControl(view, "assignees-save"); await settle();
+    expect(submitted).toEqual([]);
+    await clickControl(view, "assignees-confirm"); await settle();
     expect(view.captureCharFrame()).toContain("Save failed");
     expect(view.captureCharFrame().replace(/\s+/g, " ")).toContain("GitHub before retrying.");
     expect(action().selectedAssignees).toEqual(["max", "jane"]);
     expect(action().body).toBe("Comment draft");
     fail = false;
     await clickControl(view, "assignees-save"); await settle();
+    await clickControl(view, "assignees-confirm"); await settle();
     // Saving feedback lives in the status bar, which delays its loading indicator.
     await Bun.sleep(220); await view.flush();
     expect(view.captureCharFrame()).toContain("Saving assignees…");
@@ -506,13 +507,15 @@ test("issue shortcuts and hints hide actions without viewer permission", async (
   }
 });
 
-test("assignee picker limits selection to ten while allowing removal", async () => {
+test("assignee picker limits selection and requires confirmation before saving", async () => {
   const logins = Array.from({ length: 11 }, (_, index) => `user${index}`);
   const [action, setAction] = createSignal<IssueActionState>({ body: "", reason: "completed", operation: { status: "idle" }, selectedAssignees: logins.slice(0, 10) });
+  let saves = 0;
+  let closes = 0;
   const view = await testRender(() => <IssueAssigneesPicker number={42} state={action()}
     users={{ status: "ready", value: { items: logins, page: 1, hasMore: false } }}
     onChange={(selectedAssignees) => setAction((current) => ({ ...current, selectedAssignees }))}
-    onLoadMore={() => {}} onSubmit={() => {}} onHintChange={() => {}} onClose={() => {}} />,
+    onLoadMore={() => {}} onSubmit={() => { saves++; }} onHintChange={() => {}} onClose={() => { closes++; }} />,
     { width: 80, height: 30 });
   const settle = async () => { await view.flush(); await Bun.sleep(40); await view.flush(); };
   try {
@@ -532,6 +535,26 @@ test("assignee picker limits selection to ten while allowing removal", async () 
     expect(view.captureCharFrame()).not.toContain("Maximum 10 assignees.");
     view.mockInput.pressEnter(); await settle();
     expect(action().selectedAssignees).toHaveLength(10);
+    view.mockInput.pressKey("s", { ctrl: true }); await settle();
+    expect(saves).toBe(0);
+    expect(view.captureCharFrame()).toContain("Save assignees for #42?");
+    view.mockInput.pressKey("s", { ctrl: true }); await settle();
+    expect(saves).toBe(0);
+    view.mockInput.pressEscape(); await settle();
+    expect(closes).toBe(0);
+    expect(action().selectedAssignees).toHaveLength(10);
+    expect(view.renderer.root.findDescendantById("assignees-confirm")).toBeUndefined();
+    await clickControl(view, "assignees-save");
+    expect(saves).toBe(0);
+    await clickControl(view, "assignees-confirm");
+    expect(saves).toBe(1);
+    expect(action().selectedAssignees).toHaveLength(10);
+    setAction((current) => ({ ...current, selectedAssignees: [] }));
+    view.mockInput.pressKey("s", { ctrl: true }); await settle();
+    expect(view.captureCharFrame()).toContain("Remove all assignees from #42?");
+    expect(saves).toBe(1);
+    view.mockInput.pressEnter(); await settle();
+    expect(saves).toBe(2);
   } finally { view.renderer.destroy(); }
 });
 
@@ -588,6 +611,8 @@ test("PR actions route close, reopen and assignees to PR drafts and hide state a
     await clickControl(view, "assignee-row-1");
     expect(action().selectedAssignees).toEqual(["jane", "john"]);
     await clickControl(view, "assignees-save"); await settle();
+    expect(submitted).toEqual(["close", "reopen"]);
+    await clickControl(view, "assignees-confirm"); await settle();
     expect(submitted).toEqual(["close", "reopen", "assignees"]);
   } finally { view.renderer.destroy(); }
 });
@@ -685,4 +710,74 @@ test("comment editor preserves its cursor indicator and draft across expansion a
   } finally {
     view.renderer.destroy();
   }
+});
+
+
+test("closing issues selects a reason before editing and preserves it through clear and confirmation", async () => {
+  const [state, setState] = createSignal<IssueActionState>({ body: "", reason: "completed", operation: { status: "idle" } });
+  const [open, setOpen] = createSignal(true);
+  const [parent, setParent] = createSignal<"issue" | "pull">("issue");
+  const submissions: Array<{ body: string; reason: string }> = [];
+  let reasonChanges = 0;
+  let closes = 0;
+  const view = await testRender(() => <KeybindingsProvider><Show when={open()}>
+    <IssueActionDialog number={42} kind="close" parent={parent()} state={state()} showScrollbar={false}
+      repositoryUrl="https://github.com/owner/repo"
+      onBodyChange={body => setState(current => ({ ...current, body }))}
+      onReasonChange={reason => { reasonChanges++; setState(current => ({ ...current, reason })); }}
+      onDuplicateTargetChange={() => {}}
+      onSubmit={() => { submissions.push({ body: state().body, reason: state().reason }); setOpen(false); }}
+      onDiscard={() => setState({ body: "", reason: "completed", operation: { status: "idle" } })}
+      onClose={() => { closes++; setOpen(false); }} onHintChange={() => {}} />
+  </Show></KeybindingsProvider>, { width: 100, height: 32 });
+  const escape = async () => { view.mockInput.pressEscape(); await Bun.sleep(40); await view.flush(); };
+  try {
+    await view.flush();
+    expect(view.renderer.root.findDescendantById("issue-close-reason-menu")).toBeDefined();
+    expect(view.renderer.root.findDescendantById("issue-comment-writer")).toBeUndefined();
+    view.mockInput.pressEnter(); await view.flush();
+    expect(submissions).toEqual([]);
+    const editor = view.renderer.root.findDescendantById("issue-comment-writer") as TextareaRenderable;
+    await view.mockInput.typeText("Closing explanation"); await view.flush();
+    await escape();
+    expect(closes).toBe(0);
+    expect(state().body).toBe("Closing explanation");
+    expect(view.renderer.root.findDescendantById("issue-close-reason-menu")).toBeDefined();
+    view.mockInput.pressArrow("down"); view.mockInput.pressEnter(); await view.flush();
+    expect(state().reason).toBe("not_planned");
+    expect(view.captureCharFrame()).toContain("Close issue · #42 · Not planned");
+    expect(view.renderer.root.findDescendantById("issue-comment-writer") === editor).toBe(true);
+    expect(editor.plainText).toBe("Closing explanation");
+    view.mockInput.pressKey("d", { ctrl: true }); await view.flush();
+    expect(state().body).toBe("");
+    expect(state().reason).toBe("not_planned");
+    view.mockInput.pressKey("z", { ctrl: true }); await view.flush();
+    expect(state().body).toBe("Closing explanation");
+    expect(state().reason).toBe("not_planned");
+    view.mockInput.pressKey(".", { ctrl: true }); await view.flush();
+    expect(state().body).toBe("");
+    expect(view.renderer.root.findDescendantById("issue-action-confirm")).toBeUndefined();
+    view.mockInput.pressKey("s", { ctrl: true }); await view.flush();
+    expect(submissions).toEqual([]);
+    expect(view.captureCharFrame()).toContain("Close issue #42?");
+    expect(view.captureCharFrame()).toContain("Reason: Not planned");
+    view.mockInput.pressEnter(); await view.flush();
+    expect(submissions).toEqual([{ body: "", reason: "not_planned" }]);
+
+    // A posted comment must never be sent again or have its pending close reason changed.
+    setState({ body: "", reason: "not_planned", retry: "close", operation: { status: "error", message: "Closing failed" } });
+    setOpen(true); await view.flush();
+    expect(view.renderer.root.findDescendantById("issue-close-reason-menu")).toBeUndefined();
+    expect(view.captureCharFrame()).toContain("Comment posted.");
+    expect(reasonChanges).toBe(2);
+    await escape();
+    expect(closes).toBe(1);
+    expect(state().reason).toBe("not_planned");
+
+    setParent("pull");
+    setState({ body: "", reason: "completed", operation: { status: "idle" } });
+    setOpen(true); await view.flush();
+    expect(view.renderer.root.findDescendantById("issue-close-reason-menu")).toBeUndefined();
+    expect(view.captureCharFrame()).toContain("Close PR · #42");
+  } finally { view.renderer.destroy(); }
 });

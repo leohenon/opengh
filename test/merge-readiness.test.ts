@@ -21,4 +21,10 @@ test("merge status distinguishes blockers, waiting, unknown data, optional failu
   expect(mergeReadinessStatus({ ...clean, checks: [{ id: "required", name: "build", state: "failure", required: true }] }).status).toBe("blocked")
   expect(mergeReadinessStatus({ ...clean, checks: [{ id: "unknown", name: "build", state: "success" }] }).status).toBe("unavailable")
   expect(mergeReadinessStatus(clean, "b".repeat(40)).status).toBe("unavailable")
+  const unstable: PullReadiness = { ...clean, mergeStateStatus: "UNSTABLE",
+    checks: [{ id: "optional", name: "expected-failure", state: "failure", required: false }] }
+  expect(mergeReadinessStatus(unstable).status).toBe("ready")
+  expect(mergeReadinessStatus({ ...unstable, checks: [{ ...unstable.checks[0]!, required: true }] }).status).toBe("blocked")
+  expect(mergeReadinessStatus({ ...unstable, checks: [{ ...unstable.checks[0]!, required: undefined }] }).status).toBe("unavailable")
+  expect(mergeReadinessStatus({ ...unstable, checksComplete: false }).status).toBe("unavailable")
 })

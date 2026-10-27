@@ -105,6 +105,7 @@ test("inline comments publish immediately and independently of the overall revie
     expect(diffLoads).toBe(beforeRefresh + 1)
     expect(setup.renderer.root.findDescendantById("review-submit")).toBeUndefined()
     setup.mockInput.pressKey("R"); await settle()
+    setup.mockInput.pressEnter(); await settle()
     await setup.mockInput.typeText("Overall review feedback"); await settle()
     setup.mockInput.pressKey("s", { ctrl: true }); await settle()
     expect(submissions).toBe(0)

@@ -10,7 +10,7 @@ import type { IssueActionState } from "../src/repository-state"
 import { ContextMenu } from "../src/ui/components/context-menu"
 import { ReactionPicker } from "../src/ui/components/reaction-picker"
 import { SearchablePicker } from "../src/ui/components/searchable-picker"
-import { KeybindingsProvider, KeyInput, KeyTextarea, useKeyActions } from "../src/ui/keybindings"
+import { KeybindingsProvider, KeyInput, KeyTextarea, replaceEditorText, useKeyActions } from "../src/ui/keybindings"
 import { githubDataFixture, repositoryOperationsFixture } from "./fixtures/github-data"
 
 const active: Array<{ renderer: { destroy(): void; isDestroyed: boolean } }> = []
@@ -371,13 +371,14 @@ test("issue draft controls and confirmation hints follow remaps without leaking 
   view.mockInput.pressKey("F3")
   expect(submitted).toBe(1)
   await view.flush()
-  view.mockInput.pressKey("u", { ctrl: true })
-  await view.flush()
-  expect(state().body).toBe("")
   view.mockInput.pressKey("F6")
   await view.flush()
   expect(discarded).toBe(1)
+  expect(state().body).toBe("")
   view.mockInput.pressKey("z", { ctrl: true })
+  await view.flush()
+  expect(state().body).toBe("qrs?,")
+  view.mockInput.pressKey(".", { ctrl: true })
   await view.flush()
   expect(state().body).toBe("")
   view.mockInput.pressKey("F4")
@@ -451,4 +452,52 @@ test("multiline indentation preserves selected Unicode lines and is one undoable
   expect(editor.plainText).toBe("one\n界\nlast")
   view.mockInput.pressKey("z", { ctrl: true })
   expect(editor.plainText).toBe(initial)
+})
+
+
+test("single and multiline clears preserve undo, cursor and selection but fresh drafts reset history", async () => {
+  for (const singleLine of [true, false]) {
+    let editor!: TextareaRenderable
+    const seed = "Draft 界 text"
+    const [value, setValue] = createSignal(seed)
+    const [session, setSession] = createSignal(0)
+    const view = await testRender(() => <KeybindingsProvider>
+      {singleLine ? <KeyInput ref={item => { editor = item }} focused value={value()} historyKey={session()} onInput={setValue} width={40} />
+        : <KeyTextarea ref={item => { editor = item }} focused initialValue={seed} historyKey={session()}
+          onContentChange={() => { if (editor) setValue(editor.plainText) }} width={40} height={6} />}
+    </KeybindingsProvider>, { width: 50, height: 10 })
+    active.push(view)
+    await view.flush()
+    editor.gotoBufferEnd()
+    await view.mockInput.typeText(" extra")
+    await view.flush()
+    const text = editor.plainText
+    editor.cursorOffset = 5
+    editor.setSelection(1, 5)
+    const cursor = editor.cursorOffset
+    const selection = editor.getSelection()
+    replaceEditorText(editor, "")
+    await view.flush()
+    expect(value()).toBe("")
+    expect(editor.plainText).toBe("")
+    // Repeating Clear on an empty field must not erase the previous clear or typing.
+    replaceEditorText(editor, "")
+    view.mockInput.pressKey("z", { ctrl: true }); await view.flush()
+    expect(editor.plainText).toBe(text)
+    expect(value()).toBe(text)
+    expect(editor.cursorOffset).toBe(cursor)
+    expect(editor.getSelection()).toEqual(selection)
+    view.mockInput.pressKey("z", { ctrl: true }); await view.flush()
+    expect(editor.plainText).toBe(seed)
+    view.mockInput.pressKey(".", { ctrl: true }); await view.flush()
+    expect(editor.plainText).toBe(text)
+    view.mockInput.pressKey(".", { ctrl: true }); await view.flush()
+    expect(value()).toBe("")
+    // A fresh draft resets the stack even when it starts with the same empty text.
+    setSession(current => current + 1)
+    await view.flush()
+    view.mockInput.pressKey("z", { ctrl: true }); await view.flush()
+    expect(editor.plainText).toBe("")
+    expect(value()).toBe("")
+  }
 })

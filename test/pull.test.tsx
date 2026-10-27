@@ -115,6 +115,9 @@ test("pull request details map GitHub data and preserve list navigation across n
     expect(loaded).toEqual([summary.number, summary.number])
     view.resize(48, 34)
     await settle()
+    const compactDescription = view.renderer.root.findDescendantById("pull-detail-description")!
+    const compactContext = view.renderer.root.findDescendantById("pull-detail-context")!
+    expect(compactContext.y - (compactDescription.y + compactDescription.height)).toBe(1)
     expect(view.captureCharFrame()).toContain("Draft")
     expect(view.captureCharFrame()).toContain("jane, UI team")
     expect(view.captureCharFrame()).toContain("accessibility")

@@ -40,13 +40,14 @@ export function mergeReadinessStatus(readiness: PullReadiness, expectedHeadSha?:
     unavailable.push("Conflict status unknown; refresh readiness.")
   }
   switch (readiness.mergeStateStatus) {
-    case "CLEAN": case "DIRTY": case "DRAFT": break
+    // UNSTABLE means non-passing checks, not unknown readiness. Required
+    // checks are evaluated above; failures in optional checks do not block merging.
+    case "CLEAN": case "UNSTABLE": case "DIRTY": case "DRAFT": break
     case "BLOCKED":
       if (!draft && !blocked.length && !waiting.length) blocked.push("Repository requirements block merging; check GitHub.")
       break
     case "BEHIND": unavailable.push("Branch is behind base; confirm update requirements on GitHub."); break
     case "HAS_HOOKS": unavailable.push("Merge hooks reported; confirm requirements on GitHub."); break
-    case "UNSTABLE": unavailable.push("GitHub reports unstable checks; inspect results."); break
     default: unavailable.push("Merge state unavailable; refresh readiness.")
   }
 

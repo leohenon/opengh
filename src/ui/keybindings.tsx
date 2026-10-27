@@ -129,13 +129,20 @@ function edit(event: KeyEvent, editor: TextareaRenderable, keys: Keybindings, mu
   else history.record(action === "editor.backspace" ? "backspace" : action === "editor.delete" ? "delete" : undefined, perform)
 }
 
-const editorHistories = new WeakMap<TextareaRenderable, ReturnType<typeof createEditorHistory>>()
+const editorHistories = new WeakMap<TextareaRenderable, {
+  history: ReturnType<typeof createEditorHistory>
+  publish(): void
+}>()
 
-// Treat external-editor replacements as one undoable edit, not a new session.
+// Clears and external-editor replacements are ordinary undoable edits. Publish
+// single-line input changes too, so controlled values cannot overwrite the edit.
 export function replaceEditorText(editor: TextareaRenderable, text: string) {
-  const replace = () => editor.replaceText(text)
-  const history = editorHistories.get(editor)
-  if (history) history.record(undefined, replace)
+  const binding = editorHistories.get(editor)
+  const replace = () => {
+    editor.replaceText(text)
+    binding?.publish()
+  }
+  if (binding) binding.history.record(undefined, replace)
   else replace()
 }
 
@@ -150,10 +157,9 @@ function useEditorHandlers(keys: Keybindings, multiline: boolean) {
     attach(value: TextareaRenderable) {
       editor = value
       editor.traits = { suspend: true }
-      history = createEditorHistory(editor, () => {
-        if (!multiline) editor.emit("input", editor.plainText)
-      })
-      editorHistories.set(editor, history)
+      const publish = () => { if (!multiline) editor.emit("input", editor.plainText) }
+      history = createEditorHistory(editor, publish)
+      editorHistories.set(editor, { history, publish })
       editor.on("blurred", history.boundary)
     },
     reset() { history?.reset() },

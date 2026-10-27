@@ -181,8 +181,11 @@ function AppContent(props: AppProps) {
   const [pendingDraftUpdates, setPendingDraftUpdates] = createSignal<Array<NonNullable<ReturnType<typeof draftTarget>>>>([])
   const [issueActionHint, setIssueActionHint] = createSignal<string>()
   const [issueEditorExpanded, setIssueEditorExpanded] = createSignal(false)
-  const fullscreenEditorOpen = () => overlay() === "issue-action"
-    && ["comment", "close", "reopen"].includes(issueAction()?.kind ?? "") && issueEditorExpanded()
+  const [reviewEditorActive, setReviewEditorActive] = createSignal(false)
+  const [issueEditorActive, setIssueEditorActive] = createSignal(false)
+  const fullscreenEditorOpen = () => issueEditorExpanded() && (
+    overlay() === "pull-review" && reviewEditorActive() || overlay() === "review-comment"
+    || overlay() === "issue-action" && issueEditorActive())
   const [commandHint, setCommandHint] = createSignal<string>()
   const [settingsHint, setSettingsHint] = createSignal<string>()
   const [revealActivity, setRevealActivity] = createSignal<{ number: number; id: number; parent?: IssueActionParent }>()
@@ -1114,77 +1117,77 @@ function AppContent(props: AppProps) {
     const diff: HintEntry = ["item.diff", "diff"]
     const help: HintEntry = ["global.help", "help"]
     const close: HintEntry = ["dialog.close", "close"]
-    const picker: HintEntry[] = [[["picker.up", "picker.down"], "select"], ["picker.accept", "open"], close]
+    const picker: HintEntry[] = [["picker.accept", "open"], [["picker.up", "picker.down"], "select"], close]
     if (overlay() === "context-menu") return undefined
-    if (overlay() === "reactions") return hint(select, ["navigation.activate", "add"], close)
+    if (overlay() === "reactions") return hint(["navigation.activate", "add"], select, close)
     if (overlay() === "issue-action" || overlay() === "pull-merge" || overlay() === "pull-draft" || overlay() === "pull-review" || overlay() === "review-comment" || overlay() === "inline-retry") return issueActionHint()
-    if (overlay() === "issue-actions") return hint(select, open, close)
+    if (overlay() === "issue-actions") return hint(open, select, close)
     if (overlay() === "help") return hint(close)
     if (overlay() === "settings") return settingsHint()
     if (overlay() === "command") return commandHint()
     if (overlay() === "branch-picker" || overlay() === "switch-repo") return hint(...picker)
-    if (overlay() === "issue-references") return hint(select, open, ["references.switchTab", "switch tabs"], copy, close)
-    const common: HintEntry[] = [...(props.onSwitchRepository ? [["global.switchRepository", "switch repo"] as const] : []), help]
+    if (overlay() === "issue-references") return hint(open, select, ["references.switchTab", "switch tabs"], copy, close)
+    // Arrays are priority lists, identical at every terminal width. The footer
+    // fits whole hints without hiding recovery/primary actions behind copy/open.
+    const common: HintEntry[] = [help, ...(props.onSwitchRepository ? [["global.switchRepository", "switch repo"] as const] : [])]
     const resource = activeResource()
     if (resource?.status === "loading" && resource.value === undefined) {
       const detail = diffTarget() || activeRunId() || activeCommitSha() || activeIssueNumber() || activePullNumber()
       const tabs: HintEntry = [["navigation.previousTab", "navigation.nextTab"], "tabs"]
       return hint(...(detail ? [back] : []), ...(!diffTarget() ? [tabs] : []), ...common)
     }
+    const canRefresh = operations().refresh.status !== "loading" && resource?.status !== "loading"
+    const retry: HintEntry[] = canRefresh && resource?.status === "error" ? [["view.refresh", "retry"]] : []
+    const refresh: HintEntry[] = canRefresh && resource?.status !== "error" ? [["view.refresh", "refresh"]] : []
+    const more = (available: boolean | undefined): HintEntry[] => available ? [["navigation.activate", "load more"]] : []
+    const list = (hasItems: boolean): HintEntry[] => hasItems ? [open, select] : []
     if (diffTarget()) {
       const files = diffFocus()[page()] === "files"
       const horizontal: HintEntry = [files ? ["navigation.previousTab", "navigation.nextTab"] : ["diff.panLeft", "diff.panRight"], files ? "tabs" : "pan"]
-      const focus: HintEntry = ["diff.focus", `focus ${files ? "diff" : "files"}`]
-      if (dimensions().width < 80) return hint(back, horizontal, focus, help)
-      return hint(back, horizontal, [["navigation.up", "navigation.down"], files ? "files" : "scroll"], focus,
-        ["diff.toggleFiles", "toggle files"], [["diff.previousHunk", "diff.nextHunk"], "hunks"],
-        ...(diffResource().status === "error" ? [["navigation.activate", "file list"] as const]
-          : [["diff.toggleLayout", "layout"], ["diff.toggleWrap", "wrap"]] as const), help)
+      const failed = resource?.status === "error"
+      const recovery: HintEntry[] = failed ? [...retry, ["navigation.activate", "file list"]]
+        : canRefresh && diffResource().value?.kind === "files" ? [["view.refresh", "retry full diff"]] : []
+      return hint(back, ...recovery, ["diff.focus", `focus ${files ? "diff" : "files"}`], horizontal,
+        [["diff.previousHunk", "diff.nextHunk"], "hunks"],
+        ...(props.reviews && diffTarget()?.kind === "pull" ? [["review.open", "review"] as const] : []),
+        ...(failed ? [] : [["diff.toggleLayout", "layout"], ["diff.toggleWrap", "wrap"]] as const),
+        ["diff.toggleFiles", "toggle files"], [["navigation.up", "navigation.down"], files ? "files" : "scroll"],
+        ...refresh, github, ...common)
     }
-    if (activeRunId()) {
-      const load: HintEntry = resource?.status === "error" ? ["view.refresh", "retry"]
-        : runDetail().jobs.value?.hasMore ? ["navigation.activate", "load more"] : ["view.refresh", "refresh"]
-      return hint(back, github, copy, ...(resource?.status === "loading" ? [] : [load]), ...common)
+    if (activeRunId()) return hint(back, ...retry,
+      ...more(runDetail().jobs.status !== "loading" && runDetail().jobs.value?.hasMore), ...refresh, github, copy, ...common)
+    if (activeCommitSha()) return hint(back, ...retry,
+      ...more(commitResource().status !== "loading" && commitResource().value?.files.hasMore), diff, ...refresh, github, copy, ...common)
+    if (activeIssueNumber()) return hint(back, ...retry,
+      ...more(issueDetail().comments.status !== "loading" && issueDetail().comments.value?.hasMore),
+      ...(canActOnIssue("comment") ? [["issue.comment", "comment"] as const] : []),
+      ...(hasIssueActions() ? [["issue.actions", "actions"] as const] : []),
+      ...(issueMenuItems().length ? [["detail.references", "references"] as const] : []),
+      ...refresh, github, copy, ...common)
+    if (activePullNumber()) return hint(back, ...retry,
+      ...more(pullDetail().comments.status !== "loading" && pullDetail().comments.value?.hasMore),
+      ...(canCommentOnPull() ? [["issue.comment", "comment"] as const] : []),
+      ...(canOfferReview() ? [["review.open", "review"] as const] : []),
+      ...(hasIssueActions() ? [["issue.actions", "actions"] as const] : []), diff,
+      ...(pullMenuItems().length ? [["detail.references", "references"] as const] : []),
+      ...refresh, github, copy, ...common)
+    if (page() === "actions") {
+      const hasItems = !!data().runs.value?.items.length
+      return hint(...retry, ...list(hasItems), ...refresh, github, ...(hasItems ? [copy] : []), ...common)
     }
-    if (activeCommitSha()) {
-      const retry = commitResource().status === "error"
-      const more = commitResource().status !== "loading" && commitResource().value?.files.hasMore
-      const load: HintEntry[] = retry ? [["view.refresh", "retry"]] : more ? [["navigation.activate", "load more"]] : []
-      return hint(back, diff, ...(dimensions().width < 60 && (retry || more) ? [] : [github, copy]), ...load, ...common)
+    if (page() === "pulls" || page() === "issues") {
+      const hasItems = !!(page() === "pulls" ? pulls() : issues()).value?.items.length
+      return hint(...retry, ...list(hasItems), ["work.toggleState", "open/closed"],
+        ...(page() === "pulls" && hasItems ? [diff] : []), ...refresh, github, ...(hasItems ? [copy] : []), ...common)
     }
-    if (activeIssueNumber()) {
-      const retry = activeResource()?.status === "error"
-      const more = issueDetail().comments.status !== "loading" && issueDetail().comments.value?.hasMore
-      const references = issueMenuItems().length
-      const actions: HintEntry[] = [...(canActOnIssue("comment") ? [["issue.comment", "comment"] as const] : []),
-        ...(hasIssueActions() ? [["issue.actions", "actions"] as const] : [])]
-      const hintWidth = dimensions().width - hint(...actions).length
-      if (dimensions().width < 64) return hint(back, ...actions,
-        ...(!actions.length ? [retry ? ["view.refresh", "retry"] : more ? ["navigation.activate", "load more"]
-          : references ? ["detail.references", "references"] : github] as HintEntry[] : []), ...common)
-      return hint(back, ...actions, ...(retry ? [["view.refresh", "retry"] as const] : more ? [["navigation.activate", "load more"] as const] : []),
-        ...(references && hintWidth >= 64 ? [["detail.references", "references"] as const] : []),
-        ...(hintWidth >= 100 || !retry && !more && hintWidth >= 64 ? [github, copy] : []), ...common)
+    if (page() === "commits") {
+      const hasItems = !!data().commits.value?.items.length
+      return hint(...retry, ...list(hasItems), ["commits.chooseBranch", "branch"], ...(hasItems ? [diff] : []),
+        ...refresh, github, ...(hasItems ? [copy] : []), ...common)
     }
-    if (activePullNumber()) {
-      const retry = activeResource()?.status === "error"
-      const more = pullDetail().comments.status !== "loading" && pullDetail().comments.value?.hasMore
-      const references = pullMenuItems().length
-      const commentHints: HintEntry[] = [...(canCommentOnPull() ? [["issue.comment", "comment"] as const] : []),
-        ...(hasIssueActions() ? [["issue.actions", "actions"] as const] : [])]
-      if (dimensions().width < 64) return hint(back, diff, ...commentHints,
-        retry ? ["view.refresh", "retry"] : more ? ["navigation.activate", "load more"]
-          : references ? ["detail.references", "references"] : github, ...common)
-      return hint(back, diff, ...commentHints, ...(retry ? [["view.refresh", "retry"] as const] : more ? [["navigation.activate", "load more"] as const] : []),
-        ...(references ? [["detail.references", "references"] as const] : []),
-        ...(dimensions().width >= 100 || !retry && !more ? [github, copy] : []), ...common)
-    }
-    if (page() === "actions") return hint(select, open, github, copy, ...common)
-    if (page() === "pulls" || page() === "issues") return hint(select, open, ...(page() === "pulls" ? [diff] : []), github, copy,
-      ...(dimensions().width >= 60 ? [["work.toggleState", "open/closed"] as const] : []), ...common)
-    if (page() === "commits") return hint(select, open, diff, github, copy,
-      ...(dimensions().width >= 60 ? [["commits.chooseBranch", "branch"] as const] : []), ...common)
-    if (page() === "overview") return hint(github, copy, ...(canClone() ? [["command.clone", "clone"] as const] : []), ...common)
+    if (page() === "overview") return hint(...retry,
+      ...(overviewDocuments().length > 1 ? [["overview.nextDocument", "documents"] as const] : []),
+      ...(canClone() ? [["command.clone", "clone"] as const] : []), ...refresh, github, copy, ...common)
     return hint(...common)
   }
 
@@ -1568,7 +1571,6 @@ function AppContent(props: AppProps) {
         <Help
           onClose={() => setOverlay()}
           view={diffTarget() ? "diff" : activeRunId() ? "run" : activeCommitSha() ? "commit" : activeIssueNumber() ? "issue" : activePullNumber() ? "pull" : page()}
-          tabCount={visibleTabs().length}
           hasDocumentTabs={overviewDocuments().length > 1}
           hasMoreFiles={commitResource().value?.files.hasMore}
           hasMoreComments={activePullNumber() ? pullDetail().comments.value?.hasMore : issueDetail().comments.value?.hasMore}
@@ -1600,7 +1602,8 @@ function AppContent(props: AppProps) {
           onSubmit={() => void submitDraftChange()} onClose={closeDraftChange} onHintChange={setIssueActionHint} />}
       </Show>
       <Show when={overlay() === "pull-review" && props.reviews && reviewTarget()}>
-        <PullReviewDialog number={reviewTarget()?.number} session={props.reviews!} repositoryUrl={data().repo.url} showScrollbar={config().showScrollbars}
+        <PullReviewDialog onEditorActiveChange={setReviewEditorActive} number={reviewTarget()?.number} session={props.reviews!} repositoryUrl={data().repo.url} showScrollbar={config().showScrollbars}
+          expanded={issueEditorExpanded()} onExpandedChange={setIssueEditorExpanded} showStatusBarHints={config().showStatusBarHints}
           onSubmit={() => { void submitReview() }} onClose={() => setOverlay()} onJump={jumpReview}
           onOpenGitHub={() => { void openInBrowser(reviewTarget()?.number) }} onHintChange={setIssueActionHint} />
       </Show>
@@ -1619,6 +1622,7 @@ function AppContent(props: AppProps) {
       <Show when={overlay() === "review-comment" ? reviewAnchor() : undefined} keyed>
         {(anchor) => <ReviewCommentDialog anchor={anchor} body={inlineBody()} headSha={inlineContext()?.headSha ?? ""}
           repositoryUrl={data().repo.url} showScrollbar={config().showScrollbars}
+          expanded={issueEditorExpanded()} onExpandedChange={setIssueEditorExpanded} showStatusBarHints={config().showStatusBarHints}
           onSave={(body) => { void submitInlineComment(body) }} onClose={() => setOverlay()} onHintChange={setIssueActionHint} />}
       </Show>
       <Show when={overlay() === "pull-merge" ? mergeTarget() : undefined} keyed>
@@ -1637,6 +1641,7 @@ function AppContent(props: AppProps) {
           fallback={<IssueActionDialog
             number={action.number}
             kind={action.kind}
+            onEditorActiveChange={setIssueEditorActive}
             parent={action.parent}
             state={props.getIssueAction?.(action.number, action.parent) ?? emptyIssueAction}
             showScrollbar={config().showScrollbars}

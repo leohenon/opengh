@@ -475,7 +475,7 @@ describe("opengh TUI", () => {
     expect(statusLine()).toBe("");
     setConfig({ ...defaultConfig, showStatusBarHints: true, hideDocumentsTab: false, compactHeader: false, iconStyle: "unicode" });
     await view.flush();
-    expect(statusLine()).toBe("o GitHub · y copy URL · ? help");
+    expect(statusLine()).toBe("tab documents · r refresh · o GitHub · y copy URL · ? help");
 
     view.mockInput.pressKey("?");
     await view.flush();
@@ -484,7 +484,7 @@ describe("opengh TUI", () => {
     await Bun.sleep(30);
     view.mockInput.pressKey(",");
     await view.flush();
-    expect(statusLine()).toBe("↑/↓ select · ←/→ change · enter open · esc close");
+    expect(statusLine()).toBe("enter open · ↑/↓ select · ←/→ change · esc close");
     for (let i = 0; i < 9; i++) view.mockInput.pressArrow("down");
     view.mockInput.pressEnter();
     await view.flush();
@@ -513,7 +513,7 @@ describe("opengh TUI", () => {
     setOperations(repositoryOperationsFixture);
     setConfig({ ...defaultConfig, showStatusBarHints: true, hideDocumentsTab: false, compactHeader: false, iconStyle: "unicode" });
     await view.flush();
-    expect(statusLine()).toBe("esc back · D diff · o GitHub · y copy SHA · ? help");
+    expect(statusLine()).toBe("esc back · D diff · r refresh · o GitHub · y copy SHA · ? help");
   });
 
   test("renders repository metadata while the README loads", async () => {
@@ -1808,9 +1808,11 @@ test("compact header uses one row with tabs left and repository right", async ()
   setCompact(true);
   await view.flush();
   const rows = view.captureCharFrame().split("\n");
-  expect(rows[0]).toContain(githubDataFixture.repo.nameWithOwner);
+  const repositoryName = githubDataFixture.repo.nameWithOwner.split("/").slice(1).join("/");
+  expect(rows[0]).toContain(repositoryName);
+  expect(rows[0]).not.toContain(githubDataFixture.repo.nameWithOwner);
   expect(rows[0]).toContain("1 Overview");
-  expect(rows[0].trimEnd().endsWith(githubDataFixture.repo.nameWithOwner)).toBe(true);
+  expect(rows[0].trimEnd().endsWith(repositoryName)).toBe(true);
   expect(rows[1]).toContain("Page content");
   expect(view.captureCharFrame()).not.toContain("─");
 });

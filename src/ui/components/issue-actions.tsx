@@ -1,6 +1,6 @@
 import { TextAttributes, type ScrollBoxRenderable, type TextareaRenderable } from "@opentui/core"
 import { usePaste, useRenderer } from "@opentui/solid"
-import { createEffect, createMemo, createSignal, Index, onCleanup, Show, untrack } from "solid-js"
+import { createEffect, createMemo, createSignal, For, Index, onCleanup, Show, untrack } from "solid-js"
 import type { IssueActionKind, IssueActionParent, IssueCloseReason } from "../../models"
 import type { IssueActionState } from "../../repository-state"
 import { createReactiveMarkdownStyle } from "../markdown-style"
@@ -98,6 +98,7 @@ export function IssueActionDialog(props: {
   showStatusBarHints?: boolean
   expanded?: boolean
   onExpandedChange?(expanded: boolean): void
+  onEditorActiveChange?(active: boolean): void
   locked?: boolean
   repositoryUrl: string
   defaultBranch?: string
@@ -113,6 +114,13 @@ export function IssueActionDialog(props: {
   const keys = useKeybindings()
   const renderer = useRenderer()
   const markdownStyle = createReactiveMarkdownStyle(colors, theme)
+  const startsWithReason = props.kind === "close" && props.parent !== "pull" && props.state.retry !== "close"
+  const [stage, setStage] = createSignal<"reason" | "edit">(startsWithReason ? "reason" : "edit")
+  const [editorOpened, setEditorOpened] = createSignal(!startsWithReason)
+  const [reasonChoice, setReasonChoice] = createSignal(props.state.reason)
+  const closeReasons: readonly IssueCloseReason[] = ["completed", "not_planned"]
+  createEffect(() => props.onEditorActiveChange?.(stage() === "edit" && props.kind !== "duplicate"))
+  onCleanup(() => props.onEditorActiveChange?.(false))
   const [body, setBody] = createSignal(props.state.body)
   const [localExpanded, setLocalExpanded] = createSignal(false)
   const expanded = () => props.expanded ?? localExpanded()
@@ -128,15 +136,15 @@ export function IssueActionDialog(props: {
   const [preview, setPreview] = createSignal(false)
   const [cursor, setCursor] = createSignal({ line: 0, visualColumn: 0 })
   const [confirmSubmit, setConfirmSubmit] = createSignal(false)
-  const [editorSession, setEditorSession] = createSignal(0)
   let writer: TextareaRenderable | undefined
+  let duplicateInput: TextareaRenderable | undefined
   let previewScroll: ScrollBoxRenderable | undefined
   const bindScrollbar = createScrollbarVisibility(() => props.showScrollbar)
   const pending = () => props.state.operation.status === "loading"
   const retry = () => props.state.retry === props.kind ? props.state.retry : undefined
   const hasPreview = () => props.kind === "comment" || props.kind === "reopen" || props.kind === "close"
-  const previewing = () => hasPreview() && preview()
-  const writing = () => !previewing() && !confirmSubmit() && !pending() && !retry() && !externalEditing()
+  const previewing = () => stage() === "edit" && hasPreview() && preview()
+  const writing = () => stage() === "edit" && !previewing() && !confirmSubmit() && !pending() && !retry() && !externalEditing()
   const duplicateNumber = () => {
     const match = props.state.duplicateTarget?.trim().match(/^#?([1-9]\d*)$/)
     const number = Number(match?.[1])
@@ -145,19 +153,22 @@ export function IssueActionDialog(props: {
   const duplicateError = () => !(props.state.duplicateTarget ?? "").trim() ? ""
     : duplicateNumber() === undefined ? "Enter an issue number such as #123."
     : duplicateNumber() === props.number ? "An issue cannot be a duplicate of itself." : ""
-  const canSubmit = () => !pending() && !externalEditing() && (props.kind === "duplicate"
+  const canSubmit = () => stage() === "edit" && !pending() && !externalEditing() && (props.kind === "duplicate"
     ? duplicateNumber() !== undefined && duplicateNumber() !== props.number
     : Boolean(retry()) || props.kind !== "comment" || Boolean(body().trim()))
   const action = () => retry() ?? props.kind
   const subject = () => props.parent === "pull" ? "PR" : "issue"
   const hasCloseReason = () => props.kind === "close" && props.parent !== "pull"
   const title = () => props.kind === "comment" ? `${props.parent === "pull" ? "PR " : ""}#${props.number}`
-    : `${props.kind === "duplicate" ? "Mark as duplicate" : props.kind === "close" ? `Close ${subject()}` : `Reopen ${subject()}`} · #${props.number}`
+    : `${props.kind === "duplicate" ? "Mark as duplicate" : props.kind === "close" ? `Close ${subject()}` : `Reopen ${subject()}`} · #${props.number}${hasCloseReason() ? ` · ${props.state.reason === "completed" ? "Completed" : "Not planned"}` : ""}`
   const requestSubmit = () => { if (canSubmit()) setConfirmSubmit(true) }
   const requestClose = () => {
     if (pending() || externalEditing()) return
     if (confirmSubmit()) setConfirmSubmit(false)
-    else props.onClose()
+    else if (hasCloseReason() && !retry() && stage() === "edit") {
+      setReasonChoice(props.state.reason)
+      setStage("reason")
+    } else props.onClose()
   }
   const confirm = () => {
     if (!canSubmit()) return
@@ -166,12 +177,17 @@ export function IssueActionDialog(props: {
   }
   const discard = () => {
     if (pending() || confirmSubmit() || externalEditing()) return
+    const editor = props.kind === "duplicate" ? duplicateInput : writer
+    if (editor && !editor.isDestroyed) replaceEditorText(editor, "")
     if (props.kind === "duplicate") props.onDuplicateTargetChange("")
-    else props.onDiscard()
-    setEditorSession((value) => value + 1)
+    else if (hasCloseReason() && !retry()) props.onBodyChange("")
+    else {
+      props.onDiscard()
+      if (hasCloseReason()) { setReasonChoice(props.state.reason); setStage("reason") }
+    }
   }
   const openExternalEditor = async () => {
-    if (!hasPreview() || confirmSubmit() || pending() || retry() || externalEditing() || !writer) return
+    if (stage() !== "edit" || !hasPreview() || confirmSubmit() || pending() || retry() || externalEditing() || !writer) return
     setPreview(false)
     setEditorError(undefined)
     setExternalEditing(true)
@@ -196,21 +212,30 @@ export function IssueActionDialog(props: {
     const verb = action() === "close" ? "close" : "reopen"
     return `${body().trim() ? `Post comment and ${verb}` : action() === "close" ? "Close" : "Reopen"} ${subject()} #${props.number}?`
   }
-  const changeReason = (reason: IssueCloseReason) => {
-    if (!pending() && !retry() && !confirmSubmit() && !externalEditing()) props.onReasonChange(reason)
+  const chooseReason = (reason = reasonChoice()) => {
+    if (pending() || retry() || confirmSubmit() || externalEditing()) return
+    props.onReasonChange(reason)
+    setReasonChoice(reason)
+    setEditorOpened(true)
+    setStage("edit")
+  }
+  const moveReason = (direction: number) => {
+    const index = closeReasons.indexOf(reasonChoice())
+    setReasonChoice(closeReasons[(index + direction + closeReasons.length) % closeReasons.length]!)
   }
 
   createEffect(() => props.onHintChange(pending() ? "Saving…"
     : confirmSubmit() ? keys.hints(["dialog.confirm", "confirm"], ["dialog.close", "back"])
+    : stage() === "reason" ? keys.hints(["navigation.activate", "select"], [["navigation.up", "navigation.down"], "choose"], ["dialog.close", "close"])
     : retry() ? keys.hints(["dialog.submit", "retry"], ["dialog.discard", "discard"], ["dialog.close", "back"])
     : props.kind === "duplicate" ? keys.hints([["dialog.confirm", "dialog.submit"], "review"], ["dialog.discard", "discard"], ["dialog.close", "back"])
     : keys.hints(
       ["dialog.submit", "submit"],
-      [hasCloseReason() ? "dialog.changeReason" : "dialog.togglePreview", hasCloseReason() ? "change reason" : previewing() ? "write" : "preview"],
+      ["dialog.togglePreview", previewing() ? "write" : "preview"],
       ["dialog.toggleExpanded", expanded() ? "restore" : "expand"],
       ["dialog.externalEditor", "editor"],
       ["dialog.discard", "clear"],
-      ["dialog.close", "keep draft"],
+      ["dialog.close", hasCloseReason() ? "back" : "keep draft"],
     )))
   onCleanup(() => props.onHintChange(undefined))
 
@@ -218,7 +243,7 @@ export function IssueActionDialog(props: {
   createEffect(() => {
     const next = props.state.body
     setBody(next)
-    if (writer && writer.plainText !== next) untrack(() => writer?.setText(next))
+    if (writer && !writer.isDestroyed && writer.plainText !== next) untrack(() => writer?.setText(next))
   })
 
   usePaste((event) => {
@@ -227,25 +252,27 @@ export function IssueActionDialog(props: {
   useKeyActions({}, { when: () => pending() || externalEditing(), priority: 200, modal: true })
   useKeyActions({
     "dialog.close": requestClose,
+    "navigation.activate": () => chooseReason(),
+    "navigation.up": () => moveReason(-1),
+    "navigation.down": () => moveReason(1),
+  }, { when: () => stage() === "reason" && !pending(), priority: 100, modal: true })
+  useKeyActions({
+    "dialog.close": requestClose,
     "dialog.confirm": confirm,
   }, { when: () => confirmSubmit() && !pending(), priority: 150, modal: true })
   useKeyActions({
     "dialog.close": requestClose,
     "dialog.submit": requestSubmit,
     "dialog.discard": discard,
-  }, { when: () => !confirmSubmit() && !pending(), priority: 100, modal: true })
+  }, { when: () => stage() === "edit" && !confirmSubmit() && !pending(), priority: 100, modal: true })
   useKeyActions({
     "dialog.toggleExpanded": toggleExpanded,
     "dialog.externalEditor": () => { void openExternalEditor() },
-  }, { when: () => hasPreview() && !confirmSubmit() && !pending() && !retry() && !externalEditing(), priority: 110 })
+  }, { when: () => stage() === "edit" && hasPreview() && !confirmSubmit() && !pending() && !retry() && !externalEditing(), priority: 110 })
   useKeyActions({
     "dialog.confirm": () => {
       if (props.kind !== "duplicate") return false
       requestSubmit()
-    },
-    "dialog.changeReason": () => {
-      if (!hasCloseReason()) return false
-      changeReason(props.state.reason === "completed" ? "not_planned" : "completed")
     },
     "dialog.togglePreview": () => {
       if (!hasPreview()) return false
@@ -269,9 +296,29 @@ export function IssueActionDialog(props: {
 
   return (
     <>
-      <Popup fullscreen={expanded()} reserveStatusBar={props.showStatusBarHints}
-        width={props.kind === "duplicate" ? 56 : props.kind === "close" ? 64 : 86}
-        height={props.kind === "duplicate" ? props.state.operation.status === "error" ? 11 : 8 : props.kind === "close" ? 11 : 27}
+      <Show when={stage() === "reason"}>
+        <Popup width={52} height={7} placement="center" zIndex={250} onClose={requestClose}>
+          <box id="issue-close-reason-menu" flexGrow={1} minHeight={0} paddingX={2} paddingBottom={1} flexDirection="column">
+            <text height={1} flexShrink={0} fg={colors.text} attributes={TextAttributes.BOLD}>Close issue · #{props.number}</text>
+            <box height={1} flexShrink={0} />
+            <For each={closeReasons}>{reason => {
+              const enabled = () => !pending() && !retry()
+              const hover = mouseHover(enabled, () => reason)
+              const active = () => enabled() && reasonChoice() === reason
+              return <box id={`issue-close-reason-${reason}`} height={1} flexShrink={0}
+                backgroundColor={active() || hover.hovered() ? colors.panelHover : colors.panel}
+                {...mouseClick(() => chooseReason(reason), enabled, () => reason, hover)}>
+                <text selectable={false} fg={!enabled() ? colors.muted : active() || hover.hovered() ? colors.blue : colors.text}
+                  attributes={hover.hovered() ? TextAttributes.BOLD : TextAttributes.NONE}>{active() ? "› " : "  "}{reason === "completed" ? "Completed…" : "Not planned…"}</text>
+              </box>
+            }}</For>
+          </box>
+        </Popup>
+      </Show>
+      <Show when={editorOpened()}>
+      <Popup visible={stage() === "edit"} fullscreen={expanded()} reserveStatusBar={props.showStatusBarHints}
+        width={props.kind === "duplicate" ? 56 : props.kind === "close" && props.parent === "pull" ? 64 : 86}
+        height={props.kind === "duplicate" ? props.state.operation.status === "error" ? 11 : 8 : props.kind === "close" && props.parent === "pull" ? 11 : 27}
         placement="center" zIndex={250}
         onClose={requestClose}
       >
@@ -283,21 +330,12 @@ export function IssueActionDialog(props: {
           <Show when={props.locked && props.kind !== "duplicate"}>
             <text flexShrink={0} fg={colors.yellow}>Locked thread — commenting depends on your GitHub permissions.</text>
           </Show>
-          <Show when={hasCloseReason() && !retry()}>
-            <box height={1} flexShrink={0} flexDirection="row" gap={2}>
-              <text fg={colors.muted}>Reason</text>
-              <text fg={props.state.reason === "completed" ? colors.blue : colors.muted} selectable={false}
-                {...mouseClick(() => changeReason("completed"), () => !pending() && !confirmSubmit())}>{props.state.reason === "completed" ? "●" : "○"} Completed</text>
-              <text fg={props.state.reason === "not_planned" ? colors.blue : colors.muted} selectable={false}
-                {...mouseClick(() => changeReason("not_planned"), () => !pending() && !confirmSubmit())}>{props.state.reason === "not_planned" ? "●" : "○"} Not planned</text>
-            </box>
-          </Show>
           <Show when={retry()}>
             <text flexShrink={0} fg={colors.green}>Comment posted. Only the issue state change will be retried.</text>
           </Show>
           <Show when={props.kind === "duplicate"}>
             <box marginTop={1} flexShrink={0} flexDirection="column">
-              <KeyInput historyKey={editorSession()} value={props.state.duplicateTarget ?? ""} placeholder="#123" maxLength={17}
+              <KeyInput ref={value => { duplicateInput = value }} value={props.state.duplicateTarget ?? ""} placeholder="#123" maxLength={17}
                 focused={writing()} textColor={colors.text} focusedTextColor={colors.text} backgroundColor={colors.panel}
                 focusedBackgroundColor={colors.panel} cursorColor={colors.blue}
                 onInput={(target) => {
@@ -309,7 +347,6 @@ export function IssueActionDialog(props: {
           <Show when={props.kind !== "duplicate"}>
             <box flexGrow={1} minHeight={0} marginTop={1} flexDirection="column" overflow="hidden">
               <MarkdownTextarea id="issue-comment-writer"
-                historyKey={editorSession()}
                 ref={(value) => { writer = value }}
                 initialValue={props.state.body}
                 visible={!previewing() && !retry()}
@@ -358,6 +395,7 @@ export function IssueActionDialog(props: {
           </box>
         </box>
       </Popup>
+      </Show>
       <Show when={confirmSubmit()}>
         <Popup width={56} height={action() === "close" || action() === "duplicate" ? 6 : 5} placement="center" zIndex={300} onClose={requestClose}>
           <box flexGrow={1} minHeight={0} paddingX={2} paddingBottom={1} flexDirection="column">

@@ -5,6 +5,7 @@ import { mouseSurface } from "../mouse"
 import { useTheme } from "../theme"
 
 export function Popup(props: {
+  visible?: boolean
   fullscreen?: boolean
   reserveStatusBar?: boolean
   width?: number
@@ -28,6 +29,7 @@ export function Popup(props: {
   return (
     <box
       {...mouse}
+      visible={props.visible !== false}
       position="absolute"
       left={0}
       top={0}

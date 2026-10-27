@@ -15,5 +15,5 @@ export function pullMergeBlocker(pull: PullRequestDetail, context?: PullContext)
   if (!context) return "Merge readiness unavailable; wait for checks or refresh."
   const readiness = mergeReadinessStatus(context.readiness, pull.headSha)
   if (readiness.status !== "ready") return readiness.reasons.join(" ") || "Merge readiness unavailable."
-  if (context.readiness.mergeStateStatus !== "CLEAN") return "GitHub has not confirmed a clean merge state."
+  if (!["CLEAN", "UNSTABLE"].includes(context.readiness.mergeStateStatus)) return "GitHub has not confirmed a mergeable state."
 }

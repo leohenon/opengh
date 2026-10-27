@@ -269,7 +269,6 @@ export function DetailActivity(props: {
           ? ` · ${comments().value!.items.length} loaded` : ""}
         {references().value?.length ? ` · ${references().value!.length} ${references().value!.length === 1 ? "reference" : "references"}` : ""}
         {reviewCount() ? ` · ${reviewCount()} ${reviewCount() === 1 ? "review" : "reviews"}` : ""}
-        {props.threads?.length ? ` · ${props.threads.length} ${props.threads.length === 1 ? "thread" : "threads"}` : ""}
       </text>
       <Show when={props.commits?.status === "loading" && !props.commits.value}>
         <box width="100%" flexShrink={0} marginTop={1}><LoadingText text="Loading commits…" /></box>

@@ -16,7 +16,7 @@ const raw = { node_id: "PR1", number: 1, state: "open", title: "PR", user: { log
   html_url: "https://github.com/o/r/pull/1", body: "", base: { ref: "main" }, head: { ref: "feature", sha: head, repo: null },
   additions: 1, deletions: 0, changed_files: 1, commits: 1, comments: 0, review_comments: 0,
   labels: [], assignees: [], requested_reviewers: [], requested_teams: [], mergeable: true, mergeable_state: "clean" }
-function clientFixture(options: { permission?: unknown; queue?: unknown; state?: string; method?: unknown; confirmed?: boolean; message?: PullMergeMessage; defaults?: Record<string, unknown>; errors?: unknown } = {}) {
+function clientFixture(options: { permission?: unknown; queue?: unknown; state?: string; failedCheckRequired?: boolean; method?: unknown; confirmed?: boolean; message?: PullMergeMessage; defaults?: Record<string, unknown>; errors?: unknown } = {}) {
   let writes = 0
   let reads = 0
   const empty = { nodes: [], pageInfo: { hasNextPage: false } }
@@ -45,7 +45,12 @@ function clientFixture(options: { permission?: unknown; queue?: unknown; state?:
       let pull: Record<string, unknown> = {}
       if (query.includes("query PullContext(")) pull = { headRefOid: head, isDraft: false, mergeable: "MERGEABLE", mergeStateStatus: options.state ?? "CLEAN", reviewDecision: null }
       else if (query.includes("query PullThreads(")) pull = { headRefOid: head, reviewThreads: empty }
-      else if (query.includes("query PullChecks(")) pull = { headRefOid: head, commits: { nodes: [{ commit: { statusCheckRollup: null } }] } }
+      else if (query.includes("query PullChecks(")) pull = { headRefOid: head, commits: { nodes: [{ commit: {
+        statusCheckRollup: options.failedCheckRequired === undefined ? null : { contexts: { ...empty, nodes: [{
+          __typename: "CheckRun", id: "failed-check", name: "expected-failure", status: "COMPLETED",
+          conclusion: "FAILURE", isRequired: options.failedCheckRequired,
+        }] } },
+      } }] } }
       else if (query.includes("query PullProjects(")) pull = { projectItems: empty }
       else if (query.includes("query PullClosingIssues(")) pull = { closingIssuesReferences: empty }
       else if (query.includes("viewerPermission")) {
@@ -63,7 +68,8 @@ function clientFixture(options: { permission?: unknown; queue?: unknown; state?:
 test("fresh preflight rejects unauthorized, unknown, queue, blocked, method and head without mutations", async () => {
   for (const options of [{ permission: "READ" }, { permission: null }, { permission: "UNKNOWN" }, { queue: true },
     { queue: undefined }, { method: undefined }, { method: false }, { state: "BLOCKED" }, { state: "BEHIND" },
-    { permission: "ADMIN", state: "BLOCKED" }, { permission: "ADMIN", queue: true }]) {
+    { permission: "ADMIN", state: "BLOCKED" }, { permission: "ADMIN", queue: true },
+    { state: "UNSTABLE", failedCheckRequired: true }]) {
     const f = clientFixture(options)
     await expect(f.client.mergePull("o/r", 1, "squash", head)).rejects.toThrow()
     expect(f.writes()).toBe(0)
@@ -75,10 +81,12 @@ test("fresh preflight rejects unauthorized, unknown, queue, blocked, method and 
 })
 
 test("confirmed mutation returns merged snapshot without a fallible follow-up read", async () => {
-  const f = clientFixture()
-  expect(await f.client.mergePull("o/r", 1, "squash", head)).toMatchObject({ state: "closed", merged: true, mergedAt: date, headSha: head })
-  expect(f.writes()).toBe(1)
-  expect(f.reads()).toBe(1)
+  for (const options of [{}, { state: "UNSTABLE", failedCheckRequired: false }]) {
+    const f = clientFixture(options)
+    expect(await f.client.mergePull("o/r", 1, "squash", head)).toMatchObject({ state: "closed", merged: true, mergedAt: date, headSha: head })
+    expect(f.writes()).toBe(1)
+    expect(f.reads()).toBe(1)
+  }
   const bad = clientFixture({ confirmed: false })
   await expect(bad.client.mergePull("o/r", 1, "squash", head)).rejects.toThrow("did not confirm")
   expect(bad.writes()).toBe(1)

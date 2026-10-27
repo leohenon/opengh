@@ -56,18 +56,16 @@ export function Header(props: {
     const totalWidth = (labels: string[]) => labels.reduce((sum, label) => sum + Bun.stringWidth(label), 0)
       + Math.max(0, labels.length - 1) * 3
     const countedWidth = totalWidth(tabs.map((tab) => tab.counted))
-    // Navigation takes priority: shorten the repository, then hide it, before
-    // dropping counts or windowing tabs. The expanded header has its own repo row.
-    const fullRepo = props.repo.nameWithOwner
-    const shortRepo = fullRepo.split("/").slice(1).join("/")
+    // Compact headers use the repository name only, then an arrow when it cannot
+    // fit beside the tabs. The expanded header keeps its full owner/repository row.
+    const shortRepo = props.repo.nameWithOwner.split("/").slice(1).join("/")
     const dropdownWidth = props.onOpenRepository ? 2 : 0
-    const switchLabel = width < 24 ? "▾" : "Repo ▾"
+    const switchLabel = "▾"
     const repository = !props.compact ? "hidden"
-      : countedWidth + 2 + Bun.stringWidth(fullRepo) + dropdownWidth <= width ? "full"
       : countedWidth + 2 + Bun.stringWidth(shortRepo) + dropdownWidth <= width ? "short"
       : props.onOpenRepository ? "button" : "hidden"
     const repositoryWidth = repository === "button" ? Bun.stringWidth(switchLabel)
-      : Bun.stringWidth(repository === "full" ? fullRepo : shortRepo) + dropdownWidth
+      : Bun.stringWidth(shortRepo) + dropdownWidth
     const available = width - (repository === "hidden" ? 0 : 2 + repositoryWidth)
     const labels = tabs.map((tab) => ({ ...tab, label: countedWidth <= available ? tab.counted : tab.label }))
     const active = Math.max(0, labels.findIndex((tab) => tab.page === props.page))

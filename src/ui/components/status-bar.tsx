@@ -38,16 +38,23 @@ const loadingMessages: Record<StatusKind, string> = {
   "updating-issue": "Saving assignees…",
 }
 
+// Preserve priority and whole labels, but do not let one oversized shortcut
+// consume the remaining width when a shorter useful hint can still fit.
+export function fitStatusHints(hint: string | undefined, available: number) {
+  const visible: string[] = []
+  for (const part of (hint ?? "").split(" · ").filter(Boolean)) {
+    if (Bun.stringWidth([...visible, part].join(" · ")) <= available) visible.push(part)
+  }
+  return visible.join(" · ")
+}
+
 export function StatusBar(props: { kind?: StatusKind; detail?: string; hint?: string; zIndex?: number }) {
   const { colors } = useTheme()
   const dimensions = useTerminalDimensions()
   const hint = () => {
-    const parts = (props.hint ?? "").split(" · ")
-    // Drop lower-priority shortcuts rather than clipping or renaming their labels.
     const message = loadingMessage()
     const available = dimensions().width - 4 - (message ? Bun.stringWidth(message) + 5 : 0)
-    while (parts.length && Bun.stringWidth(parts.join(" · ")) > available) parts.pop()
-    return parts.join(" · ")
+    return fitStatusHints(props.hint, available)
   }
   const loadingMessage = () => {
     if (!props.kind) return undefined
