@@ -69,6 +69,7 @@ export function PullScreen(props: {
   reactionControls?: ReactionControls
   detail: PullDetailState
   revealActivity?: number
+  timelineCollapsed?: boolean
   interactive: boolean
   showScrollbar: boolean
   defaultBranch?: string
@@ -185,6 +186,7 @@ export function PullScreen(props: {
                   commits={props.detail.commits}
                   commitTotal={current().commitCount}
                   pullUrl={current().url}
+                  collapsed={props.timelineCollapsed}
                   commentCount={current().commentCount}
                   comments={props.detail.comments}
                   references={props.detail.references}

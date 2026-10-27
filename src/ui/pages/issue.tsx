@@ -84,6 +84,7 @@ export function IssueScreen(props: {
   reactionControls?: ReactionControls
   detail: IssueDetailState
   revealActivity?: number
+  timelineCollapsed?: boolean
   interactive: boolean
   showScrollbar: boolean
   defaultBranch?: string
@@ -199,6 +200,7 @@ export function IssueScreen(props: {
                   <box width="100%" minWidth={0} flexShrink={0} flexDirection="column">
                     <DetailActivity
                       number={props.number} reactionControls={props.reactionControls} interactive={props.interactive}
+                      collapsed={props.timelineCollapsed}
                       commentCount={current().commentCount}
                       comments={props.detail.comments}
                       references={props.detail.references}

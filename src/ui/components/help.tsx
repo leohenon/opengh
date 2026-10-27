@@ -101,6 +101,7 @@ export function Help(props: {
       case "issue":
         return [
           entry("navigation.back", "back to issues"),
+          entry("detail.toggleTimeline", "collapse / expand timeline"),
           ...(props.hasMoreComments ? [entry("navigation.activate", "load more comments")] : []),
           ...(props.canComment ? [entry("issue.comment", "add comment")] : []),
           ...(props.hasIssueActions ? [entry("issue.actions", "issue actions")] : []),
@@ -119,6 +120,7 @@ export function Help(props: {
       case "pull":
         return [
           entry("navigation.back", "back to pull requests"),
+          entry("detail.toggleTimeline", "collapse / expand timeline"),
           ...(props.hasMoreComments ? [entry("navigation.activate", "load more comments")] : []),
           ...(props.canComment ? [entry("issue.comment", "add comment")] : []),
           ...(props.canReview ? [entry("review.open", "review pull request")] : []),

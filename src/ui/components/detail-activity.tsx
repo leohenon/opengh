@@ -22,6 +22,7 @@ function Comment(props: {
   reactionControls?: ReactionControls
   interactive?: boolean
   comment: IssueComment
+  collapsed?: boolean
   syntaxStyle: SyntaxStyle
   backgroundColor: string
   context: GitHubMarkdownContext
@@ -30,25 +31,27 @@ function Comment(props: {
   const icons = useIcons()
   const reactionMouse = messageReactionMouse(() => props.number ? { kind: "comment", parent: props.subject ?? "issue", number: props.number,
     id: props.comment.id, nodeId: props.comment.nodeId } : undefined, () => props.comment, () => props.comment.body,
-    () => props.reactionControls, () => props.interactive === true)
+    () => props.reactionControls, () => props.interactive === true && !props.collapsed)
   const association = () => props.comment.authorAssociation === "NONE"
     ? "" : props.comment.authorAssociation.toLowerCase().replaceAll("_", " ")
   return (
-    <TimelineEntry icon={icons().user} nodeOffset={2}>
-      <box id={`message-comment-${props.subject}-${props.number}-${props.comment.id}`} {...reactionMouse} width="100%" minWidth={0} flexShrink={0} backgroundColor={props.backgroundColor} paddingX={2} paddingY={1} flexDirection="column">
-        <TimelineHeader>
-          <b><span style={{ fg: colors.text }}>{props.comment.author}</span></b> · {relativeTime(props.comment.createdAt)}
+    <TimelineEntry icon={icons().user} nodeOffset={props.collapsed ? 1 : 2}>
+      <box id={`message-comment-${props.subject}-${props.number}-${props.comment.id}`} {...reactionMouse} width="100%" minWidth={0} flexShrink={0} backgroundColor={props.backgroundColor} paddingX={2} paddingY={props.collapsed ? 0 : 1} flexDirection="column">
+        <text width="100%" flexShrink={0} fg={colors.muted} height={props.collapsed ? 1 : undefined} wrapMode={props.collapsed ? "none" : "word"} truncate={props.collapsed}>
+          <b><span style={{ fg: colors.text }}>{props.comment.author}</span></b>{props.collapsed ? " commented" : ""} · {relativeTime(props.comment.createdAt)}
           {association() ? ` · ${association()}` : ""}
           {props.comment.updatedAt !== props.comment.createdAt ? " · edited" : ""}
-        </TimelineHeader>
-        <box width="100%" minWidth={0} flexShrink={0} marginTop={1}>
-          <Show when={props.comment.body.trim()} fallback={<text fg={colors.muted}>No comment text.</text>}>
-            <GitHubMarkdown content={props.comment.body} syntaxStyle={props.syntaxStyle} backgroundColor={props.backgroundColor} context={props.context} preserveImages codePanels />
-          </Show>
-        </box>
-        <Reactions counts={props.comment.reactions} viewerReactions={props.comment.viewerReactions} canReact={props.comment.canReact}
-          target={props.number ? { kind: "comment", parent: props.subject ?? "issue", number: props.number, id: props.comment.id, nodeId: props.comment.nodeId } : undefined}
-          controls={props.reactionControls} interactive={props.interactive} />
+        </text>
+        <Show when={!props.collapsed}>
+          <box width="100%" minWidth={0} flexShrink={0} marginTop={1}>
+            <Show when={props.comment.body.trim()} fallback={<text fg={colors.muted}>No comment text.</text>}>
+              <GitHubMarkdown content={props.comment.body} syntaxStyle={props.syntaxStyle} backgroundColor={props.backgroundColor} context={props.context} preserveImages codePanels />
+            </Show>
+          </box>
+          <Reactions counts={props.comment.reactions} viewerReactions={props.comment.viewerReactions} canReact={props.comment.canReact}
+            target={props.number ? { kind: "comment", parent: props.subject ?? "issue", number: props.number, id: props.comment.id, nodeId: props.comment.nodeId } : undefined}
+            controls={props.reactionControls} interactive={props.interactive} />
+        </Show>
       </box>
     </TimelineEntry>
   )
@@ -144,25 +147,25 @@ function ForcePush(props: { event: PullForcePushEvent }) {
   )
 }
 
-function Review(props: { review: PullReviewEvent; syntaxStyle: SyntaxStyle; backgroundColor: string; context: GitHubMarkdownContext }) {
+function Review(props: { review: PullReviewEvent; collapsed?: boolean; syntaxStyle: SyntaxStyle; backgroundColor: string; context: GitHubMarkdownContext }) {
   const { colors } = useTheme()
   const icons = useIcons()
   const action = () => {
     const state = props.review.state === "dismissed" ? props.review.originalState : props.review.state
-    const text = state === "approved" ? "approved these changes" : state === "changes_requested" ? "requested changes" : "reviewed"
+    const text = state === "approved" ? "approved these changes" : state === "changes_requested" ? "requested changes" : props.collapsed ? "left a review" : "reviewed"
     return props.review.state === "dismissed" ? `${text} · dismissed` : text
   }
   const icon = () => props.review.state === "approved" ? icons().workflow.success
     : props.review.state === "changes_requested" ? icons().workflow.attention
     : props.review.state === "dismissed" ? icons().workflow.neutral : icons().user
   return (
-    <TimelineEntry icon={icon()} color={reviewColor(colors, props.review.state)} nodeOffset={2}>
-      <box width="100%" minWidth={0} flexShrink={0} backgroundColor={props.backgroundColor} paddingX={2} paddingY={1} flexDirection="column">
-        <TimelineHeader>
+    <TimelineEntry icon={icon()} color={reviewColor(colors, props.review.state)} nodeOffset={props.collapsed ? 1 : 2}>
+      <box width="100%" minWidth={0} flexShrink={0} backgroundColor={props.backgroundColor} paddingX={2} paddingY={props.collapsed ? 0 : 1} flexDirection="column">
+        <text width="100%" flexShrink={0} fg={colors.muted} height={props.collapsed ? 1 : undefined} wrapMode={props.collapsed ? "none" : "word"} truncate={props.collapsed}>
           <b><span style={{ fg: colors.text }}><a href={props.review.url}>{props.review.actor}</a></span></b>{" "}
           <span style={{ fg: reviewColor(colors, props.review.state) }}>{action()}</span>{" · "}{relativeTime(props.review.createdAt)}
-        </TimelineHeader>
-        <Show when={props.review.body.trim()}>
+        </text>
+        <Show when={!props.collapsed && props.review.body.trim()}>
           <box width="100%" minWidth={0} flexShrink={0} marginTop={1}>
             <GitHubMarkdown content={props.review.body} syntaxStyle={props.syntaxStyle} backgroundColor={props.backgroundColor} context={props.context} preserveImages codePanels />
           </box>
@@ -222,6 +225,7 @@ function ReviewRequest(props: { event: PullReviewRequestEvent }) {
 }
 
 export function DetailActivity(props: {
+  collapsed?: boolean
   commentCount: number
   number?: number
   reactionControls?: ReactionControls
@@ -289,7 +293,7 @@ export function DetailActivity(props: {
               </Show>
               <Switch>
                 <Match when={match((entry) => "kind" in entry && entry.kind === "commit-group")}>
-                  {(group) => <TimelineCommits commits={group().commits} />}
+                  {(group) => <TimelineCommits commits={group().commits} collapsed={props.collapsed} />}
                 </Match>
                 <Match when={match((entry) => "kind" in entry && entry.kind === "state")}>
                   {(event) => <StateChange event={event()} subject={props.subject ?? "issue"} repository={props.repository} />}
@@ -298,7 +302,7 @@ export function DetailActivity(props: {
                   {(event) => <ForcePush event={event()} />}
                 </Match>
                 <Match when={match((entry) => "kind" in entry && entry.kind === "review")}>
-                  {(review) => <Review review={review()} syntaxStyle={props.syntaxStyle} backgroundColor={props.backgroundColor} context={props.context} />}
+                  {(review) => <Review review={review()} collapsed={props.collapsed} syntaxStyle={props.syntaxStyle} backgroundColor={props.backgroundColor} context={props.context} />}
                 </Match>
                 <Match when={match((entry) => "kind" in entry && entry.kind === "review-dismissed")}>
                   {(event) => <ReviewDismissal event={event()} />}
@@ -310,13 +314,13 @@ export function DetailActivity(props: {
                   {(event) => <ReviewRequest event={event()} />}
                 </Match>
                 <Match when={match((entry) => "kind" in entry && entry.kind === "review-thread")}>
-                  {(thread) => <ReviewThread number={props.number} reactionControls={props.reactionControls} interactive={props.interactive} thread={thread()} syntaxStyle={props.syntaxStyle} backgroundColor={props.backgroundColor} context={props.context} />}
+                  {(thread) => <ReviewThread collapsed={props.collapsed} number={props.number} reactionControls={props.reactionControls} interactive={props.interactive} thread={thread()} syntaxStyle={props.syntaxStyle} backgroundColor={props.backgroundColor} context={props.context} />}
                 </Match>
                 <Match when={match((entry) => "kind" in entry && (entry.kind === "pull" || entry.kind === "issue" || entry.kind === "commit"))}>
                   {(reference) => <ReferenceMention reference={reference()} repository={props.repository} />}
                 </Match>
                 <Match when={match((entry) => "author" in entry)}>
-                  {(comment) => <Comment number={props.number} subject={props.subject} reactionControls={props.reactionControls} interactive={props.interactive} comment={comment()} syntaxStyle={props.syntaxStyle} backgroundColor={props.backgroundColor} context={props.context} />}
+                  {(comment) => <Comment collapsed={props.collapsed} number={props.number} subject={props.subject} reactionControls={props.reactionControls} interactive={props.interactive} comment={comment()} syntaxStyle={props.syntaxStyle} backgroundColor={props.backgroundColor} context={props.context} />}
                 </Match>
               </Switch>
             </TimelineItem>

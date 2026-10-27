@@ -49,6 +49,7 @@ function ThreadComment(props: {
 
 export function ReviewThread(props: {
   thread: PullReviewThread
+  collapsed?: boolean
   number?: number
   reactionControls?: ReactionControls
   interactive?: boolean
@@ -58,6 +59,7 @@ export function ReviewThread(props: {
 }) {
   const { colors, theme } = useTheme()
   const icons = useIcons()
+  const line = () => props.thread.line ?? props.thread.originalLine
   const snippet = createMemo(() => reviewSnippet(props.thread))
   const gutterWidth = () => Math.max(3, ...snippet().flatMap(line => [String(line.oldLine ?? "").length, String(line.newLine ?? "").length]))
   return (
@@ -65,11 +67,15 @@ export function ReviewThread(props: {
       <box width="100%" minWidth={0} flexShrink={0} overflow="hidden"
         backgroundColor={props.backgroundColor} flexDirection="column">
         <box height={1} flexShrink={0} paddingX={1} flexDirection="row" backgroundColor={colors.header}>
-          <text flexGrow={1} flexBasis={0} minWidth={0} height={1} wrapMode="none" truncate fg={colors.text}><b>{props.thread.path}</b></text>
+          <text flexGrow={1} flexBasis={0} minWidth={0} height={1} wrapMode="none" truncate fg={colors.text}>
+            <Show when={props.collapsed}><span style={{ fg: colors.muted }}>Review thread · </span></Show>
+            <b>{props.thread.path}</b>{props.collapsed && line() !== undefined ? `:${line()}` : ""}
+            <Show when={props.collapsed}><span style={{ fg: colors.muted }}> · {props.thread.comments.length} {props.thread.comments.length === 1 ? "comment" : "comments"}</span></Show>
+          </text>
           <Show when={props.thread.isResolved}><text flexShrink={0} fg={colors.muted}> Resolved</text></Show>
           <Show when={props.thread.isOutdated}><text flexShrink={0} fg={colors.muted}> Outdated</text></Show>
         </box>
-        <Show when={snippet().length}>
+        <Show when={!props.collapsed && snippet().length}>
           <box id={`review-code-${props.thread.id}`} width="100%" minWidth={0} flexShrink={0} flexDirection="column" overflow="hidden" backgroundColor={theme.diffContextBg ?? colors.canvas}>
             <For each={snippet()}>{line => {
               const background = () => line.prefix === "+" ? theme.diffAddedBg : line.prefix === "-" ? theme.diffRemovedBg : theme.diffContextBg
@@ -88,16 +94,18 @@ export function ReviewThread(props: {
             }}</For>
           </box>
         </Show>
-        <box width="100%" minWidth={0} flexShrink={0} paddingX={2} paddingBottom={1} flexDirection="column">
-          <For each={props.thread.comments.map((comment) => comment.id)} fallback={<text fg={colors.muted}>No comments available.</text>}>
-            {(id, index) => {
-              const comment = () => props.thread.comments.find((comment) => comment.id === id)!
-              return (
-                <ThreadComment number={props.number} reactionControls={props.reactionControls} interactive={props.interactive} comment={comment()} reply={!!comment().replyToId || index() > 0} syntaxStyle={props.syntaxStyle} backgroundColor={props.backgroundColor} context={props.context} />
-              )
-            }}
-          </For>
-        </box>
+        <Show when={!props.collapsed}>
+          <box width="100%" minWidth={0} flexShrink={0} paddingX={2} paddingBottom={1} flexDirection="column">
+            <For each={props.thread.comments.map((comment) => comment.id)} fallback={<text fg={colors.muted}>No comments available.</text>}>
+              {(id, index) => {
+                const comment = () => props.thread.comments.find((comment) => comment.id === id)!
+                return (
+                  <ThreadComment number={props.number} reactionControls={props.reactionControls} interactive={props.interactive} comment={comment()} reply={!!comment().replyToId || index() > 0} syntaxStyle={props.syntaxStyle} backgroundColor={props.backgroundColor} context={props.context} />
+                )
+              }}
+            </For>
+          </box>
+        </Show>
       </box>
     </TimelineEntry>
   )

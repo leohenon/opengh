@@ -158,6 +158,7 @@ function AppContent(props: AppProps) {
   const [issueRefresh, setIssueRefresh] = createSignal<{ number: number }>()
   const [pullState, setPullState] = createSignal<ListState>("open")
   const [pullRefresh, setPullRefresh] = createSignal<{ number: number }>()
+  const [timelineCollapsed, setTimelineCollapsed] = createSignal(false)
   const [overviewDocument, setOverviewDocument] = createSignal<string>()
   const [diffFocus, setDiffFocus] = createSignal<Partial<Record<Page, DiffFocus>>>({})
   const [overlay, setOverlay] = createSignal<Overlay>()
@@ -1026,6 +1027,11 @@ function AppContent(props: AppProps) {
       run: () => { if (hasIssueActions()) setOverlay("issue-actions"); },
       get disabled() { return !hasIssueActions(); },
     }] : [];
+  const timelineContextItems = (): ContextMenuItem[] =>
+    (activeIssueNumber() || activePullNumber()) && !diffTarget() ? [{
+      label: timelineCollapsed() ? "Expand" : "Collapse",
+      run: () => setTimelineCollapsed((collapsed) => !collapsed),
+    }] : [];
   const openMessageContext = (target: ReactionTarget, body: string, position: MousePosition) => {
     const message = () => reactionMessages().find((message) => sameReactionTarget(message.target, target))
     const current = message()
@@ -1035,6 +1041,7 @@ function AppContent(props: AppProps) {
       { label: "Copy text", run: () => void copyToClipboard(body, "Text"), disabled: !body },
       ...commentContextItems(),
       ...issueActionsContextItems(),
+      ...timelineContextItems(),
       ...backContextItems(),
     ], () => !!message())
   }
@@ -1101,7 +1108,7 @@ function AppContent(props: AppProps) {
         get disabled() { return !canClone(); },
       });
     }
-    items.push(...commentContextItems(), ...issueActionsContextItems(), ...backContextItems());
+    items.push(...commentContextItems(), ...issueActionsContextItems(), ...timelineContextItems(), ...backContextItems());
     if (items.length) openContextMenu(position, items, () => true);
   };
   const pageMouse = mouseContextMenu(openPageContext, () => overlay() === undefined, navigation)
@@ -1115,6 +1122,7 @@ function AppContent(props: AppProps) {
     const github: HintEntry = ["item.open", "GitHub"]
     const copy: HintEntry = ["item.copy", activeCommitSha() || page() === "commits" ? "copy SHA" : "copy URL"]
     const diff: HintEntry = ["item.diff", "diff"]
+    const timeline: HintEntry = ["detail.toggleTimeline", timelineCollapsed() ? "expand" : "collapse"]
     const help: HintEntry = ["global.help", "help"]
     const close: HintEntry = ["dialog.close", "close"]
     const picker: HintEntry[] = [["picker.accept", "open"], [["picker.up", "picker.down"], "select"], close]
@@ -1162,14 +1170,14 @@ function AppContent(props: AppProps) {
       ...more(issueDetail().comments.status !== "loading" && issueDetail().comments.value?.hasMore),
       ...(canActOnIssue("comment") ? [["issue.comment", "comment"] as const] : []),
       ...(hasIssueActions() ? [["issue.actions", "actions"] as const] : []),
-      ...(issueMenuItems().length ? [["detail.references", "references"] as const] : []),
+      timeline, ...(issueMenuItems().length ? [["detail.references", "references"] as const] : []),
       ...refresh, github, copy, ...common)
     if (activePullNumber()) return hint(back, ...retry,
       ...more(pullDetail().comments.status !== "loading" && pullDetail().comments.value?.hasMore),
       ...(canCommentOnPull() ? [["issue.comment", "comment"] as const] : []),
       ...(canOfferReview() ? [["review.open", "review"] as const] : []),
       ...(hasIssueActions() ? [["issue.actions", "actions"] as const] : []), diff,
-      ...(pullMenuItems().length ? [["detail.references", "references"] as const] : []),
+      timeline, ...(pullMenuItems().length ? [["detail.references", "references"] as const] : []),
       ...refresh, github, copy, ...common)
     if (page() === "actions") {
       const hasItems = !!data().runs.value?.items.length
@@ -1301,6 +1309,10 @@ function AppContent(props: AppProps) {
       void openReview()
     },
     "issue.actions": () => { if (!(activeIssueNumber() || activePullNumber()) || diffTarget() || !hasIssueActions()) return false; setOverlay("issue-actions") },
+    "detail.toggleTimeline": () => {
+      if (diffTarget() || !(activeIssueNumber() || activePullNumber())) return false
+      setTimelineCollapsed((collapsed) => !collapsed)
+    },
     "detail.references": () => { if (diffTarget() || !(activeIssueNumber() || activePullNumber()) || !activeMenuItems().length) return false; setOverlay("issue-references") },
     "command.clone": () => {
       if (page() !== "overview" || !canClone()) return false
@@ -1474,6 +1486,7 @@ function AppContent(props: AppProps) {
             <IssueScreen
               number={number}
               detail={issueDetail()}
+              timelineCollapsed={timelineCollapsed()}
               reactionControls={reactionControls()}
               revealActivity={revealActivity()?.parent !== "pull" && revealActivity()?.number === number ? revealActivity()?.id : undefined}
               defaultBranch={data().repo.defaultBranch}
@@ -1490,6 +1503,7 @@ function AppContent(props: AppProps) {
             <PullScreen
               number={number}
               detail={pullDetail()}
+              timelineCollapsed={timelineCollapsed()}
               revealActivity={revealActivity()?.parent === "pull" && revealActivity()?.number === number ? revealActivity()?.id : undefined}
               reactionControls={reactionControls()}
               defaultBranch={data().repo.defaultBranch}

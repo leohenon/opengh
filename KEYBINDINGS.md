@@ -89,6 +89,7 @@ Use characters (`j`, `G`, `?`), named keys (`enter`, `esc`, `up`), or modifier c
     "issue.comment": ["c"],
     "issue.actions": ["a"],
     "detail.references": ["p"],
+    "detail.toggleTimeline": ["z"],
 
     "diff.focus": ["tab", "shift+tab"],
     "diff.toggleFiles": ["b"],
@@ -169,3 +170,10 @@ Some terminals cannot distinguish combinations such as Ctrl+I and Tab, Ctrl+M an
 or Ctrl+[ and Esc. Ctrl+Shift+letter and Super shortcuts may require Kitty/enhanced keyboard
 support. Bind what your terminal reports, or use another shortcut if it intercepts or normalizes
 one.
+
+## Timeline
+
+In issue and pull request details, press **z** to collapse or expand all timeline bodies.
+Comments, reviews, review threads, and commit groups keep their headers; the description
+and routine events stay unchanged. The toggle is shared across issues and pull requests
+for the current app session.
