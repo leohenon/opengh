@@ -1,7 +1,7 @@
 import { spawnGitHub } from "./process"
-import { GitHubApiError } from "./errors"
+import { GitHubApiError, GitHubRequestNotSentError } from "./errors"
 
-export { GitHubApiError } from "./errors"
+export { GitHubApiError, GitHubRequestNotSentError } from "./errors"
 
 export type RequestOptions = { signal?: AbortSignal; maxBytes?: number; jq?: string }
 
@@ -127,7 +127,7 @@ export function createGitHubTransport(): GitHubTransport {
     if (fields || mutation) {
       const actual = await viewer()
       if (actual.id !== expected.id)
-        throw new Error(`GitHub account changed from @${expected.login} to @${actual.login}. Restart opengh before continuing; no changes were sent.`)
+        throw new GitHubRequestNotSentError(`GitHub account changed from @${expected.login} to @${actual.login}. Restart opengh before continuing; no changes were sent.`)
     }
     return request(...args)
   }

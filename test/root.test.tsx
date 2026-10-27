@@ -1,3 +1,4 @@
+import { createTestReviewSession } from "./fixtures/reviews"
 import { afterEach, describe, expect, test } from "bun:test"
 import { testRender } from "@opentui/solid"
 import { createSignal } from "solid-js"
@@ -100,7 +101,7 @@ describe("application root", () => {
         }, operations: structuredClone(repositoryOperationsFixture) })
       },
     }
-    const view = await testRender(() => <Root {...parseLaunchArguments(["9999"])} cwd="/work" services={{
+    const view = await testRender(() => <Root {...parseLaunchArguments(["9999"])} cwd="/work" services={{ createPullReviewSession: createTestReviewSession,
       resolveRepository: async (argument) => { expect(argument).toBe("."); return "cli/cli" },
       loadIssueKind: async (repository, number) => { lookups.push(`${repository}#${number}`); return "pull" },
       resolveLocalRepository: async () => undefined,
@@ -149,7 +150,7 @@ describe("application root", () => {
     let loads = 0
     let lookups = 0
     const pulls: number[] = []
-    const view = await testRender(() => <Root {...parseLaunchArguments(["cli/cli", "9999"])} cwd="/work" services={{
+    const view = await testRender(() => <Root {...parseLaunchArguments(["cli/cli", "9999"])} cwd="/work" services={{ createPullReviewSession: createTestReviewSession,
       resolveRepository: async () => "cli/cli",
       loadIssueKind: async () => {
         if (++lookups === 1) throw new GitHubApiError("repos/cli/cli/issues/9999", "Not Found (HTTP 404)")
@@ -206,7 +207,7 @@ describe("application root", () => {
         <Root
           repositoryArgument="."
           cwd="/work/repository"
-          services={{
+          services={{ createPullReviewSession: createTestReviewSession,
             resolveRepository: (argument, cwd) => {
               receivedArgument = argument
               receivedCwd = cwd
@@ -244,7 +245,7 @@ describe("application root", () => {
   test("shows repository discovery authentication errors instead of hanging or claiming no repository exists", async () => {
     const error = new GitHubApiError("repository discovery", "Bad credentials (HTTP 401)")
     const view = await testRender(
-      () => <Root repositoryArgument="." cwd="/work/repository" services={{
+      () => <Root repositoryArgument="." cwd="/work/repository" services={{ createPullReviewSession: createTestReviewSession,
         resolveRepository: async () => { throw error },
         resolveLocalRepository: async () => undefined,
         loadRepositoryTabs: async () => ({}),
@@ -273,7 +274,7 @@ describe("application root", () => {
       () => (
         <Root
           cwd="/work/repository"
-          services={{
+          services={{ createPullReviewSession: createTestReviewSession,
             resolveRepository: async () => undefined,
             loadRepositoryTabs: async () => ({}),
             saveRepositoryTabs: async () => {},
@@ -316,7 +317,7 @@ describe("application root", () => {
         <Root
           repositoryArgument="cli/cli"
           cwd="/work/repository"
-          services={{
+          services={{ createPullReviewSession: createTestReviewSession,
             resolveRepository: async () => "cli/cli",
             loadRepositoryTabs: async () => ({}),
             saveRepositoryTabs: async () => {},
@@ -400,7 +401,7 @@ test("always remembers a main tab per repository and restores it on direct open"
   let saved: Record<string, import("../src/navigation").Page> = { "cli/cli": "issues", "owner/other": "pulls" }
   let writes = 0
   const firstSave = deferred<void>()
-  const view = await testRender(() => <Root cwd="/work" repositoryArgument="cli/cli" services={{
+  const view = await testRender(() => <Root cwd="/work" repositoryArgument="cli/cli" services={{ createPullReviewSession: createTestReviewSession,
     resolveRepository: async (argument) => argument,
     resolveLocalRepository: async () => undefined,
     loadRecentRepositories: async () => [], rememberRepository: async () => {},
@@ -465,7 +466,7 @@ test("always remembers a main tab per repository and restores it on direct open"
 test("failed tab saves remain pending and are retried on exit without writing unchanged history", async () => {
   let attempts = 0
   const updates: unknown[] = []
-  const view = await testRender(() => <Root cwd="/work" repositoryArgument="cli/cli" services={{
+  const view = await testRender(() => <Root cwd="/work" repositoryArgument="cli/cli" services={{ createPullReviewSession: createTestReviewSession,
     resolveRepository: async () => "cli/cli", resolveLocalRepository: async () => undefined,
     loadRecentRepositories: async () => [], rememberRepository: async () => {},
     loadRepositoryTabs: async () => ({ "cli/cli": "issues", "owner/other": "pulls" }),
@@ -495,7 +496,7 @@ test("failed tab saves remain pending and are retried on exit without writing un
 test("reloads bindings in place, keeps the last valid config on failure, and remaps interrupt in inputs", async () => {
   let next: Config = { ...defaultConfig, showStatusBarHints: true, keybindings: { "global.interrupt": ["ctrl+x"] } }
   let invalid = false
-  const view = await testRender(() => <Root cwd="/unused" services={{
+  const view = await testRender(() => <Root cwd="/unused" services={{ createPullReviewSession: createTestReviewSession,
     resolveRepository: async () => undefined,
     loadRecentRepositories: async () => ["cli/cli"],
     rememberRepository: async () => {},
@@ -549,7 +550,7 @@ test("references isolate Root quit while preserving remapped list actions and di
     comments: { status: "ready", value: { items: [], page: 1, hasMore: false } },
     references: { status: "ready", value: [issuePullReferenceFixture] },
   }
-  const view = await testRender(() => <Root cwd="/unused" services={{
+  const view = await testRender(() => <Root cwd="/unused" services={{ createPullReviewSession: createTestReviewSession,
     resolveRepository: async () => "cli/cli", loadRecentRepositories: async () => [], rememberRepository: async () => {},
     loadRepositoryTabs: async () => ({}), saveRepositoryTabs: async () => {}, resolveLocalRepository: async () => undefined,
     loadConfig: async () => ({ ...defaultConfig, keybindings: { "dialog.close": ["f4"], "item.copy": ["f3"] } }),
@@ -583,7 +584,7 @@ test("settings cannot save or dismiss during a deferred config reload", async ()
   const reload = deferred<Config>()
   let loads = 0
   let saved: Config | undefined
-  const view = await testRender(() => <Root cwd="/unused" services={{
+  const view = await testRender(() => <Root cwd="/unused" services={{ createPullReviewSession: createTestReviewSession,
     resolveRepository: async () => "cli/cli", loadRecentRepositories: async () => [], rememberRepository: async () => {},
     loadRepositoryTabs: async () => ({}), saveRepositoryTabs: async () => {}, resolveLocalRepository: async () => undefined,
     loadConfig: () => ++loads === 1 ? Promise.resolve({ ...defaultConfig }) : reload.promise,
@@ -617,7 +618,7 @@ test("remapped interrupt cancels commands without quitting, then quits after com
   const result = deferred<{ exitCode: number; cancelled: boolean }>()
   let cancelled = 0
   let copied = ""
-  const view = await testRender(() => <Root cwd="/unused" services={{
+  const view = await testRender(() => <Root cwd="/unused" services={{ createPullReviewSession: createTestReviewSession,
     resolveRepository: async () => "cli/cli", loadRecentRepositories: async () => [], rememberRepository: async () => {},
     loadRepositoryTabs: async () => ({}), saveRepositoryTabs: async () => {}, resolveLocalRepository: async () => undefined,
     loadConfig: async () => ({ ...defaultConfig, keybindings: {

@@ -35,3 +35,20 @@ test("activity deduplicates commit sources, groups only adjacent same-day commit
   const days = buildActivity({ comments: [], references: [], threads: [], events: [a, { ...c, createdAt: date(0, 10, 6) }] })
   expect(days).toHaveLength(2)
 })
+
+test("inline threads replace only their empty comment-review timeline entries", () => {
+  const review = (id: number, state: import("../src/models").PullReviewState = "commented", body = ""): import("../src/models").PullReviewEvent => ({
+    kind: "review", event: "reviewed", id: `review:${id}`, reviewId: id, actor: "alice", createdAt: date(10),
+    state, body, authorAssociation: "OWNER", url: `https://github.com/owner/repo/pull/1#pullrequestreview-${id}`,
+  })
+  const events = [review(1, "commented", "  "), review(2, "approved"), review(3, "changes_requested"), review(4, "commented", "Summary"), review(5), review(6, "dismissed")]
+  const threads: import("../src/models").PullReviewThread[] = [{
+    kind: "review-thread", id: "thread", path: "README.md", line: 4, isResolved: false, isOutdated: false, createdAt: date(10),
+    comments: [1, 2, 3, 4, 6].map(id => ({ id: `comment:${id}`, reviewId: id, author: "alice", authorAssociation: "OWNER", body: "Inline feedback",
+      createdAt: date(10), updatedAt: date(10), url: "https://github.com/owner/repo/pull/1" })),
+  }]
+  const result = buildActivity({ comments: [], references: [], events, threads })
+  expect(result.filter(entry => "kind" in entry && entry.kind === "review").map(entry => entry.id)).toEqual(["review:2", "review:3", "review:4", "review:5", "review:6"])
+  expect(result).toContain(threads[0]!)
+  expect(buildActivity({ comments: [], references: [], events: [events[0]!], threads: [] })).toEqual([events[0]!])
+})

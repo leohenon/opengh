@@ -1,5 +1,5 @@
 import type { SyntaxStyle } from "@opentui/core"
-import { For, Show } from "solid-js"
+import { createMemo, For, Show } from "solid-js"
 import type { PullReviewThread, ReviewThreadComment } from "../../models"
 import { relativeTime } from "../format"
 import type { GitHubMarkdownContext } from "../github-markdown"
@@ -8,6 +8,7 @@ import { useTheme } from "../theme"
 import { GitHubMarkdown } from "./github-markdown"
 import { type ReactionControls, Reactions, messageReactionMouse } from "./reactions"
 import { TimelineEntry, TimelineHeader } from "./timeline-entry"
+import { reviewSnippet } from "../review-snippet"
 
 function ThreadComment(props: {
   comment: ReviewThreadComment
@@ -55,31 +56,48 @@ export function ReviewThread(props: {
   backgroundColor: string
   context: GitHubMarkdownContext
 }) {
-  const { colors } = useTheme()
+  const { colors, theme } = useTheme()
   const icons = useIcons()
-  const location = () => {
-    const line = props.thread.line ?? props.thread.originalLine
-    return `${props.thread.path}${line === undefined ? "" : `:${line}`}`
-  }
+  const snippet = createMemo(() => reviewSnippet(props.thread))
+  const gutterWidth = () => Math.max(3, ...snippet().flatMap(line => [String(line.oldLine ?? "").length, String(line.newLine ?? "").length]))
   return (
     <TimelineEntry icon={icons().user} color={props.thread.isResolved ? colors.muted : colors.yellow}>
-      <box width="100%" minWidth={0} flexShrink={0} backgroundColor={props.backgroundColor} paddingX={2} paddingY={1} flexDirection="column">
-        <text width="100%" flexShrink={0} fg={colors.text}>
-          <b>{location()}</b>{" · "}
-          <span style={{ fg: props.thread.isResolved ? colors.muted : colors.yellow }}>
-            {props.thread.isResolved ? "[Resolved]" : "[Unresolved]"}
-          </span>
-          <Show when={props.thread.isOutdated}><span style={{ fg: colors.muted }}>{" [Outdated]"}</span></Show>
-          <Show when={props.thread.resolvedBy}><span style={{ fg: colors.muted }}>{` · resolved by ${props.thread.resolvedBy}`}</span></Show>
-        </text>
-        <For each={props.thread.comments.map((comment) => comment.id)} fallback={<text fg={colors.muted}>No comments available.</text>}>
-          {(id, index) => {
-            const comment = () => props.thread.comments.find((comment) => comment.id === id)!
-            return (
-              <ThreadComment number={props.number} reactionControls={props.reactionControls} interactive={props.interactive} comment={comment()} reply={!!comment().replyToId || index() > 0} syntaxStyle={props.syntaxStyle} backgroundColor={props.backgroundColor} context={props.context} />
-            )
-          }}
-        </For>
+      <box width="100%" minWidth={0} flexShrink={0} overflow="hidden"
+        backgroundColor={props.backgroundColor} flexDirection="column">
+        <box height={1} flexShrink={0} paddingX={1} flexDirection="row" backgroundColor={colors.header}>
+          <text flexGrow={1} flexBasis={0} minWidth={0} height={1} wrapMode="none" truncate fg={colors.text}><b>{props.thread.path}</b></text>
+          <Show when={props.thread.isResolved}><text flexShrink={0} fg={colors.muted}> Resolved</text></Show>
+          <Show when={props.thread.isOutdated}><text flexShrink={0} fg={colors.muted}> Outdated</text></Show>
+        </box>
+        <Show when={snippet().length}>
+          <box id={`review-code-${props.thread.id}`} width="100%" minWidth={0} flexShrink={0} flexDirection="column" overflow="hidden" backgroundColor={theme.diffContextBg ?? colors.canvas}>
+            <For each={snippet()}>{line => {
+              const background = () => line.prefix === "+" ? theme.diffAddedBg : line.prefix === "-" ? theme.diffRemovedBg : theme.diffContextBg
+              const gutterBackground = () => line.prefix === "+" ? theme.diffAddedLineNumberBg : line.prefix === "-" ? theme.diffRemovedLineNumberBg : theme.diffContextBg
+              return <box width="100%" minHeight={1} flexShrink={0} flexDirection="row" minWidth={0} overflow="hidden"
+                backgroundColor={background() ?? colors.canvas}>
+                <box width={gutterWidth() + 1} flexShrink={0} alignSelf="stretch" backgroundColor={gutterBackground() ?? background()}>
+                  <text height={1} fg={colors.muted}>{String(line.oldLine ?? "").padStart(gutterWidth())} </text>
+                </box>
+                <box width={gutterWidth() + 1} flexShrink={0} alignSelf="stretch" backgroundColor={gutterBackground() ?? background()}>
+                  <text height={1} fg={colors.muted}>{String(line.newLine ?? "").padStart(gutterWidth())} </text>
+                </box>
+                <box width={2} flexShrink={0} alignSelf="stretch"><text height={1} fg={colors.text}>{line.prefix} </text></box>
+                <text flexGrow={1} flexShrink={1} flexBasis={0} minWidth={0} paddingRight={1} wrapMode="word" fg={colors.text}>{line.text}</text>
+              </box>
+            }}</For>
+          </box>
+        </Show>
+        <box width="100%" minWidth={0} flexShrink={0} paddingX={2} paddingBottom={1} flexDirection="column">
+          <For each={props.thread.comments.map((comment) => comment.id)} fallback={<text fg={colors.muted}>No comments available.</text>}>
+            {(id, index) => {
+              const comment = () => props.thread.comments.find((comment) => comment.id === id)!
+              return (
+                <ThreadComment number={props.number} reactionControls={props.reactionControls} interactive={props.interactive} comment={comment()} reply={!!comment().replyToId || index() > 0} syntaxStyle={props.syntaxStyle} backgroundColor={props.backgroundColor} context={props.context} />
+              )
+            }}
+          </For>
+        </box>
       </box>
     </TimelineEntry>
   )

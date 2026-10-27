@@ -15,13 +15,15 @@ test("diff requests use authenticated API media types and preserve PR/commit ide
     calls.push([path, accept])
     expect(options?.signal).toBe(signal)
     expect(options?.maxBytes).toBe(MAX_DIFF_BYTES)
-    return patchFixture
+    return accept === "application/vnd.github+json" ? JSON.stringify({ head: "a".repeat(40), base: "b".repeat(40) }) : patchFixture
   }))
   const signal = new AbortController().signal
-  expect(await load("base/private", { kind: "pull", number: 42 }, signal)).toEqual({ kind: "patch", patch: patchFixture })
+  expect(await load("base/private", { kind: "pull", number: 42 }, signal)).toEqual({ kind: "patch", patch: patchFixture, headSha: "a".repeat(40), baseSha: "b".repeat(40) })
   await load("owner/repo", { kind: "commit", sha: "abc123" }, signal)
   expect(calls).toEqual([
+    ["repos/base/private/pulls/42", "application/vnd.github+json"],
     ["repos/base/private/pulls/42", "application/vnd.github.diff"],
+    ["repos/base/private/pulls/42", "application/vnd.github+json"],
     ["repos/owner/repo/commits/abc123", "application/vnd.github.diff"],
   ])
   const cancelled = new AbortController()
@@ -71,4 +73,17 @@ Binary files a/image.png and b/image.png differ
   expect(parsed.files[3]?.message).toContain("Binary")
   expect(parseDiff({ kind: "patch", patch: patchFixture.replace("@@ -1 +1 @@", "@@ -1,8 +1,8 @@") }).error).toContain("Cannot render")
   expect(parseDiff({ kind: "patch", patch: "" }).files).toEqual([])
+})
+
+ test("PR diffs reject a changing head or base rather than attaching review comments to stale lines", async () => {
+  for (const changed of ["head", "base"]) {
+    let reads = 0
+    const load = createGitHubDiff(transport(async (_path, accept) => {
+      if (accept === "application/vnd.github.diff") return patchFixture
+      const refs = { head: "a".repeat(40), base: "b".repeat(40) }
+      if (++reads === 2) refs[changed as "head" | "base"] = "c".repeat(40)
+      return JSON.stringify(refs)
+    }))
+    await expect(load("owner/repo", { kind: "pull", number: 42 }, new AbortController().signal)).rejects.toThrow("changed while loading")
+  }
 })

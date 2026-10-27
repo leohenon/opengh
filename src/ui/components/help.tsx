@@ -49,6 +49,7 @@ export function Help(props: {
   hasReferences?: boolean;
   canComment?: boolean;
   hasIssueActions?: boolean;
+  canReview?: boolean;
   command?: string;
 }) {
   const { colors } = useTheme();
@@ -120,6 +121,7 @@ export function Help(props: {
         return [
           entry("item.diff", "view diff"),
           entry("navigation.back", "back to pull requests"),
+          ...(props.canReview ? [entry("review.open", "review pull request")] : []),
           ...(props.hasIssueActions ? [entry("issue.actions", "PR actions")] : []),
           ...(props.canComment ? [entry("issue.comment", "add comment")] : []),
           entry("item.open", "open on GitHub"),
@@ -149,6 +151,7 @@ export function Help(props: {
     const entries = props.view === "diff" ? [
       entry("navigation.back", "close diff; return to origin"),
       entry("diff.focus", "switch files / diff focus"),
+      ...(props.canReview ? [entry("review.open", "review pull request")] : []),
       entry("diff.toggleFiles", "toggle sidebar; hide → diff focus"),
       entry("navigation.activate", "files → diff; error → file list"),
       entry(tabActions(), "switch tabs; retain diff state"),

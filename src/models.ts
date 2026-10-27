@@ -204,6 +204,7 @@ export type PullRequestSummary = IssueSummary & {
 }
 
 export type ReviewThreadComment = Partial<ReactionState> & {
+  diffHunk?: string
   id: string
   author: string
   authorAssociation: string
@@ -216,6 +217,9 @@ export type ReviewThreadComment = Partial<ReactionState> & {
 }
 
 export type PullReviewThread = {
+  diffSide?: "LEFT" | "RIGHT"
+  startLine?: number
+  originalStartLine?: number
   kind: "review-thread"
   id: string
   path: string
@@ -356,7 +360,7 @@ export type DiffTarget =
   | { kind: "pull"; number: number }
 
 export type DiffContent =
-  | { kind: "patch"; patch: string }
+  | { kind: "patch"; patch: string; headSha?: string; baseSha?: string }
   | { kind: "files"; files: CommitFile[]; truncated: boolean }
 
 export type Paginated<T> = {

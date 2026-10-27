@@ -1,5 +1,5 @@
 import { TextAttributes, type ScrollBoxRenderable, type TextareaRenderable } from "@opentui/core"
-import { usePaste, useRenderer, useTerminalDimensions } from "@opentui/solid"
+import { usePaste, useRenderer } from "@opentui/solid"
 import { createEffect, createMemo, createSignal, Index, onCleanup, Show, untrack } from "solid-js"
 import type { IssueActionKind, IssueActionParent, IssueCloseReason } from "../../models"
 import type { IssueActionState } from "../../repository-state"
@@ -24,12 +24,11 @@ export function IssueActionsMenu(props: {
   onMerge?(): void
   draftAction?: "draft" | "ready"
   onChangeDraft?(draft: boolean): void
+  onReview?(): void
   onOpenGitHub?(): void
   onClose(): void
 }) {
   const { colors } = useTheme()
-  const dimensions = useTerminalDimensions()
-  const reasonHeight = () => props.merge?.reason && !props.merge.checking ? Math.ceil(Bun.stringWidth(props.merge.reason) / Math.max(1, Math.min(52, dimensions().width - 2) - 4)) : 0
   const [selected, setSelected] = createSignal(0)
   const items = createMemo(() => {
     const actions: { kind: Exclude<IssueActionKind, "comment">; label: string }[] = props.state === "open" ? [
@@ -37,13 +36,18 @@ export function IssueActionsMenu(props: {
       { kind: "duplicate", label: "Mark as duplicate…" },
     ] : [{ kind: "reopen", label: `Reopen ${props.parent === "pull" ? "PR" : "issue"}…` }]
     actions.push({ kind: "assignees", label: "Edit assignees…" })
-    const visible: { kind: Exclude<IssueActionKind, "comment"> | "merge" | "github" | "draft" | "ready"; label: string; disabled?: boolean }[] =
+    const visible: { kind: Exclude<IssueActionKind, "comment"> | "merge" | "github" | "review" | "draft" | "ready"; label: string; disabled?: boolean }[] =
       actions.filter((item) => !(props.parent === "pull" && item.kind === "duplicate") && props.permissions?.[item.kind])
     if (props.parent === "pull" && props.state === "open" && props.draftAction)
       visible.unshift({ kind: props.draftAction, label: props.draftAction === "draft" ? "Mark as draft…" : "Ready for review…" })
     if (props.merge) {
       visible.unshift({ kind: "merge", label: "Merge…", disabled: !!props.merge.reason })
       if (props.merge.reason && !props.merge.checking && props.onOpenGitHub) visible.push({ kind: "github", label: "Open on GitHub" })
+    }
+    if (props.onReview) visible.push({ kind: "review", label: "Review…" })
+    if (props.parent === "pull") {
+      const order = ["review", "merge", "assignees", "draft", "ready", "close", "reopen", "github"]
+      visible.sort((left, right) => order.indexOf(left.kind) - order.indexOf(right.kind))
     }
     return visible
   })
@@ -53,6 +57,7 @@ export function IssueActionsMenu(props: {
     if (!item || item.disabled) return
     setSelected(index)
     if (item.kind === "merge") props.onMerge?.()
+    else if (item.kind === "review") props.onReview?.()
     else if (item.kind === "github") props.onOpenGitHub?.()
     else if (item.kind === "draft" || item.kind === "ready") props.onChangeDraft?.(item.kind === "draft")
     else props.onSelect(item.kind)
@@ -64,7 +69,7 @@ export function IssueActionsMenu(props: {
     "navigation.activate": () => activate(),
   }, { priority: 100, modal: true })
   return (
-    <Popup width={52} height={items().length + 5 + (reasonHeight() ? reasonHeight() + 1 : 0)} placement="center" zIndex={250} onClose={props.onClose}>
+    <Popup width={52} height={items().length + 5} placement="center" zIndex={250} onClose={props.onClose}>
       <box flexGrow={1} minHeight={0} paddingX={2} paddingBottom={1} flexDirection="column">
         <text height={1} flexShrink={0} fg={colors.text} attributes={TextAttributes.BOLD}>{props.parent === "pull" ? "PR" : "Issue"} #{props.number} · Actions</text>
         <box height={1} flexShrink={0} />
@@ -78,9 +83,6 @@ export function IssueActionsMenu(props: {
             </box>
           )
         }}</Index>
-        <Show when={props.merge?.reason && !props.merge.checking}>
-          <text marginTop={1} height={reasonHeight()} flexShrink={0} wrapMode="word" fg={colors.muted}>{props.merge?.reason}</text>
-        </Show>
         <box flexGrow={1} minHeight={0} />
       </box>
     </Popup>

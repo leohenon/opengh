@@ -27,7 +27,6 @@ test("mouse diff gestures select hunks in place, isolate pane wheels, pan, wrap,
     + `@@ -500 +500 @@\n-last-old\n+last-new\n`
     + Array.from({ length: 25 }, (_, index) => `diff --git a/file-${index}.txt b/file-${index}.txt\n--- a/file-${index}.txt\n+++ b/file-${index}.txt\n@@ -1 +1 @@\n-old\n+new\n`).join("")
   const file = parseDiff({ kind: "patch", patch }).files[0]!.body!
-  const endColumn = Math.max(...file.metadata.additionLines.map((line) => Bun.stringWidth(line)), ...file.metadata.deletionLines.map((line) => Bun.stringWidth(line)))
   await render(() => <box width="100%" height="100%">
     <SelectionClipboard onCopy={async (value) => { copied.push(value); return true }} />
     <DiffScreen target={{ kind: "commit", sha: "mouse" }}
@@ -35,32 +34,52 @@ test("mouse diff gestures select hunks in place, isolate pane wheels, pan, wrap,
   const settle = async () => { await setup.flush(); await setup.renderer.idle(); await setup.flush() }
   const files = () => setup.renderer.root.findDescendantById("diff-files-pane") as BoxRenderable
   const body = () => setup.renderer.root.findDescendantById("diff-body-scroll") as ScrollBoxRenderable
-  const position = () => setup.captureCharFrame().split("\n")[0]!
   const codeRow = (text: string) => setup.captureCharFrame().split("\n").findIndex((line) => line.includes(text))
+  const rail = (index: number) => {
+    const header = setup.renderer.root.findDescendantById(`diff-hunk:${file.id}:${index}`)!
+    let column = 0
+    const span = setup.captureSpans().lines[header.y + 1]?.spans.find((span) => {
+      const start = column
+      column += Bun.stringWidth(span.text)
+      return start <= body().viewport.x && column > body().viewport.x
+    })
+    expect(span).toBeDefined()
+    return span!.fg
+  }
+  const expectSelected = (index: number) => {
+    expect(rail(index)).toEqual(selectedRail)
+    expect(rail(index === 0 ? 1 : 0)).toEqual(unselectedRail)
+  }
+  let selectedRail: ReturnType<typeof rail>
+  let unselectedRail: ReturnType<typeof rail>
   try {
     await settle()
     expect(setup.renderer.root.findDescendantById("diff-controls")).toBeUndefined()
+    selectedRail = rail(0)
+    unselectedRail = rail(1)
+    expect(selectedRail).not.toEqual(unselectedRail)
     const focused = files().borderColor
     const x = body().viewport.x + 10
     const second = codeRow("second-old-0")
     expect(second).toBeGreaterThan(-1)
+    const sourceColumn = setup.captureCharFrame().split("\n")[second]!.indexOf("second-old-0")
     await setup.mockMouse.click(x, second)
     await settle()
-    expect(position()).toContain("hunk 2/3")
+    expectSelected(1)
     expect(body().scrollTop).toBe(0) // Selecting visible code must not jump to its header.
     expect((setup.renderer.root.findDescendantById("diff-content-pane") as BoxRenderable).borderColor).toEqual(focused)
     const first = codeRow("first-old-0")
     for (const button of [1, 2] as const) await setup.mockMouse.click(x, first, button)
     await setup.mockMouse.drag(x, first, x + 4, first)
     await settle()
-    expect(position()).toContain("hunk 2/3")
+    expectSelected(1)
     expect(setup.renderer.getSelection()).toBeNull()
     expect(copied.at(-1)).toBeTruthy()
     await setup.mockMouse.pressDown(x, first)
     await setup.mockMouse.scroll(x, first, "right")
     await setup.mockMouse.release(x, first)
     await settle()
-    expect(position()).toContain("hunk 2/3") // A wheel gesture cancels a held click, not just its reveal.
+    expectSelected(1) // A wheel gesture cancels a held click, not just its reveal.
     await setup.mockMouse.scroll(x, first, "left")
     await settle()
     const list = files().getChildren()[1]!.getChildren()[0] as ScrollBoxRenderable
@@ -71,43 +90,52 @@ test("mouse diff gestures select hunks in place, isolate pane wheels, pan, wrap,
     expect(body().scrollTop).toBe(0)
     await setup.mockMouse.scroll(x, second, "right")
     await settle()
-    expect(position()).toContain("col 5")
+    expect(setup.captureCharFrame().split("\n")[second]!.slice(sourceColumn, sourceColumn + 16)).toBe(`nd-old-0-${"x".repeat(7)}`)
+    expect(setup.captureCharFrame().split("\n")[second]).not.toContain("second-old-0")
     await setup.mockMouse.scroll(x, second, "down", { modifiers: { shift: true } })
     await setup.mockMouse.scroll(x, second, "right", { modifiers: { shift: true } })
     await settle()
-    expect(position()).toContain("col 13")
+    const pannedRow = setup.captureCharFrame().split("\n")[second]!
+    expect(pannedRow.slice(sourceColumn, sourceColumn + 16)).toBe(`-${"x".repeat(15)}`)
+    expect(pannedRow).not.toContain("old-0")
     expect(body().scrollTop).toBe(0)
     expect(body().scrollLeft).toBe(0)
     setup.mockInput.pressKey("w")
     await settle()
     await setup.mockMouse.click(x, codeRow("first-old-0"))
     await settle()
-    expect(position()).toContain("hunk 1/3")
+    expectSelected(0)
     const wrapped = setup.captureCharFrame()
     await setup.mockMouse.scroll(x, second, "right")
     await settle()
     expect(setup.captureCharFrame()).toBe(wrapped)
     setup.mockInput.pressKey("w")
     await settle()
-    expect(position()).toContain("col 13")
+    expect(setup.captureCharFrame().split("\n")[second]).toBe(pannedRow)
     for (let index = 0; index < 40; index++) await setup.mockMouse.scroll(x, second, "right", { delayMs: 0 })
     await settle()
-    expect(position()).toContain(`col ${endColumn}`)
+    const endFrame = setup.captureCharFrame()
+    expect(endFrame).not.toContain("xx") // At the bound, at most the last source column remains.
+    expect(endFrame.split("\n")[second + 10]!.slice(body().viewport.x).match(/x/g)).toHaveLength(2)
+    await setup.mockMouse.scroll(x, second, "right")
+    await settle()
+    expect(setup.captureCharFrame()).toBe(endFrame)
     setup.mockInput.pressKey("t")
     await settle()
     const secondHeader = setup.renderer.root.findDescendantById(`diff-hunk:${file.id}:1`)!
     await setup.mockMouse.click(x, secondHeader.y + 1)
     await settle()
-    expect(position()).toContain("hunk 2/3")
+    expectSelected(1)
     expect(body().scrollTop).toBe(0)
     const header = setup.renderer.root.findDescendantById(`diff-hunk:${file.id}:0`)!
     await setup.mockMouse.click(header.x + 2, header.y)
     await settle()
-    expect(position()).toContain("hunk 1/3")
+    expectSelected(0)
     expect(body().scrollTop).toBe(0)
     setup.mockInput.pressKey("]")
     await settle()
-    expect(position()).toContain("hunk 2/3")
+    expect(rail(1)).toEqual(selectedRail)
+    expect(secondHeader.y).toBe(body().viewport.y)
     expect(body().scrollTop).toBeGreaterThan(0)
     const jumpedTop = body().scrollTop
     await setup.mockMouse.scroll(x, body().viewport.y + 3, "down")
@@ -140,7 +168,10 @@ test("commit diffs render when the response arrives after the loading frame", as
     resource={resource()} interactive showScrollbar onLoadFiles={() => {}} /></box>, setup.renderer)
   try {
     await setup.flush()
-    expect(setup.captureCharFrame()).toContain("Loading diff")
+    const filePane = setup.renderer.root.findDescendantById("diff-files-pane")!
+    const loadingRows = setup.captureCharFrame().split("\n").slice(filePane.y + 1, filePane.y + filePane.height)
+    expect(loadingRows.map((row) => row.slice(filePane.x + 1, filePane.x + filePane.width)).join("").trim()).toBe("")
+    expect(setup.captureCharFrame()).not.toContain("No file selected")
     expect(setup.captureCharFrame()).not.toContain("Files (0)")
     expect(setup.captureCharFrame()).not.toContain("No changed files")
     expect(setup.captureCharFrame()).not.toContain("+0")
@@ -334,7 +365,8 @@ test("numbered tabs retain independent diff viewers, geometry and scroll until E
     const frame = setup.captureCharFrame()
     expect(position).toBeGreaterThan(0)
     expect(frame).toContain("new-row-39")
-    expect(frame).toContain("hunk 2/2")
+    expect(frame).toContain("last-old")
+    expect(frame).toContain("last-new")
     expect(frame).not.toContain("Files (2)")
     setup.mockInput.pressKey("3")
     await settle()

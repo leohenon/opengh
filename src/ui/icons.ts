@@ -33,6 +33,7 @@ export type IconSet = {
   repository: { fork: string; star: string; watching: string }
   workflow: { success: string; failure: string; cancelled: string; skipped: string; clock: string; attention: string; neutral: string }
   user: string
+  comment: string
   commit: string
   branch: string
 }
@@ -43,6 +44,7 @@ export const nerdIcons: IconSet = {
   repository: repositoryIcons,
   workflow: workflowIcons,
   user: "\uf007",
+  comment: "\uf075",
   commit: "\uf417",
   branch: "\uf418",
 }
@@ -53,6 +55,7 @@ export const unicodeIcons: IconSet = {
   repository: { fork: "⑂", star: "☆", watching: "◉" },
   workflow: { success: "✓", failure: "×", cancelled: "⊘", skipped: "↷", clock: "◷", attention: "!", neutral: "−" },
   user: "●",
+  comment: "💬",
   commit: "◇",
   branch: "⑂",
 }

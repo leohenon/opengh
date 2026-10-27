@@ -1,0 +1,152 @@
+import { expect, test } from "bun:test"
+import { createTestRenderer } from "@opentui/core/testing"
+import { render } from "@opentui/solid"
+import { createSignal } from "solid-js"
+import type { PullReviewThread } from "../src/models"
+import { initializeHunk } from "../src/ui/hunk-host"
+import { MarkdownProvider } from "../src/ui/markdown-preferences"
+import { IconProvider } from "../src/ui/icon-style"
+import { nerdIcons, unicodeIcons } from "../src/ui/icons"
+import { DiffScreen } from "../src/ui/pages/diff"
+import { parseDiff } from "../src/ui/diff-model"
+import { reviewRows } from "../src/ui/review-lines"
+import { isSourceRowY } from "../src/ui/diff-comment-cards"
+import type { ContextMenuItem } from "../src/ui/components/context-menu"
+
+const patch = `diff --git a/message.ts b/message.ts
+--- a/message.ts
++++ b/message.ts
+@@ -1,3 +1,3 @@
+ const before = 1
+-const old = "old"
++const changed = "new"
+ const after = 3
+`
+const thread: PullReviewThread = {
+  kind: "review-thread", id: "thread", path: "message.ts", line: 2, diffSide: "RIGHT",
+  isResolved: true, isOutdated: false,
+  comments: [{ id: "comment", author: "alice", authorAssociation: "MEMBER", body: "Posted discussion body", createdAt: new Date(Date.now() - 240_000).toISOString(), updatedAt: "", url: "" },
+    { id: "reply", author: "bob", authorAssociation: "MEMBER", body: "A reply in the same thread", createdAt: "", updatedAt: "", url: "" }],
+}
+
+test("posted threads expand real Hunk rows, survive highlighting/layout changes, and never become source anchors", async () => {
+  const setup = await createTestRenderer({ width: 110, height: 32 })
+  initializeHunk(setup.renderer)
+  const [threads, setThreads] = createSignal<readonly PullReviewThread[]>([thread,
+    { ...thread, id: "unknown", diffSide: undefined, comments: [{ ...thread.comments[0]!, body: "Unknown side discussion" }] },
+    { ...thread, id: "outdated", isOutdated: true, comments: [{ ...thread.comments[0]!, body: "Old discussion" }] },
+  ])
+  const [writable, setWritable] = createSignal(false)
+  const [iconStyle, setIconStyle] = createSignal<"unicode" | "nerd">("unicode")
+  const [markdownStyle, setMarkdownStyle] = createSignal<"rich" | "minimal">("rich")
+  const [content, setContent] = createSignal(patch)
+  let menu: ContextMenuItem[] = []
+  await render(() => <IconProvider style={iconStyle()}><MarkdownProvider style={markdownStyle()}><DiffScreen target={{ kind: "pull", number: 1 }}
+    resource={{ status: "ready", value: { kind: "patch", patch: content() } }} interactive showScrollbar={false} onLoadFiles={() => {}}
+    threads={threads()} onContextMenu={(_, items) => { menu = items }}
+    review={writable() ? { headSha: "head", comments: [], onComment: () => {}, onOpenReview: () => {} } : undefined} /></MarkdownProvider></IconProvider>, setup.renderer)
+  const settle = async () => { await Bun.sleep(40); await setup.flush(); await setup.renderer.idle(); await setup.flush() }
+  const file = parseDiff({ kind: "patch", patch }).files[0]!.body!
+  const assertPlacement = (layout: "split" | "unified") => {
+    const rows = reviewRows(file, layout)
+    const row = setup.renderer.root.findDescendantById(rows.find((row) => row.right?.line === 2)!.id)!
+    const next = setup.renderer.root.findDescendantById(rows.find((row) => row.right?.line === 3)!.id)!
+    const card = setup.renderer.root.findDescendantById("diff-comment-card:thread")!
+    expect(card.parent).toBe(row)
+    expect(card.height).toBe(5) // Two author/body pairs and a subtle reply divider.
+    if (layout === "split") {
+      expect(card.x).toBeGreaterThan(row.x + row.width / 2)
+      expect(card.width).toBeLessThanOrEqual(Math.ceil(row.width / 2))
+    }
+    expect(card.y).toBeGreaterThan(row.y)
+    expect(next.y).toBeGreaterThanOrEqual(card.y + card.height)
+    expect(isSourceRowY(row, row.y)).toBe(true)
+    expect(isSourceRowY(row, card.y)).toBe(false)
+    const frame = setup.captureCharFrame()
+
+    expect(frame.match(/Posted discussion body/g)).toHaveLength(1)
+    expect(frame.indexOf("Posted discussion body")).toBeGreaterThan(frame.indexOf('const changed'))
+    expect(frame.indexOf("Posted discussion body")).toBeLessThan(frame.indexOf('const after'))
+    expect(frame).toContain("@alice · resolved")
+    expect(frame).toContain(iconStyle() === "unicode" ? unicodeIcons.comment : nerdIcons.comment)
+    expect(frame).not.toContain("╭")
+    expect(frame).toContain("(4m ago)")
+    expect(frame).toContain("@bob")
+    expect(frame).toContain("Unplaced review comments")
+    expect(frame).toContain("Outdated review comments")
+    expect(setup.renderer.root.findDescendantById("diff-comment-card:unknown")!.y).toBeGreaterThan(next.y)
+    return { row, card }
+  }
+  try {
+    await settle()
+    const bodyDeadline = Date.now() + 5000
+    while (!setup.captureCharFrame().includes("Posted discussion body") && Date.now() < bodyDeadline) {
+      await Bun.sleep(20); await settle()
+    }
+    assertPlacement("split") // No writable review prop is needed to read comments.
+    setIconStyle("nerd")
+    await settle()
+    assertPlacement("split")
+    // Wait for real asynchronous syntax highlighting, then verify appended children stayed in order.
+    const highlighted = () => {
+      const line = setup.captureSpans().lines.find((line) => line.spans.map((span) => span.text).join("").includes("const changed"))
+      const keyword = line?.spans.find((span) => span.text.includes("const"))?.fg
+      const literal = line?.spans.find((span) => span.text.includes('"'))?.fg
+      return !!keyword && !!literal && !keyword.equals(literal)
+    }
+    const deadline = Date.now() + 5000
+    while (!highlighted() && Date.now() < deadline) { await Bun.sleep(20); await settle() }
+    expect(highlighted()).toBe(true)
+    assertPlacement("split")
+    setWritable(true)
+    await settle()
+    for (const layout of ["split", "unified", "split"] as const) {
+      const { row, card } = assertPlacement(layout)
+      await setup.mockMouse.click(card.x + 4, card.y + 1, 2)
+      await settle()
+      expect(menu.some((item) => item.label === "Add review comment…")).toBe(false)
+      // Padding has no text target; it must not fall back to the expanded source wrapper.
+      await setup.mockMouse.click(card.x, card.y + 1, 2)
+      await settle()
+      expect(menu.some((item) => item.label === "Add review comment…")).toBe(false)
+      await setup.mockMouse.click(row.x + row.width - 5, row.y, 2)
+      await settle()
+      expect(menu.some((item) => item.label === "Add review comment…")).toBe(true)
+      menu.find((item) => item.label === "Change layout")!.run()
+      await settle()
+    }
+    setup.mockInput.pressKey("w")
+    setup.resize(100, 32)
+    await settle()
+    assertPlacement("unified")
+    const oldCard = setup.renderer.root.findDescendantById("diff-comment-card:thread")!
+    setContent(patch.replaceAll("message.ts", "other.ts"))
+    await settle()
+    expect(oldCard.isDestroyed).toBe(true)
+    expect(setup.captureCharFrame()).not.toContain("Posted discussion body")
+    setContent(patch)
+    await settle()
+    assertPlacement("unified")
+    setThreads([])
+    await settle()
+    expect(setup.renderer.root.findDescendantById("diff-comment-card:thread")).toBeUndefined()
+    expect(setup.captureCharFrame()).not.toContain("Posted discussion body")
+    setThreads([thread])
+    await settle()
+    expect(setup.captureCharFrame().match(/Posted discussion body/g)).toHaveLength(1)
+    expect(setup.renderer.root.findDescendantById("diff-comment-card:thread:divider:1")).toBeDefined()
+    setThreads([{ ...thread, comments: [{ ...thread.comments[0]!, body: "**Formatted feedback**\n\n```suggestion\nreturn true\n```" }] }])
+    const markdownDeadline = Date.now() + 5000
+    while ((!setup.captureCharFrame().includes("Formatted feedback") || setup.captureCharFrame().includes("```")) && Date.now() < markdownDeadline) {
+      await Bun.sleep(20); await settle()
+    }
+    expect(setup.captureCharFrame()).toContain("Formatted feedback")
+    expect(setup.captureCharFrame()).toContain("return true")
+    expect(setup.captureCharFrame()).not.toContain("**Formatted feedback**")
+    expect(setup.captureCharFrame()).not.toContain("```")
+    setMarkdownStyle("minimal")
+    await settle()
+    expect(setup.captureCharFrame()).toContain("Formatted feedback")
+    expect(setup.captureCharFrame()).not.toContain("```")
+  } finally { setup.renderer.destroy(); await setup.renderer.closed }
+}, 10000)

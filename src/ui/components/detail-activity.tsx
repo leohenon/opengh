@@ -263,9 +263,9 @@ export function DetailActivity(props: {
     <box width="100%" minWidth={0} flexShrink={0} flexDirection="column">
       <text width="100%" flexShrink={0} marginTop={1} fg={colors.muted}>
         <b><span style={{ fg: colors.text }}>Activity</span></b>
-        {props.commitTotal === undefined ? "" : ` · ${props.commitTotal} ${props.commitTotal === 1 ? "commit" : "commits"}`}
-        {" · "}{props.commentCount} {props.commentCount === 1 ? "comment" : "comments"}
-        {comments().value && (comments().value!.hasMore || comments().value!.items.length !== props.commentCount)
+        {props.commitTotal ? ` · ${props.commitTotal} ${props.commitTotal === 1 ? "commit" : "commits"}` : ""}
+        {props.commentCount ? ` · ${props.commentCount} ${props.commentCount === 1 ? "comment" : "comments"}` : ""}
+        {comments().value?.items.length && (comments().value!.hasMore || comments().value!.items.length !== props.commentCount)
           ? ` · ${comments().value!.items.length} loaded` : ""}
         {references().value?.length ? ` · ${references().value!.length} ${references().value!.length === 1 ? "reference" : "references"}` : ""}
         {reviewCount() ? ` · ${reviewCount()} ${reviewCount() === 1 ? "review" : "reviews"}` : ""}

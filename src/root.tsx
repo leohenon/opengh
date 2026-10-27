@@ -9,6 +9,9 @@ import { resolveLocalRepository, runCommand, type LocalRepository } from "./comm
 import { loadRecentRepositories, rememberRepository, resolveRepository } from "./github/repository"
 import { openGitHub } from "./github/browser"
 import { loadGitHubIssueKind } from "./github/client"
+import { createInlineComments } from "./inline-comments"
+import { createPullReviewSession } from "./pull-review-session"
+import type { PullReviewSession } from "./review-types"
 import { createRepositorySession, type RepositorySession } from "./repository-session"
 import type { RepositoryState } from "./repository-state"
 import { App } from "./ui/app"
@@ -42,6 +45,8 @@ export type RootServices = {
   loadConfig(): Promise<Config>
   saveConfig(config: Config): Promise<void>
   createRepositorySession(): RepositorySession
+  createPullReviewSession(): PullReviewSession
+  createInlineComments: typeof createInlineComments
   openGitHub(repository: string, target?: string | number, view?: "diff"): Promise<void>
   copyToHostClipboard(value: string): Promise<boolean>
   resolveLocalRepository: typeof resolveLocalRepository
@@ -58,6 +63,8 @@ const defaultServices: RootServices = {
   loadConfig,
   saveConfig,
   createRepositorySession,
+  createPullReviewSession,
+  createInlineComments,
   openGitHub,
   copyToHostClipboard,
   resolveLocalRepository,
@@ -118,6 +125,9 @@ export function Root(props: {
   const [dismissedDraftError, setDismissedDraftError] = createSignal<string>()
   createEffect(() => { if (!session.draftSaveError?.()) setDismissedDraftError(undefined) })
   onCleanup(() => session.flushDrafts?.())
+  const reviews = services.createPullReviewSession()
+  const inlineComments = services.createInlineComments()
+  const [reviewSaveError, setReviewSaveError] = createSignal<string>()
   const [localRepository, setLocalRepository] = createSignal<LocalRepository>()
   let commandCancel: (() => void) | undefined
   const refreshLocalRepository = async () => { setLocalRepository(await services.resolveLocalRepository(props.cwd)) }
@@ -127,7 +137,13 @@ export function Root(props: {
     if (quitting) return
     quitting = true
     session.flushDrafts?.()
-    const pending = flushRepositoryTabs()
+    const tabs = flushRepositoryTabs()
+    const pending = reviews.state().draft ? Promise.all([tabs, reviews.flush()]).catch((error) => {
+      quitting = false
+      setReviewSaveError(error instanceof Error ? error.message : "Could not save the review draft.")
+      throw error
+    }) : tabs
+    if (reviews.state().draft && pending) { void pending.then(() => renderer.destroy()).catch(() => {}); return }
     if (pending) void pending.finally(() => renderer.destroy())
     else renderer.destroy()
   }
@@ -358,6 +374,8 @@ export function Root(props: {
               onIssueDraftChange={session.updateIssueDraft}
               onDiscardIssueDraft={session.discardIssueDraft}
               onSubmitIssueAction={session.submitIssueAction}
+              reviews={reviews}
+              onPostInlineComment={inlineComments.post}
               onMergePull={session.mergePull}
               onUpdatePullDraft={session.updatePullDraft}
               onLoadPullMergeMessage={session.loadPullMergeMessage}
@@ -383,6 +401,9 @@ export function Root(props: {
       <Show when={session.draftSaveError?.() && session.draftSaveError?.() !== dismissedDraftError()}>
         <Toast title="Draft not saved locally" message={session.draftSaveError?.() ?? ""}
           zIndex={400} onDismiss={() => setDismissedDraftError(session.draftSaveError?.())} />
+      </Show>
+      <Show when={reviewSaveError()}>
+        <Toast title="Review draft not saved — quit cancelled" message={reviewSaveError()!} onDismiss={() => setReviewSaveError(undefined)} />
       </Show>
       <Show when={configReloaded()}>
         <Toast

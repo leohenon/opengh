@@ -6,6 +6,7 @@ test("PR context paginates threads, replies and checks without hiding data on pr
   const done = { hasNextPage: false, endCursor: null }
   const calls: string[] = []
   const comment = (id: string, replyTo?: string) => ({
+    diffHunk: "@@ -10,1 +12,1 @@\n-before\n+after",
     id, author: { login: "alice" }, authorAssociation: "MEMBER", body: `Comment ${id}`,
     createdAt: "2026-01-01T12:00:00Z", updatedAt: "2026-01-01T12:00:00Z",
     url: `https://github.com/owner/repo/pull/42#discussion_${id}`, pullRequestReview: { databaseId: 7 },
@@ -29,7 +30,7 @@ test("PR context paginates threads, replies and checks without hiding data on pr
         nodes: [{ id: "thread2", path: "old.ts", line: null, originalLine: 9, isResolved: true, isOutdated: true, resolvedBy: { login: "bob" },
           comments: { nodes: [comment("old")], pageInfo: done } }], pageInfo: done,
       } : {
-        nodes: [{ id: "thread1", path: "src/index.ts", line: 12, originalLine: 12, isResolved: false, isOutdated: false, resolvedBy: null,
+        nodes: [{ id: "thread1", path: "src/index.ts", line: 12, originalLine: 12, startLine: 12, originalStartLine: 12, diffSide: "RIGHT", isResolved: false, isOutdated: false, resolvedBy: null,
           comments: { nodes: [comment("root")], pageInfo: { hasNextPage: true, endCursor: "comments1" } } }],
         pageInfo: { hasNextPage: true, endCursor: "threads1" },
       } })
@@ -45,6 +46,8 @@ test("PR context paginates threads, replies and checks without hiding data on pr
   })
   const context = await client.pullContext("owner/repo", 42)
   expect(context.threads).toHaveLength(2)
+  expect(context.threads[0]).toMatchObject({ diffSide: "RIGHT", startLine: 12, originalStartLine: 12 })
+  expect(context.threads[0]?.comments[0]?.diffHunk).toBe("@@ -10,1 +12,1 @@\n-before\n+after")
   expect(context.threads[0]?.comments.map((entry) => entry.id)).toEqual(["root", "reply"])
   expect(context.threads[0]?.comments[1]).toMatchObject({ replyToId: "root", reviewId: 7, reactions: { "+1": 2 }, viewerReactions: ["+1"], canReact: true })
   expect(context.threads[1]).toMatchObject({ isResolved: true, isOutdated: true, resolvedBy: "bob", originalLine: 9 })

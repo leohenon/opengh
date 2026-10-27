@@ -38,7 +38,7 @@ class HeadChangedError extends Error {
 }
 
 const pageInfo = "pageInfo { hasNextPage endCursor }"
-const commentFields = `id author { login } authorAssociation body createdAt updatedAt url
+const commentFields = `id author { login } authorAssociation body diffHunk createdAt updatedAt url
   pullRequestReview { databaseId } replyTo { id }
   ${reactionFields}`
 
@@ -46,6 +46,7 @@ function comment(value: unknown): ReviewThreadComment {
   const node = object(value)
   return {
     id: text(node.id), author: login(node.author), authorAssociation: text(node.authorAssociation),
+    diffHunk: optionalText(node.diffHunk),
     body: text(node.body), createdAt: text(node.createdAt), updatedAt: text(node.updatedAt), url: text(node.url),
     reviewId: node.pullRequestReview == null ? undefined : optionalNumber(object(node.pullRequestReview).databaseId),
     replyToId: node.replyTo == null ? undefined : text(object(node.replyTo).id),
@@ -166,7 +167,7 @@ export function createGitHubPullContext(transport: GitHubTransport) {
       }
       async function threads(): Promise<PullReviewThread[]> {
         const nodes = await collection("PullThreads", `headRefOid reviewThreads(first: 100, after: $cursor) {
-          nodes { id path line originalLine isResolved isOutdated resolvedBy { login }
+          nodes { id path line originalLine startLine originalStartLine diffSide isResolved isOutdated resolvedBy { login }
             comments(first: 100) { nodes { ${commentFields} } ${pageInfo} }
           } ${pageInfo}
         }`, node => node.reviewThreads, object, node => text(node.id), true)
@@ -202,6 +203,8 @@ export function createGitHubPullContext(transport: GitHubTransport) {
             const items = [...comments.values()]
             result[position] = {
               kind: "review-thread", id, path: text(node.path), line: optionalNumber(node.line),
+              diffSide: node.diffSide === "LEFT" || node.diffSide === "RIGHT" ? node.diffSide : undefined,
+              startLine: optionalNumber(node.startLine), originalStartLine: optionalNumber(node.originalStartLine),
               originalLine: optionalNumber(node.originalLine), isResolved: boolean(node.isResolved),
               isOutdated: boolean(node.isOutdated),
               resolvedBy: node.resolvedBy == null ? undefined : login(node.resolvedBy),

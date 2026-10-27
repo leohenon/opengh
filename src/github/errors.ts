@@ -16,6 +16,14 @@ function authenticationGuidance(message: string, status?: number) {
   return message
 }
 
+// Only use when the transport can prove no mutation request was dispatched.
+export class GitHubRequestNotSentError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = "GitHubRequestNotSentError"
+  }
+}
+
 export class GitHubApiError extends Error {
   readonly path: string
   readonly status?: number

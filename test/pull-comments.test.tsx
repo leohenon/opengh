@@ -1,3 +1,4 @@
+import { createTestReviewSession } from "./fixtures/reviews"
 import { expect, test } from "bun:test"
 import { testRender } from "@opentui/solid"
 import type { ScrollBoxRenderable } from "@opentui/core"
@@ -36,7 +37,7 @@ test("Root PR conversation comments use the shared editor, retain drafts, confir
     pullCommits: async () => [], pullContext: async () => pullContextFixture,
     createIssueComment: async (repository, number, body) => { calls.push({ repository, number, body }); return pending.promise },
   })
-  const view = await testRender(() => <Root cwd="/fixture" services={{
+  const view = await testRender(() => <Root cwd="/fixture" services={{ createPullReviewSession: createTestReviewSession,
     resolveRepository: async () => githubDataFixture.repo.nameWithOwner, resolveLocalRepository: async () => undefined,
     loadRecentRepositories: async () => [], rememberRepository: async () => {},
     loadConfig: async () => ({ ...defaultConfig, showStatusBarHints: true, showScrollbars: false, keybindings: { "issue.comment": ["f8"] } }), saveConfig: async () => {},

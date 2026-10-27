@@ -571,7 +571,7 @@ test("PR actions route close, reopen and assignees to PR drafts and hide state a
       view.mockInput.pressKey("a"); await settle();
       expect(view.captureCharFrame()).toContain(`${verb} PR…`);
       expect(view.captureCharFrame()).not.toContain("Mark as duplicate");
-      view.mockInput.pressEnter(); await settle();
+      await clickControl(view, `issue-menu-${verb === "Close" ? "close" : "reopen"}`); await settle();
       expect(view.captureCharFrame()).not.toContain("Not planned");
       await clickControl(view, "issue-action-submit");
       expect(view.captureCharFrame()).toContain(`${verb} PR #${summary.number}?`);

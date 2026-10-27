@@ -13,9 +13,25 @@ export function createGitHubDiff(transport: GitHubTransport) {
     const path = diffPath(repository, target)
     const options = { signal, maxBytes: MAX_DIFF_BYTES }
     if (!filesOnly) {
+      const revision = async () => {
+        const value = JSON.parse(await transport.text(path, "application/vnd.github+json", {
+          ...options, jq: "{head: .head.sha, base: .base.sha}",
+        }))
+        if (!/^[a-f\d]{40}$/i.test(value?.head ?? "") || !/^[a-f\d]{40}$/i.test(value?.base ?? ""))
+          throw new Error("GitHub did not identify the PR diff commits. Refresh before reviewing.")
+        return { head: String(value.head).toLowerCase(), base: String(value.base).toLowerCase() }
+      }
+      const before = target.kind === "pull" ? await revision() : undefined
       const patch = await transport.text(path, "application/vnd.github.diff", options)
       signal.throwIfAborted()
       if (Buffer.byteLength(patch) > MAX_DIFF_BYTES) throw new Error("Diff exceeds the 4 MiB viewing limit. Load the file list or open it on GitHub.")
+      if (before) {
+        const after = await revision()
+        signal.throwIfAborted()
+        if (before.head !== after.head || before.base !== after.base)
+          throw new Error("The PR changed while loading the diff. Refresh before reviewing.")
+        return { kind: "patch", patch, headSha: before.head, baseSha: before.base }
+      }
       return { kind: "patch", patch }
     }
 

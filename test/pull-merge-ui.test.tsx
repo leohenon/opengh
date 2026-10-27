@@ -56,7 +56,7 @@ test("merge UI hides unauthorized actions, explains blockers, confirms methods a
     }
     setAllowed(true)
     view.mockInput.pressKey("a"); await settle()
-    expect(view.captureCharFrame()).toContain("merge queue")
+    expect(view.captureCharFrame()).not.toContain("merge queue") // Blocked actions stay disabled without inline explanations.
     expect(view.captureCharFrame()).toContain("Open on GitHub")
     await clickControl(view, "issue-menu-merge")
     expect(view.renderer.root.findDescendantById("merge-method-squash")).toBeUndefined()

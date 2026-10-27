@@ -1,6 +1,6 @@
 import { expect, spyOn, test } from "bun:test"
 import { repositoryFromDirectory } from "../src/github/repository"
-import { GitHubApiError, createGitHubTransport } from "../src/github/transport"
+import { GitHubApiError, GitHubRequestNotSentError, createGitHubTransport } from "../src/github/transport"
 
 test("network errors use simple messages without request URLs", () => {
   const url = "https://api.github.com/repos/owner/repo/pulls/9"
@@ -173,7 +173,7 @@ test("initial login failures are retryable but changed accounts cannot send writ
     expect(await transport.json<{ ok: boolean }>("repos/owner/repo")).toEqual({ ok: true })
     endpoints.length = 0
     account = 2
-    await expect(transport.mutate!("repos/owner/repo/issues/1/comments", "POST", { body: "private" })).rejects.toThrow("account changed")
+    await expect(transport.mutate!("repos/owner/repo/issues/1/comments", "POST", { body: "private" })).rejects.toBeInstanceOf(GitHubRequestNotSentError)
     await expect(transport.graphql!("mutation { harmlessPlaceholder }", {})).rejects.toThrow("account changed")
     expect(endpoints).toEqual(["user", "user"])
     account = 1

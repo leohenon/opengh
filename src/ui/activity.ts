@@ -23,7 +23,11 @@ export function buildActivity(props: {
   const seen = new Set<string>()
   const entries: Array<ActivityItem | ActivityCommit> = [...props.comments, ...props.references, ...props.threads]
   const hasTimelineCommits = props.events.some((event) => event.kind === "commit-added")
+  const inlineReviews = new Set(props.threads.flatMap((thread) => thread.comments.flatMap((comment) =>
+    comment.reviewId === undefined ? [] : [comment.reviewId])))
   for (const event of props.events) {
+    // An inline-only COMMENTED review adds no information beyond its visible thread.
+    if (event.kind === "review" && event.state === "commented" && !event.body.trim() && inlineReviews.has(event.reviewId)) continue
     if (event.kind !== "commit-added") { entries.push(event); continue }
     const sha = event.sha.toLowerCase()
     if (seen.has(sha)) continue
