@@ -1,4 +1,8 @@
 function authenticationGuidance(message: string, status?: number) {
+  if (/timeout|timed out|deadline exceeded/i.test(message))
+    return "GitHub request timed out."
+  if (/no such host|could not resolve host|connection refused|connection reset|network is unreachable|network is down|unexpected EOF|TLS handshake|x509:/i.test(message))
+    return "Could not connect to GitHub."
   if (status === 401 || /gh auth login|not logged (?:in|into)/i.test(message)) {
     const token = process.env.GH_TOKEN ? "GH_TOKEN" : process.env.GITHUB_TOKEN ? "GITHUB_TOKEN" : undefined
     return `${message}. ${token

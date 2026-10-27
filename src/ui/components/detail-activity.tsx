@@ -8,7 +8,6 @@ import { buildActivity, type ActivityEntry } from "../activity"
 import { useIcons } from "../icon-style"
 import { referenceColor, referenceIcon, referenceState } from "../issue-references"
 import { useTheme } from "../theme"
-import { useKeybindings } from "../keybindings"
 import { GitHubMarkdown } from "./github-markdown"
 import { type ReactionControls, Reactions, messageReactionMouse } from "./reactions"
 import { ReviewThread } from "./pull-review-threads"
@@ -245,7 +244,6 @@ export function DetailActivity(props: {
   hasFollowingItem?: boolean
 }) {
   const { colors } = useTheme()
-  const keys = useKeybindings()
   const comments = () => props.comments
   const references = () => props.references
   const reviewCount = () => props.events?.filter((event) => event.kind === "review").length ?? 0
@@ -330,7 +328,7 @@ export function DetailActivity(props: {
         <text width="100%" flexShrink={0} marginTop={1} fg={colors.muted}>No comments or references yet.</text>
       </Show>
       <Show when={props.commits?.status === "error"}>
-        <text width="100%" flexShrink={0} marginTop={1} fg={colors.red}>× {props.commits?.status === "error" ? props.commits.message : ""}{keys.hint("view.refresh", "to retry commits") ? ` · ${keys.hint("view.refresh", "to retry commits")}` : ""}</text>
+        <text width="100%" flexShrink={0} marginTop={1} fg={colors.red}>× {props.commits?.status === "error" ? props.commits.message : ""}</text>
       </Show>
       <Show when={(props.commits?.value?.length ?? 0) >= 250 && (props.commitTotal ?? 0) > loadedCommits()}>
         <text width="100%" flexShrink={0} marginTop={1} fg={colors.muted}>Commit history may be incomplete. GitHub's PR commits endpoint returns at most 250 commits.</text>

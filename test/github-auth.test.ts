@@ -2,6 +2,14 @@ import { expect, spyOn, test } from "bun:test"
 import { repositoryFromDirectory } from "../src/github/repository"
 import { GitHubApiError, createGitHubTransport } from "../src/github/transport"
 
+test("network errors use simple messages without request URLs", () => {
+  const url = "https://api.github.com/repos/owner/repo/pulls/9"
+  for (const detail of ["net/http: TLS handshake timeout", "context deadline exceeded", "Request timed out"])
+    expect(new GitHubApiError("pulls/9", `Get "${url}": ${detail}`).message).toBe("GitHub request timed out.")
+  for (const detail of ["dial tcp: lookup api.github.com: no such host", "connection refused", "connection reset by peer"])
+    expect(new GitHubApiError("pulls/9", `Get "${url}": ${detail}`).message).toBe("Could not connect to GitHub.")
+})
+
 function result(output = "", error = "", code = 0) {
   return {
     stdout: new Response(output).body!,
