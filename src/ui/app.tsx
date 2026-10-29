@@ -1,6 +1,6 @@
 import type { ScrollBoxRenderable } from "@opentui/core"
 import { useRenderer, useTerminalDimensions } from "@opentui/solid"
-import { createEffect, createMemo, createSignal, For, on, onCleanup, onMount, Show } from "solid-js"
+import { batch, createEffect, createMemo, createSignal, For, on, onCleanup, onMount, Show } from "solid-js"
 import { defaultConfig, type Config } from "../config"
 import type { HintEntry } from "../keybindings"
 import { KeybindingsBoundary, useKeyActions, useKeybindings } from "./keybindings"
@@ -936,14 +936,21 @@ function AppContent(props: AppProps) {
 
   onCleanup(() => { disposed = true; props.onCloseDiff?.(); props.onCloseRun?.(); props.onCloseCommit?.(); props.onCloseIssue?.(); props.onClosePull?.() })
 
-  const closeDetail = () => {
+  const closeDetail = () => batch(() => {
     const detail = navigation().details?.[page()]
-    setNavigation(back)
+    const next = back(navigation())
+    setNavigation(next)
     if (detail?.kind === "run") props.onCloseRun?.()
     if (detail?.kind === "commit") props.onCloseCommit?.()
     if (detail?.kind === "issue") { props.onCloseIssue?.(); setRevealActivity() }
     if (detail?.kind === "pull") { props.onClosePull?.(); setRevealActivity() }
-  }
+    // Each resource slot holds one entity; a same-tab link may have replaced it.
+    const restored = next.details?.[next.page]
+    if (restored?.kind === "run" && props.runDetail?.id !== restored.id) void props.onLoadRun?.(restored.id)
+    if (restored?.kind === "commit" && props.commitDetail?.sha !== restored.sha) void props.onLoadCommit?.(restored.sha)
+    if (restored?.kind === "issue" && props.issueDetail?.number !== restored.number) void props.onLoadIssue?.(restored.number)
+    if (restored?.kind === "pull" && props.pullDetail?.number !== restored.number) void props.onLoadPull?.(restored.number)
+  })
   const selectPage = (next: Page) => {
     initialPagePending = false
     setNavigation((state) => navigate(state, next))
