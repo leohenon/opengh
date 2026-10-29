@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test"
 import { testRender } from "@opentui/solid"
 import { clickControl } from "./fixtures/mouse"
 import {
-  LoadingRepository,
+  LoadingScreen,
   RepositoryLoadError,
   RepositoryPicker,
 } from "../src/ui/launcher"
@@ -14,18 +14,18 @@ afterEach(() => {
 
 describe("repository launcher", () => {
   test("shows repository loading without placeholder data", async () => {
-    const view = await testRender(() => <LoadingRepository repository="cli/cli" />, {
+    const view = await testRender(() => <LoadingScreen message="Loading cli/cli…" />, {
       width: 80,
       height: 24,
     })
     active.push(view)
     await view.flush()
-    expect(view.captureCharFrame()).toContain("cli/cli")
-    expect(view.captureCharFrame()).not.toContain("Loading…")
+    expect(view.captureCharFrame()).toContain("◉ opengh")
+    expect(view.captureCharFrame()).not.toContain("Loading cli/cli…")
     await Bun.sleep(210)
     await view.flush()
     const frame = view.captureCharFrame()
-    expect(frame).toContain("Loading…")
+    expect(frame).toContain("Loading cli/cli…")
     expect(frame).not.toContain("anomalyco/opentui")
   })
 

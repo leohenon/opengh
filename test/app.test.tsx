@@ -566,7 +566,7 @@ describe("opengh TUI", () => {
 
     view.mockInput.pressKey("3");
     await view.flush();
-    expect(view.captureCharFrame()).toContain("Open (4)");
+    expect(view.captureCharFrame()).toContain("Open (61)");
     expect(view.captureCharFrame()).toContain("Closed (1)");
     expect(view.captureCharFrame()).toContain("#412 opened");
     expect(view.captureCharFrame()).toContain("ScrollBox loses focus");

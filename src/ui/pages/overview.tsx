@@ -55,7 +55,9 @@ export function OverviewScreen(props: {
   const about = createMemo(() => extractAboutContent(repo().description))
   const documents = () => props.documents.value ?? []
   const document = () => documents().find((item) => item.id === props.currentDocument) ?? documents()[0]
-  const currentLabel = () => document()?.label ?? "Documentation"
+  // Leave the label empty during the first load so it fills in instead of being replaced.
+  const currentLabel = () => document()?.label
+    ?? (props.documents.status === "loading" && props.documents.value === undefined ? "" : "Documentation")
   const markdownContext = () => {
     const source = document()
     return source ? {
@@ -67,6 +69,9 @@ export function OverviewScreen(props: {
   const plainDocument = () => /(?:^|\/)(?:licen[sc]e|copying|unlicense)(?:$|[._-])/i.test(document()?.path ?? "")
     && !/\.(?:md|markdown|mdown|mkd)$/i.test(document()?.path ?? "")
   const documentResource = createMemo<ResourceState<string>>(() => document()?.resource ?? { status: "loading", phase: "load" })
+  // One view spans the document list and the selected document, so the spinner never remounts between them.
+  const viewResource = createMemo<ResourceState<unknown>>(() => props.documents.value === undefined ? props.documents
+    : document() ? documentResource() : { status: "ready", value: null })
   const hasDocumentTabs = () => documents().length > 1
   const showAboutSidebar = () => props.aboutSidebar === "show"
     || props.aboutSidebar === "auto" && dimensions().width >= 100
@@ -162,44 +167,42 @@ export function OverviewScreen(props: {
             </box>
           </Show>
         </Show>
-        <ResourceStateView resource={props.documents}>
+        <ResourceStateView resource={viewResource()}>
           {() => (
             <Show when={document()} fallback={(
               <box flexGrow={1} alignItems="center" justifyContent="center">
                 <text fg={colors.muted}>No repository documentation.</text>
               </box>
             )}>
-              <ResourceStateView resource={documentResource()}>
-                {() => {
-                  onCleanup(() => props.scrollRef(undefined))
-                  return (
-                    <scrollbox
-                      id="overview-document-scroll"
-                      focusable={false}
-                      onMouseScroll={(event) => event.stopPropagation()}
-                      ref={(value) => { bindScrollbar(value); props.scrollRef(value) }}
-                      flexGrow={1}
-                      minWidth={0}
-                      minHeight={0}
-                      backgroundColor={colors.canvas}
-                      paddingX={2}
-                      paddingY={1}
-                      scrollY
-                      contentOptions={{ alignItems: centered() ? "center" : "stretch" }}
-                    >
-                      <box width="100%" maxWidth={detailContentWidth(props.detailLayout)} minWidth={0} flexShrink={0} flexDirection="column">
-                        <GitHubMarkdown
-                          content={documentResource().value ?? ""}
-                          syntaxStyle={markdownStyle()}
-                          context={markdownContext()}
-                          plainText={plainDocument()}
-                          wide={!centered()}
-                        />
-                      </box>
-                    </scrollbox>
-                  )
-                }}
-              </ResourceStateView>
+              {(_) => {
+                onCleanup(() => props.scrollRef(undefined))
+                return (
+                  <scrollbox
+                    id="overview-document-scroll"
+                    focusable={false}
+                    onMouseScroll={(event) => event.stopPropagation()}
+                    ref={(value) => { bindScrollbar(value); props.scrollRef(value) }}
+                    flexGrow={1}
+                    minWidth={0}
+                    minHeight={0}
+                    backgroundColor={colors.canvas}
+                    paddingX={2}
+                    paddingY={1}
+                    scrollY
+                    contentOptions={{ alignItems: centered() ? "center" : "stretch" }}
+                  >
+                    <box width="100%" maxWidth={detailContentWidth(props.detailLayout)} minWidth={0} flexShrink={0} flexDirection="column">
+                      <GitHubMarkdown
+                        content={documentResource().value ?? ""}
+                        syntaxStyle={markdownStyle()}
+                        context={markdownContext()}
+                        plainText={plainDocument()}
+                        wide={!centered()}
+                      />
+                    </box>
+                  </scrollbox>
+                )
+              }}
             </Show>
           )}
         </ResourceStateView>

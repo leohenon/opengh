@@ -3,7 +3,7 @@ import { useRenderer, useTerminalDimensions } from "@opentui/solid"
 import { useKeyActions } from "../keybindings"
 import { createEffect, createMemo, For, onCleanup, Show } from "solid-js"
 import { defaultConfig, type DetailLayout } from "../../config"
-import type { IssueDetail, IssueReference } from "../../models"
+import type { IssueDetail, IssueReference, IssueSummary } from "../../models"
 import type { IssueDetailState, ResourceState } from "../../repository-state"
 import { Reactions, messageReactionMouse, type ReactionControls } from "../components/reactions"
 import { DetailActivity } from "../components/detail-activity"
@@ -91,6 +91,7 @@ function ReferencedPulls(props: { resource: ResourceState<IssueReference[]>; rep
 
 export function IssueScreen(props: {
   number: number
+  summary?: IssueSummary
   reactionControls?: ReactionControls
   onOpenReference?: (reference: IssueReference) => void
   detail: IssueDetailState
@@ -120,6 +121,8 @@ export function IssueScreen(props: {
   })
   const markdownStyle = createReactiveMarkdownStyle(colors, theme)
   const issue = () => props.detail.resource.value
+  // The list row seeds the header so it fills in rather than swapping a placeholder title.
+  const header = () => issue() ?? props.summary
   const reactionMouse = messageReactionMouse(() => issue() ? ({ kind: "issue", number: props.number, nodeId: issue()?.nodeId }) : undefined,
     issue, () => issue()?.body ?? "", () => props.reactionControls, () => props.interactive)
   const repository = () => issue()?.url.split("/").slice(3, 5).join("/") ?? ""
@@ -167,17 +170,19 @@ export function IssueScreen(props: {
       >
         <box width="100%" maxWidth={contentWidth()} minWidth={0} flexShrink={0} flexDirection="column" paddingTop={1} paddingBottom={1}>
           <text width="100%" flexShrink={0} fg={colors.text} attributes={TextAttributes.BOLD}>
-            {issue()?.title ?? "Issue"} <span style={{ fg: colors.muted }}>#{props.number}</span>
+            {header()?.title ?? "Issue"} <span style={{ fg: colors.muted }}>#{props.number}</span>
           </text>
-          <Show when={issue()}>
-            <text width="100%" flexShrink={0} marginTop={1} fg={colors.muted}>
-              <span style={{ fg: issue()?.state === "open" ? colors.openState : colors.closedState }}>
-                {issueIcon(issue()!.state, icons())} {issue()?.state === "open" ? "Open" : "Closed"}
-              </span>
-              {issue()?.stateReason ? ` · ${issue()!.stateReason!.replaceAll("_", " ")}` : ""}
-              {issue()?.locked ? " · locked" : ""}
-              {" · "}<span style={{ fg: colors.text }}>{issue()?.author}</span> opened {ago(issue()!.createdAt)}
-            </text>
+          <Show when={header()}>
+            {(current) => (
+              <text width="100%" flexShrink={0} marginTop={1} fg={colors.muted}>
+                <span style={{ fg: current().state === "open" ? colors.openState : colors.closedState }}>
+                  {issueIcon(current().state, icons())} {current().state === "open" ? "Open" : "Closed"}
+                </span>
+                {issue()?.stateReason ? ` · ${issue()!.stateReason!.replaceAll("_", " ")}` : ""}
+                {issue()?.locked ? " · locked" : ""}
+                {" · "}<span style={{ fg: colors.text }}>{current().author}</span> opened {ago(current().createdAt)}
+              </text>
+            )}
           </Show>
         </box>
         <ResourceStateView resource={props.detail.resource}>

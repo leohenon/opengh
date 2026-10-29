@@ -3,7 +3,7 @@ import { useTerminalDimensions } from "@opentui/solid"
 import { useKeyActions } from "../keybindings"
 import { createMemo, For, Show } from "solid-js"
 import { defaultConfig, type DetailLayout } from "../../config"
-import type { CommitDetail } from "../../models"
+import type { CommitDetail, CommitSummary } from "../../models"
 import type { ResourceState } from "../../repository-state"
 import { ResourceStateView } from "../components/resource-state"
 import { ago } from "../format"
@@ -19,6 +19,7 @@ const fileLabels: Record<string, string> = {
 
 export function CommitScreen(props: {
   sha: string
+  summary?: CommitSummary
   resource: ResourceState<CommitDetail>
   interactive: boolean
   showScrollbar: boolean
@@ -30,6 +31,9 @@ export function CommitScreen(props: {
   const compact = () => dimensions().width < 60
   const centered = () => (props.detailLayout ?? defaultConfig.detailLayout) === "centered"
   const contentWidth = () => detailContentWidth(props.detailLayout)
+  // The list row seeds the header so it fills in rather than swapping a placeholder title.
+  const header = () => props.resource.value ?? props.summary
+  const committer = () => props.resource.value?.committer
   const surface = createMemo(() => {
     const panel = RGBA.fromHex(colors.header)
     const canvas = RGBA.fromHex(colors.canvas)
@@ -81,18 +85,18 @@ export function CommitScreen(props: {
       >
         <box width="100%" maxWidth={contentWidth()} minWidth={0} flexShrink={0} flexDirection="column" paddingTop={1} paddingBottom={1}>
           <text width="100%" flexShrink={0} fg={colors.text} attributes={TextAttributes.BOLD}>
-            {props.resource.value?.message ?? `Commit ${props.sha.slice(0, 7)}`}
+            {header()?.message ?? `Commit ${props.sha.slice(0, 7)}`}
           </text>
-          <Show when={props.resource.value}>
+          <Show when={header()}>
             {(commit) => (
               <>
                 <text width="100%" flexShrink={0} marginTop={1} fg={colors.muted}>
                   {icons().user} <b><span style={{ fg: colors.text }}>{commit().author}</span></b> authored {ago(commit().date)} · {props.sha.slice(0, 7)}
                 </text>
-                <Show when={commit().committer && (commit().committer!.name !== commit().author || commit().committer!.date !== commit().date)}>
+                <Show when={committer() && (committer()!.name !== commit().author || committer()!.date !== commit().date)}>
                   <text width="100%" flexShrink={0} fg={colors.muted}>
-                    {icons().user} Committer <b><span style={{ fg: colors.text }}>{commit().committer?.name}</span></b>
-                    <Show when={ago(commit().committer!.date) !== ago(commit().date)}> · {ago(commit().committer!.date)}</Show>
+                    {icons().user} Committer <b><span style={{ fg: colors.text }}>{committer()?.name}</span></b>
+                    <Show when={ago(committer()!.date) !== ago(commit().date)}> · {ago(committer()!.date)}</Show>
                   </text>
                 </Show>
               </>

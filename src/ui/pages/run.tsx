@@ -2,8 +2,8 @@ import { TextAttributes, type ScrollBoxRenderable } from "@opentui/core"
 import { useKeyActions } from "../keybindings"
 import { createEffect, createMemo, For, onCleanup, Show } from "solid-js"
 import { defaultConfig, type DetailLayout } from "../../config"
+import type { WorkflowRunSummary } from "../../models"
 import type { RunDetailState } from "../../repository-state"
-import { LoadingText } from "../components/loading-text"
 import { ResourceStateView } from "../components/resource-state"
 import { detailContentWidth } from "../detail-layout"
 import { ago, exactDate } from "../format"
@@ -25,6 +25,7 @@ function duration(start: string | null, end: string | null, running: boolean) {
 
 export function RunScreen(props: {
   id: number
+  summary?: WorkflowRunSummary
   detail: RunDetailState
   active: boolean
   onRefresh?: () => Promise<void>
@@ -78,7 +79,7 @@ export function RunScreen(props: {
       >
         <box width="100%" maxWidth={contentWidth()} minWidth={0} flexShrink={0} flexDirection="column" paddingTop={1} paddingBottom={1}>
           <text width="100%" flexShrink={0} fg={colors.text} attributes={TextAttributes.BOLD}>
-            {props.detail.resource.value?.title || `Workflow run ${props.id}`}
+            {props.detail.resource.value?.title || props.summary?.title || `Workflow run ${props.id}`}
           </text>
         </box>
         <ResourceStateView resource={props.detail.resource}>
@@ -138,9 +139,6 @@ export function RunScreen(props: {
                           </box>
                         )}
                       </For>
-                      <Show when={props.detail.jobs.status === "loading"}>
-                        <LoadingText text={props.detail.jobs.status === "loading" && props.detail.jobs.phase === "pagination" ? "Loading more jobs…" : "Refreshing jobs…"} />
-                      </Show>
                       <Show when={props.detail.jobs.status === "error"}>
                         <text width="100%" flexShrink={0} marginTop={1} fg={colors.red}>
                           × {props.detail.jobs.status === "error" ? props.detail.jobs.message : ""}{keys.hint("view.refresh", "retry") ? ` · ${keys.hint("view.refresh", "retry")}` : ""}

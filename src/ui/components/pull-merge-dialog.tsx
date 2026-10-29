@@ -5,6 +5,7 @@ import { KeyInput, KeyTextarea, useKeyActions, useKeybindings } from "../keybind
 import { mouseClick, mouseHover } from "../mouse"
 import { useTheme } from "../theme"
 import { Action } from "./action"
+import { LoadingText } from "./loading-text"
 import { Popup } from "./popup"
 
 const labels: Record<PullMergeMethod, string> = {
@@ -130,7 +131,7 @@ export function PullMergeDialog(props: {
         </Show>
         <Show when={stage() !== "methods" && method() === "squash"}>
           <box visible={stage() === "edit"} flexGrow={1} minHeight={0} flexDirection="column">
-            <Show when={loading()}><text marginTop={1} fg={colors.muted}>Loading GitHub's commit message…</text></Show>
+            <Show when={loading()}><box marginTop={1} flexShrink={0}><LoadingText text="Loading GitHub's commit message…" /></box></Show>
             <Show when={loadError()}>
               <text marginTop={1} fg={colors.red} wrapMode="word">{loadError()}</text>
               <Action id="merge-message-retry" onActivate={() => void loadMessage()}>Retry loading message</Action>

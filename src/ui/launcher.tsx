@@ -13,31 +13,8 @@ import { useKeyActions, useKeybindings } from "./keybindings";
 import { StatusBar } from "./components/status-bar";
 import { useTheme } from "./theme";
 
-export function ResolvingRepository() {
-  const dimensions = useTerminalDimensions();
-  const { colors } = useTheme();
-  return (
-    <box
-      width={dimensions().width}
-      height={dimensions().height}
-      backgroundColor={colors.canvas}
-      alignItems="center"
-      justifyContent="center"
-    >
-      <box flexDirection="column" alignItems="center" gap={1}>
-        <text fg={colors.text} attributes={TextAttributes.BOLD}>
-          ◉ opengh
-        </text>
-        <LoadingText
-          text="Finding repository…"
-          color={colors.muted}
-        />
-      </box>
-    </box>
-  );
-}
-
-export function LoadingRepository(props: { repository: string; onSwitchRepository?: () => void }) {
+// One screen covers every startup stage; only the message changes, so the spinner never remounts.
+export function LoadingScreen(props: { message: string; onSwitchRepository?: () => void }) {
   const dimensions = useTerminalDimensions();
   const { colors } = useTheme();
   useKeyActions({
@@ -56,9 +33,9 @@ export function LoadingRepository(props: { repository: string; onSwitchRepositor
     >
       <box flexDirection="column" alignItems="center" gap={1}>
         <text fg={colors.text} attributes={TextAttributes.BOLD}>
-          {props.repository}
+          ◉ opengh
         </text>
-        <LoadingText text="Loading…" color={colors.muted} />
+        <LoadingText text={props.message} color={colors.muted} />
       </box>
     </box>
   );

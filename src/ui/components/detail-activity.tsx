@@ -15,7 +15,6 @@ import { ReviewThread } from "./pull-review-threads"
 import { reviewColor } from "../pull-reviews"
 import { TimelineEntry, TimelineHeader, TimelineItem } from "./timeline-entry"
 import { TimelineCommits } from "./pull-commits"
-import { LoadingText } from "./loading-text"
 
 function Comment(props: {
   number?: number
@@ -285,9 +284,6 @@ export function DetailActivity(props: {
         {references().value?.length ? ` · ${references().value!.length} ${references().value!.length === 1 ? "reference" : "references"}` : ""}
         {reviewCount() ? ` · ${reviewCount()} ${reviewCount() === 1 ? "review" : "reviews"}` : ""}
       </text>
-      <Show when={props.commits?.status === "loading" && !props.commits.value}>
-        <box width="100%" flexShrink={0} marginTop={1}><LoadingText text="Loading commits…" /></box>
-      </Show>
       <For each={[...entries().keys()]}>
         {(key, index) => {
           const entry = () => entries().get(key)!

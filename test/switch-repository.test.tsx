@@ -209,8 +209,9 @@ test("repository switch popup isolates input, preserves cancelled navigation, an
     expect(view.captureCharFrame()).toContain("› cli / cli")
     await view.mockInput.typeText("owner/pending")
     view.mockInput.pressEnter()
+    await Bun.sleep(210) // The loading message appears after LoadingText's delay.
     await settle()
-    expect(view.captureCharFrame()).toContain("owner/pending")
+    expect(view.captureCharFrame()).toContain("Loading owner/pending…")
     expect(recent).not.toContain("owner/pending")
     await switchPage() // A slow load is escapable; an obsolete response must not replace the chosen repo.
     await view.mockInput.typeText("cli/cli")

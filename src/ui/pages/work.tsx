@@ -14,7 +14,7 @@ import { mouseClick, type MousePosition } from "../mouse"
 export function WorkScreen(props: {
   kind: "issue" | "pull"
   state: ListState
-  counts: { open: number; closed: number }
+  counts: { open: string; closed: string }
   resource: ResourceState<Paginated<IssueSummary | PullRequestSummary>>
   active: boolean
   interactive: boolean

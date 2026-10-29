@@ -322,7 +322,7 @@ test("numbered tabs retain independent diff viewers, geometry and scroll until E
     expect(setup.captureCharFrame()).toContain("←/→ tabs")
     setup.mockInput.pressArrow("right")
     await settle()
-    expect(setup.captureCharFrame()).toContain("Open (4)")
+    expect(setup.captureCharFrame()).toContain("Open (61)")
     expect(setup.captureCharFrame()).not.toContain("Files (2)")
     setup.mockInput.pressArrow("left") // Returning must not dispatch this arrow to the restored diff again.
     await settle()

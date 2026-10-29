@@ -3,7 +3,7 @@ import { useRenderer, useTerminalDimensions } from "@opentui/solid"
 import { useKeyActions } from "../keybindings"
 import { createEffect, createMemo, onCleanup, Show } from "solid-js"
 import { defaultConfig, type DetailLayout } from "../../config"
-import type { PullRequestDetail, PullContext, IssueTimelineEvent, IssueReference } from "../../models"
+import type { PullRequestDetail, PullRequestSummary, PullContext, IssueTimelineEvent, IssueReference } from "../../models"
 import type { PullDetailState, ResourceState } from "../../repository-state"
 import { DetailActivity } from "../components/detail-activity"
 import { TimelineEntry } from "../components/timeline-entry"
@@ -66,6 +66,7 @@ function PullMetadata(props: { pull: PullRequestDetail; compact: boolean; contex
 
 export function PullScreen(props: {
   number: number
+  summary?: PullRequestSummary
   reactionControls?: ReactionControls
   onOpenReference?: (reference: IssueReference) => void
   detail: PullDetailState
@@ -84,10 +85,12 @@ export function PullScreen(props: {
   const centered = () => (props.detailLayout ?? defaultConfig.detailLayout) === "centered"
   const contentWidth = () => detailContentWidth(props.detailLayout, wide() ? 32 : 0)
   const pull = () => props.detail.resource.value
-  const state = () => pull()?.merged ? "Merged"
-    : pull()?.state === "closed" ? "Closed" : pull()?.draft ? "Draft" : "Open"
-  const stateColor = () => pull()?.merged ? colors.purple
-    : pull()?.state === "closed" ? colors.red : pull()?.draft ? colors.muted : colors.openState
+  // The list row seeds the header so it fills in rather than swapping a placeholder title.
+  const header = () => pull() ?? props.summary
+  const state = () => header()?.merged ? "Merged"
+    : header()?.state === "closed" ? "Closed" : header()?.draft ? "Draft" : "Open"
+  const stateColor = () => header()?.merged ? colors.purple
+    : header()?.state === "closed" ? colors.red : header()?.draft ? colors.muted : colors.openState
   const reactionMouse = messageReactionMouse(() => pull() ? ({ kind: "pull", number: props.number, nodeId: pull()?.nodeId }) : undefined,
     pull, () => pull()?.body ?? "", () => props.reactionControls, () => props.interactive)
   const repository = () => pull()?.url.split("/").slice(3, 5).join("/") ?? ""
@@ -142,9 +145,9 @@ export function PullScreen(props: {
       >
         <box width="100%" maxWidth={contentWidth()} minWidth={0} flexShrink={0} flexDirection="column" paddingTop={1} paddingBottom={1}>
           <text width="100%" flexShrink={0} fg={colors.text} attributes={TextAttributes.BOLD}>
-            {pull()?.title ?? "Pull request"} <span style={{ fg: colors.muted }}>#{props.number}</span>
+            {header()?.title ?? "Pull request"} <span style={{ fg: colors.muted }}>#{props.number}</span>
           </text>
-          <Show when={pull()}>
+          <Show when={header()}>
             {(current) => (
               <text width="100%" flexShrink={0} marginTop={1} fg={colors.muted}>
                 <span style={{ fg: stateColor() }}>{pullRequestIcon(current(), icons())} {state()}</span>

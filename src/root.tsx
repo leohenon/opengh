@@ -23,16 +23,14 @@ import { SelectionClipboard } from "./ui/components/selection-clipboard"
 import { Toast } from "./ui/components/toast"
 import { SwitchRepositoryScreen } from "./ui/pages/switch-repository"
 import {
-  LoadingRepository,
+  LoadingScreen,
   RepositoryLoadError,
   RepositoryPicker,
-  ResolvingRepository,
 } from "./ui/launcher"
 
 type View = "resolving" | "picker" | "repository" | "switch" | "launch-error"
 type LaunchRequest = { repository: string; detail?: LaunchDetail; page?: Page }
 type ReadyState = Extract<RepositoryState, { status: "ready" }>
-type LoadingState = Extract<RepositoryState, { status: "loading" }>
 type ErrorState = Extract<RepositoryState, { status: "error" }>
 
 export type RootServices = {
@@ -84,6 +82,7 @@ export function Root(props: {
   const [recent, setRecent] = createSignal<string[]>([])
   const [pickerError, setPickerError] = createSignal("")
   const [launchError, setLaunchError] = createSignal<LaunchRequest & { message: string }>()
+  const [launchRepository, setLaunchRepository] = createSignal<string>()
   const [config, setConfig] = createSignal(defaultConfig)
   const [repositoryTabs, setRepositoryTabs] = createSignal<RepositoryTabs>({})
   let tabSaveTimer: ReturnType<typeof setTimeout> | undefined
@@ -198,6 +197,14 @@ export function Root(props: {
     const current = session.state()
     return current.status === "ready" ? current.repository : undefined
   })
+  const loadingMessage = createMemo(() => {
+    if (view() === "resolving") {
+      const repository = launchRepository()
+      return repository ? `Loading ${repository}…` : "Finding repository…"
+    }
+    const current = session.state()
+    return view() === "repository" && current.status === "loading" ? `Loading ${current.repository}…` : undefined
+  })
   createEffect(() => {
     const repository = accessibleRepository()
     if (repository) void services.rememberRepository(repository).catch(() => {}).then(refreshRecent)
@@ -217,6 +224,7 @@ export function Root(props: {
   }
   const resolveLaunch = async (request: LaunchRequest) => {
     setLaunchError(undefined)
+    setLaunchRepository(request.repository)
     setView("resolving")
     let detail: DetailTarget | undefined
     try {
@@ -272,10 +280,14 @@ export function Root(props: {
       <MouseSurface>
       <SelectionClipboard onCopy={services.copyToHostClipboard} />
       <Show
-        when={view() === "repository"}
+        when={view() === "repository" && !loadingMessage()}
       fallback={
         <Switch>
-          <Match when={view() === "resolving"}><ResolvingRepository /></Match>
+          {/* Stays mounted from repository discovery through session loading. */}
+          <Match when={loadingMessage()}>
+            <LoadingScreen message={loadingMessage() ?? ""}
+              onSwitchRepository={view() === "repository" ? showSwitcher : undefined} />
+          </Match>
           <Match when={view() === "launch-error" && launchError()}>
             {(current) => <RepositoryLoadError
               title="Issue/PR unavailable"
@@ -299,9 +311,6 @@ export function Root(props: {
       }
     >
       <Switch>
-        <Match when={session.state().status === "loading" ? session.state() as LoadingState : undefined}>
-          {(current) => <LoadingRepository repository={current().repository} onSwitchRepository={showSwitcher} />}
-        </Match>
         <Match when={session.state().status === "error" ? session.state() as ErrorState : undefined}>
           {(current) => (
             <RepositoryLoadError

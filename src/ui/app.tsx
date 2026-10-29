@@ -681,14 +681,23 @@ function AppContent(props: AppProps) {
     ? props.pullDetail.resource.value.url : `${data().repo.url}/pull/${number}`
   const issues = () => data().issues[issueState()]
   const pulls = () => data().pulls[pullState()]
-  const issueCounts = () => ({
-    open: data().issues.open.value?.items.length ?? 0,
-    closed: data().issues.closed.value?.items.length ?? 0,
-  })
-  const pullCounts = () => ({
-    open: data().pulls.open.value?.items.length ?? 0,
-    closed: data().pulls.closed.value?.items.length ?? 0,
-  })
+  // Open totals share the header tabs' source. GitHub gives no closed total, so closed shows loaded rows ("30+" when more exist).
+  const loadedCount = (resource: ResourceState<Paginated<unknown>>) => resource.value
+    ? `${resource.value.items.length}${resource.value.hasMore ? "+" : ""}` : resource.status === "error" ? "—" : "…"
+  const openCount = (kind: "issues" | "pulls") => {
+    const totals = data().workCounts
+    if (totals.value) return String(totals.value[kind])
+    return totals.status === "error" ? loadedCount(data()[kind].open) : "…"
+  }
+  const issueCounts = () => ({ open: openCount("issues"), closed: loadedCount(data().issues.closed) })
+  const pullCounts = () => ({ open: openCount("pulls"), closed: loadedCount(data().pulls.closed) })
+  // Loaded list rows seed detail headers while the full detail loads.
+  const listed = <T,>(lists: ResourceState<Paginated<T>>[], match: (item: T) => boolean) =>
+    lists.flatMap((list) => list.value?.items ?? []).find(match)
+  const issueSummary = createMemo(() => listed([data().issues.open, data().issues.closed], (item) => item.number === issueNumber()))
+  const pullSummary = createMemo(() => listed([data().pulls.open, data().pulls.closed], (item) => item.number === pullNumber()))
+  const commitSummary = createMemo(() => listed([data().commits], (item) => item.sha === commitSha()))
+  const runSummary = createMemo(() => listed([data().runs], (item) => item.id === runId()))
   const baseTabs = requestedActions ? tabs : tabs.filter((tab) => tab.page !== "actions")
   const sectionAvailable = (...resources: ResourceState<{ items: readonly unknown[]; hasMore: boolean }>[]) => resources.some((resource) =>
     resource.status === "error" || Boolean(resource.value && (resource.value.items.length > 0 || resource.value.hasMore)),
@@ -791,7 +800,7 @@ function AppContent(props: AppProps) {
     if (diffTarget()) return "diff"
     if (activeRunId()) return "workflow run"
     if (activeCommitSha()) return "commit"
-    if (activePullNumber()) return pullDetailPart() === "pull" ? "pull request" : pullDetailPart() === "context" ? "PR details" : pullDetailPart()
+    if (activePullNumber()) return pullDetailPart() === "pull" ? "pull request" : pullDetailPart() === "context" ? "merge readiness" : pullDetailPart()
     if (activeIssueNumber()) return issueDetailPart()
     if (page() === "overview")
       return data().documents.status === "ready" ? currentOverviewDocument()?.label ?? "documentation" : "documentation"
@@ -1498,6 +1507,7 @@ function AppContent(props: AppProps) {
           <box visible={page() === "actions"} flexGrow={1} minHeight={0}>
             <RunScreen
               id={id}
+              summary={runSummary()}
               detail={runDetail()}
               active={page() === "actions"}
               onRefresh={props.onLoadRun ? () => props.onLoadRun!(id) : undefined}
@@ -1513,6 +1523,7 @@ function AppContent(props: AppProps) {
           <box visible={page() === "commits"} flexGrow={1} minHeight={0}>
             <CommitScreen
               sha={sha}
+              summary={commitSummary()}
               resource={commitResource()}
               interactive={!diffTarget() && page() === "commits" && overlay() === undefined}
               showScrollbar={config().showScrollbars}
@@ -1526,6 +1537,7 @@ function AppContent(props: AppProps) {
           <box visible={page() === "issues"} flexGrow={1} minHeight={0}>
             <IssueScreen
               number={number}
+              summary={issueSummary()}
               detail={issueDetail()}
               onOpenReference={openReference}
               timelineCollapsed={timelineCollapsed()}
@@ -1544,6 +1556,7 @@ function AppContent(props: AppProps) {
           <box visible={page() === "pulls"} flexGrow={1} minHeight={0}>
             <PullScreen
               number={number}
+              summary={pullSummary()}
               detail={pullDetail()}
               onOpenReference={openReference}
               timelineCollapsed={timelineCollapsed()}

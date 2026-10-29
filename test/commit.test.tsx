@@ -124,7 +124,7 @@ test("commit tabs retain detail state and Escape restores the list after resizin
   const retained = detail()
   view.mockInput.pressKey("4")
   await view.flush()
-  expect(view.captureCharFrame()).toContain("Open (3)")
+  expect(view.captureCharFrame()).toContain("Open (24)")
   expect(view.captureCharFrame()).not.toContain("o GitHub · y copy SHA")
   expect(view.captureCharFrame()).not.toContain("src/module-29.ts")
   view.mockInput.pressKey("g")
