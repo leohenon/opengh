@@ -111,8 +111,10 @@ export function createDetailCache<T>(options: DetailCacheOptions = {}) {
       budget.used += bytes
       trim(key)
     },
-    markStale(key?: string) {
-      for (const [entryKey, entry] of entries) if (key === undefined || entryKey === key) entry.loadedAt = 0
+    // Marks one key, or every key matching a predicate, as needing revalidation before reuse.
+    markStale(match: string | ((key: string) => boolean)) {
+      if (typeof match === "string") { const entry = entries.get(match); if (entry) entry.loadedAt = 0; return }
+      for (const [key, entry] of entries) if (match(key)) entry.loadedAt = 0
     },
     keys: () => [...entries.keys()],
     delete: remove,

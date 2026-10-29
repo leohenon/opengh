@@ -396,6 +396,7 @@ export function Root(props: {
               onRetryPullCommits={session.retryPullCommits}
               onRetryPullContext={session.retryPullContext}
               onClosePull={session.clearPull}
+              onInvalidatePull={session.invalidatePull}
               onOpenInBrowser={(target, repository, view) => services.openGitHub(repository ?? repositoryName, target, view)}
               onCopyToClipboard={services.copyToHostClipboard}
               onLoadMoreRuns={session.loadMoreRuns}

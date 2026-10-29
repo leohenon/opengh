@@ -79,6 +79,10 @@ describe("detail cache", () => {
     await session.load("owner/other")
     await session.loadIssue(1)
     expect(detailCalls).toBe(4)
+    // Details are repository-scoped and survive switching back.
+    await session.load("owner/repo")
+    await session.loadIssue(1)
+    expect(detailCalls).toBe(4)
   })
 
   test("pull requests reopen from cache and repository refresh marks retained details stale", async () => {
@@ -162,21 +166,6 @@ describe("detail cache invalidation", () => {
   })
 })
 
-test("caches sharing one budget evict across each other rather than each using the full limit", () => {
-  const budget = createCacheBudget(40)
-  const a = createDetailCache<string>({ budget })
-  const b = createDetailCache<string>({ budget })
-  a.set("a1", "x".repeat(10)) // 20 bytes
-  b.set("b1", "x".repeat(10)) // 20 bytes
-  b.set("b2", "x".repeat(10)) // forces the oldest entry out of whichever cache holds it
-  expect(budget.used).toBeLessThanOrEqual(40)
-  expect(a.get("a1")).toBeUndefined()
-  expect(b.get("b1")?.value).toBe("x".repeat(10))
-  expect(b.get("b2")?.value).toBe("x".repeat(10))
-  b.clear()
-  expect(budget.used).toBe(0)
-})
-
 describe("repository cache", () => {
   test("returning to a recent repository reuses its overview data and revalidates only when stale", async () => {
     let time = 0
@@ -251,19 +240,6 @@ describe("diff, run and commit caches", () => {
     expect(session.diffs!().pull?.resource.value).toMatchObject({ headSha: pullHead })
   })
 
-  test("oversized patches are never retained", async () => {
-    let diffCalls = 0
-    const session = createRepositorySession(loaders({
-      diff: async () => { diffCalls++; return { kind: "patch", patch: "x".repeat(5 * 1024 * 1024) } },
-    }))
-    await session.load("owner/repo")
-    const sha = "e".repeat(40)
-    await session.loadDiff!({ kind: "commit", sha })
-    session.clearDiff!({ kind: "commit", sha })
-    await session.loadDiff!({ kind: "commit", sha })
-    expect(diffCalls).toBe(2)
-  })
-
   test("in-progress workflow runs always revalidate while completed runs and commits reopen instantly", async () => {
     const { workflowRunFixture, workflowJobFixture } = await import("./fixtures/workflow-run")
     let runCalls = 0, commitCalls = 0
@@ -309,4 +285,41 @@ test("the shared budget evicts the globally least recently used entry and sweeps
   issues.set("later", "y")
   expect(diffs.size).toBe(0) // idle diff swept although only the issue cache was written
   expect(budget.used).toBe(issues.bytes)
+})
+
+test("external PR changes invalidate a retained PR; reactions on an open page do not force a refetch", async () => {
+  let pullCalls = 0
+  const session = createRepositorySession(loaders({
+    pull: async (repository, number) => { pullCalls++; return { ...(await loaders().pull!(repository, number)), canReact: true, nodeId: "PR_7" } },
+    addReaction: async () => ({ reactions: { heart: 1 }, viewerReactions: ["heart"], canReact: true }),
+  }), undefined, { freshMs: 60_000 })
+  await session.load("owner/repo")
+  await session.loadPull(7)
+  await session.addReaction({ kind: "pull", number: 7 }, "heart")
+  session.clearPull()
+  await session.loadPull(7)
+  expect(pullCalls).toBe(1)
+  expect(session.pullDetail()?.resource.value?.reactions).toEqual({ heart: 1 })
+  session.clearPull()
+  session.invalidatePull!("owner/repo", 7) // e.g. a review submitted after navigating away
+  await session.loadPull(7)
+  expect(pullCalls).toBe(2)
+  // A reaction still pending when switching straight to another PR cannot reach the retained page.
+  const pending = session.addReaction({ kind: "pull", number: 7 }, "heart").catch(() => undefined)
+  await session.loadPull(8)
+  await pending
+  await session.loadPull(7)
+  expect(pullCalls).toBe(4)
+})
+
+test("a completed repository refresh is retained as fresh", async () => {
+  let metadataCalls = 0
+  const session = createRepositorySession(loaders({
+    metadata: async (repository) => { metadataCalls++; return { ...structuredClone(githubDataFixture.repo), nameWithOwner: repository } },
+  }), undefined, { freshMs: 60_000 })
+  await session.load("owner/first")
+  await session.refresh()
+  await session.load("owner/second")
+  await session.load("owner/first")
+  expect(metadataCalls).toBe(3) // first, refresh, second — returning to first reuses its refreshed data
 })

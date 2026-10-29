@@ -125,6 +125,7 @@ export type AppProps = {
   onRetryPullCommits?: () => Promise<void>
   onRetryPullContext?: () => Promise<void>
   onClosePull?: () => void
+  onInvalidatePull?: (repository: string, number: number) => void
   onOpenInBrowser?: (target?: string | number, repository?: string, view?: "diff") => Promise<void>
   onCopyToClipboard?: (value: string) => Promise<boolean>
   onLoadMoreRuns?: () => Promise<void>
@@ -496,7 +497,7 @@ function AppContent(props: AppProps) {
         { repository: context.repository, number: context.number, headSha: context.headSha, thread }])
       setToast({ id: ++toastId, title: "Inline comment posted", message: `${context.anchor.path}:${context.anchor.line}`, duration: 2000, tone: "success" })
       const target = diffTarget()
-      if (activePullNumber() === context.number || target?.kind === "pull" && target.number === context.number) void props.onLoadPull?.(context.number)
+      if (activePullNumber() === context.number || target?.kind === "pull" && target.number === context.number) void props.onLoadPull?.(context.number, { force: true })
     } catch (error) {
       if (!disposed && !renderer.isDestroyed && data().repo.nameWithOwner === context.repository) {
         setToast({ id: ++toastId, title: "Inline comment not confirmed", message: error instanceof Error ? error.message : String(error) })
@@ -507,7 +508,11 @@ function AppContent(props: AppProps) {
           setOverlay("inline-retry")
         }
       }
-    } finally { setPostingInline(undefined) }
+    } finally {
+      // An unconfirmed post may still have landed; the retained PR must revalidate either way.
+      props.onInvalidatePull?.(context.repository, context.number)
+      setPostingInline(undefined)
+    }
   }
   const jumpReview = (anchor: ReviewAnchor) => {
     const target = reviewTarget()
@@ -532,12 +537,16 @@ function AppContent(props: AppProps) {
       if (disposed || renderer.isDestroyed || data().repo.nameWithOwner !== target.repository) return
       if (succeeded) {
         setToast({ id: ++toastId, title: "Review submitted", message: `PR #${target.number}`, duration: 2000, tone: "success" })
-        if (activePullNumber() === target.number) void props.onLoadPull?.(target.number)
+        if (activePullNumber() === target.number) void props.onLoadPull?.(target.number, { force: true })
       } else setToast({ id: ++toastId, title: "Review not submitted", message: props.reviews.state().message ?? "Open the pending review to check its status." })
     } catch (error) {
       if (!disposed && !renderer.isDestroyed && data().repo.nameWithOwner === target.repository)
         setToast({ id: ++toastId, title: "Review not submitted", message: String(error) })
-    } finally { setReviewSubmitting(undefined) }
+    } finally {
+      // Even an unconfirmed submission may have posted part of the review; the retained PR must revalidate.
+      props.onInvalidatePull?.(target.repository, target.number)
+      setReviewSubmitting(undefined)
+    }
   }
   const canOfferMerge = () => {
     const pull = pullDetail().resource.value

@@ -150,6 +150,8 @@ export type RepositorySession = {
   retryPullCommits(): Promise<void>
   retryPullContext(): Promise<void>
   clearPull(): void
+  // Marks a retained PR stale after a change made outside the session (reviews, inline comments).
+  invalidatePull?(repository: string, number: number): void
   issueDetail: Accessor<IssueDetailState | undefined>
   loadIssue(number: number, options?: { force?: boolean }): Promise<void>
   loadMoreIssueComments(): Promise<void>
@@ -162,7 +164,7 @@ export type RepositorySession = {
   updateIssueDraft(number: number, draft: Partial<Pick<IssueActionState, "body" | "reason" | "duplicateTarget" | "selectedAssignees">>, parent?: IssueActionParent): void
   discardIssueDraft(number: number, parent?: IssueActionParent): void
   submitIssueAction(number: number, kind: IssueActionKind, parent?: IssueActionParent): Promise<IssueActionResult>
-  load(repository: string, options?: { force?: boolean }): Promise<void>
+  load(repository: string): Promise<void>
   refresh(): Promise<void>
   retryResource(resource: RepositoryResource): Promise<void>
   canSwitchBranch(): boolean
@@ -307,7 +309,8 @@ export function createRepositorySession(
   const commitCache = createDetailCache<CommitDetailState>({ ...cacheOptions, budget: cacheBudget, freshMs: cacheOptions.freshMs ?? Number.POSITIVE_INFINITY })
   const diffCache = createDetailCache<DiffContent>({ ...cacheOptions, budget: cacheBudget, maxEntries: cacheOptions.maxEntries ?? 6,
     freshMs: cacheOptions.freshMs ?? Number.POSITIVE_INFINITY, maxValueBytes: 8 * 1024 * 1024 })
-  const detailCacheKey = (repository: string, number: number, parent: IssueActionParent = "issue") => `${parent}:${repository.toLowerCase()}#${number}`
+  // Every detail key starts with `${repository}:` so caches can be scoped to one repository.
+  const detailCacheKey = (repository: string, number: number, parent: IssueActionParent = "issue") => `${repository.toLowerCase()}:${parent}:${number}`
   // Loading sections with a value are reusable; errors stay visible so the page keeps its retry affordance.
   const settled = <T>(resource: ResourceState<T>): ResourceState<T> | undefined =>
     resource.status !== "loading" ? resource : resource.value === undefined ? undefined : { status: "ready", value: resource.value }
@@ -489,10 +492,8 @@ export function createRepositorySession(
     ...value, threads: value.threads.map((thread) => ({ ...thread, comments: thread.comments.map((comment) =>
       withReactionFields({ kind: "review-comment", number, id: comment.id }, comment, revision)) })),
   })
+  // Only runs while the reacted page is displayed; the patched page is retained when it is left.
   const applyReaction = (target: ReactionTarget, value: ReactionState) => {
-    // Retained snapshots of a closed page revalidate before reuse instead of patching copies.
-    const current = state()
-    if (current.status === "ready") (reactionParent(target) === "issue" ? issueCache : pullCache).markStale(detailCacheKey(current.repository, target.number, reactionParent(target)))
     if (target.kind === "issue") setIssueDetail((detail) => detail?.number === target.number && detail.resource.value
       ? { ...detail, resource: { ...detail.resource, value: { ...detail.resource.value, ...value } } } : detail)
     else if (target.kind === "pull") setPullDetail((detail) => detail?.number === target.number && detail.resource.value
@@ -960,15 +961,17 @@ export function createRepositorySession(
     pullCache.set(key, snapshot, fresh && whole)
     if (!whole) pullCache.markStale(key)
   }
+  const invalidatePull = (repository: string, number: number) => pullCache.markStale(detailCacheKey(repository, number, "pull"))
   const pendingReactions = (owner: "issue" | "pull") => [...reactionRequests.keys()].some((key) => key.startsWith(`${owner}:`))
-  const clearPull = () => {
-    const detail = pullDetail()
+  // Leaving a page retains it. A pending reaction can no longer publish into it, so its result arrives on revalidation.
+  const leavePull = (detail: PullDetailState | undefined) => {
     retainPull(detail, false)
-    // A pending reaction can no longer publish into the closed page; its result arrives on revalidation.
-    if (pendingReactions("pull")) {
-      if (detail && state().status === "ready") pullCache.markStale(detailCacheKey(state().repository, detail.number, "pull"))
-      resetReactionOwner("pull")
-    }
+    const current = state()
+    if (detail && pendingReactions("pull") && current.status === "ready") invalidatePull(current.repository, detail.number)
+    resetReactionOwner("pull")
+  }
+  const clearPull = () => {
+    leavePull(pullDetail())
     ++pullGeneration
     setPullDetail(undefined)
   }
@@ -1071,8 +1074,7 @@ export function createRepositorySession(
       && (previous.resource.status === "loading" || previous.comments.status === "loading"
         || previous.references.status === "loading" || previous.commits.status === "loading" || previous.context.status === "loading"))) return
     if (previous?.number !== number) {
-      if (previous) retainPull(previous, false)
-      resetReactionOwner("pull")
+      leavePull(previous)
       const cached = pullCache.get(detailCacheKey(current.repository, number, "pull"))
       if (cached) {
         previous = cached.value
@@ -1187,13 +1189,14 @@ export function createRepositorySession(
     issueCache.set(key, snapshot, fresh && whole)
     if (!whole) issueCache.markStale(key)
   }
-  const clearIssue = () => {
-    const detail = issueDetail()
+  const leaveIssue = (detail: IssueDetailState | undefined) => {
     retainIssue(detail, false)
-    if (pendingReactions("issue")) {
-      if (detail && state().status === "ready") issueCache.markStale(detailCacheKey(state().repository, detail.number))
-      resetReactionOwner("issue")
-    }
+    const current = state()
+    if (detail && pendingReactions("issue") && current.status === "ready") issueCache.markStale(detailCacheKey(current.repository, detail.number))
+    resetReactionOwner("issue")
+  }
+  const clearIssue = () => {
+    leaveIssue(issueDetail())
     ++issueGeneration
     setIssueDetail(undefined)
   }
@@ -1265,8 +1268,7 @@ export function createRepositorySession(
     if (current.status !== "ready" || (previous?.number === number
       && (previous.resource.status === "loading" || previous.comments.status === "loading" || previous.references.status === "loading"))) return
     if (previous?.number !== number) {
-      if (previous) retainIssue(previous, false)
-      resetReactionOwner("issue")
+      leaveIssue(previous)
       const cached = issueCache.get(detailCacheKey(current.repository, number))
       if (cached) {
         previous = cached.value
@@ -1945,27 +1947,16 @@ export function createRepositorySession(
     repositoryCache.set(key, data, fresh && whole)
     if (!whole) repositoryCache.markStale(key)
   }
-  const load = async (repository: string, options: { force?: boolean } = {}) => {
+  const load = async (repository: string) => {
     clearDiff()
-    // Keep the outgoing repository reusable before resetting per-repository state.
+    // Keep the outgoing repository and its open pages reusable; cache keys are repository-scoped,
+    // so details survive switching repositories (e.g. following a cross-repository reference and back).
     retainRepository(state(), false)
     ++repositoryScope
-    // Per-repository caches are discarded; skip measuring details that are about to be dropped.
-    issueCache.clear()
-    pullCache.clear()
-    runCache.clear()
-    commitCache.clear()
-    diffCache.clear()
-    ++commitGeneration
-    setCommitDetail(undefined)
-    ++runGeneration
-    setRunDetail(undefined)
-    if (pendingReactions("issue")) resetReactionOwner("issue")
-    ++issueGeneration
-    setIssueDetail(undefined)
-    if (pendingReactions("pull")) resetReactionOwner("pull")
-    ++pullGeneration
-    setPullDetail(undefined)
+    clearCommit()
+    clearRun()
+    clearIssue()
+    clearPull()
     const request = ++repositoryGeneration
     ++branchGeneration
     const cached = repositoryCache.get(repository.toLowerCase())
@@ -1975,7 +1966,7 @@ export function createRepositorySession(
       const data = onDefault ? cached.value
         : { ...cached.value, currentBranch: cached.value.repo.defaultBranch, commits: loadingResource<Paginated<CommitSummary>>(),
           commitCount: loadingResource<number>(), documents: loadingResource<RepositoryDocumentState[]>() }
-      const revalidate = cached.stale || options.force === true || !onDefault
+      const revalidate = cached.stale || !onDefault
       setState({ status: "ready", repository, data, operations: { refresh: revalidate ? loading() : idle(), branch: idle() } })
       if (!revalidate) return
       try {
@@ -2030,11 +2021,12 @@ export function createRepositorySession(
     const request = ++repositoryGeneration
     ++branchGeneration
     const repository = current.repository
-    // Repository refresh is an explicit freshness request; retained details revalidate on next open.
-    issueCache.markStale()
-    pullCache.markStale()
-    runCache.markStale()
-    repositoryCache.markStale()
+    // Repository refresh is an explicit freshness request; this repository's retained details revalidate on next open.
+    const inRepository = (key: string) => key.startsWith(`${repository.toLowerCase()}:`)
+    issueCache.markStale(inRepository)
+    pullCache.markStale(inRepository)
+    runCache.markStale(inRepository)
+    repositoryCache.markStale(repository.toLowerCase())
     setAssignableUserCache((cache) => {
       const next = { ...cache }
       delete next[repository.toLowerCase()]
@@ -2073,6 +2065,8 @@ export function createRepositorySession(
         ...latest,
         operations: { ...latest.operations, refresh: idle() },
       }))
+      // Refreshed data is fresh; returning later should not reload it again.
+      if (request === repositoryGeneration) retainRepository(state(), true)
     } catch (error) {
       updateReady(setState, request, generation, repository, (latest) => ({
         ...latest,
@@ -2444,6 +2438,7 @@ export function createRepositorySession(
     retryPullCommits,
     retryPullContext,
     clearPull,
+    invalidatePull,
     issueDetail,
     loadIssue,
     loadMoreIssueComments,
