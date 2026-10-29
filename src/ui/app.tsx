@@ -89,20 +89,20 @@ export type AppProps = {
   onLoadMoreBranches?: () => Promise<void>
   onLoadMoreCommits?: () => Promise<void>
   diffs?: Partial<Record<DiffTarget["kind"], DiffState>>
-  onLoadDiff?: (target: DiffTarget, filesOnly?: boolean) => Promise<void>
+  onLoadDiff?: (target: DiffTarget, filesOnly?: boolean, options?: { force?: boolean }) => Promise<void>
   onCloseDiff?: (target?: DiffTarget) => void
   runDetail?: RunDetailState
-  onLoadRun?: (id: number) => Promise<void>
+  onLoadRun?: (id: number, options?: { force?: boolean }) => Promise<void>
   onLoadMoreRunJobs?: () => Promise<void>
   onCloseRun?: () => void
   commitDetail?: CommitDetailState
-  onLoadCommit?: (sha: string) => Promise<void>
+  onLoadCommit?: (sha: string, options?: { force?: boolean }) => Promise<void>
   onLoadMoreCommitFiles?: () => Promise<void>
   onCloseCommit?: () => void
   getReactionAction?: (target: ReactionTarget) => ReactionActionState
   onAddReaction?: (target: ReactionTarget, kind: ReactionKind) => Promise<ReactionState>
   issueDetail?: IssueDetailState
-  onLoadIssue?: (number: number) => Promise<void>
+  onLoadIssue?: (number: number, options?: { force?: boolean }) => Promise<void>
   onLoadMoreIssueComments?: () => Promise<void>
   onRetryIssueReferences?: () => Promise<void>
   onCloseIssue?: () => void
@@ -119,7 +119,7 @@ export type AppProps = {
   onLoadPullMergeMessage?: (number: number, expectedHeadSha: string) => Promise<PullMergeDraft>
   onUpdatePullDraft?: (number: number, draft: boolean) => Promise<PullRequestDetail>
   pullDetail?: PullDetailState
-  onLoadPull?: (number: number) => Promise<void>
+  onLoadPull?: (number: number, options?: { force?: boolean }) => Promise<void>
   onLoadMorePullComments?: () => Promise<void>
   onRetryPullReferences?: () => Promise<void>
   onRetryPullCommits?: () => Promise<void>
@@ -363,7 +363,7 @@ function AppContent(props: AppProps) {
         await props.onLoadMoreIssueComments?.()
       else if (detail.resource.status === "ready" && detail.references.status === "error")
         await props.onRetryIssueReferences?.()
-      else await props.onLoadIssue?.(number)
+      else await props.onLoadIssue?.(number, { force: true })
     } finally {
       setIssueRefresh((current) => current === request ? undefined : current)
     }
@@ -672,7 +672,7 @@ function AppContent(props: AppProps) {
         await props.onLoadMorePullComments?.()
       else if (detail.resource.status === "ready" && detail.references.status === "error")
         await props.onRetryPullReferences?.()
-      else await props.onLoadPull?.(number)
+      else await props.onLoadPull?.(number, { force: true })
     } finally {
       setPullRefresh((current) => current === request ? undefined : current)
     }
@@ -1326,8 +1326,8 @@ function AppContent(props: AppProps) {
       const diff = diffTarget()
       if (diff) {
         if (diffResource().status !== "loading") {
-          void props.onLoadDiff?.(diff)
-          if (diff.kind === "pull") void props.onLoadPull?.(diff.number)
+          void props.onLoadDiff?.(diff, false, { force: true })
+          if (diff.kind === "pull") void props.onLoadPull?.(diff.number, { force: true })
         }
         return
       }
@@ -1336,12 +1336,12 @@ function AppContent(props: AppProps) {
         clearRunFailures(run)
         const jobs = runDetail().jobs
         if (runDetail().resource.status === "ready" && jobs.status === "error" && jobs.phase === "pagination") void props.onLoadMoreRunJobs?.()
-        else void props.onLoadRun?.(run)
+        else void props.onLoadRun?.(run, { force: true })
       } else if (activeCommitSha()) {
         const resource = commitResource()
         if (resource.status === "loading") return
         if (resource.status === "error" && resource.phase === "pagination") void props.onLoadMoreCommitFiles?.()
-        else void props.onLoadCommit?.(activeCommitSha()!)
+        else void props.onLoadCommit?.(activeCommitSha()!, { force: true })
       } else if (activeIssueNumber()) void refreshIssue(activeIssueNumber()!)
       else if (activePullNumber()) void refreshPull(activePullNumber()!)
       else {
