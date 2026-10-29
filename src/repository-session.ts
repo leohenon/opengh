@@ -1638,7 +1638,7 @@ export function createRepositorySession(
         commentCount: Math.max(loaded.commentCount, previous.commentCount),
         updatedAt: Date.parse(loaded.updatedAt) >= Date.parse(previous.updatedAt) ? loaded.updatedAt : previous.updatedAt,
       }, scope, reactionRead)
-      updateAction(key, () => ({ ...emptyIssueAction, reason: action.reason }), true)
+      updateAction(key, () => emptyIssueAction, true)
       return result
     } catch (error) {
       const retry = issueActions()[key]?.retry
@@ -1747,7 +1747,7 @@ export function createRepositorySession(
         if (updated.state !== nextState) throw new Error("GitHub did not change the issue state. Check your permissions on GitHub.")
         result.issue = reconcileIssueState(repository, number, updated, scope, reactionRead)
       }
-      updateAction(key, () => ({ ...emptyIssueAction, reason: action.reason }), true)
+      updateAction(key, () => emptyIssueAction, true)
       return result
     } catch (error) {
       const retry = issueActions()[key]?.retry

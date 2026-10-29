@@ -3,6 +3,7 @@ import { link, mkdir, open, readFile, rename, unlink } from "node:fs/promises"
 import { join } from "node:path"
 import { createSignal } from "solid-js"
 import { configDirectory } from "./paths"
+import { cleanupDraftTemporaryFiles } from "./draft-cleanup"
 import { createGitHubReviews, validateReviewAnchor, validateReviewDraft } from "./github/reviews"
 import { GitHubApiError, GitHubRequestNotSentError, type GitHubTransport } from "./github/transport"
 import type { PullReviewSession, ReviewDraft, ReviewEligibility, ReviewSessionState } from "./review-types"
@@ -31,6 +32,7 @@ function parsedDraft(value: unknown, scope: ReviewDraftScope): ReviewDraft {
 // Shared per-path serialization also covers multiple session/storage instances.
 const diskQueues = new Map<string, Promise<unknown>>()
 export function createReviewDraftStorage(directory = join(configDirectory(), "review-drafts")): ReviewDraftStorage {
+  cleanupDraftTemporaryFiles(directory)
   const pathFor = (scope: ReviewDraftScope) => join(directory, `${createHash("sha256").update(scopeKey(scope)).digest("hex")}.json`)
   const markerPath = (scope: ReviewDraftScope) => `${pathFor(scope)}.submission`
   const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b)
@@ -105,7 +107,14 @@ export function createReviewDraftStorage(directory = join(configDirectory(), "re
       }
       if (marker || existing?.submission) throw new Error("An unresolved review submission is stored; check GitHub before changing it.")
       if (!clean.submission) {
-        await publish(pathFor(draft), clean)
+        // Preserve body-less approvals/requests for changes, but not an empty
+        // default review. Unresolved submissions were rejected above.
+        if (!clean.body && !clean.comments.length && clean.event === "COMMENT") {
+          if (existing) {
+            await unlink(pathFor(draft))
+            await syncDirectory()
+          }
+        } else await publish(pathFor(draft), clean)
         return
       }
       const original = unmarked(clean)

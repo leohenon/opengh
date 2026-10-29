@@ -316,6 +316,32 @@ describe("pull reviews", () => {
     expect(unreadable.state().draft).toBeUndefined()
     expect(await unreadable.submit()).toBe(false)
   })
+  test("empty disk reviews are removed without losing selected events or unresolved submissions", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "opengh-empty-review-"))
+    try {
+      const storage = createReviewDraftStorage(directory), value = draft()
+      const empty = { ...value, body: "" }
+      await storage.save(empty)
+      expect(await storage.load(value)).toBeUndefined()
+      await storage.save(value)
+      await storage.save(empty)
+      expect(await readdir(directory)).toEqual([])
+      const approval = { ...empty, event: "APPROVE" as const }
+      await storage.save(approval)
+      expect(await storage.load(value)).toEqual(approval)
+      const marked = { ...approval, submission: { startedAt: new Date().toISOString(), reviewIds: [] } }
+      await storage.save(marked)
+      await expect(storage.save(empty)).rejects.toThrow("unresolved")
+      expect(await storage.load(value)).toEqual(marked)
+      await storage.remove(marked)
+      const { transport } = fixture()
+      const session = createPullReviewSession({ transport, storage })
+      await session.open("o/r", 1)
+      session.setEvent("APPROVE")
+      expect(await session.submit()).toBe(true)
+      expect(await readdir(directory)).toEqual([])
+    } finally { await rm(directory, { recursive: true, force: true }) }
+  })
   test("private atomic serialized disk storage, scope isolation and unreadable-file protection", async () => {
     const directory = await mkdtemp(join(tmpdir(), "opengh-review-test-"))
     try {

@@ -3,6 +3,7 @@ import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node
 import { join } from "node:path"
 import type { IssueCloseReason } from "./models"
 import { configDirectory } from "./paths"
+import { cleanupDraftTemporaryFiles } from "./draft-cleanup"
 
 export type DraftKind = "comment" | "close" | "reopen"
 export type IssueDraft = { body: string; reason: IssueCloseReason; retry?: "close" | "reopen" }
@@ -15,6 +16,7 @@ export type DraftStore = {
 }
 
 export function createDiskDraftStore(directory = join(configDirectory(), "drafts")): DraftStore {
+  cleanupDraftTemporaryFiles(directory)
   const pathFor = (key: string) => join(directory, `${createHash("sha256").update(key).digest("hex")}.json`)
   return {
     load(key) {

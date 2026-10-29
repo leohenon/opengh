@@ -2,6 +2,7 @@ import { createHash, randomUUID } from "node:crypto"
 import { link, mkdir, open, readFile, rename, unlink } from "node:fs/promises"
 import { join } from "node:path"
 import { configDirectory } from "./paths"
+import { cleanupDraftTemporaryFiles } from "./draft-cleanup"
 import { createGitHubReviews, validateReviewDraft } from "./github/reviews"
 import { githubTransport, GitHubApiError, GitHubRequestNotSentError, type GitHubTransport } from "./github/transport"
 import type { InlineCommentInput, PostedInlineComment, ReviewDraft } from "./review-types"
@@ -48,6 +49,7 @@ function parseAttempt(value: unknown, scope: InlineCommentScope): InlineCommentA
 }
 const storageQueues = new Map<string, Promise<unknown>>()
 export function createInlineCommentStorage(directory = join(configDirectory(), "inline-comment-attempts")): InlineCommentStorage {
+  cleanupDraftTemporaryFiles(directory)
   const pathFor = (input: InlineCommentInput) => join(directory, `${fingerprint(input)}.json`)
   // Serialize local file operations without a durable lock that could survive a crash.
   function locked<T>(run: () => Promise<T>): Promise<T> {

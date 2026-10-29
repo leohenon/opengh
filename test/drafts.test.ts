@@ -1,8 +1,11 @@
 import { expect, test } from "bun:test"
-import { mkdtempSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs"
+import { mkdtempSync, readdirSync, renameSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs"
+import { randomUUID } from "node:crypto"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { createDiskDraftStore } from "../src/drafts"
+import { createReviewDraftStorage } from "../src/pull-review-session"
+import { createInlineCommentStorage } from "../src/inline-comments"
 import type { IssueComment } from "../src/models"
 import { createRepositorySession, type RepositoryLoaders, type RepositorySession } from "../src/repository-session"
 import { commitDetailFixture, githubDataFixture, issueCommentsFixture, issueDetailFixture, pullContextFixture } from "./fixtures/github-data"
@@ -121,6 +124,7 @@ test("drafts survive restarts, isolate subjects/actions, retain failures, and du
     const beforeRetry = commentCalls
     await session.submitIssueAction(number, "close")
     expect(commentCalls).toBe(beforeRetry)
+    expect(createDiskDraftStore(drafts).load(`owner/repo#${number}:close`)).toBeUndefined()
     session = await restart()
     session.prepareIssueAction(number, "close")
     expect(session.issueAction(number).retry).toBeUndefined()
@@ -166,5 +170,21 @@ test("drafts survive restarts, isolate subjects/actions, retain failures, and du
   } finally {
     for (const session of sessions) session.flushDrafts!()
     rmSync(directory, { recursive: true, force: true })
+  }
+})
+
+test("draft stores sweep only stale atomic-write files, not drafts or submission markers", () => {
+  for (const create of [createDiskDraftStore, createReviewDraftStorage, createInlineCommentStorage]) {
+    const directory = mkdtempSync(join(tmpdir(), "opengh-draft-cleanup-"))
+    try {
+      const base = `${"a".repeat(64)}.json`
+      const stale = [`${base}.${randomUUID()}.tmp`, `${base}.submission.${randomUUID()}.tmp`]
+      const retained = [base, `${base}.submission`, `${base}.${randomUUID()}.tmp`, "unrelated.tmp"]
+      for (const name of [...stale, ...retained]) writeFileSync(join(directory, name), "preserve")
+      const old = new Date(Date.now() - 48 * 60 * 60 * 1000)
+      for (const name of [...stale, retained[0]!, retained[1]!, retained[3]!]) utimesSync(join(directory, name), old, old)
+      create(directory)
+      expect(readdirSync(directory).sort()).toEqual(retained.sort())
+    } finally { rmSync(directory, { recursive: true, force: true }) }
   }
 })
