@@ -210,13 +210,12 @@ describe("repository cache", () => {
 })
 
 describe("diff, run and commit caches", () => {
-  test("commit diffs reopen from cache while PR diffs require the loaded head to match", async () => {
-    const headSha = "a".repeat(40), baseSha = "b".repeat(40)
+  test("commit diffs reopen from cache while PR diffs require the PR's base and head commits to match", async () => {
     let diffCalls = 0
-    let pullHead = headSha
+    let pullHead = "a".repeat(40), pullBase = "b".repeat(40)
     const session = createRepositorySession(loaders({
-      diff: async (_repository, target) => { diffCalls++; return target.kind === "commit" ? { kind: "patch", patch: `commit ${diffCalls}` } : { kind: "patch", patch: `pr ${diffCalls}`, headSha: pullHead, baseSha } },
-      pull: async (repository, number) => ({ ...(await loaders().pull!(repository, number)), headSha: pullHead }),
+      diff: async (_repository, target) => { diffCalls++; return target.kind === "commit" ? { kind: "patch", patch: `commit ${diffCalls}` } : { kind: "patch", patch: `pr ${diffCalls}`, headSha: pullHead, baseSha: pullBase } },
+      pull: async (repository, number) => ({ ...(await loaders().pull!(repository, number)), headSha: pullHead, baseSha: pullBase }),
     }))
     await session.load("owner/repo")
     const sha = "c".repeat(40)
@@ -238,6 +237,16 @@ describe("diff, run and commit caches", () => {
     await session.loadDiff!({ kind: "pull", number: 7 })
     expect(diffCalls).toBe(4)
     expect(session.diffs!().pull?.resource.value).toMatchObject({ headSha: pullHead })
+    // From the list, a fresh retained PR vouches for its diff; a retargeted base does not match.
+    session.clearPull()
+    session.clearDiff!({ kind: "pull", number: 7 })
+    await session.loadDiff!({ kind: "pull", number: 7 })
+    expect(diffCalls).toBe(4)
+    pullBase = "e".repeat(40)
+    await session.loadPull(7, { force: true })
+    session.clearDiff!({ kind: "pull", number: 7 })
+    await session.loadDiff!({ kind: "pull", number: 7 })
+    expect(diffCalls).toBe(5)
   })
 
   test("in-progress workflow runs always revalidate while completed runs and commits reopen instantly", async () => {
@@ -301,7 +310,9 @@ test("external PR changes invalidate a retained PR; reactions on an open page do
   expect(pullCalls).toBe(1)
   expect(session.pullDetail()?.resource.value?.reactions).toEqual({ heart: 1 })
   session.clearPull()
-  session.invalidatePull!("owner/repo", 7) // e.g. a review submitted after navigating away
+  // e.g. a review submitted after navigating away; the app names the repository as GitHub reports it,
+  // which differs from the requested "owner/repo" here, as for a renamed repository.
+  session.invalidatePull!(githubDataFixture.repo.nameWithOwner, 7)
   await session.loadPull(7)
   expect(pullCalls).toBe(2)
   // A reaction still pending when switching straight to another PR cannot reach the retained page.

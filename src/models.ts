@@ -279,6 +279,7 @@ export type PullRequestDetail = PullRequestSummary & Partial<ReactionState> & {
   headBranch: string
   headRepository?: string
   headSha?: string
+  baseSha?: string
   additions: number
   deletions: number
   changedFiles: number

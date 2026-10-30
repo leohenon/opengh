@@ -10,6 +10,8 @@ export type DetailCacheOptions = {
 }
 
 type Entry<T> = { value: T; bytes: number; loadedAt: number; usedAt: number }
+// A stale entry is older than any clock reading, so staleness never depends on the clock's origin.
+const STALE = Number.NEGATIVE_INFINITY
 
 const MAX_MEASURED_BYTES = 64 * 1024 * 1024
 
@@ -106,19 +108,16 @@ export function createDetailCache<T>(options: DetailCacheOptions = {}) {
       remove(key)
       // Oversized values stay usable while active but are never retained for later.
       if (bytes > maxValueBytes) return
-      entries.set(key, { value, bytes, loadedAt: fresh ? time : previous?.loadedAt ?? 0, usedAt: time })
+      entries.set(key, { value, bytes, loadedAt: fresh ? time : previous?.loadedAt ?? STALE, usedAt: time })
       totalBytes += bytes
       budget.used += bytes
       trim(key)
     },
     // Marks one key, or every key matching a predicate, as needing revalidation before reuse.
     markStale(match: string | ((key: string) => boolean)) {
-      if (typeof match === "string") { const entry = entries.get(match); if (entry) entry.loadedAt = 0; return }
-      for (const [key, entry] of entries) if (match(key)) entry.loadedAt = 0
+      if (typeof match === "string") { const entry = entries.get(match); if (entry) entry.loadedAt = STALE; return }
+      for (const [key, entry] of entries) if (match(key)) entry.loadedAt = STALE
     },
-    keys: () => [...entries.keys()],
-    delete: remove,
-    clear() { for (const key of [...entries.keys()]) remove(key) },
     get size() { return entries.size },
     get bytes() { return totalBytes },
   }

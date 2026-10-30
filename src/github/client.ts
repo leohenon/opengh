@@ -142,7 +142,7 @@ type PullDetailResponse = PullResponse & {
   body: string | null
   updated_at: string
   closed_at: string | null
-  base: { ref: string }
+  base: { ref: string; sha?: string }
   head: { ref: string; sha?: string; repo: { full_name: string } | null }
   reactions?: unknown
   additions: number
@@ -1124,6 +1124,7 @@ export function createGitHubClient(transport: GitHubTransport) {
       baseBranch: item.base.ref,
       headBranch: item.head.ref,
       ...(typeof item.head.sha === "string" && /^[a-f\d]{40}$/i.test(item.head.sha) ? { headSha: item.head.sha } : {}),
+      ...(typeof item.base.sha === "string" && /^[a-f\d]{40}$/i.test(item.base.sha) ? { baseSha: item.base.sha } : {}),
       reactions: parseReactions(item.reactions),
       ...(item.head.repo ? { headRepository: item.head.repo.full_name } : {}),
       additions: item.additions,

@@ -151,6 +151,7 @@ export type RepositorySession = {
   retryPullContext(): Promise<void>
   clearPull(): void
   // Marks a retained PR stale after a change made outside the session (reviews, inline comments).
+  // Optional so hand-built test sessions need not stub it.
   invalidatePull?(repository: string, number: number): void
   issueDetail: Accessor<IssueDetailState | undefined>
   loadIssue(number: number, options?: { force?: boolean }): Promise<void>
@@ -314,6 +315,9 @@ export function createRepositorySession(
   // Loading sections with a value are reusable; errors stay visible so the page keeps its retry affordance.
   const settled = <T>(resource: ResourceState<T>): ResourceState<T> | undefined =>
     resource.status !== "loading" ? resource : resource.value === undefined ? undefined : { status: "ready", value: resource.value }
+  // A section whose load was cut off is retained as a retryable error, never as empty data.
+  const retainable = <T>(resource: ResourceState<T>): ResourceState<T> =>
+    settled(resource) ?? { status: "error", phase: "load", message: "Loading was interrupted; refresh to retry." }
   const complete = (resources: ResourceState<unknown>[]) => resources.every((resource) => resource.status === "ready")
   const [draftSaveError, setDraftSaveError] = createSignal<string>()
   const draftErrors = new Map<string, string>()
@@ -359,25 +363,27 @@ export function createRepositorySession(
   const [diffs, setDiffs] = createSignal<Partial<Record<DiffTarget["kind"], DiffState>>>({})
   const diffGeneration: Record<DiffTarget["kind"], number> = { commit: 0, pull: 0 }
   const diffAbort: Partial<Record<DiffTarget["kind"], AbortController>> = {}
-  // Diff identity is content-addressed: a commit SHA, or a PR number pinned to verified base/head commits.
-  const diffCacheKey = (repository: string, target: DiffTarget, value: DiffContent | undefined, filesOnly: boolean) => {
-    if (target.kind === "commit") return /^[a-f0-9]{40}$/i.test(target.sha) ? `${repository.toLowerCase()}:commit:${target.sha.toLowerCase()}:${filesOnly ? "files" : "patch"}` : undefined
-    if (filesOnly || value?.kind !== "patch" || !value.headSha || !value.baseSha) return undefined
-    return `${repository.toLowerCase()}:pull:${target.number}:${value.baseSha.toLowerCase()}:${value.headSha.toLowerCase()}`
-  }
+  // Diff identity is content-addressed: a commit SHA, or a PR number pinned to its base/head commits.
+  const commitDiffKey = (repository: string, sha: string, filesOnly: boolean) =>
+    /^[a-f0-9]{40}$/i.test(sha) ? `${repository.toLowerCase()}:commit:${sha.toLowerCase()}:${filesOnly ? "files" : "patch"}` : undefined
+  const pullDiffKey = (repository: string, number: number, commits: { baseSha?: string; headSha?: string } | undefined) =>
+    commits?.baseSha && commits.headSha ? `${repository.toLowerCase()}:pull:${number}:${commits.baseSha.toLowerCase()}:${commits.headSha.toLowerCase()}` : undefined
   const retainDiff = (repository: string, target: DiffTarget, value: DiffContent, filesOnly: boolean) => {
-    const key = diffCacheKey(repository, target, value, filesOnly)
+    const key = target.kind === "commit" ? commitDiffKey(repository, target.sha, filesOnly)
+      : !filesOnly && value.kind === "patch" ? pullDiffKey(repository, target.number, value) : undefined
     if (key) diffCache.set(key, value)
   }
+  // The PR snapshot trusted to name the current base/head commits: the displayed PR once loaded,
+  // or a fresh retained one (e.g. "View diff" from the list).
+  const diffPull = (repository: string, number: number) => {
+    const displayed = pullDetail()
+    if (displayed?.number === number) return displayed.resource.status === "loading" ? undefined : displayed.resource.value
+    const cached = pullCache.get(detailCacheKey(repository, number, "pull"))
+    return cached && !cached.stale ? cached.value.resource.value : undefined
+  }
   const cachedDiff = (repository: string, target: DiffTarget, filesOnly: boolean) => {
-    if (filesOnly) return target.kind === "commit" ? diffCache.get(diffCacheKey(repository, target, undefined, true) ?? "")?.value : undefined
-    if (target.kind === "commit") return diffCache.get(diffCacheKey(repository, target, undefined, false) ?? "")?.value
-    // A retained PR diff is only reusable while the loaded PR still points at the same head commit.
-    const pull = pullDetail()?.number === target.number ? pullDetail()?.resource.value : undefined
-    const headSha = pull?.headSha?.toLowerCase()
-    if (!headSha || pullDetail()?.resource.status === "loading") return undefined
-    // Prefer the most recently retained match; an older entry may carry an outdated base commit.
-    const key = diffCache.keys().findLast((key) => key.startsWith(`${repository.toLowerCase()}:pull:${target.number}:`) && key.endsWith(`:${headSha}`))
+    const key = target.kind === "commit" ? commitDiffKey(repository, target.sha, filesOnly)
+      : filesOnly ? undefined : pullDiffKey(repository, target.number, diffPull(repository, target.number))
     return key ? diffCache.get(key)?.value : undefined
   }
   const clearDiff = (target?: DiffTarget) => {
@@ -777,7 +783,7 @@ export function createRepositorySession(
     const key = `${current.repository.toLowerCase()}:run:${detail.id}`
     const resource = settled(detail.resource)
     if (resource?.status !== "ready") { runCache.markStale(key); return }
-    const jobs = settled(detail.jobs) ?? { status: "error" as const, phase: "load" as const, message: "Loading was interrupted; refresh to retry." }
+    const jobs = retainable(detail.jobs)
     // Unfinished runs change constantly; keep them reusable but always revalidate.
     const whole = jobs.status === "ready" && resource.value.status === "completed"
     runCache.set(key, { id: detail.id, resource, jobs }, fresh && whole)
@@ -953,15 +959,21 @@ export function createRepositorySession(
     const key = detailCacheKey(current.repository, detail.number, "pull")
     const resource = settled(detail.resource)
     if (resource?.status !== "ready") { pullCache.markStale(key); return }
-    const interrupted = <T>(): ResourceState<T> => ({ status: "error", phase: "load", message: "Loading was interrupted; refresh to retry." })
     const snapshot: PullDetailState = { ...detail, resource,
-      comments: settled(detail.comments) ?? interrupted(), references: settled(detail.references) ?? interrupted(),
-      commits: settled(detail.commits) ?? interrupted(), context: settled(detail.context) ?? interrupted() }
+      comments: retainable(detail.comments), references: retainable(detail.references),
+      commits: retainable(detail.commits), context: retainable(detail.context) }
     const whole = complete([snapshot.resource, snapshot.comments, snapshot.references, snapshot.commits, snapshot.context])
     pullCache.set(key, snapshot, fresh && whole)
     if (!whole) pullCache.markStale(key)
   }
-  const invalidatePull = (repository: string, number: number) => pullCache.markStale(detailCacheKey(repository, number, "pull"))
+  // Callers may name the repository as GitHub reports it; cache keys use the requested name,
+  // which differs for a renamed (redirected) repository.
+  const invalidatePull = (repository: string, number: number) => {
+    const current = state()
+    const requested = current.status === "ready" && current.data.repo.nameWithOwner.toLowerCase() === repository.toLowerCase()
+      ? current.repository : repository
+    pullCache.markStale(detailCacheKey(requested, number, "pull"))
+  }
   const pendingReactions = (owner: "issue" | "pull") => [...reactionRequests.keys()].some((key) => key.startsWith(`${owner}:`))
   // Leaving a page retains it. A pending reaction can no longer publish into it, so its result arrives on revalidation.
   const leavePull = (detail: PullDetailState | undefined) => {
@@ -1182,9 +1194,8 @@ export function createRepositorySession(
     const key = detailCacheKey(current.repository, detail.number)
     const resource = settled(detail.resource)
     if (resource?.status !== "ready") { issueCache.markStale(key); return }
-    const interrupted = <T>(): ResourceState<T> => ({ status: "error", phase: "load", message: "Loading was interrupted; refresh to retry." })
     const snapshot: IssueDetailState = { ...detail, resource,
-      comments: settled(detail.comments) ?? interrupted(), references: settled(detail.references) ?? interrupted() }
+      comments: retainable(detail.comments), references: retainable(detail.references) }
     const whole = complete([snapshot.resource, snapshot.comments, snapshot.references])
     issueCache.set(key, snapshot, fresh && whole)
     if (!whole) issueCache.markStale(key)
@@ -1925,18 +1936,14 @@ export function createRepositorySession(
   }
 
   // Only settled sections are reusable; a resumed load refetches the rest.
-  const settledData = (data: RepositoryData): RepositoryData => {
-    const resource = <T>(value: ResourceState<T>): ResourceState<T> =>
-      settled(value) ?? { status: "error", phase: "load", message: "Loading was interrupted; refresh to retry." }
-    return { ...data,
-      workCounts: resource(data.workCounts),
-      documents: data.documents.value === undefined ? resource(data.documents)
-        : { ...resource(data.documents), value: data.documents.value.map((document) => ({ ...document, resource: resource(document.resource) })) },
-      branches: resource(data.branches), commits: resource(data.commits), commitCount: resource(data.commitCount),
-      issues: { open: resource(data.issues.open), closed: resource(data.issues.closed) },
-      pulls: { open: resource(data.pulls.open), closed: resource(data.pulls.closed) },
-      runs: resource(data.runs) }
-  }
+  const settledData = (data: RepositoryData): RepositoryData => ({ ...data,
+    workCounts: retainable(data.workCounts),
+    documents: data.documents.value === undefined ? retainable(data.documents)
+      : { ...retainable(data.documents), value: data.documents.value.map((document) => ({ ...document, resource: retainable(document.resource) })) },
+    branches: retainable(data.branches), commits: retainable(data.commits), commitCount: retainable(data.commitCount),
+    issues: { open: retainable(data.issues.open), closed: retainable(data.issues.closed) },
+    pulls: { open: retainable(data.pulls.open), closed: retainable(data.pulls.closed) },
+    runs: retainable(data.runs) })
   const retainRepository = (current: RepositoryState, fresh: boolean) => {
     if (current.status !== "ready" || current.operations.branch.status === "loading") return
     const data = settledData(current.data)
@@ -1960,7 +1967,8 @@ export function createRepositorySession(
     const request = ++repositoryGeneration
     ++branchGeneration
     const cached = repositoryCache.get(repository.toLowerCase())
-    if (cached && cached.value.repo.nameWithOwner.toLowerCase() === repository.toLowerCase()) {
+    // Keyed by the requested name, so a renamed (redirected) repository is reusable too.
+    if (cached) {
       // Reopen on the default branch: branch-specific commits/documents are only reusable there.
       const onDefault = cached.value.currentBranch === cached.value.repo.defaultBranch
       const data = onDefault ? cached.value
