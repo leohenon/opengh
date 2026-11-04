@@ -50,7 +50,7 @@ import { PullScreen } from "./pages/pull"
 import { RunScreen } from "./pages/run"
 import { CommitScreen } from "./pages/commit"
 import { DiffScreen, type DiffFocus } from "./pages/diff"
-import { OverviewScreen } from "./pages/overview"
+import { aboutSidebarVisible, OverviewScreen, type AboutSidebar } from "./pages/overview"
 import { WorkScreen } from "./pages/work"
 import { SwitchRepositoryScreen } from "./pages/switch-repository"
 import { tabs } from "./tabs"
@@ -729,6 +729,9 @@ function AppContent(props: AppProps) {
   }, { repository: "", tabs: baseTabs, resolved: false })
   const visibleTabs = () => navigationTabs().tabs
   const overviewDocuments = () => data().documents.value ?? []
+  // The About sidebar follows the terminal width until toggled; the choice is not persisted.
+  const [aboutSidebar, setAboutSidebar] = createSignal<AboutSidebar>("auto")
+  const toggleAboutSidebar = () => setAboutSidebar(aboutSidebarVisible(aboutSidebar(), dimensions().width) ? "hide" : "show")
   const currentOverviewDocument = createMemo(() => overviewDocuments().find((document) => document.id === overviewDocument())
     ?? overviewDocuments()[0])
   const activeResource = (): ResourceState<unknown> | undefined => {
@@ -1215,7 +1218,6 @@ function AppContent(props: AppProps) {
         : canRefresh && diffResource().value?.kind === "files" ? [["view.refresh", "retry full diff"]] : []
       return hint(back, ...recovery, ["diff.focus", `focus ${files ? "diff" : "files"}`], horizontal,
         [["diff.previousHunk", "diff.nextHunk"], "hunks"],
-        ...(props.reviews && diffTarget()?.kind === "pull" ? [["review.open", "review"] as const] : []),
         ...(failed ? [] : [["diff.toggleLayout", "layout"], ["diff.toggleWrap", "wrap"]] as const),
         ["diff.toggleFiles", "toggle files"], [["navigation.up", "navigation.down"], files ? "files" : "scroll"],
         ...refresh, github, ...common)
@@ -1234,7 +1236,6 @@ function AppContent(props: AppProps) {
     if (activePullNumber()) return hint(back, ...retry,
       ...more(pullDetail().comments.status !== "loading" && pullDetail().comments.value?.hasMore),
       ...(canCommentOnPull() ? [["issue.comment", "comment"] as const] : []),
-      ...(canOfferReview() ? [["review.open", "review"] as const] : []),
       ...(hasIssueActions() ? [["issue.actions", "actions"] as const] : []), diff,
       timeline, ...(pullMenuItems().length ? [["detail.references", "references"] as const] : []),
       ...refresh, github, copy, ...common)
@@ -1254,6 +1255,7 @@ function AppContent(props: AppProps) {
     }
     if (page() === "overview") return hint(...retry,
       ...(overviewDocuments().length > 1 ? [["overview.nextDocument", "documents"] as const] : []),
+      ["overview.toggleSidebar", "sidebar"],
       ...(canClone() ? [["command.clone", "clone"] as const] : []), ...refresh, github, copy, ...common)
     return hint(...common)
   }
@@ -1361,12 +1363,6 @@ function AppContent(props: AppProps) {
       }
     },
     "issue.comment": () => { if (diffTarget() || !canComment()) return false; openComment() },
-    "review.open": () => {
-      const diff = diffTarget()
-      if (diff?.kind === "pull" && props.reviews) { void openReview(diff.number); return }
-      if (!canOfferReview()) return false
-      void openReview()
-    },
     "issue.actions": () => { if (!(activeIssueNumber() || activePullNumber()) || diffTarget() || !hasIssueActions()) return false; setOverlay("issue-actions") },
     "detail.toggleTimeline": () => {
       if (diffTarget() || !(activeIssueNumber() || activePullNumber())) return false
@@ -1392,6 +1388,7 @@ function AppContent(props: AppProps) {
     },
     "overview.nextDocument": () => { if (page() !== "overview") return false; moveOverviewDocument(1) },
     "overview.previousDocument": () => { if (page() !== "overview") return false; moveOverviewDocument(-1) },
+    "overview.toggleSidebar": () => { if (page() !== "overview") return false; toggleAboutSidebar() },
   }, { when: () => overlay() === undefined, priority: -10 })
 
   useKeyActions({
@@ -1426,7 +1423,7 @@ function AppContent(props: AppProps) {
             compactHeader={config().compactHeader}
             hideDocumentsTab={config().hideDocumentsTab}
             showScrollbar={config().showScrollbars}
-            aboutSidebar={config().aboutSidebar}
+            aboutSidebar={aboutSidebar()}
             detailLayout={config().detailLayout}
             scrollRef={(value) => (overviewScroll = value)}
           />
@@ -1656,7 +1653,6 @@ function AppContent(props: AppProps) {
           hasReferences={activeMenuItems().length > 0}
           canComment={canComment()}
           hasIssueActions={hasIssueActions()}
-          canReview={!!props.reviews && (diffTarget()?.kind === "pull" || canOfferReview())}
           command={page() === "overview" && canClone() ? "clone repository" : undefined}
         />
       </Show>

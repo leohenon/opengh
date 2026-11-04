@@ -84,6 +84,7 @@ Use characters (`j`, `G`, `?`), named keys (`enter`, `esc`, `up`), or modifier c
 
     "overview.nextDocument": ["tab"],
     "overview.previousDocument": ["shift+tab"],
+    "overview.toggleSidebar": ["b"],
     "commits.chooseBranch": ["tab", "shift+tab"],
     "work.toggleState": ["tab", "shift+tab"],
     "issue.comment": ["c"],

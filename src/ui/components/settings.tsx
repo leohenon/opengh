@@ -9,13 +9,13 @@ import { Popup } from "./popup"
 import { ThemePicker } from "./theme-picker"
 import { useKeyActions, useKeybindings } from "../keybindings"
 
-type Setting = "theme" | "color-mode" | "reduced-motion" | "markdown-style" | "scrollbars" | "about-sidebar" | "detail-layout" | "status-bar-hints" | "icon-style" | "compact-header" | "hide-documents-tab" | "tab-counts"
+type Setting = "theme" | "color-mode" | "reduced-motion" | "markdown-style" | "scrollbars" | "detail-layout" | "status-bar-hints" | "icon-style" | "compact-header" | "hide-documents-tab" | "tab-counts"
 
 const sectionOrder = ["Appearance", "Layout", "Usability"] as const
 type Section = typeof sectionOrder[number]
 const sectionSettings: Record<Section, readonly Setting[]> = {
   Appearance: ["theme", "color-mode", "markdown-style"],
-  Layout: ["compact-header", "tab-counts", "hide-documents-tab", "about-sidebar", "detail-layout"],
+  Layout: ["compact-header", "tab-counts", "hide-documents-tab", "detail-layout"],
   Usability: ["icon-style", "status-bar-hints", "scrollbars", "reduced-motion"],
 }
 const settingOrder = sectionOrder.flatMap((section) => sectionSettings[section])
@@ -26,7 +26,6 @@ const settingDefinitions: Record<Setting, { title: string; description: string; 
   "compact-header": { title: "Compact header", description: "More room for content", value: (config) => config.compactHeader ? "on" : "off" },
   "tab-counts": { title: "Tab counts", description: "Issue and PR totals", value: (config) => config.showTabCounts ? "on" : "off" },
   "hide-documents-tab": { title: "Document tabs", description: "Overview document navigation", value: (config) => config.hideDocumentsTab ? "off" : "on" },
-  "about-sidebar": { title: "About sidebar", description: "Repository metadata", value: (config) => config.aboutSidebar },
   "detail-layout": { title: "Detail width", description: "Detail page width", value: (config) => config.detailLayout },
   "icon-style": { title: "Icon style", description: "Terminal symbols", value: (config) => config.iconStyle === "nerd" ? "Nerd Font" : "Unicode" },
   "status-bar-hints": { title: "Status bar hints", description: "Keyboard shortcuts", value: (config) => config.showStatusBarHints ? "on" : "off" },
@@ -34,7 +33,6 @@ const settingDefinitions: Record<Setting, { title: string; description: string; 
   "reduced-motion": { title: "Reduced motion", description: "Static loading indicators", value: (config) => config.reducedMotion ? "on" : "off" },
 }
 const colorModeValues = ["system", "dark", "light"] as const
-const sidebarValues = ["auto", "show", "hide"] as const
 
 export function Settings(props: {
   config: Config
@@ -118,21 +116,6 @@ export function Settings(props: {
     }
   }
 
-  const changeSidebar = async (direction: number) => {
-    if (busy()) return
-    const current = sidebarValues.indexOf(props.config.aboutSidebar)
-    const next = sidebarValues[(current + direction + sidebarValues.length) % sidebarValues.length]!
-    setSaving(true)
-    setError("")
-    try {
-      await props.onChange({ ...props.config, aboutSidebar: next })
-    } catch (error) {
-      setError(error instanceof Error ? error.message : "Could not save settings")
-    } finally {
-      setSaving(false)
-    }
-  }
-
   const changeDetailLayout = async () => {
     if (busy()) return
     setSaving(true)
@@ -187,7 +170,6 @@ export function Settings(props: {
       case "hide-documents-tab": void toggleBoolean("hideDocumentsTab"); break
       case "compact-header": void toggleBoolean("compactHeader"); break
       case "status-bar-hints": void toggleBoolean("showStatusBarHints"); break
-      case "about-sidebar": void changeSidebar(direction); break
       case "detail-layout": void changeDetailLayout(); break
       case "icon-style": void changeIconStyle(); break
     }
@@ -273,13 +255,9 @@ export function Settings(props: {
       title: "Detail width",
       description: "Centered keeps a bounded reading column. Wide uses the available terminal width. Applies to repository documents and detail pages.",
     }
-    if (selected() === "status-bar-hints") return {
+    return {
       title: "Status bar hints",
       description: "Show keyboard shortcuts in the status bar on every page. Loading messages stay visible when hints are off.",
-    }
-    return {
-      title: "About sidebar",
-      description: "Control repository metadata visibility. Auto hides the sidebar when the terminal is narrower than 100 columns.",
     }
   }
 

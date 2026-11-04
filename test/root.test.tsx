@@ -301,7 +301,7 @@ describe("application root", () => {
     view.mockInput.pressKey(",")
     await view.flush()
     expect(view.captureCharFrame()).toContain("Malformed config")
-    for (let i = 0; i < 10; i++) view.mockInput.pressArrow("down")
+    for (let i = 0; i < 9; i++) view.mockInput.pressArrow("down")
     view.mockInput.pressArrow("right")
     await view.flush()
     expect(saves).toBe(0)
@@ -323,7 +323,7 @@ describe("application root", () => {
             saveRepositoryTabs: async () => {},
             loadRecentRepositories: async () => [],
             rememberRepository: idle,
-            loadConfig: async () => ({ showScrollbars: false, theme: "github", colorMode: "system", reducedMotion: false, markdownStyle: "rich", aboutSidebar: "auto", detailLayout: "centered", showStatusBarHints: true, showTabCounts: true, hideDocumentsTab: false, compactHeader: false, iconStyle: "unicode" }),
+            loadConfig: async () => ({ showScrollbars: false, theme: "github", colorMode: "system", reducedMotion: false, markdownStyle: "rich", detailLayout: "centered", showStatusBarHints: true, showTabCounts: true, hideDocumentsTab: false, compactHeader: false, iconStyle: "unicode" }),
             saveConfig: async (config) => {
               saved.push(config)
               await writes[saved.length - 1]!.promise
@@ -339,12 +339,12 @@ describe("application root", () => {
     await view.flush()
 
     view.mockInput.pressKey(",")
-    for (let i = 0; i < 10; i++) view.mockInput.pressArrow("down")
+    for (let i = 0; i < 9; i++) view.mockInput.pressArrow("down")
     view.mockInput.pressArrow("right")
     await Bun.sleep(0)
     await view.flush()
 
-    expect(saved).toEqual([{ showScrollbars: true, theme: "github", colorMode: "system", reducedMotion: false, markdownStyle: "rich", aboutSidebar: "auto", detailLayout: "centered", showStatusBarHints: true, showTabCounts: true, hideDocumentsTab: false, compactHeader: false, iconStyle: "unicode" }])
+    expect(saved).toEqual([{ showScrollbars: true, theme: "github", colorMode: "system", reducedMotion: false, markdownStyle: "rich", detailLayout: "centered", showStatusBarHints: true, showTabCounts: true, hideDocumentsTab: false, compactHeader: false, iconStyle: "unicode" }])
     expect(view.captureCharFrame()).toContain("‹ off ›")
     expect(view.captureCharFrame()).not.toContain("Saving…")
 
@@ -378,13 +378,13 @@ describe("application root", () => {
     await view.flush()
     expect(view.captureCharFrame()).toContain("Themes")
     expect(view.captureCharFrame()).not.toContain("Saving…")
-    expect(saved[1]).toEqual({ showScrollbars: true, theme: "nord", colorMode: "system", reducedMotion: false, markdownStyle: "rich", aboutSidebar: "auto", detailLayout: "centered", showStatusBarHints: true, showTabCounts: true, hideDocumentsTab: false, compactHeader: false, iconStyle: "unicode" })
+    expect(saved[1]).toEqual({ showScrollbars: true, theme: "nord", colorMode: "system", reducedMotion: false, markdownStyle: "rich", detailLayout: "centered", showStatusBarHints: true, showTabCounts: true, hideDocumentsTab: false, compactHeader: false, iconStyle: "unicode" })
 
     writes[1]!.resolve()
     await view.flush()
     expect(view.captureCharFrame()).toContain("Settings")
     expect(view.captureCharFrame()).toContain("‹ nord ›")
-    for (let i = 0; i < 10; i++) view.mockInput.pressArrow("down")
+    for (let i = 0; i < 9; i++) view.mockInput.pressArrow("down")
     await view.flush()
     expect(view.captureCharFrame()).toContain("› Scrollbars")
     expect(view.captureCharFrame()).toContain("‹ on ›")

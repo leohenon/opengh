@@ -48,7 +48,6 @@ export function Help(props: {
   hasReferences?: boolean;
   canComment?: boolean;
   hasIssueActions?: boolean;
-  canReview?: boolean;
   command?: string;
 }) {
   const { colors } = useTheme();
@@ -72,6 +71,7 @@ export function Help(props: {
       case "overview":
         return [
           ...(props.hasDocumentTabs ? [entry(["overview.nextDocument", "overview.previousDocument"], "switch documents")] : []),
+          entry("overview.toggleSidebar", "show / hide About sidebar"),
           entry("item.open", "open repo on GitHub"),
           entry("item.copy", "copy repo URL"),
         ];
@@ -124,7 +124,6 @@ export function Help(props: {
           entry("detail.toggleTimeline", "collapse / expand timeline"),
           ...(props.hasMoreComments ? [entry("navigation.activate", "load more comments")] : []),
           ...(props.canComment ? [entry("issue.comment", "add comment")] : []),
-          ...(props.canReview ? [entry("review.open", "review pull request")] : []),
           ...(props.hasIssueActions ? [entry("issue.actions", "PR actions")] : []),
           entry("item.diff", "view diff"),
           entry("item.open", "open on GitHub"),
@@ -150,7 +149,7 @@ export function Help(props: {
   });
   const shortcuts = createMemo(() => {
     const pageEntries = viewShortcuts();
-    const primaryActions: KeyAction[] = ["navigation.back", "navigation.activate", "issue.comment", "review.open", "issue.actions"];
+    const primaryActions: KeyAction[] = ["navigation.back", "navigation.activate", "issue.comment", "issue.actions"];
     const primary = pageEntries.filter((item) => item.actions.some((action) => primaryActions.includes(action)));
     const external = pageEntries.filter((item) => item.actions.includes("item.open") || item.actions.includes("item.copy"));
     const options = pageEntries.filter((item) => !primary.includes(item) && !external.includes(item));
@@ -160,7 +159,6 @@ export function Help(props: {
       entry("navigation.back", "close diff; return to origin"),
       entry("diff.focus", "switch files / diff focus"),
       entry("navigation.activate", "files → diff; error → file list"),
-      ...(props.canReview ? [entry("review.open", "review pull request")] : []),
       ...navigationShortcuts,
       entry(["navigation.previousTab", "navigation.nextTab"], "files: switch tabs"),
       entry(["diff.panLeft", "diff.panRight"], "diff: horizontal pan"),

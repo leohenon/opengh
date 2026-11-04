@@ -360,7 +360,6 @@ export function DiffScreen(props: {
     bodyMouse.onMouseDrag()
   })
   useKeyActions({
-    "review.open": () => { if (!props.review) return false; props.review.onOpenReview() },
     "diff.focus": () => {
       bodyMouse.onMouseDrag()
       contextMouse.onMouseDrag()

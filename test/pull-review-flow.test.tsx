@@ -64,6 +64,8 @@ test("inline comments publish immediately and independently of the overall revie
   const settle = async () => { await Bun.sleep(40); await setup.flush(); await setup.renderer.idle(); await setup.flush() }
   try {
     await settle()
+    setup.mockInput.pressKey("R"); await settle()
+    expect(setup.captureCharFrame()).not.toContain(`Review PR #${number}`)
     setup.mockInput.pressKey("a"); await settle()
     await clickControl(setup, "issue-menu-review"); await settle()
     expect(setup.captureCharFrame()).toContain(`Review PR #${number}`)
@@ -104,7 +106,9 @@ test("inline comments publish immediately and independently of the overall revie
     setup.mockInput.pressKey("r"); await settle()
     expect(diffLoads).toBe(beforeRefresh + 1)
     expect(setup.renderer.root.findDescendantById("review-submit")).toBeUndefined()
-    setup.mockInput.pressKey("R"); await settle()
+    setup.mockInput.pressEscape(); await settle()
+    setup.mockInput.pressKey("a"); await settle()
+    await clickControl(setup, "issue-menu-review"); await settle()
     setup.mockInput.pressEnter(); await settle()
     await setup.mockInput.typeText("Overall review feedback"); await settle()
     setup.mockInput.pressKey("s", { ctrl: true }); await settle()

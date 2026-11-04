@@ -475,7 +475,7 @@ describe("opengh TUI", () => {
     expect(statusLine()).toBe("");
     setConfig({ ...defaultConfig, showStatusBarHints: true, hideDocumentsTab: false, compactHeader: false, iconStyle: "unicode" });
     await view.flush();
-    expect(statusLine()).toBe("tab documents · r refresh · o GitHub · y copy URL · ? help");
+    expect(statusLine()).toBe("tab documents · b sidebar · r refresh · o GitHub · y copy URL · ? help");
 
     view.mockInput.pressKey("?");
     await view.flush();
@@ -485,7 +485,7 @@ describe("opengh TUI", () => {
     view.mockInput.pressKey(",");
     await view.flush();
     expect(statusLine()).toBe("enter open · ↑/↓ select · ←/→ change · esc close");
-    for (let i = 0; i < 9; i++) view.mockInput.pressArrow("down");
+    for (let i = 0; i < 8; i++) view.mockInput.pressArrow("down");
     view.mockInput.pressEnter();
     await view.flush();
     expect(view.captureCharFrame()).toContain("Status bar hints");
@@ -1215,7 +1215,7 @@ describe("opengh TUI", () => {
   });
 
   test("opens settings and applies saved changes immediately", async () => {
-    const [config, setConfig] = createSignal<Config>({ showScrollbars: false, theme: "github", colorMode: "system", reducedMotion: false, markdownStyle: "rich", aboutSidebar: "auto", detailLayout: "centered", showStatusBarHints: true, showTabCounts: true, hideDocumentsTab: false, compactHeader: false, iconStyle: "unicode" });
+    const [config, setConfig] = createSignal<Config>({ showScrollbars: false, theme: "github", colorMode: "system", reducedMotion: false, markdownStyle: "rich", detailLayout: "centered", showStatusBarHints: true, showTabCounts: true, hideDocumentsTab: false, compactHeader: false, iconStyle: "unicode" });
     let saves = 0;
     const view = await testRender(
       () => (
@@ -1253,7 +1253,7 @@ describe("opengh TUI", () => {
     view.mockInput.pressTab();
     await view.flush();
     expect(view.captureCharFrame()).toContain("Choose the color theme");
-    for (let i = 0; i < 10; i++) view.mockInput.pressArrow("down");
+    for (let i = 0; i < 9; i++) view.mockInput.pressArrow("down");
     await view.flush();
     expect(view.captureCharFrame()).toContain("Usability");
     expect(view.captureCharFrame()).toContain("Show vertical scrollbars");
@@ -1261,20 +1261,10 @@ describe("opengh TUI", () => {
     await Bun.sleep(0);
     await view.flush();
     expect(saves).toBe(1);
-    expect(config()).toEqual({ showScrollbars: true, theme: "github", colorMode: "system", reducedMotion: false, markdownStyle: "rich", aboutSidebar: "auto", detailLayout: "centered", showStatusBarHints: true, showTabCounts: true, hideDocumentsTab: false, compactHeader: false, iconStyle: "unicode" });
+    expect(config()).toEqual({ showScrollbars: true, theme: "github", colorMode: "system", reducedMotion: false, markdownStyle: "rich", detailLayout: "centered", showStatusBarHints: true, showTabCounts: true, hideDocumentsTab: false, compactHeader: false, iconStyle: "unicode" });
     expect(view.captureCharFrame()).toContain("‹ on ›");
 
-    for (let i = 0; i < 4; i++) view.mockInput.pressArrow("up");
-    await view.flush();
-    expect(view.captureCharFrame()).toContain("Auto hides the sidebar")
-    view.mockInput.pressArrow("right");
-    await Bun.sleep(0);
-    await view.flush();
-    expect(saves).toBe(2);
-    expect(config().aboutSidebar).toBe("show");
-    expect(view.captureCharFrame()).toContain("‹ show ›");
-
-    view.mockInput.pressArrow("down");
+    for (let i = 0; i < 3; i++) view.mockInput.pressArrow("up");
     await view.flush();
     expect(view.captureCharFrame()).toContain("Detail width");
     expect(view.captureCharFrame()).toContain("Centered keeps a bounded reading");
@@ -1285,7 +1275,7 @@ describe("opengh TUI", () => {
     view.mockInput.pressArrow("left");
     await view.flush();
     expect(config().detailLayout).toBe("centered");
-    expect(saves).toBe(4);
+    expect(saves).toBe(3);
 
     view.mockInput.pressArrow("down");
     await view.flush();
@@ -1300,7 +1290,7 @@ describe("opengh TUI", () => {
     expect(view.captureCharFrame()).toContain(repositoryIcons.star);
 
     view.mockInput.pressKey(",");
-    for (let i = 0; i < 8; i++) view.mockInput.pressArrow("down");
+    for (let i = 0; i < 7; i++) view.mockInput.pressArrow("down");
     view.mockInput.pressArrow("left");
     await view.flush();
     expect(config().iconStyle).toBe("unicode");
@@ -1332,11 +1322,11 @@ describe("opengh TUI", () => {
     view.resize(50, 14);
     await view.flush();
     expect(view.captureCharFrame()).toContain("› Document tabs");
-    for (let i = 0; i < 3; i++) view.mockInput.pressArrow("down");
+    for (let i = 0; i < 2; i++) view.mockInput.pressArrow("down");
     await view.flush();
     expect(view.captureCharFrame()).toContain("Usability");
     expect(view.captureCharFrame()).toContain("› Icon style");
-    for (let i = 0; i < 3; i++) view.mockInput.pressArrow("up");
+    for (let i = 0; i < 2; i++) view.mockInput.pressArrow("up");
     await view.flush();
     expect(view.captureCharFrame()).toContain("› Document tabs");
     for (let i = 0; i < 5; i++) view.mockInput.pressArrow("up");
@@ -1382,7 +1372,7 @@ describe("opengh TUI", () => {
   });
 
   test("previews and saves a theme from settings", async () => {
-    const [config, setConfig] = createSignal<Config>({ showScrollbars: false, theme: "github", colorMode: "system", reducedMotion: false, markdownStyle: "rich", aboutSidebar: "auto", detailLayout: "centered", showStatusBarHints: true, showTabCounts: true, hideDocumentsTab: false, compactHeader: false, iconStyle: "unicode" });
+    const [config, setConfig] = createSignal<Config>({ showScrollbars: false, theme: "github", colorMode: "system", reducedMotion: false, markdownStyle: "rich", detailLayout: "centered", showStatusBarHints: true, showTabCounts: true, hideDocumentsTab: false, compactHeader: false, iconStyle: "unicode" });
     let canvas = () => "";
     const ThemedApp = () => {
       const current = useTheme();
@@ -1430,7 +1420,7 @@ describe("opengh TUI", () => {
     expect(canvas()).toBe(resolveTheme("nord").background);
     expect(view.captureCharFrame()).toContain("‹ nord ›");
 
-    for (let i = 0; i < 11; i++) view.mockInput.pressArrow("down");
+    for (let i = 0; i < 10; i++) view.mockInput.pressArrow("down");
     view.mockInput.pressEnter();
     await view.flush();
     expect(config().reducedMotion).toBe(true);
@@ -1438,7 +1428,7 @@ describe("opengh TUI", () => {
     view.mockInput.pressArrow("left");
     await view.flush();
     expect(config().reducedMotion).toBe(false);
-    for (let i = 0; i < 9; i++) view.mockInput.pressArrow("up");
+    for (let i = 0; i < 8; i++) view.mockInput.pressArrow("up");
     view.mockInput.pressEnter();
     await view.flush();
     expect(config().markdownStyle).toBe("minimal");
@@ -1471,7 +1461,7 @@ describe("opengh TUI", () => {
   });
 
   test("restores the configured theme when preview is cancelled", async () => {
-    const config: Config = { showScrollbars: false, theme: "github", colorMode: "system", reducedMotion: false, markdownStyle: "rich", aboutSidebar: "auto", detailLayout: "centered", showStatusBarHints: true, showTabCounts: true, hideDocumentsTab: false, compactHeader: false, iconStyle: "unicode" };
+    const config: Config = { showScrollbars: false, theme: "github", colorMode: "system", reducedMotion: false, markdownStyle: "rich", detailLayout: "centered", showStatusBarHints: true, showTabCounts: true, hideDocumentsTab: false, compactHeader: false, iconStyle: "unicode" };
     let canvas = () => "";
     const ThemedApp = () => {
       const current = useTheme();
@@ -1512,7 +1502,7 @@ describe("opengh TUI", () => {
         <App
           data={githubDataFixture}
           operations={repositoryOperationsFixture}
-          config={{ showScrollbars: false, theme: "github", colorMode: "system", reducedMotion: false, markdownStyle: "rich", aboutSidebar: "auto", detailLayout: "centered", showStatusBarHints: true, showTabCounts: true, hideDocumentsTab: false, compactHeader: false, iconStyle: "unicode" }}
+          config={{ showScrollbars: false, theme: "github", colorMode: "system", reducedMotion: false, markdownStyle: "rich", detailLayout: "centered", showStatusBarHints: true, showTabCounts: true, hideDocumentsTab: false, compactHeader: false, iconStyle: "unicode" }}
           onConfigChange={async () => { throw new Error("Config directory is read-only") }}
         />
       ),
@@ -1522,7 +1512,7 @@ describe("opengh TUI", () => {
     await view.flush();
 
     view.mockInput.pressKey(",");
-    for (let i = 0; i < 10; i++) view.mockInput.pressArrow("down");
+    for (let i = 0; i < 9; i++) view.mockInput.pressArrow("down");
     view.mockInput.pressEnter();
     await Bun.sleep(0);
     await view.flush();
@@ -1767,27 +1757,21 @@ describe("opengh TUI", () => {
     expect(view.captureCharFrame()).toContain("‹ README ›");
   });
 
-  test("respects explicit About sidebar visibility", async () => {
-    const [config, setConfig] = createSignal<Config>({
-      showScrollbars: false,
-      theme: "github",
-      colorMode: "system",
-      reducedMotion: false,
-      markdownStyle: "rich",
-      aboutSidebar: "show",
-      detailLayout: "centered",
-      showStatusBarHints: true, showTabCounts: true, hideDocumentsTab: false, compactHeader: false, iconStyle: "unicode",
-    });
+  test("b shows or hides the About sidebar over the width-based default", async () => {
     const view = await testRender(
-      () => <App data={githubDataFixture} operations={repositoryOperationsFixture} config={config()} />,
+      () => <App data={githubDataFixture} operations={repositoryOperationsFixture} />,
       { width: 76, height: 24 },
     );
     active.push(view);
     await view.flush();
+    expect(view.captureCharFrame()).not.toContain("About");
+    view.mockInput.pressKey("b");
+    await view.flush();
     expect(view.captureCharFrame()).toContain("About");
 
+    // An explicit choice no longer follows the terminal width.
     view.resize(120, 24);
-    setConfig((current) => ({ ...current, aboutSidebar: "hide" }));
+    view.mockInput.pressKey("b");
     await view.flush();
     expect(view.captureCharFrame()).not.toContain("About");
   });

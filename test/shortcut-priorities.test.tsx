@@ -11,7 +11,7 @@ import { githubDataFixture, repositoryOperationsFixture } from "./fixtures/githu
 test("Help puts primary actions before secondary actions and omits redundant navigation keys", async () => {
   const [page, setPage] = createSignal<ComponentProps<typeof Help>["view"]>("commits")
   const view = await testRender(() => <KeybindingsProvider><Help view={page()} onClose={() => {}}
-    hasDocumentTabs hasMoreFiles hasMoreComments hasReferences canComment hasIssueActions canReview />
+    hasDocumentTabs hasMoreFiles hasMoreComments hasReferences canComment hasIssueActions />
   </KeybindingsProvider>, { width: 100, height: 45 })
   const cases = [
     ["overview", "move / scroll"], ["commits", "open commit"], ["issues", "open issue"],

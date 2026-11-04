@@ -6,7 +6,6 @@ import { defaultTheme, isThemeName, type ThemeName } from "./theme"
 
 export type ColorMode = "system" | "dark" | "light"
 
-export type AboutSidebar = "auto" | "show" | "hide"
 export type DetailLayout = "centered" | "wide"
 export type MarkdownStyle = "rich" | "minimal"
 export type IconStyle = "unicode" | "nerd"
@@ -17,7 +16,6 @@ export type Config = {
   colorMode: ColorMode
   reducedMotion: boolean
   markdownStyle: MarkdownStyle
-  aboutSidebar: AboutSidebar
   detailLayout: DetailLayout
   showStatusBarHints: boolean
   iconStyle: IconStyle
@@ -33,7 +31,6 @@ export const defaultConfig: Config = {
   colorMode: "system",
   reducedMotion: false,
   markdownStyle: "rich",
-  aboutSidebar: "auto",
   detailLayout: "centered",
   showStatusBarHints: false,
   iconStyle: "nerd",
@@ -77,9 +74,6 @@ function normalizeConfig(value: unknown): Config {
       : input.theme === "github-light" ? "light" : defaultConfig.colorMode,
     reducedMotion: typeof input.reducedMotion === "boolean" ? input.reducedMotion : defaultConfig.reducedMotion,
     markdownStyle: input.markdownStyle === "rich" || input.markdownStyle === "minimal" ? input.markdownStyle : defaultConfig.markdownStyle,
-    aboutSidebar: input.aboutSidebar === "auto" || input.aboutSidebar === "show" || input.aboutSidebar === "hide"
-      ? input.aboutSidebar
-      : defaultConfig.aboutSidebar,
     detailLayout: input.detailLayout === "centered" || input.detailLayout === "wide"
       ? input.detailLayout
       : defaultConfig.detailLayout,

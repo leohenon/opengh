@@ -1,7 +1,7 @@
 import { TextAttributes, type ScrollBoxRenderable } from "@opentui/core"
 import { useTerminalDimensions } from "@opentui/solid"
 import { createMemo, For, onCleanup, Show } from "solid-js"
-import { defaultConfig, type AboutSidebar, type DetailLayout } from "../../config"
+import { defaultConfig, type DetailLayout } from "../../config"
 import type { Repo } from "../../models"
 import type { RepositoryDocumentState, ResourceState } from "../../repository-state"
 import { ResourceStateView } from "../components/resource-state"
@@ -31,6 +31,10 @@ function extractAboutContent(value: string) {
 function displayUrl(value: string) {
   return value.replace(/^https?:\/\//, "").replace(/\/$/, "")
 }
+
+// Auto shows the About sidebar only when the terminal leaves room beside the document.
+export type AboutSidebar = "auto" | "show" | "hide"
+export const aboutSidebarVisible = (mode: AboutSidebar, width: number) => mode === "show" || mode === "auto" && width >= 100
 
 export function OverviewScreen(props: {
   repo: Repo
@@ -73,8 +77,7 @@ export function OverviewScreen(props: {
   const viewResource = createMemo<ResourceState<unknown>>(() => props.documents.value === undefined ? props.documents
     : document() ? documentResource() : { status: "ready", value: null })
   const hasDocumentTabs = () => documents().length > 1
-  const showAboutSidebar = () => props.aboutSidebar === "show"
-    || props.aboutSidebar === "auto" && dimensions().width >= 100
+  const showAboutSidebar = () => aboutSidebarVisible(props.aboutSidebar, dimensions().width)
   const documentLabelsWidth = () => documents().reduce((width, item) => width + item.label.length, 0)
     + Math.max(0, documents().length - 1) * 2
   const compactDocuments = () => hasDocumentTabs()
