@@ -1,5 +1,6 @@
 import { expect, spyOn, test } from "bun:test"
 import { repositoryFromDirectory } from "../src/github/repository"
+import { GitHubRequestScheduler } from "../src/github/request-scheduler"
 import { GitHubApiError, GitHubRequestNotSentError, createGitHubTransport } from "../src/github/transport"
 
 test("network errors use simple messages without request URLs", () => {
@@ -37,7 +38,7 @@ test("repository discovery preserves CLI failures and rejects non-GitHub.com rem
   }
 })
 
-test("API requests pin GitHub.com and distinguish authentication, permissions, and rate limits", async () => {
+test("API requests pin GitHub.com and distinguish authentication and permissions", async () => {
   const keys = ["GH_HOST", "GH_TOKEN", "GITHUB_TOKEN", "GH_DEBUG", "DEBUG", "GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN", "GH_REPO"] as const
   const saved = Object.fromEntries(keys.map((key) => [key, process.env[key]]))
   process.env.GH_HOST = "github.example.com"
@@ -52,7 +53,7 @@ test("API requests pin GitHub.com and distinguish authentication, permissions, a
   const spawn = spyOn(Bun, "spawn").mockImplementation(() => result('{"id":1,"login":"viewer"}'))
   try {
     expect(await githubTransport.json<{ id: number; login: string }>("user")).toEqual({ id: 1, login: "viewer" })
-    expect(spawn.mock.calls[0]?.[0]).toEqual(["gh", "api", "--hostname", "github.com", "user"])
+    expect(spawn.mock.calls[0]?.[0]).toEqual(["gh", "api", "--hostname", "github.com", "user", "--include"])
     const env = (spawn.mock.calls[0]?.[1] as { env: NodeJS.ProcessEnv }).env
     expect(env.GH_HOST).toBe("github.com")
     expect(env.GH_PROMPT_DISABLED).toBe("1")
@@ -61,7 +62,6 @@ test("API requests pin GitHub.com and distinguish authentication, permissions, a
       ["Bad credentials (HTTP 401)", 1, "gh auth login --hostname github.com"],
       ["Authentication required", 4, "gh auth login --hostname github.com"],
       ["Resource not accessible by personal access token (HTTP 403)", 1, "token permissions"],
-      ["API rate limit exceeded (HTTP 403)", 1, "wait before retrying"],
     ] as const) {
       spawn.mockImplementation(() => result("", message, code))
       await expect(githubTransport.json("user")).rejects.toThrow(guidance)
@@ -156,8 +156,9 @@ test("cancelling an initial request stops waiting without killing another caller
   }
 })
 
-test("initial login failures are retryable but changed accounts cannot send writes or GraphQL requests", async () => {
-  const transport = createGitHubTransport()
+test("read-only GraphQL skips redundant probes but changed accounts cannot send REST or GraphQL mutations", async () => {
+  const scheduler = new GitHubRequestScheduler()
+  const transport = createGitHubTransport(scheduler)
   let authenticated = false
   let account = 1
   const endpoints: string[] = []
@@ -173,13 +174,253 @@ test("initial login failures are retryable but changed accounts cannot send writ
     expect(await transport.json<{ ok: boolean }>("repos/owner/repo")).toEqual({ ok: true })
     endpoints.length = 0
     account = 2
+    for (const query of ["query { viewer { login } }", "  { viewer { login } }"])
+      expect(await transport.graphql!<{ ok: boolean }>(query, {})).toEqual({ ok: true })
+    expect(endpoints).toEqual(["graphql", "graphql"])
+    endpoints.length = 0
     await expect(transport.mutate!("repos/owner/repo/issues/1/comments", "POST", { body: "private" })).rejects.toBeInstanceOf(GitHubRequestNotSentError)
-    await expect(transport.graphql!("mutation { harmlessPlaceholder }", {})).rejects.toThrow("account changed")
-    expect(endpoints).toEqual(["user", "user"])
+    for (const query of ["mutation { harmlessPlaceholder }", "# comment\nmutation { harmlessPlaceholder }", "query Read { viewer { login } } mutation Write { harmlessPlaceholder }"])
+      await expect(transport.graphql!(query, {})).rejects.toThrow("account changed")
+    expect(endpoints).toEqual(["user", "user", "user", "user"])
     account = 1
     expect(await transport.mutate!<{ ok: boolean }>("repos/owner/repo/issues/1/comments", "POST", { body: "private" })).toEqual({ ok: true })
-    expect(endpoints).toEqual(["user", "user", "user", "repos/owner/repo/issues/1/comments"])
+    expect(await transport.graphql!<{ ok: boolean }>("mutation { harmlessPlaceholder }", {})).toEqual({ ok: true })
+    expect(endpoints.slice(4)).toEqual(["user", "repos/owner/repo/issues/1/comments", "user", "graphql"])
+    await transport.graphql!("query { viewer { login } }", { query: "mutation { harmlessPlaceholder }" })
+    const args = spawn.mock.calls.at(-1)![0] as string[]
+    expect(args).toContain("query=query { viewer { login } }")
+    expect(args).not.toContain("query=mutation { harmlessPlaceholder }")
+
+    const release = Promise.withResolvers<void>(), started = Promise.withResolvers<void>()
+    let active = 0
+    const occupied = Array.from({ length: 4 }, () => scheduler.run("read", () => {
+      if (++active === 4) started.resolve()
+      return release.promise
+    }))
+    await started.promise
+    endpoints.length = 0
+    const queued = transport.mutate!("repos/owner/repo/issues/1/comments", "POST", { body: "private" }).catch(error => error)
+    try {
+      await Promise.resolve()
+      expect(endpoints).toEqual([])
+      account = 2
+    } finally { release.resolve() }
+    await Promise.all(occupied)
+    expect(await queued).toBeInstanceOf(GitHubRequestNotSentError)
+    expect(endpoints).toEqual(["user"])
+    spawn.mockImplementation(() => result("", "Request timed out", 1))
+    await expect(transport.mutate!("repos/owner/repo/issues/1/comments", "POST", { body: "private" })).rejects.toBeInstanceOf(GitHubRequestNotSentError)
   } finally {
+    spawn.mockRestore()
+  }
+})
+
+function apiResult(body: unknown, headers: Record<string, string> = {}, status = 200, error = "", code = 0) {
+  const text = typeof body === "string" ? body : JSON.stringify(body)
+  return result(`HTTP/2.0 ${status}\r\n${Object.entries(headers).map(([key, value]) => `${key}: ${value}\r\n`).join("")}\r\n${text}`, error, code)
+}
+
+test("API response headers are removed without changing raw or jq output and size limits", async () => {
+  const transport = createGitHubTransport(new GitHubRequestScheduler())
+  const patch = "diff --git a/file b/file\n+hello\n\n"
+  const spawn = spyOn(Bun, "spawn").mockImplementation((args) => (args as string[])[4] === "user"
+    ? apiResult({ id: 1, login: "viewer" })
+    : apiResult(patch, { "X-Ratelimit-Remaining": "100" }))
+  try {
+    expect(await transport.text("repos/o/r/commits/sha", "application/vnd.github.diff", { maxBytes: Buffer.byteLength(patch) })).toBe(patch)
+    await expect(transport.text("repos/o/r/commits/sha", undefined, { maxBytes: 1 })).rejects.toThrow("viewing limit")
+    spawn.mockImplementation(() => apiResult('{"head":"abc","base":"def"}\n'))
+    expect(await transport.text("repos/o/r/pulls/1", undefined, { jq: "{head: .head.sha, base: .base.sha}" })).toBe('{"head":"abc","base":"def"}\n')
+    expect(spawn.mock.calls.at(-1)![0]).toContain("--jq")
+  } finally { spawn.mockRestore() }
+})
+
+test("exhausted budgets pause polling, GraphQL, and pages across transports until reset", async () => {
+  const scheduler = new GitHubRequestScheduler()
+  const transport = createGitHubTransport(scheduler)
+  const other = createGitHubTransport(scheduler)
+  let now = 1_800_000_000_000
+  const clock = spyOn(Date, "now").mockImplementation(() => now)
+  const spawn = spyOn(Bun, "spawn").mockImplementation(() => apiResult({ id: 1, login: "viewer" }))
+  const fetch = spyOn(globalThis, "fetch").mockImplementation(Object.assign(async () => new Response("page"), { preconnect() {} }))
+  try {
+    await transport.json("repos/o/r")
+    spawn.mockImplementation(() => apiResult({ ok: true }, {
+      "X-Ratelimit-Remaining": "0", "X-Ratelimit-Reset": String(now / 1000 + 120),
+    }))
+    expect(await transport.json<{ ok: boolean }>("repos/o/r/actions/runs/1")).toEqual({ ok: true })
+    const sent = spawn.mock.calls.length
+    for (let poll = 0; poll < 3; poll++) {
+      now += 5000
+      await expect(transport.json("repos/o/r/actions/runs/1")).rejects.toThrow("paused until")
+    }
+    await expect(other.graphql!("query { viewer { login } }", {})).rejects.toThrow("paused until")
+    await expect(transport.mutate!("repos/o/r/issues/1/comments", "POST", { body: "hello" })).rejects.toThrow("paused until")
+    await expect(other.page!("https://github.com/o/r")).rejects.toThrow("paused until")
+    expect(spawn.mock.calls.length).toBe(sent)
+    expect(fetch).not.toHaveBeenCalled()
+    now = 1_800_000_121_001
+    spawn.mockImplementation(() => apiResult({ ok: true }, { "x-ratelimit-remaining": "10" }))
+    expect(await transport.json<{ ok: boolean }>("repos/o/r/actions/runs/1")).toEqual({ ok: true })
+    expect(spawn.mock.calls.length).toBe(sent + 1)
+  } finally {
+    clock.mockRestore()
+    spawn.mockRestore()
+    fetch.mockRestore()
+  }
+})
+
+test("rate-limit failures honor Retry-After, distinguish permission errors, and back off without replaying requests", async () => {
+  let now = 1_800_000_000_000
+  const clock = spyOn(Date, "now").mockImplementation(() => now)
+  const spawn = spyOn(Bun, "spawn")
+  try {
+    const cases: { body: unknown; status: number; headers: Record<string, string>; seconds: number }[] = [
+      { body: {}, status: 429, headers: { "Retry-After": "90" }, seconds: 90 },
+      { body: {}, status: 429, headers: { "Retry-After": new Date(now + 90_000).toUTCString() }, seconds: 90 },
+      { body: { message: "Secondary rate limit exceeded" }, status: 403, headers: {}, seconds: 60 },
+      { body: { message: "API rate limit exceeded" }, status: 403, headers: { "X-Ratelimit-Remaining": "0", "X-Ratelimit-Reset": String(now / 1000 + 120) }, seconds: 121 },
+      { body: { errors: [{ type: "RATE_LIMITED", message: "API rate limit exceeded" }] }, status: 200, headers: {}, seconds: 60 },
+    ]
+    for (const limited of cases) {
+      const transport = createGitHubTransport(new GitHubRequestScheduler())
+      spawn.mockImplementation(() => apiResult({ id: 1, login: "viewer" }))
+      await transport.json("repos/o/r")
+      // An ordinary permission error must not start a cooldown.
+      spawn.mockImplementation(() => apiResult({ message: "Resource not accessible" }, {}, 403, "Forbidden (HTTP 403)", 1))
+      await expect(transport.json("repos/o/r/private")).rejects.toThrow("token permissions")
+      const start = now
+      spawn.mockImplementation(() => apiResult(limited.body, limited.headers, limited.status, "", limited.status === 200 ? 0 : 1))
+      await expect(transport.graphql!("query { viewer { login } }", {})).rejects.toThrow("wait before retrying")
+      const sent = spawn.mock.calls.length
+      now += limited.seconds * 1000 - 1
+      await expect(transport.json("repos/o/r")).rejects.toThrow("paused until")
+      expect(spawn.mock.calls.length).toBe(sent)
+      now = start + limited.seconds * 1000 + 1
+      spawn.mockImplementation(() => apiResult({ ok: true }))
+      expect(await transport.json<{ ok: boolean }>("repos/o/r")).toEqual({ ok: true })
+      expect(spawn.mock.calls.length).toBe(sent + 1)
+      now = 1_800_000_000_000
+    }
+    const transport = createGitHubTransport(new GitHubRequestScheduler())
+    spawn.mockImplementation(() => apiResult({ id: 1, login: "viewer" }))
+    await transport.json("repos/o/r")
+    spawn.mockImplementation(() => result("", "API rate limit exceeded (HTTP 403)", 1))
+    for (const wait of [60_000, 120_000]) {
+      await expect(transport.json("repos/o/r")).rejects.toThrow("wait before retrying")
+      const sent = spawn.mock.calls.length
+      now += wait - 1
+      await expect(transport.json("repos/o/r")).rejects.toThrow("paused until")
+      expect(spawn.mock.calls.length).toBe(sent)
+      now++
+    }
+  } finally {
+    clock.mockRestore()
+    spawn.mockRestore()
+  }
+})
+
+test("the default shared queue caps REST, GraphQL, probes, and pages at four", async () => {
+  const first = createGitHubTransport(), second = createGitHubTransport()
+  const release = Promise.withResolvers<void>()
+  const firstBatch = Promise.withResolvers<void>()
+  let started = 0, active = 0, maximum = 0
+  const held = () => {
+    started++
+    maximum = Math.max(maximum, ++active)
+    if (started === 4) firstBatch.resolve()
+    return release.promise.finally(() => { active-- })
+  }
+  const spawn = spyOn(Bun, "spawn").mockImplementation((args) => {
+    const path = (args as string[])[4]!
+    return {
+      ...apiResult(path === "user" ? { id: 1, login: "viewer" } : { ok: true }, {}, path === "repos/o/bad" ? 500 : 200),
+      exited: held().then(() => path === "repos/o/bad" ? 1 : 0),
+    } as unknown as Bun.Subprocess
+  })
+  const fetch = spyOn(globalThis, "fetch").mockImplementation(Object.assign(async () => {
+    await held()
+    return new Response("page")
+  }, { preconnect() {} }))
+  const pending = [
+    first.json("repos/o/bad"), second.graphql!("query { viewer { login } }", {}),
+    first.page!("https://github.com/o/r"), second.page!("https://github.com/o/r/wiki"),
+    ...Array.from({ length: 6 }, () => first.json("repos/o/r")),
+  ]
+  const completed = Promise.allSettled(pending)
+  try {
+    await firstBatch.promise
+    expect(started).toBe(4)
+    release.resolve()
+    const results = await completed
+    expect(results.filter(item => item.status === "rejected")).toHaveLength(1)
+    expect(maximum).toBe(4)
+    expect(active).toBe(0)
+  } finally {
+    release.resolve()
+    await completed
+    spawn.mockRestore()
+    fetch.mockRestore()
+  }
+})
+
+test("a newly observed cooldown rejects queued writes as not sent and discards queued polls", async () => {
+  const scheduler = new GitHubRequestScheduler()
+  const release = Promise.withResolvers<void>()
+  const started = Promise.withResolvers<void>()
+  let active = 0
+  const occupied = Array.from({ length: 4 }, () => scheduler.run("read", () => {
+    if (++active === 4) started.resolve()
+    return release.promise
+  }))
+  await started.promise
+  let sent = 0
+  const controller = new AbortController()
+  const cancelled = scheduler.run("cancelled", async () => { sent++ }, controller.signal).catch(error => error)
+  controller.abort(new Error("cancelled"))
+  expect((await cancelled).message).toBe("cancelled")
+  const write = scheduler.run("write", async () => { sent++ }, undefined, true)
+  const read = scheduler.run("poll", async () => { sent++ })
+  const rejectedWrite = write.catch(error => error)
+  const rejectedRead = read.catch(error => error)
+  scheduler.observe(new Headers({ "retry-after": "120" }), true)
+  release.resolve()
+  await Promise.all(occupied)
+  expect(await rejectedWrite).toBeInstanceOf(GitHubRequestNotSentError)
+  expect((await rejectedRead).message).toContain("paused until")
+  expect(sent).toBe(0)
+})
+
+test("failed response streams retain their slots until gh actually exits", async () => {
+  const transport = createGitHubTransport(new GitHubRequestScheduler())
+  const release = Promise.withResolvers<number>(), killed = Promise.withResolvers<void>()
+  const spawn = spyOn(Bun, "spawn").mockImplementation(() => apiResult({ id: 1, login: "viewer" }))
+  let kills = 0
+  let pending: Promise<unknown>[] = []
+  let next: Promise<string> | undefined
+  try {
+    await transport.json("repos/o/r")
+    spawn.mockImplementation(() => ({
+      ...result(),
+      stdout: new ReadableStream({ start(controller) { controller.error(new Error("stream failed")) } }),
+      exited: release.promise,
+      kill() { if (++kills === 4) killed.resolve() },
+    }) as unknown as Bun.Subprocess)
+    pending = Array.from({ length: 4 }, () => transport.text("repos/o/r/commits/failed").catch(error => error))
+    await killed.promise
+    const sent = spawn.mock.calls.length
+    spawn.mockImplementation(() => apiResult("next"))
+    next = transport.text("repos/o/r/commits/next")
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(spawn.mock.calls.length).toBe(sent)
+    release.resolve(1)
+    for (const error of await Promise.all(pending)) expect((error as Error).message).toBe("stream failed")
+    expect(await next).toBe("next")
+    expect(spawn.mock.calls.length).toBe(sent + 1)
+  } finally {
+    release.resolve(1)
+    await Promise.allSettled([...pending, ...(next ? [next] : [])])
     spawn.mockRestore()
   }
 })
