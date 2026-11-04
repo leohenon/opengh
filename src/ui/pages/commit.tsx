@@ -11,6 +11,8 @@ import { detailContentWidth } from "../detail-layout"
 import { useTheme } from "../theme"
 import { useIcons } from "../icon-style"
 import { createScrollbarVisibility } from "../scrollbar-visibility"
+import { LinkedText } from "../components/linked-text"
+import { normalizeRepositoryUrl } from "../reference-links"
 
 const fileLabels: Record<string, string> = {
   added: "added", removed: "deleted", modified: "modified", renamed: "renamed",
@@ -24,6 +26,7 @@ export function CommitScreen(props: {
   interactive: boolean
   showScrollbar: boolean
   detailLayout?: DetailLayout
+  repositoryUrl?: string
 }) {
   const { colors } = useTheme()
   const icons = useIcons()
@@ -49,6 +52,10 @@ export function CommitScreen(props: {
     const newline = message.indexOf("\n")
     return newline < 0 ? "" : message.slice(newline + 1).trim()
   })
+  const repositoryUrl = createMemo(() => normalizeRepositoryUrl(props.repositoryUrl))
+  const fileTarget = (path: string) => repositoryUrl()
+    ? `${repositoryUrl()}/blob/${encodeURIComponent(props.sha)}/${path.split("/").map(encodeURIComponent).join("/")}`
+    : undefined
   const changeWidth = createMemo(() => (props.resource.value?.files.items ?? [])
     .reduce((width, file) => Math.max(width, String(file.additions).length, String(file.deletions).length), 1) + 1)
   let scroll: ScrollBoxRenderable | undefined
@@ -85,13 +92,13 @@ export function CommitScreen(props: {
       >
         <box width="100%" maxWidth={contentWidth()} minWidth={0} flexShrink={0} flexDirection="column" paddingTop={1} paddingBottom={1}>
           <text width="100%" flexShrink={0} fg={colors.text} attributes={TextAttributes.BOLD}>
-            {header()?.message ?? `Commit ${props.sha.slice(0, 7)}`}
+            <LinkedText text={header()?.message ?? `Commit ${props.sha.slice(0, 7)}`} repositoryUrl={props.repositoryUrl} />
           </text>
           <Show when={header()}>
             {(commit) => (
               <>
                 <text width="100%" flexShrink={0} marginTop={1} fg={colors.muted}>
-                  {icons().user} <b><span style={{ fg: colors.text }}>{commit().author}</span></b> authored {ago(commit().date)} · {props.sha.slice(0, 7)}
+                  {icons().user} <b><span style={{ fg: colors.text }}>{commit().author}</span></b> authored {ago(commit().date)} · <Show when={repositoryUrl()} fallback={props.sha.slice(0, 7)}>{(url) => <a href={`${url()}/commit/${props.sha}`}>{props.sha.slice(0, 7)}</a>}</Show>
                 </text>
                 <Show when={committer() && (committer()!.name !== commit().author || committer()!.date !== commit().date)}>
                   <text width="100%" flexShrink={0} fg={colors.muted}>
@@ -103,12 +110,12 @@ export function CommitScreen(props: {
             )}
           </Show>
         </box>
-        <ResourceStateView resource={props.resource}>
+        <ResourceStateView resource={props.resource} hideError>
           {(commit) => (
             <box width="100%" maxWidth={contentWidth()} minWidth={0} flexShrink={0} flexDirection="column">
               <Show when={body()}>
                 <box width="100%" minWidth={0} flexShrink={0} backgroundColor={surface()} paddingX={2} paddingY={1}>
-                  <text width="100%" flexShrink={0} fg={colors.text}>{body()}</text>
+                  <text width="100%" flexShrink={0} fg={colors.text}><LinkedText text={body()} repositoryUrl={props.repositoryUrl} /></text>
                 </box>
               </Show>
               <text width="100%" flexShrink={0} marginTop={body() ? 1 : 0} fg={colors.muted}>
@@ -127,7 +134,9 @@ export function CommitScreen(props: {
                           <text width="100%" flexShrink={0} wrapMode="char" fg={colors.muted}>{file.previousPath}</text>
                         </Show>
                         <text width="100%" flexShrink={0} wrapMode="char" fg={colors.text}>
-                          {file.previousPath ? (compact() ? `→ ${file.path}` : `${file.previousPath} → ${file.path}`) : file.path}
+                          <Show when={file.status !== "removed" && fileTarget(file.path)} fallback={file.previousPath ? (compact() ? `→ ${file.path}` : `${file.previousPath} → ${file.path}`) : file.path}>
+                            {(href) => <a href={href()}>{file.previousPath ? (compact() ? `→ ${file.path}` : `${file.previousPath} → ${file.path}`) : file.path}</a>}
+                          </Show>
                         </text>
                       </box>
                       <box flexShrink={0} flexDirection="row" gap={1}>
@@ -138,11 +147,6 @@ export function CommitScreen(props: {
                   )}
                 </For>
               </box>
-              <Show when={props.resource.status === "error"}>
-                <text width="100%" flexShrink={0} marginTop={1} fg={colors.red}>
-                  × {props.resource.status === "error" ? props.resource.message : ""}
-                </text>
-              </Show>
               <Show when={commit().filesTruncated}>
                 <text width="100%" flexShrink={0} marginTop={1} fg={colors.muted}>GitHub's 3,000-file limit reached.</text>
               </Show>

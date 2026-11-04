@@ -28,14 +28,18 @@ function IssueMetadata(props: { issue: IssueDetail; compact: boolean; inline?: b
         <text height={1} flexShrink={0} fg={colors.text} attributes={TextAttributes.BOLD}>Details</text>
       </Show>
       <Show when={props.inline} fallback={<>
-      <MetadataField label="Labels" compact={props.compact} muted={!props.issue.labels.length}>{props.issue.labels.join(" · ") || "none"}</MetadataField>
-      <MetadataField label="Assignees" compact={props.compact} muted={!props.issue.assignees.length}>{props.issue.assignees.join(", ") || "none"}</MetadataField>
+      <MetadataField label="Labels" compact={props.compact} muted={!props.issue.labels.length}>
+        <For each={props.issue.labels} fallback="none">{(label, index) => <>{index() > 0 ? " · " : ""}<a href={`${props.issue.url.replace(/\/issues\/\d+$/, "")}/issues?q=${encodeURIComponent(`is:issue label:"${label}"`)}`}>{label}</a></>}</For>
+      </MetadataField>
+      <MetadataField label="Assignees" compact={props.compact} muted={!props.issue.assignees.length}>
+        <For each={props.issue.assignees} fallback="none">{(login, index) => <>{index() > 0 ? ", " : ""}<a href={`https://github.com/${login}`}>{login}</a></>}</For>
+      </MetadataField>
       </>}>
-        <MetadataSummary labels={props.issue.labels} assignees={props.issue.assignees} />
+        <MetadataSummary labels={props.issue.labels} assignees={props.issue.assignees} repositoryUrl={props.issue.url.replace(/\/issues\/\d+$/, "")} kind="issue" />
       </Show>
       <Show when={props.issue.milestone}>
         <MetadataField label="Milestone" compact={props.compact}>
-          {props.issue.milestone?.title}
+          <Show when={props.issue.milestone?.url} fallback={props.issue.milestone?.title}>{(url) => <a href={url()}>{props.issue.milestone?.title}</a>}</Show>
         </MetadataField>
       </Show>
     </box>
@@ -56,11 +60,11 @@ function IssueDates(props: { issue: IssueDetail; compact: boolean }) {
 }
 
 function ReferencedPulls(props: { resource: ResourceState<IssueReference[]>; repository: string; interactive: boolean; onOpenReference?: (reference: IssueReference) => void }) {
-  const { colors } = useTheme()
+  const { colors, theme } = useTheme()
   const icons = useIcons()
   const pulls = createMemo(() => referencedPulls(props.resource.value ?? []))
   return (
-    <Show when={pulls().length > 0 || props.resource.status === "error"}>
+    <Show when={pulls().length > 0}>
       <box width="100%" minWidth={0} flexShrink={0} marginTop={1} flexDirection="column">
         <text height={1} flexShrink={0} fg={colors.text} attributes={TextAttributes.BOLD}>Referenced PRs</text>
         <For each={pulls().slice(0, 3)}>
@@ -69,25 +73,35 @@ function ReferencedPulls(props: { resource: ResourceState<IssueReference[]>; rep
               <Show when={props.onOpenReference} fallback={(
                 <text width="100%" flexShrink={0} fg={referenceColor(colors, reference)}>
                   <Show when={props.interactive} fallback={<>{referenceIcon(reference, icons())} #{reference.number} · {referenceState(reference)}</>}>
-                    <a href={reference.url}>{referenceIcon(reference, icons())} #{reference.number} · {referenceState(reference)}</a>
+                    <a href={reference.url}>{referenceIcon(reference, icons())} <span style={{ fg: theme.markdownLink }}>#{reference.number}</span> · {referenceState(reference)}</a>
                   </Show>
                 </text>
               )}>
                 <text width="100%" flexShrink={0} fg={referenceColor(colors, reference)}
                   {...mouseClick(() => props.onOpenReference?.(reference), () => props.interactive && Boolean(props.onOpenReference), () => reference)}>
-                  {referenceIcon(reference, icons())} #{reference.number} · {referenceState(reference)}
+                  <Show when={props.interactive} fallback={<>{referenceIcon(reference, icons())} #{reference.number} · {referenceState(reference)}</>}>
+                    <a href={reference.url}>{referenceIcon(reference, icons())} <span style={{ fg: theme.markdownLink }}>#{reference.number}</span> · {referenceState(reference)}</a>
+                  </Show>
                 </text>
               </Show>
               <Show when={reference.repository !== props.repository}>
-                <text width="100%" flexShrink={0} fg={colors.muted}>{reference.repository}</text>
+                <text width="100%" flexShrink={0} fg={colors.muted}>
+                  <Show when={props.interactive} fallback={reference.repository}><a href={reference.url.replace(/\/pull\/\d+.*$/, "")}>{reference.repository}</a></Show>
+                </text>
               </Show>
-              <text width="100%" flexShrink={0} fg={colors.text}>{reference.title}</text>
+              <Show when={props.onOpenReference} fallback={(
+                <text width="100%" flexShrink={0} fg={theme.markdownLink}>
+                  <Show when={props.interactive} fallback={reference.title}><a href={reference.url}>{reference.title}</a></Show>
+                </text>
+              )}>
+                <text width="100%" flexShrink={0} fg={theme.markdownLink}
+                  {...mouseClick(() => props.onOpenReference?.(reference), () => props.interactive && Boolean(props.onOpenReference), () => reference)}>
+                  <Show when={props.interactive} fallback={reference.title}><a href={reference.url}>{reference.title}</a></Show>
+                </text>
+              </Show>
             </box>
           )}
         </For>
-        <Show when={props.resource.status === "error"}>
-          <text width="100%" flexShrink={0} fg={colors.red}>References unavailable</text>
-        </Show>
       </box>
     </Show>
   )
@@ -136,7 +150,6 @@ export function IssueScreen(props: {
     ref: props.defaultBranch,
     sourceUrl: issue()?.url,
   })
-  const failure = (resource: ResourceState<unknown>) => resource.status === "error" ? resource.message : ""
   let scroll: ScrollBoxRenderable | undefined
   const bindScrollbar = createScrollbarVisibility(() => props.showScrollbar)
   const revealActivity = () => scroll?.scrollTo(scroll.scrollHeight)
@@ -175,7 +188,7 @@ export function IssueScreen(props: {
       >
         <box width="100%" maxWidth={contentWidth()} minWidth={0} flexShrink={0} flexDirection="column" paddingTop={1} paddingBottom={1}>
           <text width="100%" flexShrink={0} fg={colors.text} attributes={TextAttributes.BOLD}>
-            {header()?.title ?? "Issue"} <span style={{ fg: colors.muted }}>#{props.number}</span>
+            {header()?.title ?? "Issue"} <span style={{ fg: colors.muted }}><Show when={issue()?.url} fallback={`#${props.number}`}>{(url) => <a href={url()}><span style={{ fg: props.interactive ? theme.markdownLink : colors.muted }}>#{props.number}</span></a>}</Show></span>
           </text>
           <Show when={header()}>
             {(current) => (
@@ -185,19 +198,16 @@ export function IssueScreen(props: {
                 </span>
                 {issue()?.stateReason ? ` · ${issue()!.stateReason!.replaceAll("_", " ")}` : ""}
                 {issue()?.locked ? " · locked" : ""}
-                {" · "}<span style={{ fg: colors.text }}>{current().author}</span> opened {ago(current().createdAt)}
+                {" · "}<span style={{ fg: colors.text }}><a href={`https://github.com/${current().author}`}>{current().author}</a></span> opened <Show when={issue()?.url} fallback={ago(current().createdAt)}>{(url) => <a href={url()}>{ago(current().createdAt)}</a>}</Show>
               </text>
             )}
           </Show>
         </box>
-        <ResourceStateView resource={props.detail.resource}>
+        <ResourceStateView resource={props.detail.resource} hideError>
           {(current) => (
             <>
               <box width="100%" maxWidth={contentWidth()} minWidth={0} flexShrink={0} flexDirection="row" alignItems="flex-start">
                 <box flexGrow={1} flexBasis={0} minWidth={0} flexShrink={1} flexDirection="column" paddingRight={wide() ? 2 : 0}>
-                  <Show when={current().permissionsError}>
-                    {(message) => <text width="100%" flexShrink={0} paddingBottom={1} fg={colors.yellow} wrapMode="word">Issue actions unavailable: {message()}</text>}
-                  </Show>
                   <Show when={!wide()}>
                     <box width="100%" minWidth={0} flexShrink={0} paddingBottom={1}>
                       <IssueMetadata issue={current()} compact inline={props.inlineMetadata} />
@@ -206,7 +216,7 @@ export function IssueScreen(props: {
                   </Show>
                   <box id="issue-detail-description" {...reactionMouse} width="100%" minWidth={0} flexShrink={0} backgroundColor={surface()} paddingX={2} paddingY={1} flexDirection="column">
                     <text width="100%" flexShrink={0} fg={colors.muted}>
-                      {icons().user} <b><span style={{ fg: colors.text }}>{current().author}</span></b> · author
+                      {icons().user} <b><span style={{ fg: colors.text }}><a href={`https://github.com/${current().author}`}>{current().author}</a></span></b> · author
                     </text>
                     <box width="100%" minWidth={0} flexShrink={0} marginTop={1}>
                       <Show when={current().body.trim()} fallback={<text fg={colors.muted}>No description provided.</text>}>
@@ -216,9 +226,6 @@ export function IssueScreen(props: {
                     <Reactions counts={current().reactions} viewerReactions={current().viewerReactions} canReact={current().canReact}
                       target={{ kind: "issue", number: props.number, nodeId: current().nodeId }} controls={props.reactionControls} interactive={props.interactive} />
                   </box>
-                  <Show when={props.detail.resource.status === "error"}>
-                    <text width="100%" flexShrink={0} marginTop={1} fg={colors.red}>× {failure(props.detail.resource)}</text>
-                  </Show>
                   <box width="100%" minWidth={0} flexShrink={0} flexDirection="column">
                     <DetailActivity
                       number={props.number} reactionControls={props.reactionControls} interactive={props.interactive}

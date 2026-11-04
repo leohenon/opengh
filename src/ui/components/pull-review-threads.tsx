@@ -29,7 +29,7 @@ function ThreadComment(props: {
   return (
     <box id={`message-review-${props.number}-${props.comment.id}`} {...reactionMouse} width="100%" minWidth={0} flexShrink={0} paddingLeft={props.reply ? 2 : 0} marginTop={1} flexDirection="column">
       <TimelineHeader>
-        <b><span style={{ fg: colors.text }}>{props.comment.author || "ghost"}</span></b>
+        <b><span style={{ fg: colors.text }}><Show when={props.comment.author} fallback="ghost">{(login) => <a href={`https://github.com/${login()}`}>{login()}</a>}</Show></span></b>
         {" · "}<a href={props.comment.url}>{relativeTime(props.comment.createdAt)}</a>
         {association() ? ` · ${association()}` : ""}
         {props.comment.updatedAt !== props.comment.createdAt ? " · edited" : ""}

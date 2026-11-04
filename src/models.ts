@@ -44,7 +44,7 @@ export type IssueDetail = IssueSummary & Partial<ReactionState> & {
   permissionsError?: string
   labels: string[]
   assignees: string[]
-  milestone?: { title: string; dueAt?: string }
+  milestone?: { title: string; dueAt?: string; url?: string }
   commentCount: number
 }
 
@@ -288,6 +288,7 @@ export type PullRequestDetail = PullRequestSummary & Partial<ReactionState> & {
   labels: string[]
   assignees: string[]
   reviewers: string[]
+  reviewerLinks?: { name: string; url: string }[]
   mergeable: boolean | null
 }
 

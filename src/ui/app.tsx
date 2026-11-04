@@ -7,7 +7,7 @@ import { KeybindingsBoundary, useKeyActions, useKeybindings } from "./keybinding
 import { cloneCommand, cloneDestination, matchesLocalRepository, type LocalRepository, type CommandSpec, type CommandTask } from "../command-actions"
 import { CommandDialog, type CommandAction } from "./components/command-dialog"
 import type { IssueReference, CommitDetail, DiffContent, DiffTarget, IssueActionKind, IssueActionParent, IssueActionResult, Paginated, ListState, PullMergeDraft, PullMergeMessage, PullMergeMethod, PullRequestDetail, PullReviewThread, ReactionKind, ReactionState, ReactionTarget } from "../models"
-import { back, navigate, openDetail, openDiff, type DetailTarget, type InitialNavigation, type NavigationState, type Page } from "../navigation"
+import { atRepositoryEntry, back, navigate, openDetail, openDiff, openPage, type DetailTarget, type InitialNavigation, type NavigationState, type Page } from "../navigation"
 import type {
   CommitDetailState,
   RunDetailState,
@@ -59,6 +59,9 @@ import { useTheme } from "./theme"
 import { IconProvider } from "./icon-style"
 import { MotionProvider } from "./motion"
 import { MarkdownProvider } from "./markdown-preferences"
+import { HyperlinkProvider, HyperlinkSurface } from "./hyperlinks"
+import { resolveLinkTarget } from "../link-target"
+import type { MarkdownAnchorRequest } from "./markdown-anchors"
 
 type Overlay = "context-menu" | "reactions" | "help" | "branch-picker" | "settings" | "issue-references" | "issue-actions" | "issue-action" | "pull-merge" | "pull-draft" | "pull-review" | "review-comment" | "inline-retry" | "command" | "switch-repo"
 type ToastState = { id: number; title: string; message: string; duration?: number; tone?: "error" | "success" | "info" }
@@ -78,6 +81,12 @@ export type AppProps = {
   onOpenFullApp?: () => void
   initialPage?: Page
   initialNavigation?: InitialNavigation
+  initialState?: NavigationState
+  repositoryEntry?: NavigationState
+  onReturnToRepository?: () => void
+  onOpenLocation?: (repository: string, initial: InitialNavigation, origin: NavigationState, entry?: NavigationState) => void
+  onResolveIssueKind?: (repository: string, number: number) => Promise<"issue" | "pull">
+  onOpenUrl?: (url: string) => Promise<void>
   onPageChange?: (page: Page) => void
   onQuit?: () => void
   onRefresh?: () => void
@@ -162,23 +171,31 @@ function AppContent(props: AppProps) {
   const initialNavigation = props.initialNavigation
   const initialDetail = initialNavigation?.detail
   const initialPage = initialNavigation?.page ?? props.initialPage ?? "overview"
-  const requestedActions = initialNavigation?.page === "actions" || initialDetail?.kind === "run"
-  let initialPagePending = !initialNavigation && initialPage === "actions"
+  const requestedActions = props.initialState?.page === "actions" || !!props.initialState?.details?.actions || initialNavigation?.page === "actions" || initialDetail?.kind === "run"
+  let initialPagePending = !props.initialState && !initialNavigation && initialPage === "actions"
   const initialState: NavigationState = { page: initialPagePending ? "overview" : initialPage }
-  const [navigation, setNavigation] = createSignal<NavigationState>(initialDetail ? openDetail(initialState, initialDetail) : initialState)
+  let startingState = props.initialState ?? (initialDetail ? openDetail(initialState, initialDetail) : initialState)
+  if (initialNavigation?.diff) startingState = openDiff(startingState, initialNavigation.diff)
+  const repositoryEntry = props.repositoryEntry ?? startingState
+  const [navigation, setNavigation] = createSignal<NavigationState>(startingState)
   onMount(() => {
-    if (initialNavigation) props.onPageChange?.(navigation().page)
-    if (initialDetail?.kind === "commit") void props.onLoadCommit?.(initialDetail.sha)
-    if (initialDetail?.kind === "issue") void props.onLoadIssue?.(initialDetail.number)
-    if (initialDetail?.kind === "pull") void props.onLoadPull?.(initialDetail.number)
-    if (initialDetail?.kind === "run") void props.onLoadRun?.(initialDetail.id)
+    if (initialNavigation || props.initialState) props.onPageChange?.(navigation().page)
+    for (const detail of Object.values(startingState.details ?? {})) {
+      if (detail.kind === "commit") void props.onLoadCommit?.(detail.sha)
+      if (detail.kind === "issue") void props.onLoadIssue?.(detail.number)
+      if (detail.kind === "pull") void props.onLoadPull?.(detail.number)
+      if (detail.kind === "run") void props.onLoadRun?.(detail.id)
+    }
+    for (const target of Object.values(startingState.diffs ?? {})) void props.onLoadDiff?.(target)
   })
   const [issueState, setIssueState] = createSignal<ListState>("open")
   const [issueRefresh, setIssueRefresh] = createSignal<{ number: number }>()
   const [pullState, setPullState] = createSignal<ListState>("open")
   const [pullRefresh, setPullRefresh] = createSignal<{ number: number }>()
   const [timelineCollapsed, setTimelineCollapsed] = createSignal(false)
-  const [overviewDocument, setOverviewDocument] = createSignal<string>()
+  const [documentAnchor, setDocumentAnchor] = createSignal<MarkdownAnchorRequest>()
+  const overviewDocument = () => navigation().document
+  const setOverviewDocument = (document: string | undefined) => setNavigation((state) => ({ ...state, document }))
   const [diffFocus, setDiffFocus] = createSignal<Partial<Record<Page, DiffFocus>>>({})
   const [overlay, setOverlay] = createSignal<Overlay>()
   const [toast, setToast] = createSignal<ToastState>()
@@ -223,7 +240,7 @@ function AppContent(props: AppProps) {
   const config = () => props.config ?? defaultConfig
   const data = () => typeof props.data === "function" ? props.data() : props.data
   const operations = () => typeof props.operations === "function" ? props.operations() : props.operations
-  const page = () => navigation().page
+  const page = createMemo(() => navigation().page)
   const diffTarget = () => navigation().diffs?.[page()]
   const resourceForDiff = (target?: DiffTarget): ResourceState<DiffContent> => {
     const loaded = target && props.diffs?.[target.kind]
@@ -259,7 +276,8 @@ function AppContent(props: AppProps) {
     const detail: DetailTarget = reference.kind === "commit" ? { kind: "commit", sha: reference.sha }
       : { kind: reference.kind, number: reference.number }
     if (reference.repository.toLowerCase() !== data().repo.nameWithOwner.toLowerCase()) {
-      props.onOpenReference?.(reference.repository, detail)
+      if (props.onOpenLocation) props.onOpenLocation(reference.repository, { detail }, navigation(), props.onReturnToRepository ? repositoryEntry : undefined)
+      else props.onOpenReference?.(reference.repository, detail)
       return
     }
     if (detail.kind === "commit") openCommit(detail.sha)
@@ -832,6 +850,15 @@ function AppContent(props: AppProps) {
     return undefined
   }
   const status = createMemo(statusKind)
+  const detailPage = () => Boolean(activeRunId() || activeCommitSha() || activeIssueNumber() || activePullNumber()) && !diffTarget()
+  const statusError = () => {
+    if (!detailPage() || status()) return undefined
+    const resource = activeResource()
+    if (resource?.status === "error") return resource.message
+    const permissionsError = activeIssueNumber() ? issueDetail().resource.value?.permissionsError : undefined
+    return permissionsError ? `Issue actions unavailable: ${permissionsError}` : undefined
+    return undefined
+  }
   const paginationSource = () => {
     if (activeRunId()) return `pagination:run:${runId()}`
     if (activeCommitSha()) return `pagination:commit:${commitSha()}`
@@ -873,22 +900,14 @@ function AppContent(props: AppProps) {
       ["pagination:pulls:open", current.pulls.open],
       ["pagination:pulls:closed", current.pulls.closed],
     ]
-    if (runId()) paginationResources.push([`pagination:run:${runId()}`, runDetail().jobs])
-    if (commitSha()) paginationResources.push([`pagination:commit:${commitSha()}`, commitResource()])
-    if (issueNumber()) paginationResources.push([`pagination:issue:${issueNumber()}`, issueDetail().comments])
-    if (pullNumber()) paginationResources.push([`pagination:pull:${pullNumber()}`, pullDetail().comments])
     for (const [source, resource] of paginationResources) {
       if (resource.status === "error" && resource.phase === "pagination") failures.set(source, resource.message)
     }
     const active = activeResource()
     const resourceSource = activeResourceSource()
-    if (resourceSource && active?.status === "error" && active.phase === "load" && active.value !== undefined)
+    if (!detailPage() && resourceSource && active?.status === "error" && active.phase === "load" && active.value !== undefined)
       failures.set(resourceSource, active.message)
     for (const [source, message] of shownFailures) {
-      const pendingRunResource = source === `resource:run:${runId()}:resource` ? runDetail().resource
-        : source === `resource:run:${runId()}:jobs` || source === `pagination:run:${runId()}` ? runDetail().jobs : undefined
-      // Automatic retries should not re-notify the same failure every five seconds.
-      if (pendingRunResource?.status === "loading") continue
       if (failures.get(source) !== message) shownFailures.delete(source)
     }
 
@@ -974,22 +993,38 @@ function AppContent(props: AppProps) {
     if (detail?.kind === "commit") props.onCloseCommit?.()
     if (detail?.kind === "issue") { props.onCloseIssue?.(); setRevealActivity() }
     if (detail?.kind === "pull") { props.onClosePull?.(); setRevealActivity() }
-    // Each resource slot holds one entity; a same-tab link may have replaced it.
-    const restored = next.details?.[next.page]
+    ensureDetail(next.details?.[next.page])
+  })
+  // Each resource slot holds one entity; a same-tab link may have replaced it.
+  const ensureDetail = (restored?: DetailTarget) => {
     if (restored?.kind === "run" && props.runDetail?.id !== restored.id) void props.onLoadRun?.(restored.id)
     if (restored?.kind === "commit" && props.commitDetail?.sha !== restored.sha) void props.onLoadCommit?.(restored.sha)
     if (restored?.kind === "issue" && props.issueDetail?.number !== restored.number) void props.onLoadIssue?.(restored.number)
     if (restored?.kind === "pull" && props.pullDetail?.number !== restored.number) void props.onLoadPull?.(restored.number)
+  }
+  const restoreNavigation = (next: NavigationState) => batch(() => {
+    setNavigation(next)
+    ensureDetail(next.details?.[next.page])
+    const diff = next.diffs?.[next.page]
+    if (diff) {
+      const loaded = props.diffs?.[diff.kind]?.target
+      const matches = diff.kind === "commit" ? loaded?.kind === "commit" && loaded.sha === diff.sha
+        : loaded?.kind === "pull" && loaded.number === diff.number
+      if (!matches) void props.onLoadDiff?.(diff)
+    }
   })
   const selectPage = (next: Page) => {
     initialPagePending = false
     setNavigation((state) => navigate(state, next))
   }
-  const canGoBack = () => Boolean(diffTarget() || navigation().details?.[page()]);
+  const atEntry = () => !!props.onReturnToRepository && atRepositoryEntry(navigation(), repositoryEntry)
+  const canGoBack = () => Boolean(diffTarget() || atEntry() || navigation().details?.[page()] || navigation().pageOrigin?.page === page())
   const goBack = () => {
-    if (diffTarget()) closeDiff();
-    else if (navigation().details?.[page()]) closeDetail();
-  };
+    if (diffTarget()) closeDiff()
+    else if (atEntry()) props.onReturnToRepository?.()
+    else if (navigation().details?.[page()]) closeDetail()
+    else restoreNavigation(back(navigation()))
+  }
   const selectHeaderPage = (next: Page) => {
     initialPagePending = false
     if (next !== page()) return selectPage(next);
@@ -1002,6 +1037,7 @@ function AppContent(props: AppProps) {
   }
   const selectOverviewDocument = (id: string) => {
     if (id === overviewDocument() || !overviewDocuments().some((document) => document.id === id)) return
+    setDocumentAnchor(undefined)
     setOverviewDocument(id)
     overviewScroll?.scrollTo(0)
   }
@@ -1298,9 +1334,8 @@ function AppContent(props: AppProps) {
       void props.onRefreshRecentRepositories?.().catch(() => {})
     },
     "navigation.back": () => {
-      if (diffTarget()) closeDiff()
-      else if (navigation().details?.[page()]) closeDetail()
-      else return false
+      if (!canGoBack()) return false
+      goBack()
     },
     "navigation.tab1": () => selectTab(0),
     "navigation.tab2": () => selectTab(1),
@@ -1413,7 +1448,82 @@ function AppContent(props: AppProps) {
     "navigation.last": () => overviewScroll?.scrollTo(Math.max(0, overviewScroll.scrollHeight - overviewScroll.viewport.height)),
   }, { when: () => page() === "overview" && overlay() === undefined })
 
+  let linkRequest = 0
+  const activateLink = async (url: string) => {
+    const request = ++linkRequest
+    const origin = navigation()
+    const originOverlay = overlay()
+    const current = () => !disposed && !renderer.isDestroyed && request === linkRequest
+      && navigation() === origin && overlay() === originOverlay
+    try {
+      const target = resolveLinkTarget(url)
+      if (!target) throw new Error("This link uses an unsupported or unsafe URL.")
+      // Match a loaded document independently of its fragment, before the
+      // browser fallback. The renderer resolves the fragment against real layout.
+      const location = new URL(url)
+      const documentUrl = new URL(location.href)
+      documentUrl.hash = ""
+      const document = overviewDocuments().find((item) => item.resource.value !== undefined
+        && documentUrl.href === `https://github.com/${item.repository}/blob/${encodeURIComponent(item.ref)}/${item.path.split("/").map(encodeURIComponent).join("/")}`)
+      if (document) {
+        initialPagePending = false
+        batch(() => {
+          setOverlay()
+          setNavigation((state) => openPage(state, "overview", document.id))
+          setDocumentAnchor(location.hash ? { document: document.id, fragment: location.hash, request } : undefined)
+        })
+        if (!location.hash) overviewScroll?.scrollTo(0)
+        return
+      }
+      if (target.kind === "external") {
+        if (!props.onOpenUrl) throw new Error("Opening external links is unavailable.")
+        await props.onOpenUrl(target.url)
+        return
+      }
+      let initial: InitialNavigation
+      if (target.kind === "page") initial = { page: target.page }
+      else if (target.kind === "diff") initial = { detail: target.target, diff: target.target }
+      else {
+        let detail: DetailTarget
+        if (target.detail.kind === "number") {
+          const number = target.detail.number
+          const repository = target.repository.toLowerCase()
+          const known = [...issueMenuItems(), ...pullMenuItems(), ...commitMenuItems()].find((reference) =>
+            reference.kind !== "commit" && reference.number === number && reference.repository.toLowerCase() === repository)
+          const kind = known && known.kind !== "commit" ? known.kind
+            : await props.onResolveIssueKind?.(target.repository, number)
+          if (!kind) throw new Error("Could not determine whether this reference is an issue or pull request.")
+          detail = { kind, number }
+        } else detail = target.detail
+        initial = { detail }
+      }
+      if (!current()) return
+      initialPagePending = false
+      setOverlay()
+      if (target.repository.toLowerCase() !== data().repo.nameWithOwner.toLowerCase()) {
+        if (props.onOpenLocation) props.onOpenLocation(target.repository, initial, origin, props.onReturnToRepository ? repositoryEntry : undefined)
+        else if (initial.detail && props.onOpenReference) props.onOpenReference(target.repository, initial.detail)
+        else throw new Error("Opening another repository is unavailable.")
+        return
+      }
+      batch(() => {
+        const detail = initial.detail
+        if (detail?.kind === "commit") openCommit(detail.sha)
+        if (detail?.kind === "issue") openIssue(detail.number)
+        if (detail?.kind === "pull") openPull(detail.number)
+        if (detail?.kind === "run") openRun(detail.id)
+        if (initial.page) setNavigation((state) => openPage(state, initial.page!))
+        if (initial.diff) viewDiff(initial.diff)
+      })
+    } catch (error) {
+      if (current()) setToast({ id: ++toastId, title: "Could not open link", message: error instanceof Error ? error.message : String(error) })
+    }
+  }
+  const linkIdentity = createMemo(() => ({ navigation: navigation(), overlay: overlay() }))
+
   return (
+    <HyperlinkProvider identity={linkIdentity()} onOpen={(url) => { void activateLink(url) }}>
+    <HyperlinkSurface enabled={overlay() === undefined}>
     <IconProvider style={config().iconStyle}>
     <MotionProvider reduced={config().reducedMotion}>
     <MarkdownProvider style={config().markdownStyle}>
@@ -1430,6 +1540,7 @@ function AppContent(props: AppProps) {
             repo={data().repo}
             documents={data().documents}
             currentDocument={overviewDocument()}
+            documentAnchor={documentAnchor()}
             interactive={page() === "overview" && !diffTarget() && overlay() === undefined}
             onSelectDocument={selectOverviewDocument}
             onMoveDocument={moveOverviewDocument}
@@ -1543,6 +1654,7 @@ function AppContent(props: AppProps) {
             <CommitScreen
               sha={sha}
               summary={commitSummary()}
+              repositoryUrl={data().repo.url}
               resource={commitResource()}
               interactive={!diffTarget() && page() === "commits" && overlay() === undefined}
               showScrollbar={config().showScrollbars}
@@ -1612,8 +1724,9 @@ function AppContent(props: AppProps) {
         </Show>}
       </For>
       </box>
-      <StatusBar kind={status()} detail={statusDetail()} hint={shortcutHint()}
-        zIndex={overlay() && (config().showStatusBarHints || (status() && !fullscreenEditorOpen())) ? 350 : 0} />
+      <StatusBar kind={status()} detail={statusDetail()} error={statusError()}
+        hint={statusError() ? keys.hint("view.refresh", "retry") : shortcutHint()}
+        zIndex={overlay() && (config().showStatusBarHints || ((status() || statusError()) && !fullscreenEditorOpen())) ? 350 : 0} />
       <Show when={toast()} keyed>
         {(current) => (
           <Toast
@@ -1805,5 +1918,7 @@ function AppContent(props: AppProps) {
     </MarkdownProvider>
     </MotionProvider>
     </IconProvider>
+    </HyperlinkSurface>
+    </HyperlinkProvider>
   )
 }

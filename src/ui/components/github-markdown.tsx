@@ -1,20 +1,98 @@
 import { BoxRenderable, CodeRenderable, MarkdownRenderable, TextRenderable, TextTableRenderable, Yoga, type MarkdownOptions, type Renderable, type SyntaxStyle } from "@opentui/core"
 import { useRenderer } from "@opentui/solid"
-import { createMemo, Show } from "solid-js"
+import { createMemo, onCleanup, onMount, Show } from "solid-js"
 import { normalizeGitHubMarkdown, type GitHubMarkdownContext } from "../github-markdown"
 import { compactLinkChunks, compactMarkdownLinks } from "../markdown-links"
 import "../markdown-parsers"
 import { useTheme } from "../theme"
 import { READING_WIDTH } from "../detail-layout"
 import { useMarkdownPreference } from "../markdown-preferences"
+import { useHyperlinkMouse } from "../hyperlinks"
+import { LinkedText } from "./linked-text"
+import { anchorMarkers, stripAnchorMarkers, anchorVisualRow, tableAnchorRow, sourceLineAnchor, type MarkdownCodeSource, type MarkdownSourceMap, type MarkdownRenderedAnchor, type MarkdownAnchorResolver } from "../markdown-anchors"
 
 // One prose renderer for repository documents, issue descriptions, and comments.
-export function GitHubMarkdown(props: { content: string; syntaxStyle: SyntaxStyle; preserveImages?: boolean; codePanels?: boolean; backgroundColor?: string; context?: GitHubMarkdownContext; plainText?: boolean; wide?: boolean }) {
+export function GitHubMarkdown(props: { content: string; syntaxStyle: SyntaxStyle; preserveImages?: boolean; codePanels?: boolean; backgroundColor?: string; context?: GitHubMarkdownContext; plainText?: boolean; wide?: boolean; anchorRef?: (resolver: MarkdownAnchorResolver | undefined) => void }) {
   const renderer = useRenderer()
+  const links = useHyperlinkMouse()
   const { colors, theme } = useTheme()
   const preference = useMarkdownPreference()
   const minimal = () => preference() === "minimal"
-  const content = createMemo(() => props.plainText ? props.content : normalizeGitHubMarkdown(props.content, { preserveImages: props.preserveImages, codePanels: props.codePanels, context: props.context }))
+  const prepared = createMemo(() => {
+    const sourceMap: MarkdownSourceMap | undefined = props.anchorRef
+      ? { lineCount: props.content.split(/\r\n?|\n/).length, code: [] } : undefined
+    return { sourceMap, content: props.plainText ? props.content : normalizeGitHubMarkdown(props.content, {
+      preserveImages: props.preserveImages, codePanels: props.codePanels, context: props.context, anchors: !!props.anchorRef, sourceMap,
+    }) }
+  })
+  const content = () => prepared().content
+  let markdown: MarkdownRenderable | undefined
+  let plain: TextRenderable | undefined
+  const codeNodes = (node: Renderable | undefined = markdown): CodeRenderable[] => node && !node.isDestroyed ? [
+    ...(node instanceof CodeRenderable && !node.conceal && !node.isDestroyed ? [node] : []),
+    ...node.getChildren().flatMap((child) => codeNodes(child)),
+  ] : []
+  let targets = new Map<string, MarkdownRenderedAnchor>()
+  let prose = new Set<CodeRenderable>()
+  let disposed = false
+  const resolveAnchor: MarkdownAnchorResolver = async (fragment) => {
+    const document = prepared()
+    await Promise.all([...prose, ...codeNodes()].filter((node) => !node.isDestroyed).map((node) => node.highlightingDone))
+    await renderer.idle()
+    if (disposed || document !== prepared()) return
+    const rawId = fragment.replace(/^#/, "")
+    let id: string
+    try { id = decodeURIComponent(rawId) } catch { return }
+    const sourceMap = prepared().sourceMap
+    const range = id.match(/^L([1-9]\d*)(?:-L([1-9]\d*))?$/i)
+    let target: MarkdownRenderedAnchor | undefined
+    if (range && sourceMap) {
+      const first = Number(range[1])
+      const last = Number(range[2] ?? range[1])
+      if (!Number.isSafeInteger(first) || !Number.isSafeInteger(last) || last < first) return
+      let line = Math.min(first, sourceMap.lineCount)
+      if (props.plainText && plain) target = { node: plain, position: { line: line - 1, column: 0 } }
+      else {
+        const available = [...new Set([
+          ...[...targets.keys()].flatMap((key) => /^opengh-source-L([1-9]\d*)$/.exec(key)?.slice(1).map(Number) ?? []),
+          ...sourceMap.code.flatMap((code) => [code.start, code.end]),
+        ])].sort((left, right) => left - right)
+        let code = sourceMap.code.find((code) => line >= code.start && line <= code.end)
+        if (!code && !targets.has(sourceLineAnchor(line))) {
+          line = available.find((candidate) => candidate >= line) ?? available.at(-1) ?? line
+          code = sourceMap.code.find((code) => line >= code.start && line <= code.end)
+        }
+        if (code) {
+          const sameCode = (entry: MarkdownCodeSource) => entry.content === code!.content
+          const occurrence = sourceMap.code.filter(sameCode).indexOf(code)
+          const node = codeNodes().filter((node) => node.content.replace(/\n+$/, "") === code!.content)[occurrence]
+          if (node) target = { node, position: { line: Math.max(0, Math.min(line - code.bodyStart, node.content.split("\n").length - 1)), column: 0 } }
+        } else target = targets.get(sourceLineAnchor(line))
+      }
+    } else {
+      target = targets.get(rawId) ?? targets.get(id)
+        ?? targets.get(id.replace(/^user-content-/, "")) ?? targets.get(`user-content-${id}`)
+      if (!target && sourceMap) {
+        const code = sourceMap.code.find((code) => code.anchors.includes(id))
+        if (code) {
+          const occurrence = sourceMap.code.filter((entry) => entry.content === code.content).indexOf(code)
+          const node = codeNodes().filter((node) => node.content.replace(/\n+$/, "") === code.content)[occurrence]
+          if (node) target = { node, position: { line: 0, column: 0 } }
+        }
+      }
+    }
+    if (!target || target.node.isDestroyed) return
+    let row = 0
+    if ((target.node instanceof CodeRenderable || target.node instanceof TextRenderable) && target.position) row = anchorVisualRow(target.node.lineInfo, target.position)
+    if (target.node instanceof TextTableRenderable && target.cell && target.position) {
+      const cellRow = tableAnchorRow(target.node, target.cell, target.position)
+      if (cellRow === undefined) return
+      row = cellRow
+    }
+    return { node: target.node, row }
+  }
+  onMount(() => props.anchorRef?.(resolveAnchor))
+  onCleanup(() => { disposed = true; props.anchorRef?.(undefined) })
   const tableOptions = createMemo<MarkdownOptions["tableOptions"]>(() => ({
     style: minimal() ? "columns" : "grid",
     widthMode: "full",
@@ -24,6 +102,11 @@ export function GitHubMarkdown(props: { content: string; syntaxStyle: SyntaxStyl
     borderColor: colors.border,
   }))
   const renderNode = createMemo<MarkdownOptions["renderNode"]>(() => {
+    content()
+    targets = new Map<string, MarkdownRenderedAnchor>()
+    prose = new Set<CodeRenderable>()
+    const anchorTargets = targets
+    const proseNodes = prose
     const simple = minimal()
     const contentWidth = props.wide ? "100%" : READING_WIDTH
     const background = colors.panel
@@ -99,7 +182,13 @@ export function GitHubMarkdown(props: { content: string; syntaxStyle: SyntaxStyl
       if (codePanels.has(node) || node instanceof MarkdownRenderable) return
       if (node instanceof CodeRenderable) {
         node.syntaxStyle = syntaxStyle
-        if (node.filetype === "markdown" && node.conceal) compactMarkdownLinks(node, { padInlineCode: !simple })
+        if (node.filetype === "markdown" && node.conceal) {
+          proseNodes.add(node)
+          compactMarkdownLinks(node, { padInlineCode: !simple, onAnchors: (positions) => {
+            for (const [id, target] of anchorTargets) if (target.node === node) anchorTargets.delete(id)
+            for (const [id, position] of positions) anchorTargets.set(id, { node, position })
+          } })
+        }
         else if (panels && node.parent) {
           codePanel(node)
           return
@@ -119,7 +208,10 @@ export function GitHubMarkdown(props: { content: string; syntaxStyle: SyntaxStyl
         }
       }
       if (node instanceof TextTableRenderable)
-        node.content = node.content.map((row) => row.map((cell) => cell ? compactLinkChunks(cell) : cell))
+        node.content = node.content.map((row, rowIndex) => row.map((cell, column) => cell ? compactLinkChunks(cell, {
+          linkColor: syntaxStyle.mergeStyles("markup.link").fg,
+          onAnchor: (id, position) => anchorTargets.set(id, { node, position, cell: { row: rowIndex, column } }),
+        }) : cell))
       if (list && node instanceof TextRenderable && node.chunks.length === 1) {
         const marker = node.chunks[0]!.text
         if (/^\s*[-*+]\s$/.test(marker)) {
@@ -131,6 +223,12 @@ export function GitHubMarkdown(props: { content: string; syntaxStyle: SyntaxStyl
     }
     const renderBlock: NonNullable<MarkdownOptions["renderNode"]> = (token, context) => {
       let block: Renderable | null
+      const markers = anchorMarkers(token.raw)
+      if (markers.length && !stripAnchorMarkers(token.raw).trim()) {
+        const marker = new BoxRenderable(renderer, { width: "100%", height: 0, flexShrink: 0 })
+        for (const { id } of markers) anchorTargets.set(id, { node: marker })
+        return marker
+      }
       if (token.type === "blockquote") {
         const quote = new BoxRenderable(renderer, {
           width: "100%", minWidth: 0, flexShrink: 0, flexDirection: "column",
@@ -196,7 +294,8 @@ export function GitHubMarkdown(props: { content: string; syntaxStyle: SyntaxStyl
   return (
     <Show when={!props.plainText} fallback={
       <text
-        content={props.content}
+        ref={(value) => { plain = value }}
+        {...links}
         fg={colors.text}
         bg={props.backgroundColor ?? colors.canvas}
         wrapMode="word"
@@ -204,9 +303,11 @@ export function GitHubMarkdown(props: { content: string; syntaxStyle: SyntaxStyl
         maxWidth={props.wide ? "100%" : READING_WIDTH}
         minWidth={0}
         flexShrink={0}
-      />
+      ><LinkedText text={props.content} repositoryUrl={props.context?.repositoryUrl} /></text>
     }>
       <markdown
+        ref={(value) => { markdown = value }}
+        {...links}
         content={content()}
         syntaxStyle={props.syntaxStyle}
         fg={colors.text}

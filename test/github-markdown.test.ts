@@ -32,6 +32,32 @@ C#123abc and #123abc aren't issue references. Inline \`#7\` stays code.
     } })).toContain("https://github.com/qdrant/qdrant/issues/10#issuecomment-123")
   })
 
+  test("commit references and mentions link only in prose, without wrapping existing links", () => {
+    const full = "a".repeat(40)
+    const markdown = normalizeGitHubMarkdown(`Use abc1234, other/repo@deadbee, ${full}, and @octocat.
+
+Leave deadbee, 1234567, abc123, abc1234z, xabc1234, abc1234_name, and name@octocat.com alone.
+
+[abc1234 @octocat](https://example.com/existing) and https://example.com/abc1234.
+
+Inline \`abc1234 @octocat\` and ![abc1234](https://example.com/image.png).
+
+<!-- other/repo@abc1234 @hidden -->
+
+\`\`\`text
+other/repo@abc1234 @hidden
+\`\`\``, { context: { repositoryUrl: "https://github.com/owner/repo" }, preserveImages: true })
+    expect(markdown).toContain("[abc1234](https://github.com/owner/repo/commit/abc1234)")
+    expect(markdown).toContain("[other/repo@deadbee](https://github.com/other/repo/commit/deadbee)")
+    expect(markdown).toContain(`[${full}](https://github.com/owner/repo/commit/${full})`)
+    expect(markdown).toContain("[@octocat](https://github.com/octocat)")
+    expect(markdown).toContain("[abc1234 @octocat](https://example.com/existing)")
+    expect(markdown).toContain("▧ [abc1234](https://example.com/image.png)")
+    expect(markdown.match(/\/commit\//g)).toHaveLength(3)
+    expect(markdown).not.toContain("https://github.com/hidden")
+    expect(markdown).toContain("`abc1234 @octocat`")
+  })
+
   test("GitHub alerts become readable quote headings without changing code or literal markers", () => {
     const markdown = normalizeGitHubMarkdown("> [!WARNING]\n> Read the **migration guide**.\n\n[!NOTE] is literal here.\n\n```text\n> [!NOTE]\n```")
     expect(markdown).toContain("> **Warning**\n>\n> Read the **migration guide**.")

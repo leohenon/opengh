@@ -24,7 +24,7 @@ function createMarkdownStyle(colors: AppColors, theme: ResolvedTheme, owner: Cli
     "markup.raw.block": { fg: theme.markdownCodeBlock, bg: colors.panel },
     "markup.raw.inline": { fg: theme.markdownText, bg: colors.panel },
     "markup.link": { fg: theme.markdownLink },
-    "markup.link.label": { fg: theme.markdownLinkText, underline: true },
+    "markup.link.label": { fg: theme.markdownLink, underline: true },
     "markup.link.url": { fg: colors.muted },
     "markup.image.marker": { fg: colors.muted },
     "markup.list": { fg: colors.muted },

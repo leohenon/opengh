@@ -1,6 +1,6 @@
 import { useRenderer } from "@opentui/solid"
 import { createEffect, createMemo, createSignal, Match, onCleanup, onMount, Show, Switch } from "solid-js"
-import type { DetailTarget, InitialNavigation, Page } from "./navigation"
+import type { DetailTarget, InitialNavigation, NavigationState, Page } from "./navigation"
 import type { LaunchDetail } from "./launch-target"
 import { loadRepositoryTabs, saveRepositoryTabs, type RepositoryTabs } from "./repository-tabs"
 import { defaultConfig, loadConfig, saveConfig, type Config } from "./config"
@@ -8,6 +8,7 @@ import { copyToHostClipboard } from "./clipboard"
 import { resolveLocalRepository, runCommand, type LocalRepository } from "./command-actions"
 import { loadRecentRepositories, rememberRepository, resolveRepository } from "./github/repository"
 import { openGitHub } from "./github/browser"
+import { openUrl } from "./open-url"
 import { loadGitHubIssueKind } from "./github/client"
 import { createInlineComments } from "./inline-comments"
 import { createPullReviewSession } from "./pull-review-session"
@@ -46,6 +47,7 @@ export type RootServices = {
   createPullReviewSession(): PullReviewSession
   createInlineComments: typeof createInlineComments
   openGitHub(repository: string, target?: string | number, view?: "diff"): Promise<void>
+  openUrl(url: string): Promise<void>
   copyToHostClipboard(value: string): Promise<boolean>
   resolveLocalRepository: typeof resolveLocalRepository
   runCommand: typeof runCommand
@@ -64,6 +66,7 @@ const defaultServices: RootServices = {
   createPullReviewSession,
   createInlineComments,
   openGitHub,
+  openUrl,
   copyToHostClipboard,
   resolveLocalRepository,
   runCommand,
@@ -211,12 +214,32 @@ export function Root(props: {
     const repository = accessibleRepository()
     if (repository) void services.rememberRepository(repository).catch(() => {}).then(refreshRecent)
   })
+  type RepositoryReturn = { repository: string; state: NavigationState; entry?: NavigationState }
+  const [repositoryReturns, setRepositoryReturns] = createSignal<RepositoryReturn[]>([])
+  let pendingState: RepositoryReturn | undefined
   let pendingNavigation: (InitialNavigation & { repository: string }) | undefined
-  const open = (repository: string, initial?: InitialNavigation) => {
+  const open = (repository: string, initial?: InitialNavigation, followingLink = false) => {
+    if (!followingLink) { setRepositoryReturns([]); pendingState = undefined }
     pendingNavigation = initial ? { ...initial, repository } : undefined
     setLaunchError(undefined)
     void session.load(repository)
     setView("repository")
+  }
+  const followRepository = (repository: string, initial: InitialNavigation, origin: NavigationState, entry?: NavigationState) => {
+    const current = session.state()
+    if (current.status !== "ready") return
+    setRepositoryReturns((items) => [...items, { repository: current.repository, state: origin, entry }])
+    pendingState = undefined
+    open(repository, initial, true)
+  }
+  const returnToRepository = () => {
+    const items = repositoryReturns()
+    const previous = items.at(-1)
+    if (!previous) return false
+    setRepositoryReturns(items.slice(0, -1))
+    pendingState = previous
+    open(previous.repository, undefined, true)
+    return true
   }
   let switchReturn: View = "repository"
   const showSwitcher = () => {
@@ -276,7 +299,8 @@ export function Root(props: {
 
   return (
     <KeybindingsProvider overrides={config().keybindings}>
-    <RootShortcuts onInterrupt={() => commandCancel ? commandCancel() : quit()} onQuit={quit} onReload={() => void reloadConfig()} />
+    <RootShortcuts onInterrupt={() => commandCancel ? commandCancel() : quit()} onQuit={quit} onReload={() => void reloadConfig()}
+      onBack={() => view() === "repository" && session.state().status !== "ready" ? returnToRepository() : false} />
     <ThemeProvider name={config().theme} mode={config().colorMode}>
       <MotionProvider reduced={config().reducedMotion}>
       <MouseSurface>
@@ -333,6 +357,8 @@ export function Root(props: {
                 const initialNavigation = pendingNavigation?.repository.toLowerCase() === repositoryName.toLowerCase()
                   ? pendingNavigation : undefined
                 if (initialNavigation) pendingNavigation = undefined
+                const restored = pendingState?.repository.toLowerCase() === repositoryName.toLowerCase() ? pendingState : undefined
+                if (restored) pendingState = undefined
                 return <App
               data={() => current().data}
               operations={() => current().operations}
@@ -340,6 +366,12 @@ export function Root(props: {
               initialNavigation={initialNavigation}
               standalone={standalone()}
               onOpenFullApp={() => setStandalone(false)}
+              initialState={restored?.state}
+              repositoryEntry={restored?.entry}
+              onReturnToRepository={repositoryReturns().length ? () => { returnToRepository() } : undefined}
+              onOpenLocation={followRepository}
+              onResolveIssueKind={services.loadIssueKind}
+              onOpenUrl={services.openUrl}
               onPageChange={(page) => { if (!standalone()) rememberTab(repositoryName, page) }}
               config={config()}
               configSaving={configSaving() || configReloading()}
@@ -444,11 +476,11 @@ export function Root(props: {
   )
 }
 
-function RootShortcuts(props: { onInterrupt(): void; onQuit(): void; onReload(): void }) {
+function RootShortcuts(props: { onInterrupt(): void; onQuit(): void; onReload(): void; onBack(): boolean }) {
   useKeyActions({
     "global.interrupt": () => props.onInterrupt(),
     "global.reloadConfig": () => props.onReload(),
   }, { priority: 1000 })
-  useKeyActions({ "global.quit": () => props.onQuit() }, { priority: -100 })
+  useKeyActions({ "global.quit": () => props.onQuit(), "navigation.back": () => props.onBack() }, { priority: -100 })
   return null
 }

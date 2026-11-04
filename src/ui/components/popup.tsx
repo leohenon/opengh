@@ -2,6 +2,7 @@ import { MouseButton, RGBA } from "@opentui/core"
 import { useTerminalDimensions } from "@opentui/solid"
 import type { JSX } from "solid-js"
 import { mouseSurface } from "../mouse"
+import { useHyperlinkMouse } from "../hyperlinks"
 import { useTheme } from "../theme"
 
 export function Popup(props: {
@@ -16,6 +17,7 @@ export function Popup(props: {
   children: JSX.Element
 }) {
   const mouse = mouseSurface()
+  const links = useHyperlinkMouse(() => props.visible !== false)
   const dimensions = useTerminalDimensions()
   const { colors } = useTheme()
   let dismissOnRelease = false
@@ -62,12 +64,18 @@ export function Popup(props: {
         overflow="hidden"
         paddingTop={1}
         backgroundColor={colors.panel}
+        onMouseMove={links.onMouseMove}
+        onMouseOut={links.onMouseOut}
+        onMouseDrag={links.onMouseDrag}
+        onMouseScroll={links.onMouseScroll}
         onMouseDown={(event) => {
           dismissOnRelease = false
+          links.onMouseDown(event)
           event.stopPropagation()
         }}
         onMouseUp={(event) => {
           dismissOnRelease = false
+          links.onMouseUp(event)
           event.stopPropagation()
         }}
       >

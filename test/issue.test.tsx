@@ -5,7 +5,6 @@ import type { CommitDetailState, IssueDetailState } from "../src/repository-stat
 import type { IssueDetail, IssueReference } from "../src/models"
 import type { DetailTarget } from "../src/navigation"
 import { App } from "../src/ui/app"
-import { IssueScreen } from "../src/ui/pages/issue"
 import { commitDetailFixture, githubDataFixture, issueDetailFixture, issueCommentsFixture, issuePullReferenceFixture, repositoryOperationsFixture } from "./fixtures/github-data"
 
 const active: Array<{ renderer: { destroy(): void; isDestroyed: boolean } }> = []
@@ -128,16 +127,16 @@ test("permission recovery guidance remains visible with readable issue content a
     permissions: undefined,
     permissionsError: "GitHub account changed. Restart opengh before continuing; no changes were sent.",
   })
-  const view = await testRender(() => <IssueScreen
-    number={issueDetailFixture.number}
-    detail={{
+  const view = await testRender(() => <App
+    data={githubDataFixture}
+    operations={repositoryOperationsFixture}
+    initialNavigation={{ detail: { kind: "issue", number: issueDetailFixture.number } }}
+    issueDetail={{
       number: issueDetailFixture.number,
       resource: { status: "ready", value: issue() },
       comments: { status: "ready", value: { items: [], page: 1, hasMore: false } },
       references: { status: "ready", value: [] },
     }}
-    interactive
-    showScrollbar={false}
   />, { width: 100, height: 32 })
   active.push(view)
   await settle(view)

@@ -20,7 +20,7 @@ export function PullReviewSummary(props: { events: readonly IssueTimelineEvent[]
               <Show when={index() > 0}>
                 <Show when={props.compact} fallback={<br />}>{" · "}</Show>
               </Show>
-              {review.actor || "ghost"}{" "}
+              <Show when={review.actor} fallback="ghost">{(login) => <a href={`https://github.com/${login()}`}>{login()}</a>}</Show>{" "}
               <span style={{ fg: reviewColor(colors, review.state) }}>
                 <a href={review.url}>{labels[review.state]}</a>
               </span>

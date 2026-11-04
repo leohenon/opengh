@@ -15,6 +15,7 @@ import { ReviewThread } from "./pull-review-threads"
 import { reviewColor } from "../pull-reviews"
 import { TimelineEntry, TimelineHeader, TimelineItem } from "./timeline-entry"
 import { TimelineCommits } from "./pull-commits"
+import { LinkedText } from "./linked-text"
 
 function Comment(props: {
   number?: number
@@ -32,13 +33,16 @@ function Comment(props: {
   const reactionMouse = messageReactionMouse(() => props.number ? { kind: "comment", parent: props.subject ?? "issue", number: props.number,
     id: props.comment.id, nodeId: props.comment.nodeId } : undefined, () => props.comment, () => props.comment.body,
     () => props.reactionControls, () => props.interactive === true && !props.collapsed)
+  const permalink = () => props.context.sourceUrl
+    ? `${props.context.sourceUrl.split("#")[0]}#issuecomment-${props.comment.id}`
+    : props.number && props.context.repositoryUrl ? `${props.context.repositoryUrl}/issues/${props.number}#issuecomment-${props.comment.id}` : undefined
   const association = () => props.comment.authorAssociation === "NONE"
     ? "" : props.comment.authorAssociation.toLowerCase().replaceAll("_", " ")
   return (
     <TimelineEntry icon={icons().user} nodeOffset={props.collapsed ? 1 : 2}>
       <box id={`message-comment-${props.subject}-${props.number}-${props.comment.id}`} {...reactionMouse} width="100%" minWidth={0} flexShrink={0} backgroundColor={props.backgroundColor} paddingX={2} paddingY={props.collapsed ? 0 : 1} flexDirection="column">
         <text width="100%" flexShrink={0} fg={colors.muted} height={props.collapsed ? 1 : undefined} wrapMode={props.collapsed ? "none" : "word"} truncate={props.collapsed}>
-          <b><span style={{ fg: colors.text }}>{props.comment.author}</span></b>{props.collapsed ? " commented" : ""} · {relativeTime(props.comment.createdAt)}
+          <b><span style={{ fg: colors.text }}><a href={`https://github.com/${props.comment.author}`}>{props.comment.author}</a></span></b>{props.collapsed ? " commented" : ""} · <Show when={permalink()} fallback={relativeTime(props.comment.createdAt)}>{(url) => <a href={url()}>{relativeTime(props.comment.createdAt)}</a>}</Show>
           {association() ? ` · ${association()}` : ""}
           {props.comment.updatedAt !== props.comment.createdAt ? " · edited" : ""}
         </text>
@@ -58,34 +62,39 @@ function Comment(props: {
 }
 
 function ReferenceMention(props: { reference: IssueReference; repository: string; interactive?: boolean; onOpenReference?: (reference: IssueReference) => void }) {
-  const { colors } = useTheme()
+  const { colors, theme } = useTheme()
   const icons = useIcons()
-  const identifier = () => {
-    const reference = props.reference
-    const id = reference.kind === "commit" ? reference.sha.slice(0, 7) : `#${reference.number}`
-    return reference.repository === props.repository ? id : `${reference.repository}${reference.kind === "commit" ? "@" : ""}${id}`
-  }
+  const identifier = () => props.reference.kind === "commit" ? props.reference.sha.slice(0, 7) : `#${props.reference.number}`
+  const repositoryUrl = () => props.reference.url.replace(/\/(?:issues|pull|commit)\/[^/#?]+.*$/, "")
   const kind = () => props.reference.kind === "pull" ? "PR" : props.reference.kind
   return (
     <TimelineEntry icon={referenceIcon(props.reference, icons())} color={referenceColor(colors, props.reference)}>
       <box width="100%" minWidth={0} flexShrink={0} paddingX={2} flexDirection="column">
         <TimelineHeader>
-          <b><span style={{ fg: colors.text }}>{props.reference.actor}</span></b> referenced this in {kind()} {identifier()}
+          <b><span style={{ fg: colors.text }}><Show when={props.reference.kind !== "commit" && props.interactive !== false} fallback={props.reference.actor}><a href={`https://github.com/${props.reference.actor}`}>{props.reference.actor}</a></Show></span></b> referenced this in {kind()}{" "}
+          <Show when={props.reference.repository !== props.repository}>
+            <Show when={props.interactive !== false} fallback={props.reference.repository}>
+              <span style={{ fg: theme.markdownLink }}><a href={repositoryUrl()}>{props.reference.repository}</a></span>
+            </Show>{props.reference.kind === "commit" ? "@" : ""}
+          </Show>
+          <Show when={props.interactive !== false} fallback={identifier()}><span style={{ fg: theme.markdownLink }}><a href={props.reference.url}>{identifier()}</a></span></Show>
           <Show when={props.reference.kind !== "commit"}>
             {" · "}<span style={{ fg: referenceColor(colors, props.reference) }}>{referenceState(props.reference)}</span>
           </Show>
         </TimelineHeader>
         <box width="100%" minWidth={0} flexShrink={0} paddingLeft={2}>
           <Show when={props.onOpenReference} fallback={(
-            <text width="100%" flexShrink={0} fg={colors.blue}>
+            <text width="100%" flexShrink={0} fg={theme.markdownLink}>
               <Show when={props.interactive !== false} fallback={props.reference.title}>
                 <a href={props.reference.url}>{props.reference.title}</a>
               </Show>
             </text>
           )}>
-            <text width="100%" flexShrink={0} fg={colors.blue}
+            <text width="100%" flexShrink={0} fg={theme.markdownLink}
               {...mouseClick(() => props.onOpenReference?.(props.reference), () => props.interactive !== false && Boolean(props.onOpenReference), () => props.reference)}>
-              {props.reference.title}
+              <Show when={props.interactive !== false} fallback={props.reference.title}>
+                <a href={props.reference.url}>{props.reference.title}</a>
+              </Show>
             </text>
           </Show>
         </box>
@@ -105,9 +114,7 @@ function StateChange(props: { event: IssueStateEvent; subject: "issue" | "pull";
     : props.subject === "pull" ? icons().pullRequest.closed : icons().issue.closed
   const closer = () => props.event.event === "closed" ? props.event.closer : undefined
   const identifier = (source: IssueCloser) => {
-    const local = source.repository === props.repository
-    return source.kind === "pull" ? `${local ? "" : source.repository}#${source.number}`
-      : `${local ? "" : `${source.repository}@`}${source.sha.slice(0, 7)}`
+    return source.kind === "pull" ? `#${source.number}` : source.sha.slice(0, 7)
   }
   const action = () => props.event.event === "merged" ? "merged this pull request"
     : closer() ? props.subject === "issue" ? "closed this as completed in" : "closed this pull request in"
@@ -116,15 +123,18 @@ function StateChange(props: { event: IssueStateEvent; subject: "issue" | "pull";
     <TimelineEntry icon={icon()} color={color()}>
       <box width="100%" minWidth={0} flexShrink={0} paddingX={2}>
         <TimelineHeader>
-          <b><span style={{ fg: colors.text }}>{props.event.actor}</span></b>{" "}
+          <b><span style={{ fg: colors.text }}><a href={`https://github.com/${props.event.actor}`}>{props.event.actor}</a></span></b>{" "}
           <span style={{ fg: color() }}>{action()}</span>
           <Show when={closer()} keyed>
-            {(source) => <>{" "}<span style={{ fg: colors.blue }}><a href={source.url}>{identifier(source)}</a></span></>}
+            {(source) => <>{" "}<span style={{ fg: colors.blue }}>
+              <Show when={source.repository !== props.repository}><a href={source.url.replace(/\/(?:pull|commit)\/[^/#?]+.*$/, "")}>{source.repository}</a>{source.kind === "commit" ? "@" : ""}</Show>
+              <a href={source.url}>{identifier(source)}</a>
+            </span></>}
           </Show>
           {" · "}{relativeTime(props.event.createdAt)}
         </TimelineHeader>
         <Show when={closer()} keyed>
-          {(source) => <text width="100%" flexShrink={0} fg={colors.muted}>{source.title}</text>}
+          {(source) => <text width="100%" flexShrink={0} fg={colors.muted}><a href={source.url}>{source.title}</a></text>}
         </Show>
       </box>
     </TimelineEntry>
@@ -138,7 +148,7 @@ function ForcePush(props: { event: PullForcePushEvent }) {
     <TimelineEntry icon={icons().branch} color={colors.blue}>
       <box width="100%" minWidth={0} flexShrink={0} paddingX={2} flexDirection="column">
         <TimelineHeader>
-          <b><span style={{ fg: colors.text }}>{props.event.actor}</span></b> force-pushed this branch
+          <b><span style={{ fg: colors.text }}><a href={`https://github.com/${props.event.actor}`}>{props.event.actor}</a></span></b> force-pushed this branch
           {" · "}{relativeTime(props.event.createdAt)}
         </TimelineHeader>
         <Show when={props.event.beforeCommit || props.event.afterCommit}>
@@ -171,8 +181,8 @@ function Review(props: { review: PullReviewEvent; collapsed?: boolean; syntaxSty
     <TimelineEntry icon={icon()} color={reviewColor(colors, props.review.state)} nodeOffset={props.collapsed ? 1 : 2}>
       <box width="100%" minWidth={0} flexShrink={0} backgroundColor={props.backgroundColor} paddingX={2} paddingY={props.collapsed ? 0 : 1} flexDirection="column">
         <text width="100%" flexShrink={0} fg={colors.muted} height={props.collapsed ? 1 : undefined} wrapMode={props.collapsed ? "none" : "word"} truncate={props.collapsed}>
-          <b><span style={{ fg: colors.text }}><a href={props.review.url}>{props.review.actor}</a></span></b>{" "}
-          <span style={{ fg: reviewColor(colors, props.review.state) }}>{action()}</span>{" · "}{relativeTime(props.review.createdAt)}
+          <b><span style={{ fg: colors.text }}><a href={`https://github.com/${props.review.actor}`}>{props.review.actor}</a></span></b>{" "}
+          <span style={{ fg: reviewColor(colors, props.review.state) }}>{action()}</span>{" · "}<a href={props.review.url}>{relativeTime(props.review.createdAt)}</a>
         </text>
         <Show when={!props.collapsed && props.review.body.trim()}>
           <box width="100%" minWidth={0} flexShrink={0} marginTop={1}>
@@ -184,7 +194,7 @@ function Review(props: { review: PullReviewEvent; collapsed?: boolean; syntaxSty
   )
 }
 
-function ReviewDismissal(props: { event: PullReviewDismissedEvent }) {
+function ReviewDismissal(props: { event: PullReviewDismissedEvent; repositoryUrl?: string }) {
   const { colors } = useTheme()
   const icons = useIcons()
   const target = () => props.event.reviewer === props.event.actor ? "their review"
@@ -192,8 +202,8 @@ function ReviewDismissal(props: { event: PullReviewDismissedEvent }) {
   return (
     <TimelineEntry icon={icons().workflow.neutral}>
       <box width="100%" minWidth={0} flexShrink={0} paddingX={2}>
-        <TimelineHeader><b><span style={{ fg: colors.text }}>{props.event.actor}</span></b> dismissed {target()}{" · "}{relativeTime(props.event.createdAt)}</TimelineHeader>
-        <Show when={props.event.body.trim()}><text width="100%" flexShrink={0} fg={colors.muted}>{props.event.body}</text></Show>
+        <TimelineHeader><b><span style={{ fg: colors.text }}><a href={`https://github.com/${props.event.actor}`}>{props.event.actor}</a></span></b> dismissed {target()}{" · "}{relativeTime(props.event.createdAt)}</TimelineHeader>
+        <Show when={props.event.body.trim()}><text width="100%" flexShrink={0} fg={colors.muted}><LinkedText text={props.event.body} repositoryUrl={props.repositoryUrl} /></text></Show>
       </box>
     </TimelineEntry>
   )
@@ -207,7 +217,7 @@ function DraftTransition(props: { event: PullDraftEvent }) {
     <TimelineEntry icon={ready() ? icons().pullRequest.open : icons().pullRequest.draft} color={ready() ? colors.openState : colors.muted}>
       <box width="100%" minWidth={0} flexShrink={0} paddingX={2}>
         <TimelineHeader>
-          <b><span style={{ fg: colors.text }}>{props.event.actor}</span></b> marked this pull request {ready() ? "ready for review" : "as draft"}
+          <b><span style={{ fg: colors.text }}><a href={`https://github.com/${props.event.actor}`}>{props.event.actor}</a></span></b> marked this pull request {ready() ? "ready for review" : "as draft"}
           {" · "}{relativeTime(props.event.createdAt)}
         </TimelineHeader>
       </box>
@@ -225,7 +235,7 @@ function ReviewRequest(props: { event: PullReviewRequestEvent }) {
     <TimelineEntry icon={icons().user} color={colors.blue}>
       <box width="100%" minWidth={0} flexShrink={0} paddingX={2}>
         <TimelineHeader>
-          <b><span style={{ fg: colors.text }}>{props.event.actor}</span></b> {action()}{" "}<span style={{ fg: colors.text }}>{name()}</span>
+          <b><span style={{ fg: colors.text }}><a href={`https://github.com/${props.event.actor}`}>{props.event.actor}</a></span></b> {action()}{" "}<span style={{ fg: colors.text }}><Show when={props.event.target.kind === "user"} fallback={name()}><a href={`https://github.com/${props.event.target.kind === "user" ? props.event.target.login : ""}`}>{name()}</a></Show></span>
           {" · "}{relativeTime(props.event.createdAt)}
         </TimelineHeader>
       </box>
@@ -272,7 +282,6 @@ export function DetailActivity(props: {
     ...(props.commits?.value?.map((commit) => commit.sha.toLowerCase()) ?? []),
     ...(props.events?.filter((event) => event.kind === "commit-added").map((commit) => commit.sha.toLowerCase()) ?? []),
   ]).size
-  const failure = (resource: ResourceState<unknown>) => resource.status === "error" ? resource.message : ""
   return (
     <box width="100%" minWidth={0} flexShrink={0} flexDirection="column">
       <text width="100%" flexShrink={0} marginTop={1} fg={colors.muted}>
@@ -300,7 +309,7 @@ export function DetailActivity(props: {
               </Show>
               <Switch>
                 <Match when={match((entry) => "kind" in entry && entry.kind === "commit-group")}>
-                  {(group) => <TimelineCommits commits={group().commits} collapsed={props.collapsed} />}
+                  {(group) => <TimelineCommits commits={group().commits} collapsed={props.collapsed} context={props.context} />}
                 </Match>
                 <Match when={match((entry) => "kind" in entry && entry.kind === "state")}>
                   {(event) => <StateChange event={event()} subject={props.subject ?? "issue"} repository={props.repository} />}
@@ -312,7 +321,7 @@ export function DetailActivity(props: {
                   {(review) => <Review review={review()} collapsed={props.collapsed} syntaxStyle={props.syntaxStyle} backgroundColor={props.backgroundColor} context={props.context} />}
                 </Match>
                 <Match when={match((entry) => "kind" in entry && entry.kind === "review-dismissed")}>
-                  {(event) => <ReviewDismissal event={event()} />}
+                  {(event) => <ReviewDismissal event={event()} repositoryUrl={props.context.repositoryUrl} />}
                 </Match>
                 <Match when={match((entry) => "kind" in entry && entry.kind === "draft")}>
                   {(event) => <DraftTransition event={event()} />}
@@ -337,17 +346,8 @@ export function DetailActivity(props: {
       <Show when={comments().status === "ready" && references().status === "ready" && (!props.commits || props.commits.status === "ready") && !props.threadsLoading && !props.threadsUnavailable && activity().length === 0}>
         <text width="100%" flexShrink={0} marginTop={1} fg={colors.muted}>No comments or references yet.</text>
       </Show>
-      <Show when={props.commits?.status === "error"}>
-        <text width="100%" flexShrink={0} marginTop={1} fg={colors.red}>× {props.commits?.status === "error" ? props.commits.message : ""}</text>
-      </Show>
       <Show when={(props.commits?.value?.length ?? 0) >= 250 && (props.commitTotal ?? 0) > loadedCommits()}>
         <text width="100%" flexShrink={0} marginTop={1} fg={colors.muted}>Commit history may be incomplete. GitHub's PR commits endpoint returns at most 250 commits.</text>
-      </Show>
-      <Show when={comments().status === "error"}>
-        <text width="100%" flexShrink={0} fg={colors.red}>× {failure(comments())}</text>
-      </Show>
-      <Show when={references().status === "error"}>
-        <text width="100%" flexShrink={0} fg={colors.red}>× {failure(references())}</text>
       </Show>
       <TimelineItem last>{props.children}</TimelineItem>
     </box>

@@ -81,7 +81,7 @@ type IssueDetailResponse = IssueResponse & {
   locked: boolean
   labels: (string | { name: string })[]
   assignees: { login: string }[]
-  milestone: { title: string; due_on: string | null } | null
+  milestone: { title: string; due_on: string | null; html_url?: string } | null
   comments: number
 }
 
@@ -154,7 +154,7 @@ type PullDetailResponse = PullResponse & {
   labels: (string | { name: string })[]
   assignees: { login: string }[]
   requested_reviewers: { login: string }[]
-  requested_teams: { name: string }[]
+  requested_teams: { name: string; html_url?: string }[]
   mergeable: boolean | null
   mergeable_state: string
 }
@@ -326,6 +326,7 @@ function issueDetail(item: IssueDetailResponse, allowPullRequest = false): Issue
     ...(item.milestone ? {
       milestone: {
         title: item.milestone.title,
+        ...(item.milestone.html_url ? { url: item.milestone.html_url } : {}),
         ...(item.milestone.due_on != null ? { dueAt: item.milestone.due_on } : {}),
       },
     } : {}),
@@ -1137,6 +1138,10 @@ export function createGitHubClient(transport: GitHubTransport) {
       reviewers: [
         ...item.requested_reviewers.map((reviewer) => reviewer.login),
         ...item.requested_teams.map((team) => team.name),
+      ],
+      reviewerLinks: [
+        ...item.requested_reviewers.map((reviewer) => ({ name: reviewer.login, url: `https://github.com/${reviewer.login}` })),
+        ...item.requested_teams.filter((team) => team.html_url).map((team) => ({ name: team.name, url: team.html_url! })),
       ],
       mergeable: item.mergeable,
     })

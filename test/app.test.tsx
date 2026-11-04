@@ -8,7 +8,7 @@ import { defaultConfig, type Config } from "../src/config";
 import { appColors, resolveTheme } from "../src/theme";
 import { issueIcons, pullRequestIcons, repositoryIcons, workflowIcons } from "../src/ui/icons";
 import type { CommitDetailState, RepositoryData, ResourceState } from "../src/repository-state";
-import type { DetailTarget, Page } from "../src/navigation";
+import type { DetailTarget, InitialNavigation, NavigationState, Page } from "../src/navigation";
 import { ThemeProvider, useTheme } from "../src/ui/theme";
 import {
   commitDetailFixture,
@@ -581,6 +581,48 @@ describe("opengh TUI", () => {
     setConfig({ ...defaultConfig, showStatusBarHints: true, hideDocumentsTab: false, compactHeader: false, iconStyle: "unicode" });
     await view.flush();
     expect(statusLine()).toBe("esc back · D diff · r refresh · o GitHub · y copy SHA · ? help");
+  });
+
+  test("About sidebar links open the parent repository internally and description URLs externally", async () => {
+    const parentRepository = "upstream/terminal";
+    const parentUrl = new URL(`/${parentRepository}`, githubDataFixture.repo.url).href;
+    const externalUrl = "https://example.com/docs/";
+    const locations: Array<{ repository: string; initial: InitialNavigation; origin: NavigationState; entry?: NavigationState }> = [];
+    const external: string[] = [];
+    const view = await testRender(() => <App
+      data={{ ...githubDataFixture, repo: { ...githubDataFixture.repo,
+        parentRepository, description: `Terminal toolkit ${externalUrl}`,
+      } }}
+      config={defaultConfig}
+      operations={repositoryOperationsFixture}
+      onOpenLocation={(repository, initial, origin, entry) => { locations.push({ repository, initial, origin, entry }); }}
+      onOpenUrl={async (url) => { external.push(url); }}
+    />, { width: 120, height: 32 });
+    active.push(view);
+    await view.flush();
+    expect(view.captureCharFrame()).toContain("Forked from");
+    expect(view.captureCharFrame()).toContain(parentRepository);
+    expect(view.captureCharFrame()).toContain("example.com/docs");
+    const clickLink = async (href: string) => {
+      for (let y = 0; y < view.renderer.height; y++) {
+        for (let x = 0; x < view.renderer.width; x++) {
+          if (view.renderer.getLinkAt(x, y) !== href) continue;
+          await view.mockMouse.click(x, y);
+          await view.flush();
+          return;
+        }
+      }
+      throw new Error(`No painted hyperlink for ${href}`);
+    };
+    await clickLink(parentUrl);
+    expect(locations).toEqual([{
+      repository: parentRepository, initial: { page: "overview" },
+      origin: expect.objectContaining({ page: "overview" }), entry: undefined,
+    }]);
+    expect(external).toEqual([]);
+    await clickLink(externalUrl);
+    expect(external).toEqual([externalUrl]);
+    expect(locations).toHaveLength(1);
   });
 
   test("renders repository metadata while the README loads", async () => {

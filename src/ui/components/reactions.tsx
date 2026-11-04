@@ -1,3 +1,5 @@
+import { useRenderer } from "@opentui/solid"
+import { MouseButton } from "@opentui/core"
 import { createEffect, createMemo, For, Show } from "solid-js"
 import type { ReactionCounts, ReactionKind, ReactionState, ReactionTarget } from "../../models"
 import type { ReactionActionState } from "../../repository-state"
@@ -66,6 +68,7 @@ export function messageReactionMouse(
   controls: () => ReactionControls | undefined,
   interactive: () => boolean,
 ) {
+  const renderer = useRenderer()
   const identity = () => { const current = target(); return current ? `${reactionKey(current)}:${current.nodeId ?? ""}` : undefined }
   const enabled = () => interactive() && !!controls() && !!target()
   const canReact = () => enabled() && state()?.canReact !== false && controls()?.action(target()!).operation.status !== "loading"
@@ -75,8 +78,14 @@ export function messageReactionMouse(
   createEffect(() => { identity(); interactive(); double.onMouseDrag(); context.onMouseDrag() })
   return {
     ...hover.handlers,
-    onMouseDown(event: Parameters<typeof double.onMouseDown>[0]) { double.onMouseDown(event); context.onMouseDown(event) },
-    onMouseUp(event: Parameters<typeof double.onMouseUp>[0]) { double.onMouseUp(event); context.onMouseUp(event) },
+    onMouseDown(event: Parameters<typeof double.onMouseDown>[0]) {
+      if (event.button === MouseButton.LEFT && renderer.getLinkAt(event.x, event.y)) { double.onMouseDrag(); return }
+      double.onMouseDown(event); context.onMouseDown(event)
+    },
+    onMouseUp(event: Parameters<typeof double.onMouseUp>[0]) {
+      if (event.button === MouseButton.LEFT && renderer.getLinkAt(event.x, event.y)) { double.onMouseDrag(); return }
+      double.onMouseUp(event); context.onMouseUp(event)
+    },
     onMouseDrag() { double.onMouseDrag(); context.onMouseDrag(); hover.handlers.onMouseDrag() },
     onMouseScroll() { double.onMouseScroll(); context.onMouseScroll(); hover.handlers.onMouseScroll() },
   }

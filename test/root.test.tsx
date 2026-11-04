@@ -1,13 +1,14 @@
 import { createTestReviewSession } from "./fixtures/reviews"
 import { afterEach, describe, expect, test } from "bun:test"
 import { testRender } from "@opentui/solid"
+import { CodeRenderable, type Renderable } from "@opentui/core"
 import { createSignal } from "solid-js"
 import { defaultConfig, type Config } from "../src/config"
-import type { IssueDetailState, PullDetailState, RepositoryState } from "../src/repository-state"
+import type { CommitDetailState, IssueDetailState, PullDetailState, RepositoryState } from "../src/repository-state"
 import { parseLaunchArguments } from "../src/launch-target"
 import { Root } from "../src/root"
 import { GitHubApiError } from "../src/github/transport"
-import { githubDataFixture, repositoryOperationsFixture, issueDetailFixture, issuePullReferenceFixture } from "./fixtures/github-data"
+import { githubDataFixture, repositoryOperationsFixture, issueDetailFixture, issuePullReferenceFixture, commitDetailFixture } from "./fixtures/github-data"
 
 const active: Array<{ renderer: { destroy(): void; isDestroyed: boolean } }> = []
 afterEach(() => {
@@ -651,4 +652,109 @@ test("remapped interrupt cancels commands without quitting, then quits after com
   expect(copied).toBe("command output\n")
   view.mockInput.pressKey("x", { ctrl: true })
   expect(view.renderer.isDestroyed).toBe(true)
+})
+
+
+test("mouse hyperlinks resolve entities and preserve Back across repositories and linked lists", async () => {
+  const source = "owner/source"
+  const destination = "owner/other"
+  const sourceUrl = `https://github.com/${source}`
+  const pullUrl = `https://github.com/${destination}/issues/42`
+  const commitUrl = `https://github.com/${destination}/commit/abc1234`
+  const externalUrl = "https://example.com/guide#install"
+  const missingUrl = "https://github.com/owner/missing/pull/99"
+  const [state, setState] = createSignal<RepositoryState>({ status: "loading", repository: source })
+  const [issue, setIssue] = createSignal<IssueDetailState>()
+  const [pull, setPull] = createSignal<PullDetailState>()
+  const [commit, setCommit] = createSignal<CommitDetailState>()
+  const repositories: string[] = []
+  const resolved: string[] = []
+  const external: string[] = []
+  const session = { ...readySession(), state, issueDetail: issue, pullDetail: pull, commitDetail: commit,
+    clearIssue: () => setIssue(undefined), clearPull: () => setPull(undefined), clearCommit: () => setCommit(undefined),
+    load: async (repository: string) => {
+      repositories.push(repository)
+      setState({ status: "loading", repository })
+      await Promise.resolve()
+      if (repository === "owner/missing") { setState({ status: "error", repository, message: "Repository unavailable" }); return }
+      setState({ status: "ready", repository, data: { ...structuredClone(githubDataFixture),
+        repo: { ...githubDataFixture.repo, nameWithOwner: repository, url: `https://github.com/${repository}` } },
+        operations: structuredClone(repositoryOperationsFixture) })
+    },
+    loadIssue: async (number: number) => {
+      setIssue({ number, resource: { status: "ready", value: { ...issueDetailFixture, number,
+        title: number === 1 ? "Source issue" : "Another issue", url: `${sourceUrl}/issues/${number}`,
+        body: `[Other PR](${pullUrl}) · [External](${externalUrl}) · [Home](${sourceUrl}) · [List](${sourceUrl}/issues) · [Missing](${missingUrl})` } },
+        comments: { status: "ready", value: { items: [], page: 1, hasMore: false } }, references: { status: "ready", value: [] } })
+    },
+    loadPull: async (number: number) => {
+      setPull({ number, resource: { status: "ready", value: { ...issueDetailFixture, number,
+        title: "Destination PR", url: pullUrl.replace("/issues/", "/pull/"), body: `[Commit](${commitUrl})`,
+        merged: false, draft: false, baseBranch: "main", headBranch: "feature", additions: 1, deletions: 0,
+        changedFiles: 1, commitCount: 1, reviewers: [], mergeable: true } },
+        comments: { status: "ready", value: { items: [], page: 1, hasMore: false } }, references: { status: "ready", value: [] },
+        commits: { status: "ready", value: [] }, context: { status: "loading", phase: "load" } })
+    },
+    loadCommit: async (sha: string) => { setCommit({ sha, resource: { status: "ready", value: {
+      ...commitDetailFixture, sha, message: "Target commit", fullMessage: "Target commit" } } }) },
+  }
+  const view = await testRender(() => <Root cwd="/unused" repositoryArgument={source} initialDetail={{ kind: "issue", number: 1 }}
+    services={{ createPullReviewSession: createTestReviewSession, createRepositorySession: () => session,
+      resolveRepository: async () => source, resolveLocalRepository: async () => undefined,
+      loadRecentRepositories: async () => [], rememberRepository: async () => {},
+      loadRepositoryTabs: async () => ({}), saveRepositoryTabs: async () => {}, loadConfig: async () => ({ ...defaultConfig }),
+      loadIssueKind: async (repository, number) => { resolved.push(`${repository}#${number}`); return "pull" },
+      openUrl: async (url) => { external.push(url) },
+    }} />, { width: 120, height: 32 })
+  active.push(view)
+  const settle = async () => { await Bun.sleep(0); await view.flush() }
+  const blocks = (node: Renderable): CodeRenderable[] => [
+    ...(node instanceof CodeRenderable ? [node] : []), ...node.getChildren().flatMap(blocks),
+  ]
+  const click = async (url: string) => {
+    for (let pass = 0; pass < 3; pass++) {
+      await settle()
+      await Promise.all(blocks(view.renderer.root).map((block) => block.highlightingDone))
+      await view.flush()
+      for (let y = 0; y < view.renderer.height; y++) for (let x = 0; x < view.renderer.width; x++) {
+        if (view.renderer.getLinkAt(x, y) !== url) continue
+        await view.mockMouse.click(x, y)
+        await settle()
+        return
+      }
+    }
+    throw new Error(`Link was not painted: ${url}`)
+  }
+  const back = async () => { view.mockInput.pressEscape(); await Bun.sleep(30); await settle() }
+  await settle()
+  expect(view.captureCharFrame()).toContain("Source issue")
+  await click(externalUrl)
+  expect(external).toEqual([externalUrl])
+  expect(view.captureCharFrame()).toContain("Source issue")
+  await click(pullUrl)
+  expect(resolved).toEqual([`${destination}#42`])
+  expect(view.captureCharFrame()).toContain("Destination PR")
+  await click(commitUrl)
+  expect(view.captureCharFrame()).toContain("Target commit")
+  await back()
+  expect(view.captureCharFrame()).toContain("Destination PR")
+  expect(repositories).toEqual([source, destination])
+  await back()
+  expect(view.captureCharFrame()).toContain("Source issue")
+  expect(repositories).toEqual([source, destination, source])
+  await click(sourceUrl)
+  expect(view.captureCharFrame()).not.toContain("Source issue")
+  await back()
+  expect(view.captureCharFrame()).toContain("Source issue")
+  await click(`${sourceUrl}/issues`)
+  view.mockInput.pressEnter()
+  await settle()
+  expect(view.captureCharFrame()).toContain("Another issue")
+  await back()
+  await back()
+  expect(view.captureCharFrame()).toContain("Source issue")
+  await click(missingUrl)
+  expect(view.captureCharFrame()).toContain("Repository unavailable")
+  await back()
+  expect(view.captureCharFrame()).toContain("Source issue")
 })

@@ -1,7 +1,7 @@
 import { RGBA, rgbToHex, TextAttributes, type ScrollBoxRenderable } from "@opentui/core"
 import { useRenderer, useTerminalDimensions } from "@opentui/solid"
 import { useKeyActions } from "../keybindings"
-import { createEffect, createMemo, onCleanup, Show } from "solid-js"
+import { createEffect, createMemo, For, onCleanup, Show } from "solid-js"
 import { defaultConfig, type DetailLayout } from "../../config"
 import type { PullRequestDetail, PullRequestSummary, PullContext, IssueTimelineEvent, IssueReference } from "../../models"
 import type { PullDetailState, ResourceState } from "../../repository-state"
@@ -24,6 +24,7 @@ import { useTheme } from "../theme"
 
 function PullMetadata(props: { pull: PullRequestDetail; compact: boolean; inline?: boolean; context: ResourceState<PullContext>; events: readonly IssueTimelineEvent[] }) {
   const { colors } = useTheme()
+  const repositoryUrl = () => props.pull.url.replace(/\/pull\/\d+$/, "")
   const headLabel = () => {
     const repository = props.pull.url.split("/").slice(3, 5).join("/")
     return props.pull.headRepository && props.pull.headRepository !== repository
@@ -35,19 +36,28 @@ function PullMetadata(props: { pull: PullRequestDetail; compact: boolean; inline
         <text height={1} flexShrink={0} fg={colors.text} attributes={TextAttributes.BOLD}>Details</text>
       </Show>
       <Show when={props.inline} fallback={<>
-      <MetadataField label="Labels" compact={props.compact} muted={!props.pull.labels.length}>{props.pull.labels.join(" · ") || "none"}</MetadataField>
-      <MetadataField label="Assignees" compact={props.compact} muted={!props.pull.assignees.length}>{props.pull.assignees.join(", ") || "none"}</MetadataField>
+      <MetadataField label="Labels" compact={props.compact} muted={!props.pull.labels.length}>
+        <For each={props.pull.labels} fallback="none">{(label, index) => <>{index() > 0 ? " · " : ""}<a href={`${repositoryUrl()}/pulls?q=${encodeURIComponent(`is:pr label:"${label}"`)}`}>{label}</a></>}</For>
+      </MetadataField>
+      <MetadataField label="Assignees" compact={props.compact} muted={!props.pull.assignees.length}>
+        <For each={props.pull.assignees} fallback="none">{(login, index) => <>{index() > 0 ? ", " : ""}<a href={`https://github.com/${login}`}>{login}</a></>}</For>
+      </MetadataField>
       </>}>
-        <MetadataSummary labels={props.pull.labels} assignees={props.pull.assignees} />
+        <MetadataSummary labels={props.pull.labels} assignees={props.pull.assignees} repositoryUrl={repositoryUrl()} kind="pull" />
       </Show>
       <Show when={!props.inline || props.events.some(event => event.kind === "review")}>
         <PullReviewSummary events={props.events} compact={props.compact} />
       </Show>
       <Show when={props.pull.reviewers.length > 0}>
-        <MetadataField label="Review requested" compact={props.compact}>{props.pull.reviewers.join(", ")}</MetadataField>
+        <MetadataField label="Review requested" compact={props.compact}>
+          <For each={props.pull.reviewers}>{(name, index) => <>{index() > 0 ? ", " : ""}<Show when={props.pull.reviewerLinks?.find((reviewer) => reviewer.name === name)?.url} fallback={name}>{(url) => <a href={url()}>{name}</a>}</Show></>}</For>
+        </MetadataField>
       </Show>
       <MetadataField label="Branches" compact={props.compact}>
-        <span style={{ fg: colors.blue }}>{props.pull.baseBranch}</span>{" ← "}{headLabel()}
+        <span style={{ fg: colors.blue }}><a href={`${repositoryUrl()}/tree/${encodeURIComponent(props.pull.baseBranch)}`}>{props.pull.baseBranch}</a></span>{" ← "}
+        <Show when={props.pull.headRepository} fallback={headLabel()}>
+          {(repository) => <a href={`${repositoryUrl().split("/").slice(0, 3).join("/")}/${repository()}/tree/${encodeURIComponent(props.pull.headBranch)}`}>{headLabel()}</a>}
+        </Show>
       </MetadataField>
       <MetadataField label="Changes" compact={props.compact}>
         {props.pull.commitCount} {props.pull.commitCount === 1 ? "commit" : "commits"}
@@ -126,7 +136,7 @@ export function PullScreen(props: {
     renderer.requestRender()
     onCleanup(() => renderer.off("frame", revealActivity))
   })
-  const keys = useKeyActions({
+  useKeyActions({
     "navigation.up": () => scroll!.scrollBy(-1),
     "navigation.down": () => scroll!.scrollBy(1),
     "navigation.halfPageUp": () => scroll!.scrollBy(-Math.max(1, Math.floor(scroll!.viewport.height / 2))),
@@ -152,18 +162,18 @@ export function PullScreen(props: {
       >
         <box width="100%" maxWidth={contentWidth()} minWidth={0} flexShrink={0} flexDirection="column" paddingTop={1} paddingBottom={1}>
           <text width="100%" flexShrink={0} fg={colors.text} attributes={TextAttributes.BOLD}>
-            {header()?.title ?? "Pull request"} <span style={{ fg: colors.muted }}>#{props.number}</span>
+            {header()?.title ?? "Pull request"} <span style={{ fg: colors.muted }}><Show when={pull()?.url} fallback={`#${props.number}`}>{(url) => <a href={url()}><span style={{ fg: props.interactive ? theme.markdownLink : colors.muted }}>#{props.number}</span></a>}</Show></span>
           </text>
           <Show when={header()}>
             {(current) => (
               <text width="100%" flexShrink={0} marginTop={1} fg={colors.muted}>
                 <span style={{ fg: stateColor() }}>{pullRequestIcon(current(), icons())} {state()}</span>
-                {" · "}<span style={{ fg: colors.text }}>{current().author}</span> opened {ago(current().createdAt)}
+                {" · "}<span style={{ fg: colors.text }}><a href={`https://github.com/${current().author}`}>{current().author}</a></span> opened <Show when={pull()?.url} fallback={ago(current().createdAt)}>{(url) => <a href={url()}>{ago(current().createdAt)}</a>}</Show>
               </text>
             )}
           </Show>
         </box>
-        <ResourceStateView resource={props.detail.resource}>
+        <ResourceStateView resource={props.detail.resource} hideError>
           {(current) => (
             <box width="100%" maxWidth={contentWidth()} minWidth={0} flexShrink={0} flexDirection="row" alignItems="flex-start">
               <box flexGrow={1} flexBasis={0} minWidth={0} flexShrink={1} flexDirection="column" paddingRight={wide() ? 2 : 0}>
@@ -177,7 +187,7 @@ export function PullScreen(props: {
                 </Show>
                 <box {...reactionMouse} id="pull-detail-description" width="100%" minWidth={0} flexShrink={0} backgroundColor={surface()} paddingX={2} paddingY={1} flexDirection="column">
                   <text width="100%" flexShrink={0} fg={colors.muted}>
-                    {icons().user} <b><span style={{ fg: colors.text }}>{current().author}</span></b> · author
+                    {icons().user} <b><span style={{ fg: colors.text }}><a href={`https://github.com/${current().author}`}>{current().author}</a></span></b> · author
                   </text>
                   <box width="100%" minWidth={0} flexShrink={0} marginTop={1}>
                     <Show when={current().body.trim()} fallback={<text fg={colors.muted}>No description provided.</text>}>
@@ -187,9 +197,6 @@ export function PullScreen(props: {
                   <Reactions counts={current().reactions} viewerReactions={current().viewerReactions} canReact={current().canReact}
                     target={{ kind: "pull", number: props.number, nodeId: current().nodeId }} controls={props.reactionControls} interactive={props.interactive} />
                 </box>
-                <Show when={props.detail.resource.status === "error"}>
-                  <text width="100%" flexShrink={0} marginTop={1} fg={colors.red}>× {props.detail.resource.status === "error" ? props.detail.resource.message : ""}</text>
-                </Show>
                 <Show when={props.detail.context.value && !wide() && !props.inlineMetadata}>
                   <box id="pull-detail-context" width="100%" minWidth={0} flexShrink={0} marginTop={1}>
                     <PullContextMetadata context={props.detail.context.value!} compact repository={repository()} />
@@ -210,13 +217,13 @@ export function PullScreen(props: {
                   threadsLoading={props.detail.context.status === "loading"}
                   threadsUnavailable={props.detail.context.status === "error"}
                   subject="pull"
-                  hasFollowingItem={current().state === "open"}
+                  hasFollowingItem={current().state === "open" && props.detail.context.status !== "error"}
                   repository={repository()}
                   syntaxStyle={markdownStyle()}
                   backgroundColor={surface()}
                   context={markdownContext()}
                 >
-                  <Show when={current().state === "open"}>
+                  <Show when={current().state === "open" && props.detail.context.status !== "error"}>
                     <Show when={props.detail.context.value && props.detail.context.status === "ready"} fallback={(
                       <TimelineEntry icon={props.detail.context.status === "loading" ? icons().workflow.clock : icons().workflow.attention} color={colors.muted} nodeOffset={2}>
                         <box width="100%" minWidth={0} flexShrink={0} backgroundColor={surface()} paddingX={2} paddingY={1}>
@@ -228,9 +235,6 @@ export function PullScreen(props: {
                     )}>
                       <PullReadinessPanel context={props.detail.context.value!} expectedHeadSha={current().headSha} backgroundColor={surface()} />
                     </Show>
-                  </Show>
-                  <Show when={props.detail.context.status === "error"}>
-                    <text width="100%" flexShrink={0} marginTop={1} fg={colors.red}>× {props.detail.context.status === "error" ? props.detail.context.message : ""}{keys.hint("view.refresh", "retry PR details") ? ` · ${keys.hint("view.refresh", "retry PR details")}` : ""}</text>
                   </Show>
                 </DetailActivity>
               </box>

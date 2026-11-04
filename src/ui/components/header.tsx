@@ -11,16 +11,21 @@ import { mouseClick } from "../mouse"
 
 function RepositoryName(props: { repo: Repo; short?: boolean; interactive?: boolean; onOpen?: () => void }) {
   const { colors } = useTheme()
+  const pickerMouse = mouseClick(() => props.onOpen?.(), () => props.interactive !== false && Boolean(props.onOpen))
   return (
     <box id="repository-dropdown" flexDirection="row" flexShrink={1} minWidth={0} maxWidth="100%"
-      {...mouseClick(() => props.onOpen?.(), () => props.interactive !== false && Boolean(props.onOpen))}>
+      {...(props.onOpen ? pickerMouse : {})}>
       <box flexDirection="row" flexShrink={1} minWidth={0} overflow="hidden">
         <Show when={!props.short}>
-          <text height={1} wrapMode="none" flexShrink={0} selectable={!props.onOpen} fg={colors.muted}>{props.repo.nameWithOwner.split("/")[0]}/</text>
+          <text height={1} wrapMode="none" flexShrink={0} selectable={!props.onOpen} fg={colors.muted}>
+            <Show when={!props.onOpen && props.interactive !== false} fallback={`${props.repo.nameWithOwner.split("/")[0]}/`}><a href={props.repo.url}>{props.repo.nameWithOwner.split("/")[0]}/</a></Show>
+          </text>
         </Show>
         <text height={1} wrapMode="none" truncate flexShrink={1} minWidth={0} selectable={!props.onOpen}
           fg={props.interactive === false && props.onOpen ? colors.muted : colors.blue} attributes={TextAttributes.BOLD}>
-          {props.repo.nameWithOwner.split("/").slice(1).join("/")}
+          <Show when={!props.onOpen && props.interactive !== false} fallback={props.repo.nameWithOwner.split("/").slice(1).join("/")}>
+            <a href={props.repo.url}>{props.repo.nameWithOwner.split("/").slice(1).join("/")}</a>
+          </Show>
         </text>
       </box>
       <Show when={props.onOpen}><text flexShrink={0} height={1} selectable={false} fg={colors.muted}> ▾</text></Show>

@@ -44,8 +44,11 @@ export function PullContextMetadata(props: { context: PullContext; compact: bool
             {(issue, index) => (
               <>
                 <Show when={index() > 0}><Show when={props.compact} fallback={<br />}>{" · "}</Show></Show>
-                <span style={{ fg: colors.blue }}><a href={issue.url}>{issue.repository === props.repository ? "" : issue.repository}#{issue.number}</a></span>
-                {` · ${issue.state === "closed" ? "Closed" : "Open"} · ${issue.title}`}
+                <span style={{ fg: colors.blue }}>
+                  <Show when={issue.repository !== props.repository}><a href={issue.url.replace(/\/issues\/\d+.*$/, "")}>{issue.repository}</a></Show>
+                  <a href={issue.url}>#{issue.number}</a>
+                </span>
+                {` · ${issue.state === "closed" ? "Closed" : "Open"} · `}<a href={issue.url}>{issue.title}</a>
               </>
             )}
           </For>

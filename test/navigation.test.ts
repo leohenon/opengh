@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { back, navigate, openDetail, openDiff, type NavigationState } from "../src/navigation"
+import { atRepositoryEntry, back, navigate, openDetail, openDiff, openPage, type NavigationState } from "../src/navigation"
 
 describe("navigation", () => {
   test("tab switches preserve each diff and back closes only the active tab's diff", () => {
@@ -77,4 +77,20 @@ describe("navigation", () => {
     const state: NavigationState = { page: "issues" }
     expect(back(state)).toBe(state)
   })
+  test("linked lists/documents restore their origin after local details unwind", () => {
+    const first = openDetail({ page: "issues" }, { kind: "issue", number: 1 })
+    const origin = openDetail(first, { kind: "issue", number: 2 })
+    const list = openPage(origin, "issues")
+    const detail = openDetail(list, { kind: "issue", number: 3 })
+    expect(back(detail)).toEqual(list)
+    expect(back(back(detail))).toBe(origin)
+    expect(back(origin)).toEqual(first)
+    const document = openPage(origin, "overview", "readme")
+    expect(document.document).toBe("readme")
+    expect(back(document)).toBe(origin)
+    expect(atRepositoryEntry(origin, origin)).toBe(true)
+    expect(atRepositoryEntry(detail, origin)).toBe(false)
+    expect(atRepositoryEntry(openDiff(origin, { kind: "pull", number: 3 }), origin)).toBe(false)
+  })
+
 })

@@ -80,10 +80,10 @@ export function IssueReferencesPicker(props: {
                     <text width={3} flexShrink={0} fg={referenceColor(colors, reference())}>{referenceIcon(reference(), icons())}</text>
                     <box height={2} flexGrow={1} flexBasis={0} minWidth={0}>
                       <ListLine fg={colors.text} attributes={selected() ? TextAttributes.BOLD : TextAttributes.NONE}>
-                        {(width) => fitText(`${referenceIdentifier(reference())} ${reference().title}`, width)}
+                        {(width) => <a href={reference().url}>{fitText(`${referenceIdentifier(reference())} ${reference().title}`, width)}</a>}
                       </ListLine>
                       <ListLine fg={colors.muted}>
-                        {(width) => fitText(`${reference().repository} · ${referenceState(reference())}`, width)}
+                        {(width) => <a href={reference().url}>{fitText(`${reference().repository} · ${referenceState(reference())}`, width)}</a>}
                       </ListLine>
                     </box>
                   </>

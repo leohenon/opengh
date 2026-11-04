@@ -35,6 +35,7 @@ export function RunScreen(props: {
 }) {
   const { colors } = useTheme()
   const icons = useIcons()
+  const repositoryUrl = () => props.detail.resource.value?.url.replace(/\/actions\/runs\/\d+.*$/, "")
   const centered = () => (props.detailLayout ?? defaultConfig.detailLayout) === "centered"
   const contentWidth = () => detailContentWidth(props.detailLayout)
   let scroll: ScrollBoxRenderable | undefined
@@ -82,7 +83,7 @@ export function RunScreen(props: {
             {props.detail.resource.value?.title || props.summary?.title || `Workflow run ${props.id}`}
           </text>
         </box>
-        <ResourceStateView resource={props.detail.resource}>
+        <ResourceStateView resource={props.detail.resource} hideError>
           {(run) => (
             <box width="100%" maxWidth={contentWidth()} minWidth={0} flexShrink={0} flexDirection="column">
               <text width="100%" flexShrink={0} fg={runColor(run(), colors)}>
@@ -90,13 +91,13 @@ export function RunScreen(props: {
                 <span style={{ fg: colors.muted }}> · {duration(run().startedAt, run().status === "completed" ? run().updatedAt : null, run().status === "in_progress")}</span>
               </text>
               <text width="100%" flexShrink={0} fg={colors.text}>
-                {run().name} #{run().number} · attempt {run().attempt}
+                <a href={run().url}>{run().name} #{run().number}</a> · attempt {run().attempt}
               </text>
               <text width="100%" flexShrink={0} fg={colors.muted}>
-                {run().event} · {icons().user} {run().actor || "Unknown actor"}
+                {run().event} · {icons().user} <Show when={run().actor} fallback="Unknown actor">{(login) => <a href={`https://github.com/${login()}`}>{login()}</a>}</Show>
               </text>
               <text width="100%" flexShrink={0} wrapMode="char" fg={colors.muted}>
-                {icons().branch} {run().branch || "Unknown branch"} · {run().sha.slice(0, 7) || "Unknown commit"}
+                {icons().branch} <Show when={run().branch} fallback="Unknown branch">{(branch) => <a href={`${repositoryUrl()}/tree/${encodeURIComponent(branch())}`}>{branch()}</a>}</Show> · <Show when={run().sha} fallback="Unknown commit">{(sha) => <a href={`${repositoryUrl()}/commit/${sha()}`}>{sha().slice(0, 7)}</a>}</Show>
               </text>
               <text width="100%" flexShrink={0} fg={colors.muted}>Created {exactDate(run().createdAt)} · {ago(run().createdAt)}</text>
               <Show when={run().startedAt}>
@@ -104,25 +105,20 @@ export function RunScreen(props: {
               </Show>
               <text width="100%" flexShrink={0} fg={colors.muted}>Updated {exactDate(run().updatedAt)}</text>
               <Show when={run().workflowPath}>
-                <text width="100%" flexShrink={0} wrapMode="char" fg={colors.muted}>{run().workflowPath}</text>
-              </Show>
-              <Show when={props.detail.resource.status === "error"}>
-                <text width="100%" flexShrink={0} marginTop={1} fg={colors.red}>
-                  × {props.detail.resource.status === "error" ? props.detail.resource.message : ""}{keys.hint("view.refresh", "retry") ? ` · ${keys.hint("view.refresh", "retry")}` : ""}
-                </text>
+                <text width="100%" flexShrink={0} wrapMode="char" fg={colors.muted}><a href={`${repositoryUrl()}/blob/${encodeURIComponent(run().sha)}/${run().workflowPath.split("/").map(encodeURIComponent).join("/")}`}>{run().workflowPath}</a></text>
               </Show>
               <text width="100%" flexShrink={0} marginTop={1} fg={colors.text} attributes={TextAttributes.BOLD}>
                 Jobs{props.detail.jobs.value ? ` · ${props.detail.jobs.value.items.length}${props.detail.jobs.value.hasMore ? " loaded" : ""}` : ""}
               </text>
               <box width="100%" minWidth={0} flexShrink={0} flexDirection="column">
-                <ResourceStateView resource={props.detail.jobs}>
+                <ResourceStateView resource={props.detail.jobs} hideError>
                   {(jobs) => (
                     <box width="100%" minWidth={0} flexShrink={0} flexDirection="column">
                       <For each={jobs().items} fallback={<text width="100%" flexShrink={0} fg={colors.muted}>No jobs.</text>}>
                         {(job) => (
                           <box width="100%" minWidth={0} flexShrink={0} flexDirection="column" marginTop={1}>
                             <text width="100%" flexShrink={0} fg={runColor(job, colors)}>
-                              {runIcon(job, icons().workflow)} <b><span style={{ fg: colors.text }}>{job.name}</span></b>
+                              {runIcon(job, icons().workflow)} <b><span style={{ fg: colors.text }}><a href={`${run().url}/job/${job.id}`}>{job.name}</a></span></b>
                               {" · "}{runState(job)} · {duration(job.startedAt, job.completedAt, job.status === "in_progress")}
                             </text>
                             <text width="100%" flexShrink={0} fg={colors.muted}>  Runner: {job.runner || "Not assigned"}</text>
@@ -139,11 +135,6 @@ export function RunScreen(props: {
                           </box>
                         )}
                       </For>
-                      <Show when={props.detail.jobs.status === "error"}>
-                        <text width="100%" flexShrink={0} marginTop={1} fg={colors.red}>
-                          × {props.detail.jobs.status === "error" ? props.detail.jobs.message : ""}{keys.hint("view.refresh", "retry") ? ` · ${keys.hint("view.refresh", "retry")}` : ""}
-                        </text>
-                      </Show>
                       <Show when={jobs().hasMore}>
                         <text width="100%" flexShrink={0} marginTop={1} fg={colors.muted}>{keys.hint("navigation.activate", "load more jobs")}</text>
                       </Show>

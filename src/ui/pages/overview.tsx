@@ -1,6 +1,6 @@
 import { TextAttributes, type ScrollBoxRenderable } from "@opentui/core"
 import { useTerminalDimensions } from "@opentui/solid"
-import { createMemo, For, onCleanup, Show } from "solid-js"
+import { createEffect, createMemo, createSignal, For, on, onCleanup, Show } from "solid-js"
 import { defaultConfig, type DetailLayout } from "../../config"
 import type { Repo } from "../../models"
 import type { RepositoryDocumentState, ResourceState } from "../../repository-state"
@@ -13,6 +13,7 @@ import { useTheme } from "../theme"
 import { useIcons } from "../icon-style"
 import { createScrollbarVisibility } from "../scrollbar-visibility"
 import { mouseClick } from "../mouse"
+import type { MarkdownAnchorRequest, MarkdownAnchorResolver } from "../markdown-anchors"
 
 function extractAboutContent(value: string) {
   const urls: string[] = []
@@ -65,6 +66,7 @@ export function OverviewScreen(props: {
   repo: Repo
   documents: ResourceState<RepositoryDocumentState[]>
   currentDocument?: string
+  documentAnchor?: MarkdownAnchorRequest
   interactive?: boolean
   onSelectDocument?: (id: string) => void
   onMoveDocument?: (delta: number) => void
@@ -109,6 +111,18 @@ export function OverviewScreen(props: {
   const compactDocuments = () => hasDocumentTabs()
     && documentLabelsWidth() > Math.max(1, dimensions().width - (showAboutSidebar() ? 42 : 8))
   const markdownStyle = createReactiveMarkdownStyle(colors, theme)
+
+  let scroll: ScrollBoxRenderable | undefined
+  const [resolveAnchor, setResolveAnchor] = createSignal<MarkdownAnchorResolver>()
+  createEffect(on(() => [props.documentAnchor, resolveAnchor(), document()?.id] as const, ([request, resolve, documentId]) => {
+    if (!request || !resolve || request.document !== documentId) return
+    let cancelled = false
+    onCleanup(() => { cancelled = true })
+    void resolve(request.fragment).then((target) => {
+      if (cancelled || !scroll || !target || target.node.isDestroyed || props.interactive === false) return
+      scroll.scrollTo(Math.max(0, scroll.scrollTop + target.node.y + target.row - scroll.viewport.y))
+    }).catch(() => {})
+  }))
 
   return (
     <box
@@ -207,13 +221,13 @@ export function OverviewScreen(props: {
               </box>
             )}>
               {(_) => {
-                onCleanup(() => props.scrollRef(undefined))
+                onCleanup(() => { scroll = undefined; props.scrollRef(undefined) })
                 return (
                   <scrollbox
                     id="overview-document-scroll"
                     focusable={false}
                     onMouseScroll={(event) => event.stopPropagation()}
-                    ref={(value) => { bindScrollbar(value); props.scrollRef(value) }}
+                    ref={(value) => { scroll = value; bindScrollbar(value); props.scrollRef(value) }}
                     flexGrow={1}
                     minWidth={0}
                     minHeight={0}
@@ -226,6 +240,7 @@ export function OverviewScreen(props: {
                     <box width="100%" maxWidth={detailContentWidth(props.detailLayout)} minWidth={0} flexShrink={0} flexDirection="column">
                       <GitHubMarkdown
                         content={documentResource().value ?? ""}
+                        anchorRef={(resolve) => { setResolveAnchor(() => resolve) }}
                         syntaxStyle={markdownStyle()}
                         context={markdownContext()}
                         plainText={plainDocument()}
@@ -264,14 +279,24 @@ export function OverviewScreen(props: {
           >
             <Show when={repo().parentRepository}>
               <text height={1} flexShrink={0} fg={colors.muted}>Forked from</text>
-              <text flexShrink={0} fg={colors.blue} wrapMode="word">{repo().parentRepository}</text>
+              <text flexShrink={0} fg={theme.markdownLink} wrapMode="word">
+                <Show when={props.interactive !== false} fallback={repo().parentRepository}>
+                  <a href={new URL(`/${repo().parentRepository}`, repo().url).href}>{repo().parentRepository}</a>
+                </Show>
+              </text>
               <box height={1} flexShrink={0} />
             </Show>
             <text flexShrink={0} fg={colors.text} wrapMode="word">{about().description}</text>
             <Show when={about().urls.length > 0}>
               <box height={1} flexShrink={0} />
               <For each={about().urls}>
-                {(url) => <text height={1} flexShrink={0} fg={colors.blue}>{displayUrl(url)}</text>}
+                {(url) => (
+                  <text height={1} flexShrink={0} fg={theme.markdownLink}>
+                    <Show when={props.interactive !== false} fallback={displayUrl(url)}>
+                      <a href={url}>{displayUrl(url)}</a>
+                    </Show>
+                  </text>
+                )}
               </For>
             </Show>
             <box height={1} flexShrink={0} />
