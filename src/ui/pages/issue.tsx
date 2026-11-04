@@ -7,7 +7,7 @@ import type { IssueDetail, IssueReference, IssueSummary } from "../../models"
 import type { IssueDetailState, ResourceState } from "../../repository-state"
 import { Reactions, messageReactionMouse, type ReactionControls } from "../components/reactions"
 import { DetailActivity } from "../components/detail-activity"
-import { MetadataField } from "../components/detail-metadata"
+import { MetadataField, MetadataSummary } from "../components/detail-metadata"
 import { GitHubMarkdown } from "../components/github-markdown"
 import type { GitHubMarkdownContext } from "../github-markdown"
 import { ResourceStateView } from "../components/resource-state"
@@ -20,15 +20,19 @@ import { useTheme } from "../theme"
 import { useIcons } from "../icon-style"
 import { createScrollbarVisibility } from "../scrollbar-visibility"
 
-function IssueMetadata(props: { issue: IssueDetail; compact: boolean }) {
+function IssueMetadata(props: { issue: IssueDetail; compact: boolean; inline?: boolean }) {
   const { colors } = useTheme()
   return (
     <box width="100%" minWidth={0} flexShrink={0} flexDirection="column">
       <Show when={!props.compact}>
         <text height={1} flexShrink={0} fg={colors.text} attributes={TextAttributes.BOLD}>Details</text>
       </Show>
+      <Show when={props.inline} fallback={<>
       <MetadataField label="Labels" compact={props.compact} muted={!props.issue.labels.length}>{props.issue.labels.join(" · ") || "none"}</MetadataField>
       <MetadataField label="Assignees" compact={props.compact} muted={!props.issue.assignees.length}>{props.issue.assignees.join(", ") || "none"}</MetadataField>
+      </>}>
+        <MetadataSummary labels={props.issue.labels} assignees={props.issue.assignees} />
+      </Show>
       <Show when={props.issue.milestone}>
         <MetadataField label="Milestone" compact={props.compact}>
           {props.issue.milestone?.title}
@@ -101,12 +105,13 @@ export function IssueScreen(props: {
   showScrollbar: boolean
   defaultBranch?: string
   detailLayout?: DetailLayout
+  inlineMetadata?: boolean
 }) {
   const { colors, theme } = useTheme()
   const icons = useIcons()
   const dimensions = useTerminalDimensions()
   const renderer = useRenderer()
-  const wide = () => dimensions().width >= 112
+  const wide = () => !props.inlineMetadata && dimensions().width >= 112
   const centered = () => (props.detailLayout ?? defaultConfig.detailLayout) === "centered"
   const contentWidth = () => detailContentWidth(props.detailLayout, wide() ? 32 : 0)
   const surface = createMemo(() => {
@@ -195,7 +200,8 @@ export function IssueScreen(props: {
                   </Show>
                   <Show when={!wide()}>
                     <box width="100%" minWidth={0} flexShrink={0} paddingBottom={1}>
-                      <IssueMetadata issue={current()} compact />
+                      <IssueMetadata issue={current()} compact inline={props.inlineMetadata} />
+                      <Show when={props.inlineMetadata}><IssueDates issue={current()} compact /></Show>
                     </box>
                   </Show>
                   <box id="issue-detail-description" {...reactionMouse} width="100%" minWidth={0} flexShrink={0} backgroundColor={surface()} paddingX={2} paddingY={1} flexDirection="column">
@@ -228,7 +234,7 @@ export function IssueScreen(props: {
                       backgroundColor={surface()}
                       context={markdownContext()}
                     />
-                    <Show when={!wide() && (current().closedAt || current().milestone?.dueAt)}>
+                    <Show when={!props.inlineMetadata && !wide() && (current().closedAt || current().milestone?.dueAt)}>
                       <box width="100%" minWidth={0} flexShrink={0} marginTop={1}>
                         <IssueDates issue={current()} compact />
                       </box>

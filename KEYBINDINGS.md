@@ -49,6 +49,10 @@ Use characters (`j`, `G`, `?`), named keys (`enter`, `esc`, `up`), or modifier c
 
 `global.quit` closes the app outside dialogs and in Help. `global.interrupt` also works inside dialogs, cancelling a running command or quitting otherwise.
 
+In `--standalone` mode, **Ctrl+O** (`global.openFullApp`) reveals the header
+and enables global tab navigation without changing the current page.
+`--inline` prints static output and has no keybindings.
+
 ## Defaults
 
 ```json
@@ -58,6 +62,7 @@ Use characters (`j`, `G`, `?`), named keys (`enter`, `esc`, `up`), or modifier c
     "global.interrupt": ["ctrl+c"],
     "global.reloadConfig": ["ctrl+r"],
     "global.help": ["?"],
+    "global.openFullApp": ["ctrl+o"],
     "global.settings": [","],
     "global.switchRepository": ["s"],
     "navigation.up": ["up", "k"],

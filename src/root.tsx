@@ -73,11 +73,13 @@ export function Root(props: {
   repositoryArgument?: string
   initialPage?: Page
   initialDetail?: LaunchDetail
+  standalone?: boolean
   cwd: string
   services?: Partial<RootServices>
 }) {
   const services = { ...defaultServices, ...props.services }
   const renderer = useRenderer()
+  const [standalone, setStandalone] = createSignal(props.standalone ?? false)
   const [view, setView] = createSignal<View>("resolving")
   const [recent, setRecent] = createSignal<string[]>([])
   const [pickerError, setPickerError] = createSignal("")
@@ -336,7 +338,9 @@ export function Root(props: {
               operations={() => current().operations}
               initialPage={repositoryTabs()[repositoryName.toLowerCase()]}
               initialNavigation={initialNavigation}
-              onPageChange={(page) => rememberTab(repositoryName, page)}
+              standalone={standalone()}
+              onOpenFullApp={() => setStandalone(false)}
+              onPageChange={(page) => { if (!standalone()) rememberTab(repositoryName, page) }}
               config={config()}
               configSaving={configSaving() || configReloading()}
               configError={configError()}

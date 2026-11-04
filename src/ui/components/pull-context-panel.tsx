@@ -7,10 +7,11 @@ import { useTheme } from "../theme"
 import { MetadataField } from "./detail-metadata"
 import { TimelineEntry } from "./timeline-entry"
 
-export function PullContextMetadata(props: { context: PullContext; compact: boolean; repository?: string }) {
+export function PullContextMetadata(props: { context: PullContext; compact: boolean; repository?: string; omitEmpty?: boolean }) {
   const { colors } = useTheme()
   return (
     <box width="100%" minWidth={0} flexShrink={0} flexDirection="column">
+      <Show when={!props.omitEmpty || props.context.milestone}>
       <MetadataField label="Milestone" compact={props.compact} muted={!props.context.milestone}>
         <Show when={props.context.milestone} fallback="none">
           {(milestone) => (
@@ -21,6 +22,8 @@ export function PullContextMetadata(props: { context: PullContext; compact: bool
           )}
         </Show>
       </MetadataField>
+      </Show>
+      <Show when={!props.omitEmpty || props.context.projects?.length}>
       <MetadataField label="Projects" compact={props.compact} muted={!props.context.projects?.length}>
         <Show when={props.context.projects !== undefined} fallback="unavailable">
           <For each={props.context.projects} fallback="none">
@@ -33,6 +36,8 @@ export function PullContextMetadata(props: { context: PullContext; compact: bool
           </For>
         </Show>
       </MetadataField>
+      </Show>
+      <Show when={!props.omitEmpty || props.context.closingIssues?.length}>
       <MetadataField label="Issues closed on merge" compact={props.compact} muted={!props.context.closingIssues?.length}>
         <Show when={props.context.closingIssues !== undefined} fallback="unavailable">
           <For each={props.context.closingIssues} fallback="none">
@@ -46,6 +51,7 @@ export function PullContextMetadata(props: { context: PullContext; compact: bool
           </For>
         </Show>
       </MetadataField>
+      </Show>
     </box>
   )
 }

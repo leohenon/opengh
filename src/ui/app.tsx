@@ -74,6 +74,8 @@ export type AppProps = {
   localRepository?: LocalRepository
   onRunCommand?: (spec: CommandSpec, output: (chunk: string) => void, signal: AbortSignal) => Promise<CommandTask>
   onCommandCaptureCancel?: (cancel: (() => void) | undefined) => void
+  standalone?: boolean
+  onOpenFullApp?: () => void
   initialPage?: Page
   initialNavigation?: InitialNavigation
   onPageChange?: (page: Page) => void
@@ -150,6 +152,13 @@ function AppContent(props: AppProps) {
   const { colors } = useTheme()
   const dimensions = useTerminalDimensions()
   // Startup intent and preferences are sampled once; later writes must not navigate.
+  const [standalone, setStandalone] = createSignal(props.standalone ?? false)
+  const openFullApp = () => {
+    if (!standalone()) return false
+    setStandalone(false)
+    props.onOpenFullApp?.()
+    props.onPageChange?.(page())
+  }
   const initialNavigation = props.initialNavigation
   const initialDetail = initialNavigation?.detail
   const initialPage = initialNavigation?.page ?? props.initialPage ?? "overview"
@@ -1198,12 +1207,12 @@ function AppContent(props: AppProps) {
     if (overlay() === "issue-references") return hint(open, select, ["references.switchTab", "switch tabs"], copy, close)
     // Arrays are priority lists, identical at every terminal width. The footer
     // fits whole hints without hiding recovery/primary actions behind copy/open.
-    const common: HintEntry[] = [...(props.onSwitchRepository ? [["global.switchRepository", "switch repo"] as const] : []), help]
+    const common: HintEntry[] = [...(standalone() ? [["global.openFullApp", "full app"] as const] : []), ...(props.onSwitchRepository ? [["global.switchRepository", "switch repo"] as const] : []), help]
     const resource = activeResource()
     if (resource?.status === "loading" && resource.value === undefined) {
       const detail = diffTarget() || activeRunId() || activeCommitSha() || activeIssueNumber() || activePullNumber()
       const tabs: HintEntry = [["navigation.previousTab", "navigation.nextTab"], "tabs"]
-      return hint(...(detail ? [back] : []), ...(!diffTarget() ? [tabs] : []), ...common)
+      return hint(...(detail ? [back] : []), ...(!diffTarget() && !standalone() ? [tabs] : []), ...common)
     }
     const canRefresh = operations().refresh.status !== "loading" && resource?.status !== "loading"
     const retry: HintEntry[] = canRefresh && resource?.status === "error" ? [["view.refresh", "retry"]] : []
@@ -1272,6 +1281,7 @@ function AppContent(props: AppProps) {
   })
 
   const selectTab = (index: number) => {
+    if (standalone()) return false
     const tab = visibleTabs()[index]
     if (!tab) return false
     selectPage(tab.page)
@@ -1281,6 +1291,7 @@ function AppContent(props: AppProps) {
     "global.quit": quit,
     "global.help": () => setOverlay("help"),
     "global.settings": () => setOverlay("settings"),
+    "global.openFullApp": openFullApp,
     "global.switchRepository": () => {
       if (!props.onSwitchRepository) return false
       setOverlay("switch-repo")
@@ -1296,8 +1307,8 @@ function AppContent(props: AppProps) {
     "navigation.tab3": () => selectTab(2),
     "navigation.tab4": () => selectTab(3),
     "navigation.tab5": () => selectTab(4),
-    "navigation.previousTab": () => { if (diffTarget()) return false; movePage(-1) },
-    "navigation.nextTab": () => { if (diffTarget()) return false; movePage(1) },
+    "navigation.previousTab": () => { if (diffTarget() || standalone()) return false; movePage(-1) },
+    "navigation.nextTab": () => { if (diffTarget() || standalone()) return false; movePage(1) },
     "item.open": () => {
       const diff = diffTarget()
       if (diff) void openInBrowser(diff.kind === "pull" ? diff.number : diff.sha, undefined, "diff")
@@ -1407,9 +1418,11 @@ function AppContent(props: AppProps) {
     <MotionProvider reduced={config().reducedMotion}>
     <MarkdownProvider style={config().markdownStyle}>
     <box width={dimensions().width} height={dimensions().height} flexDirection="column" backgroundColor={colors.canvas}>
+      <Show when={!standalone()}>
       <Header repo={data().repo} page={page()} tabs={visibleTabs()} workCounts={data().workCounts} compact={config().compactHeader} showTabCounts={config().showTabCounts}
         interactive={overlay() === undefined} onSelect={selectHeaderPage}
         onOpenRepository={props.onSwitchRepository ? openRepositoryPicker : undefined} />
+      </Show>
       <box {...pageMouse} flexGrow={1} minHeight={0} flexDirection="column">
       <box visible={!diffTarget()} flexGrow={1} minHeight={0} flexDirection="column">
       <box visible={page() === "overview"} flexGrow={1} minHeight={0}>
@@ -1542,6 +1555,7 @@ function AppContent(props: AppProps) {
         {(number) => (
           <box visible={page() === "issues"} flexGrow={1} minHeight={0}>
             <IssueScreen
+              inlineMetadata={config().detailsPlacement === "inline"}
               number={number}
               summary={issueSummary()}
               detail={issueDetail()}
@@ -1561,6 +1575,7 @@ function AppContent(props: AppProps) {
         {(number) => (
           <box visible={page() === "pulls"} flexGrow={1} minHeight={0}>
             <PullScreen
+              inlineMetadata={config().detailsPlacement === "inline"}
               number={number}
               summary={pullSummary()}
               detail={pullDetail()}
@@ -1646,6 +1661,7 @@ function AppContent(props: AppProps) {
       <Show when={overlay() === "help"}>
         <Help
           onClose={() => setOverlay()}
+          standalone={standalone()}
           view={diffTarget() ? "diff" : activeRunId() ? "run" : activeCommitSha() ? "commit" : activeIssueNumber() ? "issue" : activePullNumber() ? "pull" : page()}
           hasDocumentTabs={overviewDocuments().length > 1}
           hasMoreFiles={commitResource().value?.files.hasMore}

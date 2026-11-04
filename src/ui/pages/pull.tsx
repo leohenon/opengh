@@ -7,7 +7,7 @@ import type { PullRequestDetail, PullRequestSummary, PullContext, IssueTimelineE
 import type { PullDetailState, ResourceState } from "../../repository-state"
 import { DetailActivity } from "../components/detail-activity"
 import { TimelineEntry } from "../components/timeline-entry"
-import { MetadataField } from "../components/detail-metadata"
+import { MetadataField, MetadataSummary } from "../components/detail-metadata"
 import { GitHubMarkdown } from "../components/github-markdown"
 import { ResourceStateView } from "../components/resource-state"
 import { Reactions, messageReactionMouse, type ReactionControls } from "../components/reactions"
@@ -22,7 +22,7 @@ import { createReactiveMarkdownStyle } from "../markdown-style"
 import { createScrollbarVisibility } from "../scrollbar-visibility"
 import { useTheme } from "../theme"
 
-function PullMetadata(props: { pull: PullRequestDetail; compact: boolean; context: ResourceState<PullContext>; events: readonly IssueTimelineEvent[] }) {
+function PullMetadata(props: { pull: PullRequestDetail; compact: boolean; inline?: boolean; context: ResourceState<PullContext>; events: readonly IssueTimelineEvent[] }) {
   const { colors } = useTheme()
   const headLabel = () => {
     const repository = props.pull.url.split("/").slice(3, 5).join("/")
@@ -34,9 +34,15 @@ function PullMetadata(props: { pull: PullRequestDetail; compact: boolean; contex
       <Show when={!props.compact}>
         <text height={1} flexShrink={0} fg={colors.text} attributes={TextAttributes.BOLD}>Details</text>
       </Show>
+      <Show when={props.inline} fallback={<>
       <MetadataField label="Labels" compact={props.compact} muted={!props.pull.labels.length}>{props.pull.labels.join(" · ") || "none"}</MetadataField>
       <MetadataField label="Assignees" compact={props.compact} muted={!props.pull.assignees.length}>{props.pull.assignees.join(", ") || "none"}</MetadataField>
-      <PullReviewSummary events={props.events} compact={props.compact} />
+      </>}>
+        <MetadataSummary labels={props.pull.labels} assignees={props.pull.assignees} />
+      </Show>
+      <Show when={!props.inline || props.events.some(event => event.kind === "review")}>
+        <PullReviewSummary events={props.events} compact={props.compact} />
+      </Show>
       <Show when={props.pull.reviewers.length > 0}>
         <MetadataField label="Review requested" compact={props.compact}>{props.pull.reviewers.join(", ")}</MetadataField>
       </Show>
@@ -76,12 +82,13 @@ export function PullScreen(props: {
   showScrollbar: boolean
   defaultBranch?: string
   detailLayout?: DetailLayout
+  inlineMetadata?: boolean
 }) {
   const { colors, theme } = useTheme()
   const icons = useIcons()
   const renderer = useRenderer()
   const dimensions = useTerminalDimensions()
-  const wide = () => dimensions().width >= 112
+  const wide = () => !props.inlineMetadata && dimensions().width >= 112
   const centered = () => (props.detailLayout ?? defaultConfig.detailLayout) === "centered"
   const contentWidth = () => detailContentWidth(props.detailLayout, wide() ? 32 : 0)
   const pull = () => props.detail.resource.value
@@ -162,7 +169,10 @@ export function PullScreen(props: {
               <box flexGrow={1} flexBasis={0} minWidth={0} flexShrink={1} flexDirection="column" paddingRight={wide() ? 2 : 0}>
                 <Show when={!wide()}>
                   <box width="100%" minWidth={0} flexShrink={0} paddingBottom={1}>
-                    <PullMetadata pull={current()} compact context={props.detail.context} events={props.detail.events ?? []} />
+                    <PullMetadata pull={current()} compact inline={props.inlineMetadata} context={props.detail.context} events={props.detail.events ?? []} />
+                    <Show when={props.inlineMetadata && props.detail.context.value}>
+                      {context => <PullContextMetadata context={context()} compact omitEmpty repository={repository()} />}
+                    </Show>
                   </box>
                 </Show>
                 <box {...reactionMouse} id="pull-detail-description" width="100%" minWidth={0} flexShrink={0} backgroundColor={surface()} paddingX={2} paddingY={1} flexDirection="column">
@@ -180,7 +190,7 @@ export function PullScreen(props: {
                 <Show when={props.detail.resource.status === "error"}>
                   <text width="100%" flexShrink={0} marginTop={1} fg={colors.red}>× {props.detail.resource.status === "error" ? props.detail.resource.message : ""}</text>
                 </Show>
-                <Show when={props.detail.context.value && !wide()}>
+                <Show when={props.detail.context.value && !wide() && !props.inlineMetadata}>
                   <box id="pull-detail-context" width="100%" minWidth={0} flexShrink={0} marginTop={1}>
                     <PullContextMetadata context={props.detail.context.value!} compact repository={repository()} />
                   </box>

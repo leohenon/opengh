@@ -7,6 +7,7 @@ import { defaultTheme, isThemeName, type ThemeName } from "./theme"
 export type ColorMode = "system" | "dark" | "light"
 
 export type DetailLayout = "centered" | "wide"
+export type DetailsPlacement = "auto" | "inline"
 export type MarkdownStyle = "rich" | "minimal"
 export type IconStyle = "unicode" | "nerd"
 
@@ -17,6 +18,7 @@ export type Config = {
   reducedMotion: boolean
   markdownStyle: MarkdownStyle
   detailLayout: DetailLayout
+  detailsPlacement: DetailsPlacement
   showStatusBarHints: boolean
   iconStyle: IconStyle
   compactHeader: boolean
@@ -32,6 +34,7 @@ export const defaultConfig: Config = {
   reducedMotion: false,
   markdownStyle: "rich",
   detailLayout: "centered",
+  detailsPlacement: "auto",
   showStatusBarHints: false,
   iconStyle: "nerd",
   compactHeader: false,
@@ -77,6 +80,9 @@ function normalizeConfig(value: unknown): Config {
     detailLayout: input.detailLayout === "centered" || input.detailLayout === "wide"
       ? input.detailLayout
       : defaultConfig.detailLayout,
+    detailsPlacement: input.detailsPlacement === "auto" || input.detailsPlacement === "inline"
+      ? input.detailsPlacement
+      : defaultConfig.detailsPlacement,
     showStatusBarHints: typeof input.showStatusBarHints === "boolean"
       ? input.showStatusBarHints
       : defaultConfig.showStatusBarHints,

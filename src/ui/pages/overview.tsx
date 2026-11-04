@@ -36,6 +36,31 @@ function displayUrl(value: string) {
 export type AboutSidebar = "auto" | "show" | "hide"
 export const aboutSidebarVisible = (mode: AboutSidebar, width: number) => mode === "show" || mode === "auto" && width >= 100
 
+function InlineAbout(props: { repo: Repo }) {
+  const { colors } = useTheme()
+  const icons = useIcons()
+  const about = createMemo(() => extractAboutContent(props.repo.description))
+  return (
+    <box width="100%" minWidth={0} flexShrink={0} paddingX={2} paddingBottom={1} flexDirection="column">
+      <text width="100%" flexShrink={0} fg={colors.text} attributes={TextAttributes.BOLD}>About · {props.repo.nameWithOwner}</text>
+      <text width="100%" flexShrink={0} fg={colors.text}>{about().description}</text>
+      <For each={about().urls}>
+        {url => <text width="100%" flexShrink={0} fg={colors.blue}>{displayUrl(url)}</text>}
+      </For>
+      <Show when={props.repo.parentRepository}>
+        <text width="100%" flexShrink={0} fg={colors.muted}>Forked from <span style={{ fg: colors.blue }}>{props.repo.parentRepository}</span></text>
+      </Show>
+      <text width="100%" flexShrink={0} fg={colors.muted}>
+        {icons().repository.star} {count(props.repo.stars)} stars{" · "}
+        {icons().repository.fork} {count(props.repo.forks)} forks{" · "}
+        {icons().repository.watching} {count(props.repo.watchers)} watching
+        <Show when={props.repo.language && props.repo.language !== "Unknown"}>{" · "}<span style={{ fg: colors.blue }}>{props.repo.language}</span></Show>
+        <Show when={props.repo.license && props.repo.license !== "None"}>{" · "}{props.repo.license}</Show>
+      </text>
+    </box>
+  )
+}
+
 export function OverviewScreen(props: {
   repo: Repo
   documents: ResourceState<RepositoryDocumentState[]>
@@ -47,6 +72,7 @@ export function OverviewScreen(props: {
   hideDocumentsTab?: boolean
   showScrollbar: boolean
   aboutSidebar: AboutSidebar
+  inlineAbout?: boolean
   detailLayout?: DetailLayout
   scrollRef: (value: ScrollBoxRenderable | undefined) => void
 }) {
@@ -77,7 +103,7 @@ export function OverviewScreen(props: {
   const viewResource = createMemo<ResourceState<unknown>>(() => props.documents.value === undefined ? props.documents
     : document() ? documentResource() : { status: "ready", value: null })
   const hasDocumentTabs = () => documents().length > 1
-  const showAboutSidebar = () => aboutSidebarVisible(props.aboutSidebar, dimensions().width)
+  const showAboutSidebar = () => !props.inlineAbout && aboutSidebarVisible(props.aboutSidebar, dimensions().width)
   const documentLabelsWidth = () => documents().reduce((width, item) => width + item.label.length, 0)
     + Math.max(0, documents().length - 1) * 2
   const compactDocuments = () => hasDocumentTabs()
@@ -88,14 +114,17 @@ export function OverviewScreen(props: {
     <box
       flexGrow={1}
       minHeight={0}
-      flexDirection="row"
-      gap={2}
+      flexDirection={props.inlineAbout ? "column" : "row"}
+      gap={props.inlineAbout ? 0 : 2}
       paddingTop={1}
       paddingBottom={1}
       paddingLeft={2}
       paddingRight={2}
       backgroundColor={colors.canvas}
     >
+      <Show when={props.inlineAbout && props.aboutSidebar !== "hide"}>
+        <InlineAbout repo={repo()} />
+      </Show>
       <box flexGrow={1} minWidth={0} minHeight={0} flexDirection="column">
         <Show when={!props.hideDocumentsTab}>
           <box

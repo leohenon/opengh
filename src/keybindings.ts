@@ -6,6 +6,7 @@ export const keybindingDefinitions = {
   "global.interrupt": binding(["ctrl+c"], "Quit / cancel running command"),
   "global.reloadConfig": binding(["ctrl+r"], "Reload configuration"),
   "global.help": binding(["?"], "Help"),
+  "global.openFullApp": binding(["ctrl+o"], "Open full app from standalone mode"),
   "global.settings": binding([","], "Settings"),
   "global.switchRepository": binding(["s"], "Switch repository"),
   "navigation.up": binding(["up", "k"], "Move / scroll up"),

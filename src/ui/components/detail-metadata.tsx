@@ -16,3 +16,16 @@ export function MetadataField(props: { label: string; compact: boolean; muted?: 
     </box>
   )
 }
+
+export function MetadataSummary(props: { labels: readonly string[]; assignees: readonly string[] }) {
+  const { colors } = useTheme()
+  return (
+    <Show when={props.labels.length || props.assignees.length}>
+      <text width="100%" flexShrink={0} fg={colors.muted}>
+        <Show when={props.labels.length}>Labels <span style={{ fg: colors.text }}>{props.labels.join(" · ")}</span></Show>
+        <Show when={props.labels.length && props.assignees.length}>{" · "}</Show>
+        <Show when={props.assignees.length}>Assignees <span style={{ fg: colors.text }}>{props.assignees.join(", ")}</span></Show>
+      </text>
+    </Show>
+  )
+}

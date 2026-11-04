@@ -35,6 +35,19 @@ if (launch.help) {
   process.exit(0)
 }
 
+if (launch.inline) {
+  try {
+    const { printInline } = await import("./inline")
+    await printInline(launch, cwd)
+  } catch (error) {
+    console.error(`opengh: ${error instanceof Error ? error.message : "Could not print page"}`)
+    process.exitCode = 1
+  } finally {
+    await stopGitHubProcesses()
+  }
+  process.exit(process.exitCode ?? 0)
+}
+
 const renderer = await createCliRenderer({
   targetFps: 30,
   exitOnCtrlC: false,
@@ -58,6 +71,7 @@ try {
       repositoryArgument={launch.repositoryArgument}
       initialPage={launch.initialPage}
       initialDetail={launch.initialDetail}
+      standalone={launch.standalone}
       cwd={cwd}
       services={{
         saveConfig: (config) => trackSave(saveConfig(config)),

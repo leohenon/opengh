@@ -7,6 +7,8 @@ export type LaunchOptions = {
   repositoryArgument?: string
   initialPage?: Page
   initialDetail?: LaunchDetail
+  standalone?: boolean
+  inline?: boolean
   help?: boolean
 }
 
@@ -35,6 +37,8 @@ URL query strings and anchors are ignored (no comment or line jumping).
 Quote URLs containing shell metacharacters and identifiers such as '#123'.
 
 Options:
+  --standalone                        Hide global navigation; Ctrl+O opens the full app
+  --inline                            Print the complete page to stdout and exit
   -h, --help                          Show this help
 `
 
@@ -94,11 +98,15 @@ function repositoryLocation(value: string): LaunchOptions | undefined {
 export function parseLaunchArguments(args: readonly string[]): LaunchOptions {
   const positional: string[] = []
   let explicitDetail: LaunchDetail | undefined
+  let standalone = false
+  let inlineMode = false
   let options = true
   for (let index = 0; index < args.length; index++) {
     const argument = args[index]!
     if (options && argument === "--") { options = false; continue }
     if (options && (argument === "--help" || argument === "-h")) return { help: true }
+    if (options && argument === "--standalone") { standalone = true; continue }
+    if (options && argument === "--inline") { inlineMode = true; continue }
     if (!options || !argument.startsWith("-")) { positional.push(argument.trim()); continue }
     const [option, inline] = argument.split(/=(.*)/s)
     if (!["--commit", "--issue", "--pr"].includes(option!))
@@ -109,16 +117,20 @@ export function parseLaunchArguments(args: readonly string[]): LaunchOptions {
     explicitDetail = option === "--commit" ? { kind: "commit", sha: commitHash(value) }
       : { kind: option === "--pr" ? "pull" : "issue", number: positiveNumber(value) }
   }
+  const mode: LaunchOptions = {
+    ...(standalone ? { standalone: true } : {}),
+    ...(inlineMode ? { inline: true } : {}),
+  }
   if (positional.length > 2) throw new Error("Expected at most a repository and one target.")
-  if (!positional.length) return explicitDetail ? { repositoryArgument: ".", initialDetail: explicitDetail } : {}
+  if (!positional.length) return explicitDetail ? { ...mode, repositoryArgument: ".", initialDetail: explicitDetail } : mode
 
   const location = repositoryLocation(positional[0]!)
   if (!location) {
     if (positional.length > 1 || explicitDetail) throw new Error(`Invalid repository: “${positional[0]}”. Expected owner/repo, a GitHub URL, or '.'.`)
-    return { repositoryArgument: ".", initialDetail: identifier(positional[0]!) }
+    return { ...mode, repositoryArgument: ".", initialDetail: identifier(positional[0]!) }
   }
   if (positional[1] !== undefined && explicitDetail) throw new Error("Specify a target either positionally or with an option, not both.")
   const detail = explicitDetail ?? (positional[1] !== undefined ? identifier(positional[1]) : undefined)
   if (detail && (location.initialPage || location.initialDetail)) throw new Error("The URL already selects a page or detail; do not specify another target.")
-  return detail ? { ...location, initialDetail: detail } : location
+  return detail ? { ...mode, ...location, initialDetail: detail } : { ...mode, ...location }
 }

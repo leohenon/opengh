@@ -9,13 +9,13 @@ import { Popup } from "./popup"
 import { ThemePicker } from "./theme-picker"
 import { useKeyActions, useKeybindings } from "../keybindings"
 
-type Setting = "theme" | "color-mode" | "reduced-motion" | "markdown-style" | "scrollbars" | "detail-layout" | "status-bar-hints" | "icon-style" | "compact-header" | "hide-documents-tab" | "tab-counts"
+type Setting = "theme" | "color-mode" | "reduced-motion" | "markdown-style" | "scrollbars" | "detail-layout" | "details-placement" | "status-bar-hints" | "icon-style" | "compact-header" | "hide-documents-tab" | "tab-counts"
 
 const sectionOrder = ["Appearance", "Layout", "Usability"] as const
 type Section = typeof sectionOrder[number]
 const sectionSettings: Record<Section, readonly Setting[]> = {
   Appearance: ["theme", "color-mode", "markdown-style"],
-  Layout: ["compact-header", "tab-counts", "hide-documents-tab", "detail-layout"],
+  Layout: ["compact-header", "tab-counts", "hide-documents-tab", "detail-layout", "details-placement"],
   Usability: ["icon-style", "status-bar-hints", "scrollbars", "reduced-motion"],
 }
 const settingOrder = sectionOrder.flatMap((section) => sectionSettings[section])
@@ -27,6 +27,7 @@ const settingDefinitions: Record<Setting, { title: string; description: string; 
   "tab-counts": { title: "Tab counts", description: "Issue and PR totals", value: (config) => config.showTabCounts ? "on" : "off" },
   "hide-documents-tab": { title: "Document tabs", description: "Overview document navigation", value: (config) => config.hideDocumentsTab ? "off" : "on" },
   "detail-layout": { title: "Detail width", description: "Detail page width", value: (config) => config.detailLayout },
+  "details-placement": { title: "Details placement", description: "Issue and PR metadata", value: (config) => config.detailsPlacement },
   "icon-style": { title: "Icon style", description: "Terminal symbols", value: (config) => config.iconStyle === "nerd" ? "Nerd Font" : "Unicode" },
   "status-bar-hints": { title: "Status bar hints", description: "Keyboard shortcuts", value: (config) => config.showStatusBarHints ? "on" : "off" },
   scrollbars: { title: "Scrollbars", description: "Lists and documents", value: (config) => config.showScrollbars ? "on" : "off" },
@@ -129,6 +130,19 @@ export function Settings(props: {
     }
   }
 
+  const changeDetailsPlacement = async () => {
+    if (busy()) return
+    setSaving(true)
+    setError("")
+    try {
+      await props.onChange({ ...props.config, detailsPlacement: props.config.detailsPlacement === "inline" ? "auto" : "inline" })
+    } catch (error) {
+      setError(error instanceof Error ? error.message : "Could not save settings")
+    } finally {
+      setSaving(false)
+    }
+  }
+
   const changeIconStyle = async () => {
     if (busy()) return
     setSaving(true)
@@ -171,6 +185,7 @@ export function Settings(props: {
       case "compact-header": void toggleBoolean("compactHeader"); break
       case "status-bar-hints": void toggleBoolean("showStatusBarHints"); break
       case "detail-layout": void changeDetailLayout(); break
+      case "details-placement": void changeDetailsPlacement(); break
       case "icon-style": void changeIconStyle(); break
     }
   }
@@ -254,6 +269,10 @@ export function Settings(props: {
     if (selected() === "detail-layout") return {
       title: "Detail width",
       description: "Centered keeps a bounded reading column. Wide uses the available terminal width. Applies to repository documents and detail pages.",
+    }
+    if (selected() === "details-placement") return {
+      title: "Details placement",
+      description: "Auto puts issue and PR metadata in a sidebar on wide terminals and inline on narrow ones. Inline always places details below the title. Overview is not affected. --inline output always uses inline details.",
     }
     return {
       title: "Status bar hints",

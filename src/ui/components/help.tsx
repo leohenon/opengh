@@ -41,6 +41,7 @@ function Shortcut(props: { keys: string; keyWidth: number; children: JSX.Element
 
 export function Help(props: {
   onClose: () => void;
+  standalone?: boolean;
   view: Page | "run" | "commit" | "issue" | "pull" | "diff";
   hasDocumentTabs?: boolean;
   hasMoreFiles?: boolean;
@@ -155,6 +156,10 @@ export function Help(props: {
     const options = pageEntries.filter((item) => !primary.includes(item) && !external.includes(item));
     // Stable sections across every page: primary actions, navigation/options,
     // external actions, then app controls. Numbered tab keys are in the header.
+    const appShortcuts = [
+      ...(props.standalone ? [entry("global.openFullApp", "open full app")] : []),
+      ...applicationShortcuts,
+    ];
     const entries = props.view === "diff" ? [
       entry("navigation.back", "close diff; return to origin"),
       entry("diff.focus", "switch files / diff focus"),
@@ -168,16 +173,16 @@ export function Help(props: {
       entry("diff.toggleWrap", "toggle line wrapping"),
       entry("view.refresh", "refresh / retry"),
       entry("item.open", "open diff on GitHub"),
-      ...applicationShortcuts,
+      ...appShortcuts,
     ] : [
       ...primary,
       ...navigationShortcuts,
-      entry(["navigation.previousTab", "navigation.nextTab"], "switch tabs"),
+      ...(!props.standalone ? [entry(["navigation.previousTab", "navigation.nextTab"], "switch tabs")] : []),
       ...options,
       ...(props.command ? [entry("command.clone", props.command)] : []),
       entry("view.refresh", "refresh / retry"),
       ...external,
-      ...applicationShortcuts,
+      ...appShortcuts,
     ];
     return entries.flatMap(({ actions, description }) => {
       const label = [...new Set(actions.map((action) => keys.key(action, true)).filter(Boolean))].join(" / ");
