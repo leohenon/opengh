@@ -1,7 +1,11 @@
 import { describe, expect, test } from "bun:test"
 import { createGitHubClient } from "../src/github/client"
+import { githubDataFixture } from "./fixtures/github-data"
+import { createRequestBudget, MAX_DETAIL_ITEMS, ResponseLimitError } from "../src/github/request-budget"
 import { currentPullReviews } from "../src/ui/pull-reviews"
-import { GitHubApiError, type GitHubTransport } from "../src/github/transport"
+import { GitHubApiError, type GitHubTransport, type RequestOptions } from "../src/github/transport"
+
+const repository = { ...githubDataFixture.repo, id: 123, nameWithOwner: "renamed/repository" }
 
 type Responses = Record<string, unknown>
 
@@ -37,6 +41,7 @@ describe("GitHub client", () => {
     const client = createGitHubClient({
       async json<T>(path: string) {
         paths.push(path)
+        if (path === "repos/owner/repo/pulls/42") return { commits: 250 } as T
         const page = Number(new URL(`https://api.github.com/${path}`).searchParams.get("page"))
         if (page > 3) throw new Error("Unexpected commit page")
         return Array.from({ length: page === 3 ? 50 : 100 }, (_, index) => {
@@ -48,7 +53,7 @@ describe("GitHub client", () => {
       async text() { return "" },
     })
     const commits = await client.pullCommits("owner/repo", 42)
-    expect(paths).toEqual([1, 2, 3].map((page) => `repos/owner/repo/pulls/42/commits?per_page=100&page=${page}`))
+    expect(paths).toEqual([...([1, 2, 3].map((page) => `repos/owner/repo/pulls/42/commits?per_page=100&page=${page}`)), "repos/owner/repo/pulls/42"])
     expect(commits).toHaveLength(250)
     expect(commits[0]).toMatchObject({ sha: "0".repeat(40), message: "Commit 0", author: "Local Author" })
     expect(commits.at(-1)?.message).toBe("Commit 249")
@@ -57,6 +62,8 @@ describe("GitHub client", () => {
   test("maps repository metadata", async () => {
     const client = createGitHubClient(transport({
       "repos/owner/repo": {
+        id: 123,
+        node_id: "R_fixture_123",
         full_name: "owner/repo",
         html_url: "https://github.com/owner/repo",
         description: null,
@@ -71,6 +78,8 @@ describe("GitHub client", () => {
       },
     }))
     const repo = await client.metadata("owner/repo")
+    expect(repo.id).toBe(123)
+    expect(repo.nodeId).toBe("R_fixture_123")
     expect(repo.nameWithOwner).toBe("owner/repo")
     expect(repo.url).toBe("https://github.com/owner/repo")
     expect(repo.description).toBe("No description provided.")
@@ -499,23 +508,23 @@ describe("GitHub client", () => {
           : { ...issue, state: input.state, state_reason: input.state_reason ?? null }) as T
       },
     })
-    expect(await client.createIssueComment("owner/repo", 42, body)).toEqual({
+    expect(await client.createIssueComment(repository, 42, body)).toEqual({
       id: 9876543210, author: "ghost", authorAssociation: "NONE", body, createdAt: date, updatedAt: date,
     })
-    expect(await client.updateIssueState("owner/repo", 42, "closed")).toMatchObject({
+    expect(await client.updateIssueState(repository, 42, "closed")).toMatchObject({
       state: "closed", stateReason: "completed", body: "", author: "ghost", commentCount: 1,
     })
-    expect(await client.updateIssueState("owner/repo", 42, "closed", "not_planned")).toMatchObject({
+    expect(await client.updateIssueState(repository, 42, "closed", "not_planned")).toMatchObject({
       state: "closed", stateReason: "not_planned",
     })
-    const reopened = await client.updateIssueState("owner/repo", 42, "open", "not_planned")
+    const reopened = await client.updateIssueState(repository, 42, "open", "not_planned")
     expect(reopened.state).toBe("open")
     expect(reopened).not.toHaveProperty("stateReason")
     expect(calls).toEqual([
-      { path: "repos/owner/repo/issues/42/comments", method: "POST", body: { body } },
-      { path: "repos/owner/repo/issues/42", method: "PATCH", body: { state: "closed", state_reason: "completed" } },
-      { path: "repos/owner/repo/issues/42", method: "PATCH", body: { state: "closed", state_reason: "not_planned" } },
-      { path: "repos/owner/repo/issues/42", method: "PATCH", body: { state: "open" } },
+      { path: "repositories/123/issues/42/comments", method: "POST", body: { body } },
+      { path: "repositories/123/issues/42", method: "PATCH", body: { state: "closed", state_reason: "completed" } },
+      { path: "repositories/123/issues/42", method: "PATCH", body: { state: "closed", state_reason: "not_planned" } },
+      { path: "repositories/123/issues/42", method: "PATCH", body: { state: "open" } },
     ])
   })
 
@@ -535,7 +544,10 @@ describe("GitHub client", () => {
           created_at: "2026-01-01", updated_at: "2026-01-01", html_url: "https://github.com/owner/repo/issues/42",
           locked: false, labels: [], assignees: returnedAssignees.map((login) => ({ login })), comments: 0 } as T
       },
-      async graphql<T>(query: string) {
+      async graphql<T>(query: string, variables: Record<string, string>) {
+        expect(variables).toEqual({ repositoryId: "R_fixture_123" })
+        expect(query).toContain("repository: node(id: $repositoryId)")
+        expect(query).not.toContain("$owner")
         expect(query).toContain("viewerCanAssign")
         expect(query).not.toContain("viewerCanUpdate")
         expect(query).not.toContain("viewerCanLabel")
@@ -547,12 +559,12 @@ describe("GitHub client", () => {
     expect(await client.assignableUsers("owner/repo")).toMatchObject({ hasMore: true })
     expect(await client.assignableUsers("owner/repo", 2)).toEqual({ items: ["user0"], hasMore: false })
     expect(paths).toEqual(["repos/owner/repo/assignees?per_page=100&page=1", "repos/owner/repo/assignees?per_page=100&page=2"])
-    const updated = await client.setIssueAssignees("owner/repo", 42, [])
+    const updated = await client.setIssueAssignees(repository, 42, [])
     expect(updated.permissions?.assignees).toBe(true)
     expect(updated.assignees).toEqual([])
-    expect(calls).toEqual([{ path: "repos/owner/repo/issues/42", method: "PATCH", body: { assignees: [] } }])
+    expect(calls).toEqual([{ path: "repositories/123/issues/42", method: "PATCH", body: { assignees: [] } }])
     returnedAssignees = ["BOB", "Alice"]
-    expect((await client.setIssueAssignees("owner/repo", 42, ["alice", "bob"])).assignees).toEqual(returnedAssignees)
+    expect((await client.setIssueAssignees(repository, 42, ["alice", "bob"])).assignees).toEqual(returnedAssignees)
     for (const [requested, returned] of [
       [["alice"], []], // Ignored addition.
       [[], ["alice"]], // Ignored removal.
@@ -561,7 +573,7 @@ describe("GitHub client", () => {
       [["alice"], ["alice", "bob"]], // Unexpected extra assignee.
     ]) {
       returnedAssignees = returned!
-      await expect(client.setIssueAssignees("owner/repo", 42, requested!)).rejects.toThrow("did not confirm the requested assignees")
+      await expect(client.setIssueAssignees(repository, 42, requested!)).rejects.toThrow("did not confirm the requested assignees")
     }
   })
 
@@ -573,8 +585,8 @@ describe("GitHub client", () => {
       closed_at: null, state_reason: null, locked: false, labels: [], assignees: [],
       milestone: null, comments: 0,
     }
-    const sourcePath = "repos/owner/repo/issues/42"
-    const canonicalPath = "repos/owner/repo/issues/7"
+    const sourcePath = "repositories/123/issues/42"
+    const canonicalPath = "repositories/123/issues/7"
     const responses: Responses = {
       [sourcePath]: source,
       [canonicalPath]: { ...source, number: 7, id: 9876543210, state: "closed" },
@@ -591,23 +603,23 @@ describe("GitHub client", () => {
       },
     }
     const client = createGitHubClient(fixture)
-    await expect(client.markIssueDuplicate("owner/repo", 42, 42)).rejects.toThrow("itself")
-    await expect(client.markIssueDuplicate("owner/repo", 0, 7)).rejects.toThrow("positive safe integers")
-    await expect(client.markIssueDuplicate("owner/repo", 42, 1.5)).rejects.toThrow("positive safe integers")
-    await expect(createGitHubClient({ ...fixture, mutate: undefined }).markIssueDuplicate("owner/repo", 42, 7))
+    await expect(client.markIssueDuplicate(repository, 42, 42)).rejects.toThrow("itself")
+    await expect(client.markIssueDuplicate(repository, 0, 7)).rejects.toThrow("positive safe integers")
+    await expect(client.markIssueDuplicate(repository, 42, 1.5)).rejects.toThrow("positive safe integers")
+    await expect(createGitHubClient({ ...fixture, mutate: undefined }).markIssueDuplicate(repository, 42, 7))
       .rejects.toThrow("does not support mutations")
     expect(reads).toEqual([])
     responses[sourcePath] = { ...source, state: "closed" }
-    await expect(client.markIssueDuplicate("owner/repo", 42, 7)).rejects.toThrow("Reopen the issue first")
+    await expect(client.markIssueDuplicate(repository, 42, 7)).rejects.toThrow("Reopen the issue first")
     expect(reads).toEqual([sourcePath])
     responses[sourcePath] = source
     responses[canonicalPath] = { number: 7, id: 9876543210, pull_request: {} }
-    await expect(client.markIssueDuplicate("owner/repo", 42, 7)).rejects.toThrow("is a pull request")
+    await expect(client.markIssueDuplicate(repository, 42, 7)).rejects.toThrow("is a pull request")
     responses[canonicalPath] = { number: 7 }
-    await expect(client.markIssueDuplicate("owner/repo", 42, 7)).rejects.toThrow("valid global issue ID")
+    await expect(client.markIssueDuplicate(repository, 42, 7)).rejects.toThrow("valid global issue ID")
     expect(writes).toEqual([])
     responses[canonicalPath] = { number: 7, id: 9876543210, state: "closed" }
-    expect(await client.markIssueDuplicate("owner/repo", 42, 7)).toEqual({
+    expect(await client.markIssueDuplicate(repository, 42, 7)).toEqual({
       number: 42, state: "closed", stateReason: "duplicate", title: "Duplicate", author: "ghost",
       createdAt: date, url: source.html_url, body: "", updatedAt: date, closedAt: date,
       locked: false, labels: [], assignees: [], commentCount: 0,
@@ -619,19 +631,19 @@ describe("GitHub client", () => {
 
   test("rejects blank comments and unsupported mutations, and does not retry failed writes", async () => {
     const readonly = createGitHubClient(transport())
-    await expect(readonly.createIssueComment("owner/repo", 42, "body")).rejects.toThrow("does not support mutations")
-    await expect(readonly.updateIssueState("owner/repo", 42, "closed")).rejects.toThrow("does not support mutations")
+    await expect(readonly.createIssueComment(repository, 42, "body")).rejects.toThrow("does not support mutations")
+    await expect(readonly.updateIssueState(repository, 42, "closed")).rejects.toThrow("does not support mutations")
     let calls = 0
     const error = new Error("Write denied")
     const client = createGitHubClient({
       ...transport(),
       async mutate<T>(): Promise<T> { calls++; throw error },
     })
-    await expect(client.createIssueComment("owner/repo", 42, " \r\n\t")).rejects.toThrow("must not be blank")
+    await expect(client.createIssueComment(repository, 42, " \r\n\t")).rejects.toThrow("must not be blank")
     expect(calls).toBe(0)
-    await expect(client.createIssueComment("owner/repo", 42, "body")).rejects.toBe(error)
+    await expect(client.createIssueComment(repository, 42, "body")).rejects.toBe(error)
     expect(calls).toBe(1)
-    await expect(client.updateIssueState("owner/repo", 42, "closed")).rejects.toBe(error)
+    await expect(client.updateIssueState(repository, 42, "closed")).rejects.toBe(error)
     expect(calls).toBe(2)
   })
 
@@ -993,4 +1005,165 @@ test("workflow details map nullable fields and fetch jobs for the selected attem
   const jobs = await client.runJobs("owner/repo", 42, 3, 2)
   expect(jobs.hasMore).toBe(true)
   expect(jobs.items[0]).toMatchObject({ id: 7, runner: "", conclusion: "", steps: [{ number: 1, conclusion: "" }] })
+})
+
+test("timeline propagates inherited options, bounds raw pages and preserves cancellation during enrichment", async () => {
+  const budget = createRequestBudget()
+  let calls = 0
+  const client = createGitHubClient({
+    ...transport(),
+    async json<T>(_path: string, options?: RequestOptions) {
+      expect(options?.budget).toBe(budget)
+      expect(options?.signal).toBe(budget.signal)
+      calls++
+      return Array(100).fill(null) as T
+    },
+  })
+  try {
+    await expect(client.issueTimeline("owner/repo", 42, { budget })).rejects.toThrow("incomplete")
+    expect(calls).toBe(20)
+    expect(budget.signal.aborted).toBe(false)
+  } finally { budget.dispose() }
+
+  for (const error of [new DOMException("Stopped", "AbortError"), new ResponseLimitError("Response too large")]) {
+    const controller = new AbortController()
+    const enriching = createGitHubClient({
+      ...transport(),
+      async json<T>() {
+        return [{ id: 1, node_id: "C1", event: "closed", created_at: "2026-01-01T00:00:00Z" }] as T
+      },
+      async graphql<T>(): Promise<T> { if (error.name === "AbortError") controller.abort(error); throw error },
+    })
+    await expect(enriching.issueTimeline("owner/repo", 42, { signal: controller.signal })).rejects.toBe(error)
+  }
+})
+
+test("raw item overflow includes timelines, comments, and nested job steps", async () => {
+  const client = createGitHubClient({ ...transport(), async json<T>() { return Array(10_001).fill(null) as T } })
+  await expect(client.issueReferences("owner/repo", 42)).rejects.toThrow("item limit")
+  const budget = createRequestBudget()
+  const comments = createGitHubClient(transport({
+    "repos/owner/repo/issues/42/comments?per_page=100&page=1": Array(2).fill({ id: 1, user: null, body: "comment", created_at: "2026-01-01", updated_at: "2026-01-01" }),
+  }))
+  try {
+    budget.consumeItems(MAX_DETAIL_ITEMS - 1)
+    await expect(comments.issueComments("owner/repo", 42, 1, { budget })).rejects.toThrow("item limit")
+  } finally { budget.dispose() }
+  const jobsBudget = createRequestBudget()
+  const jobs = createGitHubClient(transport({
+    "repos/owner/repo/actions/runs/42/attempts/1/jobs?per_page=30&page=1": {
+      total_count: 1, jobs: [{ id: 1, name: "job", status: "queued", steps: Array(MAX_DETAIL_ITEMS).fill({ number: 1, name: "step", status: "queued" }) }],
+    },
+  }))
+  try { await expect(jobs.runJobs("owner/repo", 42, 1, 1, { budget: jobsBudget })).rejects.toThrow("item limit") }
+  finally { jobsBudget.dispose() }
+})
+
+test("cached A displays and authorizes A, then writes A after its name is reused by B", async () => {
+  const target = { ...repository, id: 71, nodeId: "R_A", nameWithOwner: "owner/repo" }
+  const date = "2026-01-01T00:00:00Z"
+  const a = { number: 42, state: "open", title: "A details", user: null, created_at: date,
+    html_url: "https://github.com/moved/A/issues/42", body: "A body", updated_at: date,
+    closed_at: null, state_reason: null, locked: true, labels: [], assignees: [], comments: 0 }
+  const calls: string[] = []
+  let permissionCalls = 0
+  const client = createGitHubClient({
+    async json<T>(path: string) {
+      calls.push(path)
+      return (path.startsWith("repositories/71/") ? a : { ...a, title: "B details", body: "B body" }) as T
+    },
+    async text() { return "" },
+    async graphql<T>(query: string, variables: Record<string, string>) {
+      permissionCalls++
+      expect(query).toContain("repository: node(id: $repositoryId)")
+      expect(query).toContain("... on Repository { id")
+      expect(query).not.toContain("$owner")
+      expect(query).not.toContain("$name")
+      const isA = variables.repositoryId === "R_A"
+      return { data: { repository: { id: isA ? "R_A" : "R_B", isArchived: false,
+        viewerPermission: isA ? "ADMIN" : "READ",
+        issue: { viewerCanClose: isA, viewerCanReopen: false, viewerCanAssign: isA } } } } as T
+    },
+    async mutate<T>(path: string, _method: "POST" | "PATCH", input: Record<string, unknown>) {
+      calls.push(path)
+      return { ...a, state: input.state, state_reason: input.state_reason } as T
+    },
+  })
+  expect(await client.issue(target, 42)).toMatchObject({ title: "A details", body: "A body", permissions: { close: true, comment: true } })
+  expect(await client.updateIssueState(target, 42, "closed")).toMatchObject({ title: "A details", state: "closed", permissions: { close: true } })
+  expect(calls).toEqual(["repositories/71/issues/42", "repositories/71/issues/42"])
+  expect(permissionCalls).toBe(2)
+  await expect(client.issue({ ...target, id: 0 }, 42)).rejects.toThrow("Repository ID")
+  await expect(client.issue({ ...target, nodeId: "" }, 42)).rejects.toThrow("node ID")
+})
+
+test("bound timeline hydrates this repository by ID while keeping foreign commit sources labeled", async () => {
+  const sha = "a".repeat(40)
+  const paths: string[] = []
+  const target = { id: 71, nodeId: "R_A", nameWithOwner: "owner/repo" }
+  const client = createGitHubClient({
+    async json<T>(path: string) {
+      paths.push(path)
+      if (path.includes("/timeline?")) return ["owner/repo", "foreign/repo"].map(repository => ({
+        event: "referenced", created_at: "2026-01-01T00:00:00Z", commit_id: sha,
+        commit_url: `https://api.github.com/repos/${repository}/commits/${sha}`,
+      })) as T
+      return { sha, commit: { message: path.startsWith("repositories/71/") ? "A commit" : "Foreign commit" } } as T
+    },
+    async text() { return "" },
+  })
+  const references = await client.issueReferences(target, 42)
+  expect(references.map(reference => [reference.repository, reference.title])).toEqual([
+    ["owner/repo", "A commit"], ["foreign/repo", "Foreign commit"],
+  ])
+  expect(paths).toEqual(["repositories/71/issues/42/timeline?per_page=100&page=1", `repositories/71/commits/${sha}`, `repos/foreign/repo/commits/${sha}`])
+})
+
+test("text references share the detail budget, pin local targets by ID and propagate response limits", async () => {
+  const target = { id: 71, nodeId: "R_A", nameWithOwner: "owner/repo" }
+  const budget = createRequestBudget()
+  const options = { budget, signal: budget.signal }
+  const paths: string[] = []
+  let limited = false
+  const limit = new ResponseLimitError("Reference response too large")
+  const client = createGitHubClient({
+    async json<T>(path: string, received?: RequestOptions) {
+      expect(received).toBe(options)
+      paths.push(path)
+      if (path.includes("/commits/")) return {
+        sha: "a".repeat(40), author: null, committer: null,
+        commit: { message: "Fix #2 and foreign/repo#3", author: null },
+        stats: { additions: 0, deletions: 0 }, files: [],
+      } as T
+      if (limited) throw limit
+      return { number: path.endsWith("/2") ? 2 : 3, title: "Reference", state: "open" } as T
+    },
+    async text() { return "" },
+  })
+  try {
+    const detail = await client.commit(target, "a".repeat(40), 1, options)
+    expect(detail.references?.map(ref => ref.repository)).toEqual(["owner/repo", "foreign/repo"])
+    expect(paths).toEqual([
+      `repositories/71/commits/${"a".repeat(40)}?per_page=100&page=1`,
+      "repositories/71/issues/2", "repos/foreign/repo/issues/3",
+    ])
+    // One commit plus two raw reference responses were charged to the same budget.
+    expect(() => budget.consumeItems(MAX_DETAIL_ITEMS - 3)).not.toThrow()
+    expect(() => budget.consumeItems(1)).toThrow("item limit")
+  } finally { budget.dispose() }
+  limited = true
+  const nextBudget = createRequestBudget()
+  options.budget = nextBudget
+  options.signal = nextBudget.signal
+  try { await expect(client.commit(target, "a".repeat(40), 1, options)).rejects.toBe(limit) }
+  finally { nextBudget.dispose() }
+})
+
+test("write routing rejects missing or unsafe repository IDs instead of falling back to names", async () => {
+  let calls = 0
+  const client = createGitHubClient({ ...transport(), async mutate<T>(): Promise<T> { calls++; throw new Error("Unexpected write") } })
+  for (const id of [0, -1, 1.5, NaN, Number.MAX_SAFE_INTEGER + 1]) {
+    await expect(client.createIssueComment({ ...repository, id }, 42, "body")).rejects.toThrow("Repository ID")
+  }
+  expect(calls).toBe(0)
 })

@@ -1,5 +1,6 @@
 import { expect, spyOn, test } from "bun:test"
 import { repositoryFromDirectory } from "../src/github/repository"
+import { createRequestBudget, MAX_DETAIL_BYTES } from "../src/github/request-budget"
 import { GitHubRequestScheduler } from "../src/github/request-scheduler"
 import { GitHubApiError, GitHubRequestNotSentError, createGitHubTransport } from "../src/github/transport"
 
@@ -119,6 +120,75 @@ test("unsafe API endpoints and anonymous-page destinations never reach the netwo
   }
 })
 
+test("response, diagnostic, and shared byte limits kill oversized requests", async () => {
+  const transport = createGitHubTransport()
+  let diagnostic = false
+  let kills = 0
+  const spawn = spyOn(Bun, "spawn").mockImplementation((args) => {
+    const endpoint = (args as string[])[4]
+    return {
+      ...result(endpoint === "user" ? '{"id":1,"login":"viewer"}' : "123456", diagnostic ? "x".repeat(65537) : ""),
+      kill() { kills++ },
+    } as unknown as Bun.Subprocess
+  })
+  const budget = createRequestBudget()
+  try {
+    await expect(transport.text("repos/owner/repo", undefined, { maxBytes: 5 })).rejects.toThrow("viewing limit")
+    diagnostic = true
+    await expect(transport.text("repos/owner/repo")).rejects.toThrow("diagnostic output")
+    diagnostic = false
+    budget.consumeBytes(MAX_DETAIL_BYTES - 5)
+    await expect(transport.text("repos/owner/repo", undefined, { budget })).rejects.toThrow("16 MiB")
+    expect(budget.signal.aborted).toBe(true)
+    expect(kills).toBeGreaterThanOrEqual(3)
+  } finally {
+    budget.dispose()
+    spawn.mockRestore()
+  }
+})
+
+test("fresh account probes honor cancellation and GraphQL variables stay in stdin", async () => {
+  const transport = createGitHubTransport()
+  const controller = new AbortController()
+  const reason = new Error("Cancelled probe")
+  const endpoints: string[] = []
+  let hold = false
+  let finish!: (code: number) => void
+  const exited = new Promise<number>((resolve) => { finish = resolve })
+  let started!: () => void
+  const probing = new Promise<void>((resolve) => { started = resolve })
+  const spawn = spyOn(Bun, "spawn").mockImplementation((args) => {
+    const endpoint = (args as string[])[4]!
+    endpoints.push(endpoint)
+    if (endpoint === "user" && hold) {
+      started()
+      return { ...result('{"id":1,"login":"viewer"}'), exited, kill() { finish(143) } } as unknown as Bun.Subprocess
+    }
+    return result(endpoint === "user" ? '{"id":1,"login":"viewer"}' : '{"ok":true}')
+  })
+  try {
+    await transport.json("repos/owner/repo")
+    await transport.graphql!("query Private($body: String!) { viewer { login } }", { body: "private-test-content" })
+    const [args, options] = spawn.mock.calls.at(-1)!
+    expect((args as string[]).join(" ")).not.toContain("private-test-content")
+    const input = (options as { stdin: Uint8Array }).stdin
+    expect(JSON.parse(new TextDecoder().decode(input)).variables.body).toBe("private-test-content")
+    hold = true
+    const cancelled = transport.mutate!("repositories/123/issues/1/comments", "POST", { body: "private" }, { signal: controller.signal })
+    const rejected = cancelled.then(() => { throw new Error("Cancelled request unexpectedly succeeded") }, (error) => {
+      expect(error).toBeInstanceOf(GitHubRequestNotSentError)
+      expect(error.message).toContain(reason.message)
+    })
+    await probing
+    controller.abort(reason)
+    await rejected
+    expect(endpoints).not.toContain("repositories/123/issues/1/comments")
+  } finally {
+    finish(143)
+    spawn.mockRestore()
+  }
+})
+
 test("cancelling an initial request stops waiting without killing another caller's identity probe", async () => {
   const transport = createGitHubTransport()
   const controller = new AbortController()
@@ -187,9 +257,11 @@ test("read-only GraphQL skips redundant probes but changed accounts cannot send 
     expect(await transport.graphql!<{ ok: boolean }>("mutation { harmlessPlaceholder }", {})).toEqual({ ok: true })
     expect(endpoints.slice(4)).toEqual(["user", "repos/owner/repo/issues/1/comments", "user", "graphql"])
     await transport.graphql!("query { viewer { login } }", { query: "mutation { harmlessPlaceholder }" })
-    const args = spawn.mock.calls.at(-1)![0] as string[]
-    expect(args).toContain("query=query { viewer { login } }")
+    const [args, options] = spawn.mock.calls.at(-1)!
     expect(args).not.toContain("query=mutation { harmlessPlaceholder }")
+    const body = JSON.parse(new TextDecoder().decode((options as { stdin: Uint8Array }).stdin))
+    expect(body.query).toBe("query { viewer { login } }")
+    expect(body.variables.query).toBe("mutation { harmlessPlaceholder }")
 
     const release = Promise.withResolvers<void>(), started = Promise.withResolvers<void>()
     let active = 0

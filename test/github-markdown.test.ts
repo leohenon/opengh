@@ -1,7 +1,131 @@
 import { describe, expect, test } from "bun:test"
-import { normalizeGitHubMarkdown } from "../src/ui/github-markdown"
+import { unified } from "unified"
+import remarkParse from "remark-parse"
+import { visit } from "unist-util-visit"
+import { gitHubMarkdownFallback, normalizeGitHubMarkdown } from "../src/ui/github-markdown"
 
 describe("GitHub Markdown normalization", () => {
+  test("bounds source size and tree complexity before recursive conversion", () => {
+    const attack = "<a>" + "<span>".repeat(12_000) + "hello" + "</span>".repeat(12_000) + "</a>"
+    for (const source of [attack, "> ".repeat(80) + "deep", "*x* ".repeat(10_001), "<template>".repeat(80) + "hello" + "</template>".repeat(80)])
+      expect(() => normalizeGitHubMarkdown(source)).toThrow("Markdown is too complex")
+    for (const source of ["x".repeat(1024 * 1024 + 1), "界".repeat(400_000)])
+      expect(() => normalizeGitHubMarkdown(source)).toThrow("Markdown is too large")
+    for (const ending of ["\n", "\r\n", "\r"])
+      expect(() => normalizeGitHubMarkdown("```text\n" + ("x" + ending).repeat(10_000) + "```"))
+        .toThrow("too many lines")
+    const expansion = "[a][r] ".repeat(1000) + "\n\n[r]: https://example.com/" + "x".repeat(8000)
+    expect(() => normalizeGitHubMarkdown(expansion)).toThrow("expansion exceeds")
+    expect(() => normalizeGitHubMarkdown("#1 ".repeat(10_000), { context: { repositoryUrl: "https://github.com/owner/repo" } }))
+      .toThrow("Markdown is too complex")
+    const fallback = gitHubMarkdownFallback(("hello\u001b\u0085\n").repeat(10_000), new Error("private detail"))
+    expect(fallback).toContain("Markdown conversion failed. Showing a plain-text preview.")
+    expect(fallback).not.toContain("private detail")
+    expect(fallback).not.toMatch(/[\u001b\u0085]/)
+    expect(fallback.length).toBeLessThan(4300)
+    expect(fallback.split("\n").length).toBeLessThanOrEqual(44)
+  })
+
+  test("projects padded GFM cells before conversion with an aggregate table budget", () => {
+    const attack = "|" + "h|".repeat(3000) + "\n|" + "-|".repeat(3000) + "\n" + "|x|\n".repeat(4000)
+    expect(Buffer.byteLength(attack)).toBe(28_004)
+    // This error comes from boundedMarkdown, not the post-conversion HAST cap.
+    expect(() => normalizeGitHubMarkdown(attack)).toThrow("Markdown is too complex (table expansion)")
+    const modestTable = "|" + "h|".repeat(40) + "\n|" + "-|".repeat(40) + "\n" + "|x|\n".repeat(100)
+    expect(normalizeGitHubMarkdown(modestTable)).toContain("| h")
+    expect(() => normalizeGitHubMarkdown((modestTable + "\n").repeat(3)))
+      .toThrow("Markdown is too complex (table expansion)")
+    const ragged = "| Name | Status |\n| :--- | ---: |\n| Ada |\n| Bob | Ready | ignored |"
+    const padded = "| Name | Status |\n| :--- | ---: |\n| Ada | |\n| Bob | Ready |"
+    expect(normalizeGitHubMarkdown(ragged)).toBe(normalizeGitHubMarkdown(padded))
+    const longCell = "x".repeat(8000)
+    const longColumn = normalizeGitHubMarkdown(`| ${longCell} |\n| --- |\n` + "|x|\n".repeat(1000))
+    expect(longColumn).toContain(longCell)
+    expect(longColumn.length).toBeLessThan(30_000) // No longest-cell padding across every serialized row.
+    expect(() => normalizeGitHubMarkdown('<table><tr><td colspan="1000000000">x</td></tr></table>'))
+      .toThrow("Markdown is too complex (table expansion)")
+    const rowSpan = (span: number) => `<table><tr><td rowspan="${span}">x</td></tr></table>`
+    expect(normalizeGitHubMarkdown(rowSpan(1_000_000_000))).toBe(normalizeGitHubMarkdown(rowSpan(1)))
+    const spanning = '<table><tr><th colspan="2">Heading</th></tr><tr><td rowspan="2">A</td><td>B</td></tr><tr><td>C</td></tr></table>'
+    expect(normalizeGitHubMarkdown(spanning)).toBe(normalizeGitHubMarkdown("| Heading | |\n| --- | --- |\n| A | B |\n| | C |"))
+  })
+
+  test("control-bearing Markdown and HTML links remain text", () => {
+    for (const control of ["\u007f", "\u0080", "\u0085", "\u009f"]) {
+      const source = `[Unsafe](https://example.com/${control}path) and <a href="https://example.com/${control}path">HTML unsafe</a>`
+      for (const markdown of [normalizeGitHubMarkdown(source), normalizeGitHubMarkdown(source, { context: { repositoryUrl: "https://github.com/owner/repo" } })]) {
+        expect(markdown).toContain("Unsafe")
+        expect(markdown).toContain("HTML unsafe")
+        const links: unknown[] = []
+        visit(unified().use(remarkParse).parse(markdown), ["link", "definition"], (node) => { links.push(node) })
+        expect(links).toEqual([])
+      }
+    }
+  })
+
+  test("drops interactive form projections before datalist inputs can expand", () => {
+    const options = `<option value="${"v".repeat(20_000)}" label="choice"></option>`.repeat(4)
+    const source = `<datalist id="d">${options}</datalist>` + '<input list="d" multiple>'.repeat(100)
+    expect(Buffer.byteLength(source)).toBeLessThan(85_000)
+    expect(normalizeGitHubMarkdown(source)).toBe("")
+    const controls = '<form>Static <button>button text<input list="d"></button>'
+      + '<select><optgroup><option>Hidden option</option></optgroup></select>'
+      + '<textarea>Hidden textarea</textarea><output>Hidden output</output>'
+      + '<input value="Hidden input"></form>'
+    const markdown = normalizeGitHubMarkdown(controls)
+    expect(markdown).toContain("Static button text")
+    expect(markdown).not.toContain("Hidden")
+  })
+
+  test("converter and context generated destinations are always sanitized", () => {
+    const source = '<base href="file:///tmp/"><a href="relative">Relative</a>'
+      + '<input type="image" src="file:///tmp/local-file" alt="Open">'
+      + '<input type="url" value="file:///tmp/local-file">'
+      + '<input type="url" value="javascript:alert(1)">'
+      + '<input type="email" value="hidden@example.com">'
+      + '\n\n[Unsafe reference][bad] ![Unsafe image][bad]\n\n[bad]: file:///tmp/local-file'
+      + '\n\n[Safe](https://example.com/) ![Screenshot](https://example.com/ui.png)'
+    for (const context of [undefined, { repositoryUrl: "https://github.com/owner/repo" }]) {
+      const markdown = normalizeGitHubMarkdown(source, { context })
+      expect(markdown).toContain("Relative")
+      expect(markdown).toContain("Unsafe reference")
+      expect(markdown).toContain("Unsafe image")
+      expect(markdown).toContain("[Safe](https://example.com/)")
+      expect(markdown).toContain("▧ [Screenshot](https://example.com/ui.png)")
+      expect(markdown).not.toContain("local-file")
+      expect(markdown).not.toContain("hidden@example.com")
+      visit(unified().use(remarkParse).parse(markdown), ["link", "image", "definition"], (node) => {
+        if (node.type === "link" || node.type === "image" || node.type === "definition")
+          expect(node.url).not.toMatch(/^(?:file|javascript|data):|[\u0000-\u001f\u007f-\u009f]/i)
+      })
+    }
+    // Exercise the final pass independently of early HTML/Markdown checks:
+    // resolution itself can generate a forbidden destination from context.
+    for (const context of [
+      { repositoryUrl: "file:///tmp/repo" },
+      { repositoryUrl: "https://github.com/owner/repo", sourceUrl: "file:///tmp/source" },
+    ]) {
+      const markdown = normalizeGitHubMarkdown("[Readable](#section)", { context })
+      expect(markdown).toBe("Readable")
+    }
+  })
+
+  test("task states stay readable and fenced control markup stays literal", () => {
+    const tasks = "- [x] Complete\n- [ ] Pending"
+    expect(normalizeGitHubMarkdown(tasks)).toBe(tasks)
+    const markup = '<base href="file:///tmp/"><input type="image" src="file:///tmp/local-file">\n'
+      + '<datalist id="d"><option value="literal"></option></datalist><input list="d">'
+    for (const codePanels of [true, false])
+      expect(normalizeGitHubMarkdown("```html\n" + markup + "\n```", { codePanels }))
+        .toBe("```html\n" + markup + "\n```")
+    const checks = normalizeGitHubMarkdown('<p><input type="checkbox" checked disabled list="d"> Done '
+      + '<input type="radio" disabled list="d"> Pending</p>')
+    const labels: string[] = []
+    visit(unified().use(remarkParse).parse(checks), "text", (node) => { labels.push(node.value) })
+    expect(labels.join("")).toContain("[x] Done")
+    expect(labels.join("")).toContain("[ ] Pending")
+  })
+
   test("repository links and issue references resolve without changing code or existing links", () => {
     const markdown = normalizeGitHubMarkdown(`[Guide](CONTRIBUTING.md) [details](#details) [license](../LICENSE) [root](/SECURITY.md).
 

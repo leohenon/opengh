@@ -31,7 +31,7 @@ test("repository switch popup isolates input, preserves cancelled navigation, an
     documents: async (repo, branch) => [{ id: `${repo.nameWithOwner}:README.md`, repository: repo.nameWithOwner, ref: branch, path: "README.md", label: "README" }],
     document: async () => Array.from({ length: 100 }, (_, index) => `Line ${index} of documentation\n`).join("\n"),
     branches: async () => ({ items: ["main", "next"], hasMore: false }),
-    commits: async (repository, branch) => { branchLoads.push(`${repository}:${branch}`); return { items: githubDataFixture.commits.value!.items, hasMore: false } },
+    commits: async (repository, branch) => { branchLoads.push(`${repository.nameWithOwner}:${branch}`); return { items: githubDataFixture.commits.value!.items, hasMore: false } },
     commit: async (_repository, sha) => ({ ...commitDetailFixture, sha }),
     issue: async () => issueDetailFixture,
     issueComments: async () => ({ items: [], hasMore: false }),

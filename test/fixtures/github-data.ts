@@ -43,6 +43,8 @@ export const githubDataFixture: RepositoryData = {
   commitCount: { status: "ready", value: 4 },
   workCounts: { status: "ready", value: { issues: 61, pulls: 24 } },
   repo: {
+    id: 123,
+    nodeId: "R_fixture_123",
     nameWithOwner: "anomalyco/opentui",
     url: "https://github.com/anomalyco/opentui",
     description: "A TypeScript library for building rich terminal user interfaces",

@@ -1,7 +1,7 @@
 import { workflowJobFixture, workflowRunFixture } from "./fixtures/workflow-run"
 
 import { describe, expect, test } from "bun:test"
-import type { DiffContent, CommitDetail, CommitSummary, IssueDetail, IssueComment, IssueTimeline, RepositoryDocument, ReactionState, ReactionTarget, PullRequestDetail, PullContext } from "../src/models"
+import type { DiffContent, CommitDetail, CommitSummary, IssueDetail, IssueComment, IssueTimeline, RepositoryDocument, ReactionState, ReactionTarget, PullRequestDetail, PullContext, Repo } from "../src/models"
 import type { RepositoryLoaders } from "../src/repository-session"
 import { createRepositorySession } from "../src/repository-session"
 import { commitDetailFixture, githubDataFixture, issueDetailFixture, issueCommentsFixture, issuePullReferenceFixture, pullContextFixture } from "./fixtures/github-data"
@@ -17,14 +17,19 @@ function deferred<T>() {
 }
 
 function loaders(overrides: Partial<RepositoryLoaders> = {}): RepositoryLoaders {
+  const ids = new Map([[githubDataFixture.repo.nameWithOwner.toLowerCase(), githubDataFixture.repo.id]])
   return {
-    metadata: async () => structuredClone(githubDataFixture.repo),
+    metadata: async (repository) => {
+      const key = repository.toLowerCase()
+      if (!ids.has(key)) ids.set(key, 1000 + ids.size)
+      return { ...structuredClone(githubDataFixture.repo), id: ids.get(key)!, nodeId: `R_fixture_${ids.get(key)!}`, nameWithOwner: repository }
+    },
     workCounts: async () => ({ issues: 61, pulls: 24 }),
     commitCount: async () => 4,
     documents: async (repo, branch) => githubDataFixture.documents.value!.map(({ resource, ...source }) => ({
       ...source, id: `${repo.nameWithOwner}:${source.path}`, repository: repo.nameWithOwner, ref: branch,
     })),
-    document: async (source) => githubDataFixture.documents.value!.find((document) => document.path === source.path)!.resource.value!,
+    document: async (_repository, source) => githubDataFixture.documents.value!.find((document) => document.path === source.path)!.resource.value!,
     branches: async () => ({ items: structuredClone(githubDataFixture.branches.value!.items), hasMore: false }),
     commits: async () => ({ items: structuredClone(githubDataFixture.commits.value!.items), hasMore: false }),
     commit: async () => structuredClone(commitDetailFixture),
@@ -118,6 +123,35 @@ describe("repository session", () => {
     await session.refresh()
     expect(calls).toContain("runs")
     expect(calls).toContain("commits")
+  })
+
+  test("canonical routing and immutable repository IDs keep writes and drafts out of replacement repositories", async () => {
+    let remote = { ...githubDataFixture.repo, id: 71, nodeId: "R_fixture_71", nameWithOwner: "trusted/canonical" }
+    const issueRepositories: Pick<Repo, "id" | "nodeId" | "nameWithOwner">[] = []
+    const writes: number[] = []
+    const session = createRepositorySession(loaders({
+      metadata: async () => ({ ...remote }),
+      issue: async (repository) => { issueRepositories.push(repository); return structuredClone(issueDetailFixture) },
+      createIssueComment: async (repository) => { writes.push(repository.id); return issueCommentsFixture[0]! },
+    }))
+    await session.load("former-owner/old-name")
+    expect(ready(session).repository).toBe("trusted/canonical")
+    await session.loadIssue(issueDetailFixture.number)
+    expect(issueRepositories).toMatchObject([{ id: 71, nodeId: "R_fixture_71", nameWithOwner: "trusted/canonical" }])
+    session.updateIssueDraft(issueDetailFixture.number, { body: "Private commentary" })
+    await session.submitIssueAction(issueDetailFixture.number, "comment")
+    expect(writes).toEqual([71])
+    session.updateIssueDraft(issueDetailFixture.number, { body: "Private retained draft" })
+    remote = { ...remote, id: 72, nodeId: "R_fixture_72" }
+    await session.refresh()
+    expect(session.state()).toMatchObject({ status: "error", message: expect.stringContaining("identity changed") })
+    expect(session.issueDetail()).toBeUndefined()
+    await session.loadIssue(issueDetailFixture.number)
+    expect(issueRepositories).toMatchObject([{ id: 71, nodeId: "R_fixture_71", nameWithOwner: "trusted/canonical" }])
+    await expect(session.submitIssueAction(issueDetailFixture.number, "comment")).rejects.toThrow("Reload the issue")
+    await session.load("trusted/canonical")
+    await session.loadIssue(issueDetailFixture.number)
+    expect(session.issueAction(issueDetailFixture.number).body).toBe("")
   })
 
   test("replacing a diff aborts only its same-kind request and rejects late results", async () => {
@@ -240,7 +274,7 @@ describe("repository session", () => {
     const other = deferred<number>()
     const session = createRepositorySession(loaders({
       metadata: async (repository) => ({ ...githubDataFixture.repo, nameWithOwner: repository }),
-      commitCount: async (repository, branch) => {
+      commitCount: async ({ nameWithOwner: repository }, branch) => {
         if (repository === "owner/other") return other.promise
         return branch === "feature/next" ? next.promise : 1284
       },
@@ -311,7 +345,7 @@ describe("repository session", () => {
     const pending = deferred<{ issues: number; pulls: number }>()
     const session = createRepositorySession(loaders({
       metadata: async (repository) => ({ ...githubDataFixture.repo, nameWithOwner: repository }),
-      workCounts: async (repository) => repository === "owner/old" ? pending.promise : { issues: 0, pulls: 0 },
+      workCounts: async ({ nameWithOwner: repository }) => repository === "owner/old" ? pending.promise : { issues: 0, pulls: 0 },
     }))
     const old = session.load("owner/old")
     await Bun.sleep(0)
@@ -371,7 +405,7 @@ describe("repository session", () => {
     await Promise.resolve()
     expect(session.issueDetail()?.resource.status).toBe("ready")
     await session.submitIssueAction(issue.number, "close")
-    await Promise.resolve()
+    await Bun.sleep(0) // The independent post-write timeline refresh settles asynchronously.
     expect(timelineCalls).toBe(2)
     expect(session.issueDetail()?.events).toEqual(closed.events)
     pending.resolve({ references: [], events: [
@@ -457,10 +491,12 @@ describe("repository session", () => {
 
   test("issue details load on demand and reject results after back or repository replacement", async () => {
     const pending = new Map<number, ReturnType<typeof deferred<IssueDetail>>>()
+    const signals = new Map<number, AbortSignal>()
     let commentCalls = 0
     let referenceCalls = 0
     const session = createRepositorySession(loaders({
-      issue: async (_repository, number) => {
+      issue: async (_repository, number, options) => {
+        signals.set(number, options!.signal!)
         const request = deferred<IssueDetail>()
         pending.set(number, request)
         return request.promise
@@ -472,6 +508,8 @@ describe("repository session", () => {
     expect(pending.size).toBe(0)
     const first = session.loadIssue(1)
     const second = session.loadIssue(2)
+    expect(signals.get(1)?.aborted).toBe(true)
+    expect(signals.get(2)?.aborted).toBe(false)
     pending.get(2)!.resolve({ ...issueDetailFixture, number: 2, commentCount: 0 })
     await second
     pending.get(1)!.reject(new Error("Old issue unavailable"))
@@ -483,15 +521,93 @@ describe("repository session", () => {
     expect(session.issueDetail()?.references.value).toEqual([issuePullReferenceFixture])
     const closed = session.loadIssue(3)
     session.clearIssue()
+    expect(signals.get(3)?.aborted).toBe(true)
     pending.get(3)!.resolve({ ...issueDetailFixture, number: 3 })
     await closed
     expect(session.issueDetail()).toBeUndefined()
     const replaced = session.loadIssue(4)
     await session.load("owner/another-repository")
+    expect(signals.get(4)?.aborted).toBe(true)
     pending.get(4)!.resolve({ ...issueDetailFixture, number: 4 })
     await replaced
     expect(session.issueDetail()).toBeUndefined()
     expect(commentCalls).toBe(0)
+  })
+
+  test("failed issue reload releases stopped auxiliary resources for independent retries", async () => {
+    const held = deferred<void>()
+    const started = deferred<void>()
+    let pending = 0
+    let retrying = false
+    let failCore = false
+    const wait = async () => { if (!retrying) { if (++pending === 2) started.resolve(); await held.promise } }
+    const session = createRepositorySession(loaders({
+      issue: async () => { if (failCore) throw new Error("Core reload failed"); return structuredClone(issueDetailFixture) },
+      issueComments: async () => { await wait(); return { items: structuredClone(issueCommentsFixture), hasMore: false } },
+      issueReferences: async () => { await wait(); return [issuePullReferenceFixture] },
+    }))
+    await session.load("owner/repo")
+    const initial = session.loadIssue(issueDetailFixture.number)
+    try {
+      await started.promise
+      failCore = true
+      retrying = true
+      await session.loadIssue(issueDetailFixture.number)
+      expect(session.issueDetail()?.resource.status).toBe("error")
+      expect(session.issueDetail()?.comments.status).toBe("error")
+      expect(session.issueDetail()?.references.status).toBe("error")
+      await session.retryIssueReferences()
+      await session.loadMoreIssueComments()
+      expect(session.issueDetail()?.references.status).toBe("ready")
+      expect(session.issueDetail()?.comments.status).toBe("ready")
+      expect(session.issueDetail()?.resource.status).toBe("error")
+      held.resolve()
+      await initial
+      expect(session.issueDetail()?.references.status).toBe("ready")
+      expect(session.issueDetail()?.comments.status).toBe("ready")
+    } finally { held.resolve(); await initial }
+  })
+
+  test("failed PR reload releases comments, references, commits and context for retries", async () => {
+    const held = deferred<void>()
+    const started = deferred<void>()
+    let pending = 0
+    let retrying = false
+    let failCore = false
+    const wait = async () => { if (!retrying) { if (++pending === 4) started.resolve(); await held.promise } }
+    const summary = githubDataFixture.pulls.open.value!.items[0]!
+    const session = createRepositorySession(loaders({
+      pull: async () => {
+        if (failCore) throw new Error("Core reload failed")
+        return { ...summary, url: `https://github.com/owner/repo/pull/${summary.number}`, body: "Description", updatedAt: summary.createdAt,
+          baseBranch: "main", headBranch: "feature", additions: 1, deletions: 0, changedFiles: 1,
+          commitCount: githubDataFixture.commits.value!.items.length, commentCount: 2, labels: [], assignees: [], reviewers: [], mergeable: null }
+      },
+      issueComments: async () => { await wait(); return { items: structuredClone(issueCommentsFixture), hasMore: false } },
+      issueReferences: async () => { await wait(); return [issuePullReferenceFixture] },
+      pullCommits: async () => { await wait(); return structuredClone(githubDataFixture.commits.value!.items) },
+      pullContext: async (): Promise<PullContext> => { await wait(); return structuredClone(pullContextFixture) },
+    }))
+    await session.load("owner/repo")
+    const initial = session.loadPull(summary.number)
+    try {
+      await started.promise
+      failCore = true
+      retrying = true
+      await session.loadPull(summary.number)
+      const failed = session.pullDetail()!
+      for (const resource of [failed.resource, failed.comments, failed.references, failed.commits, failed.context]) expect(resource.status).toBe("error")
+      await session.retryPullReferences()
+      await session.retryPullCommits()
+      await session.retryPullContext()
+      await session.loadMorePullComments()
+      const recovered = session.pullDetail()!
+      for (const resource of [recovered.comments, recovered.references, recovered.commits, recovered.context]) expect(resource.status).toBe("ready")
+      expect(session.pullDetail()?.resource.status).toBe("error")
+      held.resolve()
+      await initial
+      expect(session.pullDetail()?.context.status).toBe("ready")
+    } finally { held.resolve(); await initial }
   })
 
   test("issue comments fail independently, retry with deduplication, and preserve loaded pages", async () => {
@@ -664,7 +780,7 @@ describe("repository session", () => {
     const posted = { ...issueCommentsFixture[0]!, id: 9002, body: "Original repository draft" }
     const calls: string[] = []
     const session = createRepositorySession(loaders({
-      createIssueComment: async (repository) => { calls.push(repository); return pending.promise },
+      createIssueComment: async (repository) => { calls.push(repository.nameWithOwner); return pending.promise },
     }))
     await session.load("owner/original")
     await session.loadIssue(number)
@@ -808,7 +924,7 @@ describe("repository session", () => {
     const calls: [string, number | undefined][] = []
     let fail = true
     const session = createRepositorySession(loaders({
-      assignableUsers: async (repository, page) => {
+      assignableUsers: async ({ nameWithOwner: repository }, page) => {
         calls.push([repository, page])
         if (repository === "owner/repo" && page === 1) return firstPage
         if (repository === "owner/other") return { items: ["other"], hasMore: false }
@@ -956,10 +1072,10 @@ describe("repository session", () => {
     let failDocument = true
     const documentCalls: string[] = []
     const session = createRepositorySession(loaders({
-      document: async (source) => {
+      document: async (repository, source) => {
         documentCalls.push(source.path)
         if (failDocument && source.path === "CODE_OF_CONDUCT.md") throw new Error("Code of conduct unavailable")
-        return defaults.document(source)
+        return defaults.document(repository, source)
       },
       issues: async (_repository, state) => {
         if (state === "open") throw new Error("Open issues unavailable")
@@ -1014,8 +1130,8 @@ describe("repository session", () => {
       metadata: async (repository) => ({ ...githubDataFixture.repo, nameWithOwner: repository }),
       documents: async (repo, branch) => repo.nameWithOwner === "first/repository"
         ? firstDocuments.promise : defaults.documents(repo, branch),
-      document: async (source) => { documentCalls.push(source.repository); return defaults.document(source) },
-      commits: async (repository) => repository === "first/repository"
+      document: async (repository, source) => { documentCalls.push(source.repository); return defaults.document(repository, source) },
+      commits: async ({ nameWithOwner: repository }) => repository === "first/repository"
         ? firstCommits.promise
         : { items: [], hasMore: false },
     }))
@@ -1209,7 +1325,7 @@ describe("repository session", () => {
     const pending = deferred<{ items: CommitSummary[]; hasMore: boolean }>()
     const session = createRepositorySession(loaders({
       metadata: async (repository) => ({ ...githubDataFixture.repo, nameWithOwner: repository }),
-      commits: async (repository, _branch, page) => page === 2
+      commits: async ({ nameWithOwner: repository }, _branch, page) => page === 2
         ? pending.promise
         : { items: [{ sha: repository.padEnd(40, "0"), message: repository, author: "octocat", date: "" }], hasMore: true },
     }))
@@ -1276,10 +1392,10 @@ describe("repository session", () => {
   test("reloads documents without letting their content failures block branch switching", async () => {
     const defaults = loaders()
     const session = createRepositorySession(loaders({
-      document: async (source) => {
+      document: async (repository, source) => {
         if (source.path === "CONTRIBUTING.md") return `${source.ref} contributing`
         if (source.path === "SECURITY.md" && source.ref === "next") throw new Error("Security unavailable")
-        return defaults.document(source)
+        return defaults.document(repository, source)
       },
     }))
 
@@ -1421,7 +1537,7 @@ describe("reaction mutations", () => {
     const calls: { repository: string; target: ReactionTarget }[] = []
     let fail = true
     const session = createRepositorySession(reactionLoaders({ addReaction: async (repository, target) => {
-      calls.push({ repository, target })
+      calls.push({ repository: repository.nameWithOwner, target })
       if (target.kind === "issue") return issueWrite.promise
       if (target.kind === "comment" && target.parent === "issue") return commentWrite.promise
       if (target.kind === "pull" && fail) throw new Error("Permission denied")

@@ -1,4 +1,6 @@
 export type Repo = {
+  id: number
+  nodeId: string
   nameWithOwner: string
   parentRepository?: string
   url: string

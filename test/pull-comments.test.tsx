@@ -35,7 +35,7 @@ test("Root PR conversation comments use the shared editor, retain drafts, confir
       changedFiles: 0, commitCount: 0, commentCount: comments.length,
       labels: [], assignees: [], reviewers: [], mergeable: null }),
     pullCommits: async () => [], pullContext: async () => pullContextFixture,
-    createIssueComment: async (repository, number, body) => { calls.push({ repository, number, body }); return pending.promise },
+    createIssueComment: async (repository, number, body) => { calls.push({ repository: repository.nameWithOwner, number, body }); return pending.promise },
   })
   const view = await testRender(() => <Root cwd="/fixture" services={{ createPullReviewSession: createTestReviewSession,
     resolveRepository: async () => githubDataFixture.repo.nameWithOwner, resolveLocalRepository: async () => undefined,

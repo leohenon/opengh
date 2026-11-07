@@ -1,3 +1,27 @@
+diff --git a/dist/npm/main.js b/dist/npm/main.js
+--- a/dist/npm/main.js
++++ b/dist/npm/main.js
+@@ -161,7 +161,12 @@
+   var LINE_TERMINATORS = /[\n\r\u2028\u2029]/;
+   var GLOB_SHELL_SPECIAL = /[\s#!"$&'():;<=>@\\^`|]/g;
+   module.exports = function quote(xs) {
++    var sawComment = false;
+     return xs.map(function(s) {
++      // Security backport from shell-quote 1.11.0 (GHSA-pqg4-j6r4-53mv).
++      if (sawComment && typeof s === "string" && LINE_TERMINATORS.test(s)) {
++        throw new TypeError("a token after a `comment` must not contain line terminators");
++      }
+       if (s === "") {
+         return "''";
+       }
+@@ -185,6 +190,7 @@
+           if (LINE_TERMINATORS.test(s.comment)) {
+             throw new TypeError("`comment` must not contain line terminators");
+           }
++          sawComment = true;
+           return "#" + s.comment;
+         }
+         throw new TypeError("unrecognized object token shape");
 diff --git a/dist/npm/opentui/index.d.ts b/dist/npm/opentui/index.d.ts
 index 9386c3054441f6de21bf4de75e67f31ee639761f..9247b1a52eb2bbd65afd754c92db64f1e409c957 100644
 --- a/dist/npm/opentui/index.d.ts

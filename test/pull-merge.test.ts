@@ -226,7 +226,7 @@ test("session confirms merge, preserves independent drafts, and does not fail on
   merged = true
   release({ ...pull, state: "closed", merged: true, mergedAt: date })
   await merging
-  await Promise.resolve()
+  await Bun.sleep(0) // Follow-up refreshes run in the background after the confirmed merge.
   expect(session.pullDetail()?.resource.value).toMatchObject({ merged: true, state: "closed" })
   expect(session.issueAction(1, "pull")).toMatchObject({ body: "keep me", selectedAssignees: ["me"], operation: { status: "idle" } })
   expect(session.pullDetail()?.references.status).toBe("error")

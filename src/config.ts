@@ -1,7 +1,7 @@
-import { chmod, lstat, mkdir, realpath, rename, rm, stat, writeFile } from "node:fs/promises"
-import { dirname, join } from "node:path"
+import { join } from "node:path"
 import { configDirectory } from "./paths"
 import { normalizeKeybindings, type KeybindingOverrides } from "./keybindings"
+import { atomicPrivateWrite, readPrivateJson, trustedConfigDestination } from "./filesystem"
 import { defaultTheme, isThemeName, type ThemeName } from "./theme"
 
 export type ColorMode = "system" | "dark" | "light"
@@ -96,7 +96,7 @@ function normalizeConfig(value: unknown): Config {
 
 export async function loadConfig(path = configPath()): Promise<Config> {
   try {
-    return normalizeConfig(await Bun.file(path).json())
+    return normalizeConfig(await readPrivateJson(path, { maxBytes: 64 * 1024, configSymlinks: true }))
   } catch (error) {
     if (error instanceof Error && "code" in error && error.code === "ENOENT") return { ...defaultConfig }
     throw new ConfigFileError("load", path, error)
@@ -104,25 +104,12 @@ export async function loadConfig(path = configPath()): Promise<Config> {
 }
 
 export async function saveConfig(config: Config, path = configPath()): Promise<void> {
-  let temporary: string | undefined
   try {
-    const entry = await lstat(path).catch((error) => {
-      if (error instanceof Error && "code" in error && error.code === "ENOENT") return undefined
-      throw error
-    })
-    // Replace the target, never the link; dangling links fail without being overwritten.
-    const destination = entry?.isSymbolicLink() ? await realpath(path) : path
-    const existing = entry?.isSymbolicLink() ? await stat(destination) : entry
-    const mode = existing ? existing.mode & 0o777 : undefined
-    await mkdir(dirname(destination), { recursive: true })
-    temporary = `${destination}.${crypto.randomUUID()}.tmp`
+    // Follow intentional config links only through trusted intermediate paths.
+    const destination = await trustedConfigDestination(path)
     const output = config.keybindings === undefined ? config : { ...config, keybindings: normalizeKeybindings(config.keybindings) }
-    await writeFile(temporary, JSON.stringify(output, null, 2) + "\n", { flag: "wx", mode })
-    // Restore any permission bits masked by umask before replacing the existing file.
-    if (mode !== undefined) await chmod(temporary, mode)
-    await rename(temporary, destination)
+    await atomicPrivateWrite(destination, JSON.stringify(output, null, 2) + "\n", true)
   } catch (error) {
-    if (temporary) await rm(temporary, { force: true }).catch(() => {})
     throw new ConfigFileError("save", path, error)
   }
 }

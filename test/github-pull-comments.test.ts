@@ -1,7 +1,9 @@
 import { describe, expect, test } from "bun:test"
 import { createGitHubClient } from "../src/github/client"
 import type { GitHubTransport } from "../src/github/transport"
+import { githubDataFixture } from "./fixtures/github-data"
 
+const repository = { ...githubDataFixture.repo, id: 71, nodeId: "R_owner_repo", nameWithOwner: "owner/repo" }
 const date = "2026-01-01T00:00:00Z"
 const pull = {
   number: 42, state: "open", title: "Pull", user: { login: "author" },
@@ -38,13 +40,13 @@ describe("PR conversation comments", () => {
       let permissionQueries = 0
       const client = createGitHubClient({ ...rest(),
         async mutate<T>(path: string, method: "POST" | "PATCH", input: Record<string, unknown>) {
-          expect([path, method, input]).toEqual(["repos/owner/repo/issues/42", "PATCH", { assignees }])
+          expect([path, method, input]).toEqual(["repositories/71/issues/42", "PATCH", { assignees }])
           return { ...pull, pull_request: { url: "https://api.github.com/repos/owner/repo/pulls/42" },
             assignees: assignees.map((login) => ({ login })) } as T
         },
         async graphql<T>(): Promise<T> { permissionQueries++; throw new Error("Unexpected permission query") },
       })
-      expect(await client.setIssueAssignees("owner/repo", 42, assignees)).toMatchObject({ number: 42, assignees })
+      expect(await client.setIssueAssignees(repository, 42, assignees)).toMatchObject({ number: 42, assignees })
       expect(permissionQueries).toBe(0)
       // Browsing an issue must still reject a PR returned by the issues endpoint.
       const issueClient = createGitHubClient({ ...rest(), async json<T>() {
@@ -152,12 +154,12 @@ describe("PR conversation comments", () => {
       if (failed) throw error
       return { id: 123, user: { login: "viewer" }, body: input.body, created_at: date, updated_at: date } as T
     } })
-    expect(await client.createIssueComment("owner/repo", 42, body)).toMatchObject({ id: 123, body, author: "viewer" })
-    expect(calls).toEqual([{ path: "repos/owner/repo/issues/42/comments", method: "POST", body: { body } }])
-    await expect(client.createIssueComment("owner/repo", 42, " \r\n\t")).rejects.toThrow("must not be blank")
+    expect(await client.createIssueComment(repository, 42, body)).toMatchObject({ id: 123, body, author: "viewer" })
+    expect(calls).toEqual([{ path: "repositories/71/issues/42/comments", method: "POST", body: { body } }])
+    await expect(client.createIssueComment(repository, 42, " \r\n\t")).rejects.toThrow("must not be blank")
     expect(calls).toHaveLength(1)
     failed = true
-    await expect(client.createIssueComment("owner/repo", 42, body)).rejects.toBe(error)
+    await expect(client.createIssueComment(repository, 42, body)).rejects.toBe(error)
     expect(calls).toHaveLength(2)
     expect(calls[1]).toEqual(calls[0])
   })

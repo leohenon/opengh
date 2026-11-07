@@ -4,20 +4,21 @@ import { GitHubApiError, type GitHubTransport } from "../src/github/transport"
 import type { Repo } from "../src/models"
 
 const repo: Repo = {
+  id: 71, nodeId: "R_A",
   nameWithOwner: "owner/repo", url: "https://github.com/owner/repo/", visibility: "PUBLIC",
   defaultBranch: "main", description: "", stars: 0, forks: 0, watchers: 0,
   language: "Rust", license: "MIT", updatedAt: "",
 }
 const branch = "topic/docs"
 const query = "?ref=topic%2Fdocs"
-const base = "repos/owner/repo"
+const base = "repositories/71"
 function file(path: string, preferredFileType: string, tabName: string, repoName = "repo", refName = branch) {
   return { displayName: path.split("/").at(-1), repoName, refName, path, preferredFileType, tabName,
     richText: "", loaded: false, timedOut: false, errorMessage: null, headerInfo: null }
 }
-function page(files: unknown, key = "codeViewTreeRoute", path = "/", ref = branch) {
+function page(files: unknown, key = "codeViewTreeRoute", path = "/", ref = branch, id: number | undefined = repo.id) {
   return `<html><script type="application/json" data-target="react-app.embeddedData">${JSON.stringify({
-    payload: { [key]: { path, refInfo: { name: ref }, overview: { overviewFiles: files } } },
+    payload: { codeViewLayoutRoute: { repo: { id } }, [key]: { path, refInfo: { name: ref }, overview: { overviewFiles: files } } },
   })}</script></html>`
 }
 function transport(html?: string | Error, responses: Record<string, unknown> = {}) {
@@ -60,10 +61,10 @@ test("uses exact overview ordering, labels, multiple license identities and inhe
 test("fetches content separately with encoded path/ref and rejects unsafe sources", async () => {
   const { api, calls } = transport(page([file("docs/A #?.md", "future", "A", ".github", "release/docs")]))
   const [document] = await api.documents(repo, branch)
-  expect(await api.document(document!)).toBe("body")
+  expect(await api.document(repo, document!)).toBe("body")
   expect(calls[1]).toBe("repos/owner/.github/contents/docs/A%20%23%3F.md?ref=release%2Fdocs application/vnd.github.raw+json")
   for (const change of [{ path: "../README.md" }, { repository: "https://example.com/repo" }, { path: "docs\\README.md" }]) {
-    await expect(api.document({ ...document!, ...change })).rejects.toThrow("Invalid document")
+    await expect(api.document(repo, { ...document!, ...change })).rejects.toThrow()
   }
   expect(calls).toHaveLength(2)
 })
@@ -73,7 +74,7 @@ test("empty overview is authoritative; malformed, wrong-route and unavailable pa
   expect(await empty.api.documents(repo, branch)).toEqual([])
   expect(empty.calls).toHaveLength(1)
   for (const html of [page({}), page([file("../bad", "readme", "README")]), page([], "codeViewTreeRoute", "docs"),
-    page([], "codeViewTreeRoute", "", "wrong"), "<script>not data</script>", new Error("HTTP 503")]) {
+    page([], "codeViewTreeRoute", "", "wrong"), page([], "codeViewTreeRoute", "/", branch, 72), page([], "codeViewTreeRoute", "/", branch, 0), "<script>not data</script>", new Error("HTTP 503")]) {
     const { api, calls } = transport(html, { [`${base}/readme${query}`]: { path: "README.rst" } })
     expect((await api.documents(repo, branch)).map(document => document.path)).toEqual(["README.rst"])
     expect(calls).toContain(`${base}/readme${query}`)
@@ -99,5 +100,20 @@ test("private fallback respects directory priority, semantic labels and only ign
   for (const error of [new GitHubApiError("readme", "Forbidden", 403), new Error("network failure")]) {
     const failed = transport(undefined, { [`${base}/readme${query}`]: error })
     await expect(failed.api.documents(repo, branch)).rejects.toBe(error)
+  }
+})
+
+test("public discovery and content remain on A when its old name now belongs to B", async () => {
+  const { api, calls } = transport(page([file("B.md", "readme", "README")], "codeViewTreeRoute", "/", branch, 72), {
+    [`${base}/readme${query}`]: { path: "docs/A #?.md" },
+    [`repos/owner/repo/readme${query}`]: { path: "B.md" },
+  })
+  const [document] = await api.documents(repo, branch)
+  expect(document?.path).toBe("docs/A #?.md")
+  expect(await api.document(repo, document!)).toBe("body")
+  expect(calls.at(-1)).toBe(`${base}/contents/docs/A%20%23%3F.md${query} application/vnd.github.raw+json`)
+  expect(calls.filter(call => !call.startsWith("https:")).every(call => call.startsWith(base))).toBe(true)
+  for (const change of [{ path: "../README.md" }, { repository: "https://example.com/repo" }, { path: "docs\\README.md" }]) {
+    await expect(api.document(repo, { ...document!, ...change })).rejects.toThrow()
   }
 })

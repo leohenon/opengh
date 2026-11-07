@@ -2,7 +2,7 @@ import { normalizeRepository } from "../repository-name";
 import { spawnGitHub } from "./process";
 import { GitHubApiError } from "./errors";
 import { configDirectory } from "../paths";
-import { mkdir } from "node:fs/promises";
+import { atomicPrivateWrite, ensureTrustedDirectory, readPrivateJson, regularOwnedFile } from "../filesystem";
 import { dirname, join } from "node:path";
 
 const MAX_RECENT = 100;
@@ -59,7 +59,7 @@ export async function loadRecentRepositories(
   path = recentRepositoriesPath(),
 ): Promise<string[]> {
   try {
-    const value = await Bun.file(path).json();
+    const value = await readPrivateJson(path, { maxBytes: 64 * 1024 });
     if (!Array.isArray(value)) return [];
     const seen = new Set<string>();
     return value
@@ -83,11 +83,12 @@ export async function rememberRepository(
 ) {
   const normalized = normalizeRepository(repository);
   if (!normalized) return;
+  await ensureTrustedDirectory(dirname(path));
+  await regularOwnedFile(path);
   const recent = await loadRecentRepositories(path);
   const next = [
     normalized,
     ...recent.filter((item) => item.toLowerCase() !== normalized.toLowerCase()),
   ].slice(0, MAX_RECENT);
-  await mkdir(dirname(path), { recursive: true });
-  await Bun.write(path, JSON.stringify(next, null, 2) + "\n");
+  await atomicPrivateWrite(path, JSON.stringify(next, null, 2) + "\n");
 }

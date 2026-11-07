@@ -28,11 +28,22 @@ import type {
   WorkflowJob,
 } from "../models"
 import { pullMergeBlocker } from "../pull-merge"
+import { repositoryName, repositoryPath, repositorySelector, type RepositoryReference } from "./repository-target"
 import { createGitHubDocuments } from "./documents"
 import { createGitHubPullContext } from "./pull-context"
 import { createGitHubReactions, parseReactions, parseReactionState, reactionFields } from "./reactions"
-import { githubTransport, type GitHubTransport } from "./transport"
 import { parseTextReferences } from "./text-references"
+import { githubTransport, type GitHubTransport, type RequestOptions } from "./transport"
+import { createRequestBudget, isRequestInterrupted as interrupted, MAX_AUTOMATIC_PAGES, RequestBudgetLimitError } from "./request-budget"
+
+function detailLimit() {
+  return new RequestBudgetLimitError("Details exceeded the loading limit")
+}
+
+function repositoryIssues(repository: Repo) {
+  if (!Number.isSafeInteger(repository.id) || repository.id <= 0) throw new Error("Repository ID must be a positive safe integer.")
+  return `repositories/${repository.id}/issues`
+}
 
 const PAGE_SIZE = 30
 const BRANCH_PAGE_SIZE = 100
@@ -40,6 +51,8 @@ const BRANCH_PAGE_SIZE = 100
 type Page<T> = { items: T[]; hasMore: boolean }
 
 type RepositoryResponse = {
+  id: number
+  node_id: string
   full_name: string
   parent?: { full_name: string } | null
   html_url: string
@@ -366,7 +379,11 @@ export function createGitHubClient(transport: GitHubTransport) {
   const { addReaction, bodyReactions, commentReactions } = createGitHubReactions(transport)
   const metadata = async (repository: string): Promise<Repo> => {
     const repo = await transport.json<RepositoryResponse>(`repos/${repository}`)
+    if (!Number.isSafeInteger(repo.id) || repo.id <= 0) throw new Error("Repository ID must be a positive safe integer.")
+    if (typeof repo.node_id !== "string" || !repo.node_id.trim()) throw new Error("Repository node ID must not be blank.")
     return {
+      id: repo.id,
+      nodeId: repo.node_id,
       nameWithOwner: repo.full_name,
       parentRepository: repo.parent?.full_name,
       url: repo.html_url,
@@ -382,9 +399,9 @@ export function createGitHubClient(transport: GitHubTransport) {
     }
   }
 
-  const branches = async (repository: string, fallbackBranch: string, page = 1): Promise<Page<string>> => {
+  const branches = async (repository: RepositoryReference, fallbackBranch: string, page = 1): Promise<Page<string>> => {
     const items = await transport.json<BranchResponse[]>(
-      `repos/${repository}/branches?per_page=${BRANCH_PAGE_SIZE}&page=${page}`,
+      `${repositoryPath(repository)}/branches?per_page=${BRANCH_PAGE_SIZE}&page=${page}`,
     )
     return {
       items: items.length || page > 1 ? items.map((branch) => branch.name) : [fallbackBranch],
@@ -392,26 +409,22 @@ export function createGitHubClient(transport: GitHubTransport) {
     }
   }
 
-  const commits = async (repository: string, branch: string, page = 1): Promise<Page<CommitSummary>> => {
+  const commits = async (repository: RepositoryReference, branch: string, page = 1): Promise<Page<CommitSummary>> => {
     const branchQuery = branch ? `&sha=${encodeURIComponent(branch)}` : ""
     const items = await transport.json<CommitResponse[]>(
-      `repos/${repository}/commits?per_page=${PAGE_SIZE}&page=${page}${branchQuery}`,
+      `${repositoryPath(repository)}/commits?per_page=${PAGE_SIZE}&page=${page}${branchQuery}`,
     )
     return { items: items.map(commitSummary), hasMore: items.length === PAGE_SIZE }
   }
 
-  const commitCount = async (repository: string, branch: string): Promise<number> => {
-    if (!/^[a-z\d_.-]+\/[a-z\d_.-]+$/i.test(repository)
-      || repository.split("/").some((part) => part === "." || part === "..")) {
-      throw new Error("Invalid repository for commit count.")
-    }
+  const commitCount = async (repository: RepositoryReference, branch: string): Promise<number> => {
+    const selector = repositorySelector(repository)
     if (!branch.trim()) throw new Error("Branch for commit count must not be blank.")
-    const failure = `Commit count for ${repository} branch ${branch} could not be verified.`
+    const failure = `Commit count for ${repositoryName(repository)} branch ${branch} could not be verified.`
     if (!transport.graphql) throw new Error(failure)
-    const [owner, name] = repository.split("/") as [string, string]
     const response = record(await transport.graphql<unknown>(
-      "query($owner: String!, $name: String!, $ref: String!) { repository(owner: $owner, name: $name) { ref(qualifiedName: $ref) { target { __typename ... on Commit { history { totalCount } } } } } }",
-      { owner, name, ref: `refs/heads/${branch}` },
+      `query(${selector.declarations}, $ref: String!) { ${selector.select("ref(qualifiedName: $ref) { target { __typename ... on Commit { history { totalCount } } } }")} }`,
+      { ...selector.variables, ref: `refs/heads/${branch}` },
     ))
     if (response?.errors != null && (!Array.isArray(response.errors) || response.errors.length)) {
       const messages = Array.isArray(response.errors)
@@ -428,25 +441,29 @@ export function createGitHubClient(transport: GitHubTransport) {
   }
 
   const textReferences = async (
-    repository: string, text: string, source: { actor: string; createdAt: string; number?: number; sha?: string }, markdown = false,
+    repository: RepositoryReference, text: string, source: { actor: string; createdAt: string; number?: number; sha?: string }, markdown = false, options?: RequestOptions,
   ): Promise<IssueReference[]> => {
-    const sameRepository = (target: string) => target.toLowerCase() === repository.toLowerCase()
+    const name = repositoryName(repository)
+    const sameRepository = (target: string) => target.toLowerCase() === name.toLowerCase()
     const isSelfCommit = (target: string, sha: string) => sameRepository(target) && source.sha !== undefined
       && source.sha.toLowerCase().startsWith(sha.toLowerCase())
-    const candidates = parseTextReferences(text, repository, markdown).filter(ref => ref.kind === "issue"
+    const candidates = parseTextReferences(text, name, markdown).filter(ref => ref.kind === "issue"
       ? !(sameRepository(ref.repository) && ref.number === source.number)
       : !isSelfCommit(ref.repository, ref.sha))
     const results: (IssueReference | undefined)[] = new Array(candidates.length)
     let next = 0
     // Bound concurrent requests without dropping references from longer messages.
-    await Promise.all(Array.from({ length: Math.min(4, candidates.length) }, async () => {
+    const workers = await Promise.allSettled(Array.from({ length: Math.min(4, candidates.length) }, async () => {
       while (next < candidates.length) {
+        options?.signal?.throwIfAborted()
         const index = next++
         const ref = candidates[index]!
+        const target = sameRepository(ref.repository) ? repository : ref.repository
         try {
           const shared = { repository: ref.repository, actor: source.actor, createdAt: source.createdAt }
           if (ref.kind === "commit") {
-            const item = await transport.json<CommitResponse>(`repos/${ref.repository}/commits/${ref.sha}`)
+            const item = await transport.json<CommitResponse>(`${repositoryPath(target)}/commits/${ref.sha}`, options)
+            options?.budget?.consumeItems(1)
             if (!/^[a-f\d]{40}$/i.test(item.sha) || isSelfCommit(ref.repository, item.sha)) continue
             const sha = item.sha.toLowerCase()
             results[index] = { ...shared, kind: "commit", sha,
@@ -454,7 +471,8 @@ export function createGitHubClient(transport: GitHubTransport) {
               title: firstLine(item.commit.message, "No commit message."),
               url: `https://github.com/${ref.repository}/commit/${sha}` }
           } else {
-            const item = await transport.json<IssueResponse>(`repos/${ref.repository}/issues/${ref.number}`)
+            const item = await transport.json<IssueResponse>(`${repositoryPath(target)}/issues/${ref.number}`, options)
+            options?.budget?.consumeItems(1)
             const kind = item.pull_request != null ? "pull" : "issue"
             const common = { ...shared, number: item.number, title: item.title,
               id: `outgoing:${ref.repository}:${kind}:${item.number}`,
@@ -465,26 +483,30 @@ export function createGitHubClient(transport: GitHubTransport) {
                 draft: item.draft === true }
               : { ...common, kind }
           }
-        } catch {
+        } catch (error) {
+          if (interrupted(error, options)) throw error
           // Deleted, private, ambiguous, or unavailable targets must not hide the source detail.
         }
       }
       return undefined
     }))
+    const failure = workers.find((worker) => worker.status === "rejected")
+    if (failure?.status === "rejected") throw failure.reason
     // Short and full SHAs can resolve to the same commit.
     const unique = new Map<string, IssueReference>()
     for (const ref of results) if (ref && !unique.has(ref.id)) unique.set(ref.id, ref)
     return [...unique.values()]
   }
 
-  const commit = async (repository: string, sha: string, page = 1): Promise<CommitDetail> => {
+  const commit = async (repository: RepositoryReference, sha: string, page = 1, options?: RequestOptions): Promise<CommitDetail> => {
     const item = await transport.json<CommitDetailResponse>(
-      `repos/${repository}/commits/${encodeURIComponent(sha)}?per_page=100&page=${page}`,
+      `${repositoryPath(repository)}/commits/${encodeURIComponent(sha)}?per_page=100&page=${page}`, options,
     )
+    options?.budget?.consumeItems(1 + item.files.length)
     const summary = commitSummary(item)
     const references = page === 1 ? await textReferences(repository, item.commit.message, {
       sha: item.sha, actor: summary.author, createdAt: summary.date,
-    }) : []
+    }, false, options) : []
     return {
       ...summary,
       ...(references.length ? { references } : {}),
@@ -512,9 +534,9 @@ export function createGitHubClient(transport: GitHubTransport) {
     }
   }
 
-  const issues = async (repository: string, state: ListState, page = 1): Promise<Page<IssueSummary>> => {
+  const issues = async (repository: RepositoryReference, state: ListState, page = 1): Promise<Page<IssueSummary>> => {
     const items = await transport.json<IssueResponse[]>(
-      `repos/${repository}/issues?state=${state}&per_page=${PAGE_SIZE}&page=${page}`,
+      `${repositoryPath(repository)}/issues?state=${state}&per_page=${PAGE_SIZE}&page=${page}`,
     )
     return {
       items: items.filter((item) => !item.pull_request).map(issueSummary),
@@ -522,17 +544,13 @@ export function createGitHubClient(transport: GitHubTransport) {
     }
   }
 
-  const workCounts = async (repository: string): Promise<{ issues: number; pulls: number }> => {
-    if (!/^[a-z\d_.-]+\/[a-z\d_.-]+$/i.test(repository)
-      || repository.split("/").some((part) => part === "." || part === "..")) {
-      throw new Error("Invalid repository for open issue and pull request counts.")
-    }
+  const workCounts = async (repository: RepositoryReference): Promise<{ issues: number; pulls: number }> => {
+    const selector = repositorySelector(repository)
     const failure = "Open issue and pull request counts could not be verified."
     if (!transport.graphql) throw new Error(failure)
-    const [owner, name] = repository.split("/") as [string, string]
     const response = record(await transport.graphql<unknown>(
-      "query($owner: String!, $name: String!) { repository(owner: $owner, name: $name) { issues(states: OPEN) { totalCount } pullRequests(states: OPEN) { totalCount } } }",
-      { owner, name },
+      `query(${selector.declarations}) { ${selector.select("issues(states: OPEN) { totalCount } pullRequests(states: OPEN) { totalCount }")} }`,
+      selector.variables,
     ))
     if (response?.errors != null && (!Array.isArray(response.errors) || response.errors.length)) {
       const messages = Array.isArray(response.errors)
@@ -548,16 +566,15 @@ export function createGitHubClient(transport: GitHubTransport) {
     return { issues, pulls }
   }
 
-  const hasIssues = async (repository: string, state: ListState): Promise<boolean> => {
+  const hasIssues = async (repository: RepositoryReference, state: ListState): Promise<boolean> => {
     if (!transport.graphql) throw new Error("Issue availability could not be verified.")
-    const [owner, name, ...extra] = repository.split("/")
-    if (!owner || !name || extra.length) throw new Error("Invalid repository for issue availability.")
+    const selector = repositorySelector(repository)
     const response = await transport.graphql<{
       data?: { repository?: { issues?: { totalCount?: number } } | null }
       errors?: { message?: string }[]
     }>(
-      "query($owner: String!, $name: String!, $state: IssueState!) { repository(owner: $owner, name: $name) { issues(states: [$state]) { totalCount } } }",
-      { owner, name, state: state.toUpperCase() },
+      `query(${selector.declarations}, $state: IssueState!) { ${selector.select("issues(states: [$state]) { totalCount }")} }`,
+      { ...selector.variables, state: state.toUpperCase() },
     )
     if (response.errors?.length) throw new Error(response.errors.map((error) => error.message).filter(Boolean).join(" · ") || "Issue availability could not be verified.")
     const count = response.data?.repository?.issues?.totalCount
@@ -565,10 +582,10 @@ export function createGitHubClient(transport: GitHubTransport) {
     return count > 0
   }
 
-  const withIssuePermissions = async (repository: string, number: number, detail: IssueDetail): Promise<IssueDetail> => {
+  const withIssuePermissions = async (repository: RepositoryReference, number: number, detail: IssueDetail, options?: RequestOptions): Promise<IssueDetail> => {
     // Unknown permissions must not expose actions; reading the issue still works.
     if (!transport.graphql || !Number.isSafeInteger(number) || number <= 0) return detail
-    const [owner, name] = repository.split("/")
+    const selector = repositorySelector(repository)
     try {
       const response = await transport.graphql<{
         data?: { repository?: {
@@ -581,10 +598,11 @@ export function createGitHubClient(transport: GitHubTransport) {
         } | null }
         errors?: unknown[]
       }>(
-        `query($owner: String!, $name: String!) { repository(owner: $owner, name: $name) { isArchived viewerPermission issue(number: ${number}) { viewerCanClose viewerCanReopen viewerCanAssign ${reactionFields} } } }`,
-        { owner: owner!, name: name! },
+        `query(${selector.declarations}) { ${selector.select(`isArchived viewerPermission issue(number: ${number}) { viewerCanClose viewerCanReopen viewerCanAssign ${reactionFields} }`)} }`,
+        selector.variables, options,
       )
       const repo = response.data?.repository
+      if (repo?.issue) options?.budget?.consumeItems(1)
       if (response.errors?.length || !repo?.issue) return detail
       const writable = repo.isArchived === false
       const maintainer = ["WRITE", "MAINTAIN", "ADMIN"].includes(repo.viewerPermission ?? "")
@@ -600,69 +618,73 @@ export function createGitHubClient(transport: GitHubTransport) {
       const reactions = parseReactionState(repo.issue)
       if (reactions) detail = { ...detail, ...reactions }
     } catch (error) {
+      if (interrupted(error, options)) throw error
       // Keep reading available, but retain login/restart guidance for the UI.
       detail.permissionsError = error instanceof Error ? error.message : "Issue action permissions could not be verified."
     }
     return detail
   }
 
-  const issueKind = async (repository: string, number: number): Promise<"issue" | "pull"> => {
-    const item = await transport.json<IssueResponse>(`repos/${repository}/issues/${number}`)
+  const issueKind = async (repository: RepositoryReference, number: number, options?: RequestOptions): Promise<"issue" | "pull"> => {
+    const item = await transport.json<IssueResponse>(`${repositoryPath(repository)}/issues/${number}`, options)
+    options?.budget?.consumeItems(1)
     return item.pull_request ? "pull" : "issue"
   }
 
-  const issue = async (repository: string, number: number): Promise<IssueDetail> => {
-    const item = await transport.json<IssueDetailResponse>(`repos/${repository}/issues/${number}`)
+  const issue = async (repository: RepositoryReference, number: number, options?: RequestOptions): Promise<IssueDetail> => {
+    const item = await transport.json<IssueDetailResponse>(`${repositoryPath(repository)}/issues/${number}`, options)
+    options?.budget?.consumeItems(1)
     const detail = issueDetail(item)
     const references = await textReferences(repository, detail.body, {
       number: detail.number, actor: detail.author, createdAt: detail.createdAt,
-    }, true)
-    return withIssuePermissions(repository, number, { ...detail, ...(references.length ? { references } : {}) })
+    }, true, options)
+    return withIssuePermissions(repository, number, { ...detail, ...(references.length ? { references } : {}) }, options)
   }
 
-  const issueComments = async (repository: string, number: number, page = 1): Promise<Page<IssueComment>> => {
+  const issueComments = async (repository: RepositoryReference, number: number, page = 1, options?: RequestOptions): Promise<Page<IssueComment>> => {
     const items = await transport.json<IssueCommentResponse[]>(
-      `repos/${repository}/issues/${number}/comments?per_page=100&page=${page}`,
+      `${repositoryPath(repository)}/issues/${number}/comments?per_page=100&page=${page}`, options,
     )
-    const reactions = await commentReactions(items)
+    options?.budget?.consumeItems(items.length)
+    const reactions = await commentReactions(items, options)
     return {
       items: items.map((item) => ({ ...issueComment(item), ...reactions.get(item.node_id ?? "") })),
       hasMore: items.length === 100,
     }
   }
 
-  const createIssueComment = async (repository: string, number: number, body: string): Promise<IssueComment> => {
+  const createIssueComment = async (repository: Repo, number: number, body: string): Promise<IssueComment> => {
     if (!body.trim()) throw new Error("Issue comment body must not be blank.")
     if (!transport.mutate) throw new Error("GitHub transport does not support mutations.")
     const item = await transport.mutate<IssueCommentResponse>(
-      `repos/${repository}/issues/${number}/comments`, "POST", { body },
+      `${repositoryIssues(repository)}/${number}/comments`, "POST", { body },
     )
     return issueComment(item)
   }
 
   const updateIssueState = async (
-    repository: string,
+    repository: Repo,
     number: number,
     state: ListState,
     reason?: "completed" | "not_planned",
   ): Promise<IssueDetail> => {
     if (!transport.mutate) throw new Error("GitHub transport does not support mutations.")
     const item = await transport.mutate<IssueDetailResponse>(
-      `repos/${repository}/issues/${number}`, "PATCH",
+      `${repositoryIssues(repository)}/${number}`, "PATCH",
       { state, ...(state === "closed" ? { state_reason: reason ?? "completed" } : {}) },
     )
     return withIssuePermissions(repository, number, issueDetail(item))
   }
 
-  const assignableUsers = async (repository: string, page = 1): Promise<Page<string>> => {
-    const users = await transport.json<{ login: string }[]>(`repos/${repository}/assignees?per_page=100&page=${page}`)
+  const assignableUsers = async (repository: RepositoryReference, page = 1): Promise<Page<string>> => {
+    const users = await transport.json<{ login: string }[]>(`${repositoryPath(repository)}/assignees?per_page=100&page=${page}`)
     return { items: users.map((user) => user.login), hasMore: users.length === 100 }
   }
 
-  const setIssueAssignees = async (repository: string, number: number, assignees: string[]): Promise<IssueDetail> => {
+  const setIssueAssignees = async (repository: Repo, number: number, assignees: string[]): Promise<IssueDetail> => {
     if (!transport.mutate) throw new Error("GitHub transport does not support mutations.")
     const item = await transport.mutate<IssueDetailResponse>(
-      `repos/${repository}/issues/${number}`, "PATCH", { assignees },
+      `${repositoryIssues(repository)}/${number}`, "PATCH", { assignees },
     )
     // GitHub manages PR assignees through the issues endpoint too.
     const detail = issueDetail(item, true)
@@ -676,7 +698,7 @@ export function createGitHubClient(transport: GitHubTransport) {
   }
 
   const markIssueDuplicate = async (
-    repository: string,
+    repository: Repo,
     number: number,
     canonicalNumber: number,
   ): Promise<IssueDetail> => {
@@ -686,15 +708,15 @@ export function createGitHubClient(transport: GitHubTransport) {
     }
     if (number === canonicalNumber) throw new Error("An issue cannot be a duplicate of itself.")
     if (!transport.mutate) throw new Error("GitHub transport does not support mutations.")
-    const source = await issue(repository, number)
+    const source = issueDetail(await transport.json<IssueDetailResponse>(`${repositoryIssues(repository)}/${number}`))
     if (source.state !== "open") throw new Error("Only open issues can be marked as duplicate. Reopen the issue first.")
-    const canonical = await transport.json<IssueDetailResponse>(`repos/${repository}/issues/${canonicalNumber}`)
+    const canonical = await transport.json<IssueDetailResponse>(`${repositoryIssues(repository)}/${canonicalNumber}`)
     if ("pull_request" in canonical) throw new Error(`Issue #${canonicalNumber} is a pull request.`)
     if (typeof canonical.id !== "number" || !Number.isSafeInteger(canonical.id) || canonical.id <= 0) {
       throw new Error(`Canonical issue #${canonicalNumber} has no valid global issue ID.`)
     }
     const item = await transport.mutate<IssueDetailResponse>(
-      `repos/${repository}/issues/${number}`, "PATCH",
+      `${repositoryIssues(repository)}/${number}`, "PATCH",
       { state: "closed", state_reason: "duplicate", duplicate_issue_id: canonical.id },
     )
     const detail = issueDetail(item)
@@ -704,16 +726,23 @@ export function createGitHubClient(transport: GitHubTransport) {
     return withIssuePermissions(repository, number, detail)
   }
 
-  const issueTimeline = async (repository: string, number: number): Promise<IssueTimeline> => {
+  const issueTimeline = async (repository: RepositoryReference, number: number, options?: RequestOptions): Promise<IssueTimeline> => {
+    const ownedBudget = options?.budget ? undefined : createRequestBudget(options?.signal)
+    const budget = options?.budget ?? ownedBudget!
+    options = { ...options, budget, signal: options?.signal ? AbortSignal.any([budget.signal, options.signal]) : budget.signal }
+    try {
     const references = new Map<string, IssueReference>()
     const events = new Map<string, IssueTimelineEvent>()
     const eventNodes = new Map<string, IssueTimelineEvent>()
     const dismissalStates = new Map<string, PullReviewState>()
     let timelineIndex = 0
     for (let page = 1; ; page++) {
+      options.signal?.throwIfAborted()
+      if (page > MAX_AUTOMATIC_PAGES) throw detailLimit()
       const items = await transport.json<IssueTimelineResponse[]>(
-        `repos/${repository}/issues/${number}/timeline?per_page=100&page=${page}`,
+        `${repositoryPath(repository)}/issues/${number}/timeline?per_page=100&page=${page}`, options,
       )
+      budget.consumeItems(items.length)
       for (const item of items) {
         const index = timelineIndex++
         if (!item) continue
@@ -727,7 +756,7 @@ export function createGitHubClient(transport: GitHubTransport) {
           const author = record(item.author)
           const authorName = [author?.login, author?.name].find((value): value is string =>
             typeof value === "string" && !!value.trim()) ?? "ghost"
-          let url = `https://github.com/${repository}/commit/${sha}`
+          let url = `https://github.com/${repositoryName(repository)}/commit/${sha}`
           if (typeof item.html_url === "string") {
             try {
               const candidate = new URL(item.html_url)
@@ -759,7 +788,7 @@ export function createGitHubClient(transport: GitHubTransport) {
             kind: "review", event: "reviewed", id, reviewId: item.id,
             actor: item.user?.login ?? "ghost", createdAt: item.submitted_at, state,
             body: item.body ?? "", authorAssociation: item.author_association ?? "NONE",
-            url: item.html_url || `https://github.com/${repository}/pull/${number}#pullrequestreview-${item.id}`,
+            url: item.html_url || `https://github.com/${repositoryName(repository)}/pull/${number}#pullrequestreview-${item.id}`,
             ...(typeof item.commit_id === "string" && /^[a-f\d]{40}$/i.test(item.commit_id)
               ? { commitSha: item.commit_id.toLowerCase() } : {}),
           }
@@ -898,11 +927,12 @@ export function createGitHubClient(transport: GitHubTransport) {
         try {
           const response = record(await transport.graphql<unknown>(
             `query { nodes(ids: ${JSON.stringify(batch)}) { ... on ClosedEvent { id closer { __typename ... on PullRequest { number title url repository { nameWithOwner } } ... on Commit { oid messageHeadline url repository { nameWithOwner } } } } ... on HeadRefForcePushedEvent { id beforeCommit { oid url } afterCommit { oid url } } } }`,
-            {},
+            {}, options,
           ))
           const nodes = record(response?.data)?.nodes
           if ((response?.errors != null && (!Array.isArray(response.errors) || response.errors.length))
             || !Array.isArray(nodes)) continue
+          budget.consumeItems(nodes.length)
           for (const value of nodes) {
             const node = record(value)
             if (typeof node?.id !== "string" || !batch.includes(node.id)) continue
@@ -917,7 +947,8 @@ export function createGitHubClient(transport: GitHubTransport) {
               if (afterCommit) event.afterCommit = afterCommit
             }
           }
-        } catch {
+        } catch (error) {
+          if (interrupted(error, options)) throw error
           // Event details are optional; keep the REST timeline when enrichment fails.
         }
       }
@@ -925,21 +956,28 @@ export function createGitHubClient(transport: GitHubTransport) {
     const commits = [...references.values()].filter((reference): reference is IssueCommitReference => reference.kind === "commit")
     const titles = new Map<string, Promise<string>>()
     const loadTitle = (reference: IssueCommitReference) => {
-      const path = `repos/${reference.repository}/commits/${reference.sha}`
+      const target = reference.repository.toLowerCase() === repositoryName(repository).toLowerCase() ? repository : reference.repository
+      const path = `${repositoryPath(target)}/commits/${reference.sha}`
       let pending = titles.get(path)
       if (!pending) {
-        pending = transport.json<CommitResponse>(path).then((commit) =>
-          commit.sha.toLowerCase() === reference.sha ? firstLine(commit.commit?.message, reference.title) : reference.title,
-        ).catch(() => reference.title)
+        pending = transport.json<CommitResponse>(path, options).then((commit) => {
+          budget.consumeItems(1)
+          return commit.sha.toLowerCase() === reference.sha ? firstLine(commit.commit?.message, reference.title) : reference.title
+        }).catch((error) => {
+          if (interrupted(error, options)) throw error
+          return reference.title
+        })
         titles.set(path, pending)
       }
       return pending
     }
     // Keep event deduplication separate from shared commit metadata, and bound concurrent API requests.
     for (let offset = 0; offset < commits.length; offset += 4) {
-      await Promise.all(commits.slice(offset, offset + 4).map(async (reference) => {
+      const results = await Promise.allSettled(commits.slice(offset, offset + 4).map(async (reference) => {
         reference.title = await loadTitle(reference)
       }))
+      const failure = results.find((result) => result.status === "rejected")
+      if (failure?.status === "rejected") throw failure.reason
     }
     const mergedTimes = new Set([...events.values()]
       .filter((event) => event.event === "merged").map((event) => Date.parse(event.createdAt)))
@@ -949,14 +987,17 @@ export function createGitHubClient(transport: GitHubTransport) {
         .filter((event) => event.event !== "closed" || !mergedTimes.has(Date.parse(event.createdAt)))
         .sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt)),
     }
+    } finally {
+      ownedBudget?.dispose()
+    }
   }
 
-  const issueReferences = async (repository: string, number: number): Promise<IssueReference[]> =>
-    (await issueTimeline(repository, number)).references
+  const issueReferences = async (repository: RepositoryReference, number: number, options?: RequestOptions): Promise<IssueReference[]> =>
+    (await issueTimeline(repository, number, options)).references
 
-  const pulls = async (repository: string, state: ListState, page = 1): Promise<Page<PullRequestSummary>> => {
+  const pulls = async (repository: RepositoryReference, state: ListState, page = 1): Promise<Page<PullRequestSummary>> => {
     const items = await transport.json<PullResponse[]>(
-      `repos/${repository}/pulls?state=${state}&per_page=${PAGE_SIZE}&page=${page}`,
+      `${repositoryPath(repository)}/pulls?state=${state}&per_page=${PAGE_SIZE}&page=${page}`,
     )
     return {
       items: items.map((item) => ({ ...issueSummary(item), merged: item.merged_at != null, draft: item.draft === true })),
@@ -964,16 +1005,17 @@ export function createGitHubClient(transport: GitHubTransport) {
     }
   }
 
-  const withPullPermissions = async (repository: string, number: number, detail: PullRequestDetail): Promise<PullRequestDetail> => {
+  const withPullPermissions = async (repository: RepositoryReference, number: number, detail: PullRequestDetail, options?: RequestOptions): Promise<PullRequestDetail> => {
     if (!transport.graphql || !Number.isSafeInteger(number) || number <= 0) return detail
-    const [owner, name] = repository.split("/")
+    const selector = repositorySelector(repository)
     try {
       const response = record(await transport.graphql<unknown>(
-        `query($owner: String!, $name: String!) { repository(owner: $owner, name: $name) { isArchived viewerPermission mergeCommitAllowed squashMergeAllowed rebaseMergeAllowed pullRequest(number: ${number}) { id viewerDidAuthor viewerCanClose viewerCanReopen viewerCanAssign isMergeQueueEnabled } } }`,
-        { owner: owner!, name: name! },
+        `query(${selector.declarations}) { ${selector.select(`isArchived viewerPermission mergeCommitAllowed squashMergeAllowed rebaseMergeAllowed pullRequest(number: ${number}) { id viewerDidAuthor viewerCanClose viewerCanReopen viewerCanAssign isMergeQueueEnabled }`)} }`,
+        selector.variables, options,
       ))
       if (response?.errors != null && (!Array.isArray(response.errors) || response.errors.length)) return detail
       const repo = record(record(response?.data)?.repository)
+      if (repo?.pullRequest) options?.budget?.consumeItems(1)
       const id = record(repo?.pullRequest)?.id
       if (typeof id !== "string" || !id.trim() || typeof repo?.isArchived !== "boolean"
         || repo.viewerPermission !== null && typeof repo.viewerPermission !== "string"
@@ -998,32 +1040,32 @@ export function createGitHubClient(transport: GitHubTransport) {
         if (repo.rebaseMergeAllowed) methods.push("rebase")
         detail.merge = { methods, queueRequired: capabilities.isMergeQueueEnabled }
       }
-    } catch {
+    } catch (error) {
+      if (interrupted(error, options)) throw error
       // Permission lookup failures must not prevent read-only browsing.
     }
     return detail
   }
 
-  const pull = async (repository: string, number: number): Promise<PullRequestDetail> => {
-    const item = await transport.json<PullDetailResponse>(`repos/${repository}/pulls/${number}`)
-    const reactions = await bodyReactions(repository, number, "pull")
+  const pull = async (repository: RepositoryReference, number: number, options?: RequestOptions): Promise<PullRequestDetail> => {
+    const item = await transport.json<PullDetailResponse>(`${repositoryPath(repository)}/pulls/${number}`, options)
+    options?.budget?.consumeItems(1)
+    const reactions = await bodyReactions(repository, number, "pull", options)
     const detail = pullDetail(item)
     const references = await textReferences(repository, detail.body, {
       number: detail.number, actor: detail.author, createdAt: detail.createdAt,
-    }, true)
-    return withPullPermissions(repository, number, { ...detail, ...reactions, ...(references.length ? { references } : {}) })
+    }, true, options)
+    return withPullPermissions(repository, number, { ...detail, ...reactions, ...(references.length ? { references } : {}) }, options)
   }
 
-  const pullMergeMessage = async (repository: string, number: number, expectedHeadSha: string): Promise<PullMergeMessage> => {
-    if (!/^[a-z\d_.-]+\/[a-z\d_.-]+$/i.test(repository)
-      || repository.split("/").some(part => part === "." || part === "..")
-      || !Number.isSafeInteger(number) || number <= 0) throw new Error("Invalid pull request.")
+  const pullMergeMessage = async (repository: RepositoryReference, number: number, expectedHeadSha: string, options?: RequestOptions): Promise<PullMergeMessage> => {
+    const selector = repositorySelector(repository)
+    if (!Number.isSafeInteger(number) || number <= 0) throw new Error("Invalid pull request.")
     if (!transport.graphql) throw new Error("Pull request merge messages are unavailable.")
     if (!/^[a-f\d]{40}$/i.test(expectedHeadSha)) throw new Error("Expected head commit is unavailable.")
-    const [owner, name] = repository.split("/")
     const response = record(await transport.graphql<unknown>(
-      `query($owner: String!, $name: String!) { repository(owner: $owner, name: $name) { pullRequest(number: ${number}) { id number headRefOid viewerMergeHeadlineText(mergeType: SQUASH) viewerMergeBodyText(mergeType: SQUASH) } } }`,
-      { owner: owner!, name: name! },
+      `query(${selector.declarations}) { ${selector.select(`pullRequest(number: ${number}) { id number headRefOid viewerMergeHeadlineText(mergeType: SQUASH) viewerMergeBodyText(mergeType: SQUASH) }`)} }`,
+      selector.variables, options,
     ))
     if (response?.errors != null && (!Array.isArray(response.errors) || response.errors.length))
       throw new Error("GitHub could not load the squash commit message. Try again.")
@@ -1036,16 +1078,15 @@ export function createGitHubClient(transport: GitHubTransport) {
     return { headline: pull.viewerMergeHeadlineText, body: pull.viewerMergeBodyText }
   }
 
-  const mergePull = async (repository: string, number: number, method: PullMergeMethod, expectedHeadSha: string, message?: PullMergeMessage): Promise<PullRequestDetail> => {
+  const mergePull = async (repository: RepositoryReference, number: number, method: PullMergeMethod, expectedHeadSha: string, message?: PullMergeMessage): Promise<PullRequestDetail> => {
     if (message !== undefined) {
       if (method !== "squash") throw new Error("Custom commit messages are only supported for squash merges.")
       if (typeof message?.headline !== "string" || !message.headline.trim() || /[\r\n]/.test(message.headline))
         throw new Error("Commit headline must be nonblank and single-line.")
       if (typeof message.body !== "string") throw new Error("Commit body must be text.")
     }
-    if (!/^[a-z\d_.-]+\/[a-z\d_.-]+$/i.test(repository)
-      || repository.split("/").some(part => part === "." || part === "..")
-      || !Number.isSafeInteger(number) || number <= 0) throw new Error("Invalid pull request.")
+    repositorySelector(repository)
+    if (!Number.isSafeInteger(number) || number <= 0) throw new Error("Invalid pull request.")
     if (!transport.graphql) throw new Error("Pull request merging is unavailable.")
     if (!/^[a-f\d]{40}$/i.test(expectedHeadSha)) throw new Error("Expected head commit is unavailable.")
     const [fresh, context] = await Promise.all([pull(repository, number), pullContext(repository, number)])
@@ -1075,10 +1116,9 @@ export function createGitHubClient(transport: GitHubTransport) {
     throw new Error(errors.join(" · ") || "GitHub did not confirm the merge. Check the pull request on GitHub before retrying.")
   }
 
-  const updatePullDraft = async (repository: string, number: number, draft: boolean): Promise<PullRequestDetail> => {
-    if (!/^[a-z\d_.-]+\/[a-z\d_.-]+$/i.test(repository)
-      || repository.split("/").some(part => part === "." || part === "..")
-      || !Number.isSafeInteger(number) || number <= 0 || typeof draft !== "boolean") throw new Error("Invalid pull request.")
+  const updatePullDraft = async (repository: RepositoryReference, number: number, draft: boolean): Promise<PullRequestDetail> => {
+    repositorySelector(repository)
+    if (!Number.isSafeInteger(number) || number <= 0 || typeof draft !== "boolean") throw new Error("Invalid pull request.")
     if (!transport.graphql) throw new Error("Pull request draft changes are unavailable.")
     const fresh = await pull(repository, number)
     if (fresh.number !== number || !fresh.nodeId) throw new Error("Pull request identity could not be verified.")
@@ -1105,9 +1145,9 @@ export function createGitHubClient(transport: GitHubTransport) {
     throw new Error(errors.join(" · ") || "GitHub did not confirm the draft change. Check the pull request on GitHub before retrying.")
   }
 
-  const updatePullState = async (repository: string, number: number, state: ListState): Promise<PullRequestDetail> => {
+  const updatePullState = async (repository: RepositoryReference, number: number, state: ListState): Promise<PullRequestDetail> => {
     if (!transport.mutate) throw new Error("GitHub transport does not support mutations.")
-    const item = await transport.mutate<PullDetailResponse>(`repos/${repository}/pulls/${number}`, "PATCH", { state })
+    const item = await transport.mutate<PullDetailResponse>(`${repositoryPath(repository)}/pulls/${number}`, "PATCH", { state })
     return withPullPermissions(repository, number, pullDetail(item))
   }
 
@@ -1146,27 +1186,44 @@ export function createGitHubClient(transport: GitHubTransport) {
       mergeable: item.mergeable,
     })
 
-  const pullCommits = async (repository: string, number: number): Promise<CommitSummary[]> => {
-    const commits: CommitSummary[] = []
-    const seen = new Set<string>()
-    for (let page = 1; page <= 3; page++) {
-      const items = await transport.json<CommitResponse[]>(
-        `repos/${repository}/pulls/${number}/commits?per_page=100&page=${page}`,
-      )
-      for (const item of items) {
-        if (seen.has(item.sha)) continue
-        seen.add(item.sha)
-        commits.push(commitSummary(item))
-        if (commits.length === 250) return commits
+  const pullCommits = async (repository: RepositoryReference, number: number, options?: RequestOptions): Promise<CommitSummary[]> => {
+    const ownedBudget = options?.budget ? undefined : createRequestBudget(options?.signal)
+    const budget = options?.budget ?? ownedBudget!
+    options = { ...options, budget, signal: options?.signal ? AbortSignal.any([budget.signal, options.signal]) : budget.signal }
+    try {
+      const commits: CommitSummary[] = []
+      const seen = new Set<string>()
+      for (let page = 1; ; page++) {
+        options.signal?.throwIfAborted()
+        if (page > MAX_AUTOMATIC_PAGES) throw detailLimit()
+        const items = await transport.json<CommitResponse[]>(
+          `${repositoryPath(repository)}/pulls/${number}/commits?per_page=100&page=${page}`, options,
+        )
+        budget.consumeItems(items.length)
+        // This endpoint cannot expose commits beyond GitHub's 250-commit cap.
+        // Verify the total before presenting a capped response as complete.
+        if (page === 3 && items.length >= 50) {
+          const detail = await transport.json<{ commits: number }>(`${repositoryPath(repository)}/pulls/${number}`, options)
+          budget.consumeItems(1)
+          if (!Number.isSafeInteger(detail.commits) || detail.commits < 0 || detail.commits > 250
+            || items.length > 50) throw detailLimit()
+        }
+        for (const item of items) {
+          if (seen.has(item.sha)) continue
+          seen.add(item.sha)
+          commits.push(commitSummary(item))
+        }
+        if (items.length < 100) break
       }
-      if (items.length < 100) break
+      return commits
+    } finally {
+      ownedBudget?.dispose()
     }
-    return commits
   }
 
-  const runs = async (repository: string, page = 1): Promise<Page<WorkflowRunSummary>> => {
+  const runs = async (repository: RepositoryReference, page = 1): Promise<Page<WorkflowRunSummary>> => {
     const response = await transport.json<WorkflowRunsResponse>(
-      `repos/${repository}/actions/runs?per_page=${PAGE_SIZE}&page=${page}`,
+      `${repositoryPath(repository)}/actions/runs?per_page=${PAGE_SIZE}&page=${page}`,
     )
     const items = (response.workflow_runs ?? []).map((item) => ({
       id: item.id,
@@ -1179,8 +1236,8 @@ export function createGitHubClient(transport: GitHubTransport) {
     return { items, hasMore: page * PAGE_SIZE < (response.total_count ?? items.length) }
   }
 
-  const run = async (repository: string, id: number): Promise<WorkflowRunDetail> => {
-    const item = await transport.json<WorkflowRunDetailResponse>(`repos/${repository}/actions/runs/${id}`)
+  const run = async (repository: RepositoryReference, id: number, options?: RequestOptions): Promise<WorkflowRunDetail> => {
+    const item = await transport.json<WorkflowRunDetailResponse>(`${repositoryPath(repository)}/actions/runs/${id}`, options)
     return {
       id: item.id,
       name: item.name,
@@ -1201,10 +1258,11 @@ export function createGitHubClient(transport: GitHubTransport) {
     }
   }
 
-  const runJobs = async (repository: string, id: number, attempt: number, page = 1): Promise<Page<WorkflowJob>> => {
+  const runJobs = async (repository: RepositoryReference, id: number, attempt: number, page = 1, options?: RequestOptions): Promise<Page<WorkflowJob>> => {
     const response = await transport.json<{ total_count: number; jobs: WorkflowJobResponse[] }>(
-      `repos/${repository}/actions/runs/${id}/attempts/${attempt}/jobs?per_page=${PAGE_SIZE}&page=${page}`,
+      `${repositoryPath(repository)}/actions/runs/${id}/attempts/${attempt}/jobs?per_page=${PAGE_SIZE}&page=${page}`, options,
     )
+    options?.budget?.consumeItems(response.jobs.reduce((count, job) => count + 1 + (job.steps?.length ?? 0), 0))
     return {
       items: response.jobs.map((job) => ({
         id: job.id,

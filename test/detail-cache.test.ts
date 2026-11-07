@@ -54,6 +54,9 @@ describe("detail cache", () => {
     let time = 0
     let detailCalls = 0
     const session = createRepositorySession(loaders({
+      metadata: async (repository) => ({ ...structuredClone(githubDataFixture.repo),
+        id: githubDataFixture.repo.id + (repository === "owner/other" ? 1 : 0), nodeId: `R_${repository}`,
+        nameWithOwner: repository, url: `https://github.com/${repository}` }),
       issue: async (_repository, number) => { detailCalls++; return { ...structuredClone(issueDetailFixture), number, title: `Load ${detailCalls}` } },
     }), undefined, { freshMs: 30_000, now: () => time })
     await session.load("owner/repo")

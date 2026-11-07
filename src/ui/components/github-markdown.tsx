@@ -1,7 +1,7 @@
 import { BoxRenderable, CodeRenderable, MarkdownRenderable, TextRenderable, TextTableRenderable, Yoga, type MarkdownOptions, type Renderable, type SyntaxStyle } from "@opentui/core"
 import { useRenderer } from "@opentui/solid"
 import { createMemo, onCleanup, onMount, Show } from "solid-js"
-import { normalizeGitHubMarkdown, type GitHubMarkdownContext } from "../github-markdown"
+import { assertGitHubMarkdownSource, gitHubMarkdownFallback, normalizeGitHubMarkdown, type GitHubMarkdownContext } from "../github-markdown"
 import { compactLinkChunks, compactMarkdownLinks } from "../markdown-links"
 import "../markdown-parsers"
 import { useTheme } from "../theme"
@@ -19,11 +19,17 @@ export function GitHubMarkdown(props: { content: string; syntaxStyle: SyntaxStyl
   const preference = useMarkdownPreference()
   const minimal = () => preference() === "minimal"
   const prepared = createMemo(() => {
-    const sourceMap: MarkdownSourceMap | undefined = props.anchorRef
-      ? { lineCount: props.content.split(/\r\n?|\n/).length, code: [] } : undefined
-    return { sourceMap, content: props.plainText ? props.content : normalizeGitHubMarkdown(props.content, {
-      preserveImages: props.preserveImages, codePanels: props.codePanels, context: props.context, anchors: !!props.anchorRef, sourceMap,
-    }) }
+    try {
+      // Bound input before allocating a source map, including plain-text documents.
+      assertGitHubMarkdownSource(props.content)
+      const sourceMap: MarkdownSourceMap | undefined = props.anchorRef
+        ? { lineCount: props.content.split(/\r\n?|\n/).length, code: [] } : undefined
+      return { sourceMap, markdown: !props.plainText, content: props.plainText ? props.content : normalizeGitHubMarkdown(props.content, {
+        preserveImages: props.preserveImages, codePanels: props.codePanels, context: props.context, anchors: !!props.anchorRef, sourceMap,
+      }) }
+    } catch (error) {
+      return { sourceMap: undefined, content: gitHubMarkdownFallback(props.content, error), markdown: false }
+    }
   })
   const content = () => prepared().content
   let markdown: MarkdownRenderable | undefined
@@ -292,7 +298,7 @@ export function GitHubMarkdown(props: { content: string; syntaxStyle: SyntaxStyl
   })
 
   return (
-    <Show when={!props.plainText} fallback={
+    <Show when={prepared().markdown} fallback={
       <text
         ref={(value) => { plain = value }}
         {...links}
@@ -303,7 +309,7 @@ export function GitHubMarkdown(props: { content: string; syntaxStyle: SyntaxStyl
         maxWidth={props.wide ? "100%" : READING_WIDTH}
         minWidth={0}
         flexShrink={0}
-      ><LinkedText text={props.content} repositoryUrl={props.context?.repositoryUrl} /></text>
+      ><LinkedText text={content()} repositoryUrl={props.context?.repositoryUrl} /></text>
     }>
       <markdown
         ref={(value) => { markdown = value }}

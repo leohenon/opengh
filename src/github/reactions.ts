@@ -1,7 +1,8 @@
 import { reactionKinds, type ReactionCounts, type ReactionKind, type ReactionState, type ReactionTarget } from "../models"
 import { reactionKey, validateReactionKind } from "../reactions"
-import { normalizeRepository } from "../repository-name"
-import type { GitHubTransport } from "./transport"
+import { repositoryPath, repositorySelector, type RepositoryReference } from "./repository-target"
+import { isRequestInterrupted } from "./request-budget"
+import type { GitHubTransport, RequestOptions } from "./transport"
 
 const contents: Record<string, ReactionKind> = {
   THUMBS_UP: "+1", THUMBS_DOWN: "-1", LAUGH: "laugh", HOORAY: "hooray",
@@ -57,9 +58,9 @@ export function parseReactionState(value: unknown): ReactionState | undefined {
 }
 
 export function createGitHubReactions(transport: GitHubTransport) {
-  const request = async (query: string, variables: Record<string, string> = {}) => {
+  const request = async (query: string, variables: Record<string, string> = {}, options?: RequestOptions) => {
     if (!transport.graphql) throw new Error("Reactions require GitHub GraphQL access.")
-    const response = object(await transport.graphql<unknown>(query, variables))
+    const response = object(await transport.graphql<unknown>(query, variables, options))
     if (response.errors != null) {
       if (!Array.isArray(response.errors)) throw new Error("Invalid reaction errors response from GitHub.")
       if (response.errors.length) throw new Error(response.errors.map((error) =>
@@ -67,31 +68,28 @@ export function createGitHubReactions(transport: GitHubTransport) {
     }
     return object(response.data)
   }
-  const validRepository = (repository: string) => {
-    if (!normalizeRepository(repository) || repository.trim() !== repository || repository.split("/").length !== 2
-      || repository.split("/").some((part) => part === "." || part === ".."))
-      throw new Error("Invalid reaction repository.")
-  }
-  const addReaction = async (repository: string, requested: ReactionTarget, kind: ReactionKind): Promise<ReactionState> => {
+  const addReaction = async (repository: RepositoryReference, requested: ReactionTarget, kind: ReactionKind): Promise<ReactionState> => {
     const target = { ...requested }
     reactionKey(target)
     validateReactionKind(kind)
-    validRepository(repository)
+    repositorySelector(repository)
     if (!transport.graphql) throw new Error("Reactions require GitHub GraphQL access.")
     let id: string
     if (target.kind === "review-comment") {
       const data = await request(`query ReactionSubject($id: ID!) { node(id: $id) {
-        __typename ... on PullRequestReviewComment { id pullRequest { number repository { nameWithOwner } } }
+        __typename ... on PullRequestReviewComment { id pullRequest { number repository { id nameWithOwner } } }
       } }`, { id: target.id })
       const node = object(data.node)
       const pull = object(node.pullRequest)
       if (node.__typename !== "PullRequestReviewComment" || node.id !== target.id || pull.number !== target.number
-        || String(object(pull.repository).nameWithOwner).toLowerCase() !== repository.toLowerCase())
+        || (typeof repository === "string"
+          ? String(object(pull.repository).nameWithOwner).toLowerCase() !== repository.toLowerCase()
+          : object(pull.repository).id !== repository.nodeId))
         throw new Error("Review comment does not belong to this pull request and repository.")
       id = target.id
     } else {
       const path = target.kind === "comment" ? `issues/comments/${target.id}` : `issues/${target.number}`
-      const node = object(await transport.json<unknown>(`repos/${repository}/${path}`))
+      const node = object(await transport.json<unknown>(`${repositoryPath(repository)}/${path}`))
       if (target.kind === "comment") {
         const parent = typeof node.issue_url === "string" ? /\/issues\/([1-9]\d*)$/.exec(node.issue_url)?.[1] : undefined
         if (node.id !== target.id || Number(parent) !== target.number) throw new Error("Comment does not belong to this issue or pull request.")
@@ -112,29 +110,36 @@ export function createGitHubReactions(transport: GitHubTransport) {
       throw new Error("GitHub did not confirm the requested reaction. Refresh the message before retrying.")
     return value
   }
-  const bodyReactions = async (repository: string, number: number, kind: "issue" | "pull"): Promise<ReactionState | undefined> => {
+  const bodyReactions = async (repository: RepositoryReference, number: number, kind: "issue" | "pull", options?: RequestOptions): Promise<ReactionState | undefined> => {
     if (!transport.graphql || !Number.isSafeInteger(number) || number <= 0) return
     try {
-      validRepository(repository)
-      const [owner, name] = repository.split("/")
+      const selector = repositorySelector(repository)
       const field = kind === "issue" ? "issue" : "pullRequest"
-      const data = await request(`query BodyReactions($owner: String!, $name: String!) {
-        repository(owner: $owner, name: $name) { ${field}(number: ${number}) { ${reactionFields} } }
-      }`, { owner: owner!, name: name! })
+      const data = await request(`query BodyReactions(${selector.declarations}) {
+        ${selector.select(`${field}(number: ${number}) { ${reactionFields} }`)}
+      }`, selector.variables, options)
+      options?.budget?.consumeItems(1)
       return parseReactionState(object(data.repository)[field])
-    } catch { return undefined } // Optional viewer information must not prevent read-only browsing.
+    } catch (error) {
+      if (isRequestInterrupted(error, options)) throw error
+      return undefined // Optional viewer information must not prevent read-only browsing.
+    }
   }
-  const commentReactions = async (items: readonly { node_id?: string }[]) => {
+  const commentReactions = async (items: readonly { node_id?: string }[], options?: RequestOptions) => {
     const states = new Map<string, ReactionState>()
     const ids = [...new Set(items.map((item) => item.node_id).filter((id): id is string => typeof id === "string" && Boolean(id.trim())))].slice(0, 100)
     if (!transport.graphql || !ids.length) return states
     try {
-      const data = await request(`query CommentReactions { nodes(ids: ${JSON.stringify(ids)}) { ... on Reactable { id ${reactionFields} } } }`)
+      const data = await request(`query CommentReactions { nodes(ids: ${JSON.stringify(ids)}) { ... on Reactable { id ${reactionFields} } } }`, {}, options)
+      if (Array.isArray(data.nodes)) options?.budget?.consumeItems(data.nodes.length)
       if (Array.isArray(data.nodes)) for (const node of data.nodes) {
         const value = parseReactionState(node)
         if (value && typeof node.id === "string" && ids.includes(node.id)) states.set(node.id, value)
       }
-    } catch { /* REST counts remain usable when optional viewer information is unavailable. */ }
+    } catch (error) {
+      if (isRequestInterrupted(error, options)) throw error
+      // REST counts remain usable when optional viewer information is unavailable.
+    }
     return states
   }
   return { addReaction, bodyReactions, commentReactions }

@@ -34,6 +34,39 @@ async function settle(view: Awaited<ReturnType<typeof testRender>>) {
   }
 }
 
+test("rejected Markdown uses bounded plain text and recovers in rich and minimal modes", async () => {
+  const [content, setContent] = createSignal("Initial **Markdown**.")
+  const [style, setStyle] = createSignal<MarkdownStyle>("rich")
+  const view = await testRender(() => <ThemeProvider name="github"><MarkdownProvider style={style()}>
+    <MarkdownSample content={content()} />
+  </MarkdownProvider></ThemeProvider>, { width: 120, height: 20 })
+  try {
+    for (const preference of ["rich", "minimal"] as const) {
+      setStyle(preference)
+      for (const [source, notice] of [
+        ["<a>" + "<span>".repeat(12_000) + "hello" + "</span>".repeat(12_000) + "</a>", "Markdown is too complex"],
+        ["Readable oversize preview\n" + "x".repeat(1024 * 1024), "Markdown is too large"],
+        ["|" + "h|".repeat(3000) + "\n|" + "-|".repeat(3000) + "\n" + "|x|\n".repeat(4000), "Markdown is too complex"],
+        ['<table><tr><td colspan="1000000000">x</td></tr></table>', "Markdown is too complex"],
+      ] as const) {
+        setContent(source)
+        await settle(view)
+        const frame = view.captureCharFrame()
+        expect(frame).toContain(notice)
+        expect(frame).toContain("Showing a plain-text preview.")
+        expect(codeBlocks(view.renderer.root)).toHaveLength(0)
+      }
+      setContent("Recovered **Markdown**.\n\n| Resource | Status |\n| --- | --- |\n| Ragged |\n| Complete | Ready |")
+      await settle(view)
+      const recovered = view.captureCharFrame()
+      for (const text of ["Recovered Markdown.", "Resource", "Status", "Ragged", "Complete", "Ready"])
+        expect(recovered).toContain(text)
+      expect(recovered).not.toContain("plain-text preview")
+      expect(codeBlocks(view.renderer.root).length).toBeGreaterThan(0)
+    }
+  } finally { view.renderer.destroy() }
+}, 15_000)
+
 test("shared markdown keeps padded code, compact linked labels, and block spacing across resizes and updates", async () => {
   const [content, setContent] = createSignal(`# Implementation
 
@@ -314,6 +347,13 @@ test("minimal Markdown switches live without losing structure, links, or literal
 
 [Guide](https://example.com/guide) and **important** text.
 
+- [x] Completed task
+- [ ] Pending task
+
+![Screenshot](https://example.com/ui.png)
+
+<form>Static form text<input type="image" src="file:///tmp/local-file" alt="Hidden control"></form>
+
 > [!WARNING]
 > Keep this warning.
 
@@ -327,6 +367,10 @@ test("minimal Markdown switches live without losing structure, links, or literal
 
 \`\`\`md
 ## Literal heading
+\`\`\`
+
+\`\`\`html
+<input list="d"><datalist id="d"></datalist>
 \`\`\`
 
 | Resource | Status |
@@ -347,6 +391,9 @@ test("minimal Markdown switches live without losing structure, links, or literal
     await settle(view)
     expect(json().screenY - json().parent!.screenY).toBe(2)
     expect(view.captureCharFrame()).toContain("─")
+    for (const text of ["Completed task", "Pending task", "▧ Screenshot", "Static form text"])
+      expect(view.captureCharFrame()).toContain(text)
+    expect(view.captureCharFrame()).not.toContain("Hidden control")
     setStyle("minimal")
     for (const appearance of ["dark", "light"] as const) {
       setMode(appearance)
@@ -354,6 +401,12 @@ test("minimal Markdown switches live without losing structure, links, or literal
       const frame = view.captureCharFrame()
       for (const text of ["Heading", "Guide and important text.", "Warning", "Keep this warning.", "Nested code:", "Docs", "Ready", "## Literal heading"])
         expect(frame).toContain(text)
+      for (const text of ["Completed task", "Pending task", "▧ Screenshot", "Static form text"])
+        expect(frame).toContain(text)
+      expect(frame).not.toContain("Hidden control")
+      expect(frame).not.toContain("local-file")
+      expect(codeBlocks(view.renderer.root).find((block) => block.filetype === "html")?.plainText)
+        .toBe('<input list="d"><datalist id="d"></datalist>')
       expect(frame).not.toContain("https://example.com")
       expect(frame).not.toMatch(/[─│┌└]/)
       expect(frame.split("\n").some((row) => row.trim() === "json")).toBe(false)

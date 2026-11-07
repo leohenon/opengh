@@ -266,7 +266,7 @@ test("mouse-only fixture route crosses launcher, repository, tabs, branches, doc
     + Array.from({ length: 60 }, (_, index) => `+new-${index}\n`).join("")
   const { view, session } = await setup({
     documents: async (repo, ref) => ["README", "Security"].map((label) => ({ id: label, path: `${label}.md`, label, repository: repo.nameWithOwner, ref })),
-    document: async (source) => Array.from({ length: 60 }, (_, index) => `${source.label} line ${index}\n\n`).join(""),
+    document: async (_repository, source) => Array.from({ length: 60 }, (_, index) => `${source.label} line ${index}\n\n`).join(""),
     commits: async () => ({ items: githubDataFixture.commits.value!.items, hasMore: false }),
     branches: async () => ({ items: ["main", "next"], hasMore: false }),
     diff: async () => ({ kind: "patch", patch }),

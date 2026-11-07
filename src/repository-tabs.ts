@@ -1,8 +1,8 @@
-import { randomUUID } from "node:crypto"
-import { mkdir, readFile, readdir, rename, rm, writeFile } from "node:fs/promises"
+import { opendir } from "node:fs/promises"
 import { join } from "node:path"
 import type { Page } from "./navigation"
 import { configDirectory } from "./paths"
+import { atomicPrivateWrite, ensureTrustedDirectory, readPrivateJson, trustedReadDirectory } from "./filesystem"
 import { normalizeRepository } from "./repository-name"
 
 export type RepositoryTabs = Record<string, Page>
@@ -19,9 +19,9 @@ function normalizeTabs(value: unknown): RepositoryTabs {
   return tabs
 }
 
-async function readTabs(path: string): Promise<RepositoryTabs> {
+async function readTabs(path: string, maxBytes = 1024 * 1024): Promise<RepositoryTabs> {
   try {
-    return normalizeTabs(JSON.parse(await readFile(path, "utf8")))
+    return normalizeTabs(await readPrivateJson(path, { maxBytes }))
   } catch (error) {
     if (error instanceof SyntaxError || (error instanceof Error && "code" in error && error.code === "ENOENT")) return {}
     throw error
@@ -31,13 +31,22 @@ async function readTabs(path: string): Promise<RepositoryTabs> {
 export async function loadRepositoryTabs(path = join(configDirectory(), "repository-state.json")): Promise<RepositoryTabs> {
   // Keep the original aggregate file readable; per-repository updates override it.
   const tabs = await readTabs(path)
-  const directory = `${path}.d`
-  const files = await readdir(directory).catch((error) => {
-    if (error instanceof Error && "code" in error && error.code === "ENOENT") return []
+  let directory: string
+  const files: string[] = []
+  try {
+    directory = await trustedReadDirectory(`${path}.d`)
+    const entries = await opendir(directory)
+    let count = 0
+    for await (const entry of entries) {
+      if (++count > 10_000) throw new Error("Repository state directory exceeds the 10,000 file limit")
+      if (entry.name.endsWith(".json")) files.push(entry.name)
+    }
+  } catch (error) {
+    if (error instanceof Error && "code" in error && error.code === "ENOENT") return tabs
     throw error
-  })
-  for (const file of files.filter((file) => file.endsWith(".json"))) {
-    const saved = await readTabs(join(directory, file))
+  }
+  for (const file of files) {
+    const saved = await readTabs(join(directory, file), 4096)
     for (const [repository, page] of Object.entries(saved)) {
       if (file === `${encodeURIComponent(repository)}.json`) tabs[repository] = page
     }
@@ -49,16 +58,9 @@ export async function loadRepositoryTabs(path = join(configDirectory(), "reposit
 // read/merge/write races and never overwrite another repository's history.
 export async function saveRepositoryTabs(tabs: RepositoryTabs, path = join(configDirectory(), "repository-state.json")): Promise<void> {
   const directory = `${path}.d`
-  await mkdir(directory, { recursive: true })
+  await ensureTrustedDirectory(directory)
   for (const [repository, page] of Object.entries(normalizeTabs(tabs))) {
     const destination = join(directory, `${encodeURIComponent(repository)}.json`)
-    const temporary = `${destination}.${randomUUID()}.tmp`
-    try {
-      await writeFile(temporary, JSON.stringify({ [repository]: page }, null, 2) + "\n", { flag: "wx" })
-      await rename(temporary, destination)
-    } catch (error) {
-      await rm(temporary, { force: true }).catch(() => {})
-      throw error
-    }
+    await atomicPrivateWrite(destination, JSON.stringify({ [repository]: page }, null, 2) + "\n")
   }
 }

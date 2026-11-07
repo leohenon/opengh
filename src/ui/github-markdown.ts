@@ -1,5 +1,7 @@
 import { posix } from "node:path"
 import type { Element, ElementContent, Root, Text } from "hast"
+import { toHtml } from "hast-util-to-html"
+import { parseFragment } from "parse5"
 import type { PhrasingContent, Root as MarkdownRoot } from "mdast"
 import rehypeRaw from "rehype-raw"
 import rehypeRemark from "rehype-remark"
@@ -17,6 +19,168 @@ export type GitHubMarkdownContext = {
   ref?: string
   path?: string
   sourceUrl?: string
+}
+
+const MAX_SOURCE_BYTES = 1024 * 1024
+const MAX_SOURCE_LINES = 10_000
+const MAX_TREE_DEPTH = 64
+const MAX_TREE_NODES = 20_000
+
+export class GitHubMarkdownError extends Error {}
+
+function lineBreaks(value: string, remaining: number) {
+  let count = 0
+  for (const _ of value.matchAll(/\r\n|[\r\n]/g)) {
+    if (++count > remaining) throw new GitHubMarkdownError("Markdown has too many lines (limit: 10,000)")
+  }
+  return count
+}
+
+export function assertGitHubMarkdownSource(value: string) {
+  if (value.length > MAX_SOURCE_BYTES || Buffer.byteLength(value, "utf8") > MAX_SOURCE_BYTES)
+    throw new GitHubMarkdownError("Markdown is too large (limit: 1 MiB)")
+  lineBreaks(value, MAX_SOURCE_LINES - 1)
+}
+
+// Both unist and parse5 trees are checked iteratively, before recursive visitors
+// or the parse5-to-HAST converter can see attacker-controlled nesting.
+type BoundedNode = {
+  type?: string; nodeName?: string; tagName?: string; value?: string; url?: string; title?: string | null
+  properties?: Record<string, unknown>; attrs?: { name: string; value: string }[]
+  children?: BoundedNode[]; childNodes?: BoundedNode[]; content?: BoundedNode
+}
+function assertBoundedTree(root: BoundedNode) {
+  const pending = [{ node: root, depth: 0 }]
+  let count = 1
+  let bytes = 0
+  let lines = 1
+  const charge = (value: unknown) => {
+    for (const item of Array.isArray(value) ? value : [value]) {
+      if (typeof item !== "string") continue
+      if (item.length > MAX_SOURCE_BYTES) throw new GitHubMarkdownError("Markdown expansion exceeds the viewing limit")
+      bytes += Buffer.byteLength(item, "utf8")
+      if (bytes > MAX_SOURCE_BYTES) throw new GitHubMarkdownError("Markdown expansion exceeds the viewing limit")
+      lines += lineBreaks(item, MAX_SOURCE_LINES - lines)
+    }
+  }
+  while (pending.length) {
+    const { node, depth } = pending.pop()!
+    if (depth > MAX_TREE_DEPTH) throw new GitHubMarkdownError("Markdown is too complex")
+    charge(node.value)
+    charge(node.url)
+    charge(node.title)
+    charge(node.tagName ?? node.nodeName)
+    for (const [name, value] of Object.entries(node.properties ?? {})) { charge(name); charge(value) }
+    for (const attribute of node.attrs ?? []) { charge(attribute.name); charge(attribute.value) }
+    const children = node.children ?? node.childNodes ?? []
+    const additional = children.length + (node.content ? 1 : 0)
+    count += additional
+    if (count > MAX_TREE_NODES) throw new GitHubMarkdownError("Markdown is too complex")
+    for (const child of children) pending.push({ node: child, depth: depth + 1 })
+    // parse5 stores template contents outside childNodes.
+    if (node.content) pending.push({ node: node.content, depth: depth + 1 })
+  }
+}
+
+function boundedMarkdown() {
+  return (tree: MarkdownRoot) => {
+    assertBoundedTree(tree)
+    let projectedNodes = 0
+    // remark-rehype URI encoding must not hide controls from safeTarget.
+    visit(tree, (node) => {
+      projectedNodes++
+      if (projectedNodes > MAX_TREE_NODES) throw new GitHubMarkdownError("Markdown is too complex (table expansion)")
+      if (node.type === "table") {
+        const rows = node.children.length
+        const width = Math.max(node.align?.length ?? 0, node.children[0]?.children.length ?? 0)
+        // table-row pads to align width BEFORE boundedHtml runs. Charge cells
+        // and their newline separators, row wrappers/separators, and table /
+        // thead / tbody wrappers. Retain the original nodes too: conservative,
+        // and shared across ALL tables and the rest of this Markdown tree.
+        // Divide before multiplying so even the projection stays bounded.
+        if (width > MAX_TREE_NODES || rows > Math.floor((MAX_TREE_NODES - projectedNodes - 8) / (2 * width + 3)))
+          throw new GitHubMarkdownError("Markdown is too complex (table expansion)")
+        projectedNodes += rows * (2 * width + 3) + 8
+      }
+      if (node.type === "link" || node.type === "definition" || node.type === "image") node.url = safeTarget(node.url)
+    })
+  }
+}
+
+function boundedHtmlTables() {
+  return (tree: Root) => {
+    assertBoundedTree(tree)
+    let projectedNodes = 0
+    visit(tree, (node) => {
+      if (++projectedNodes > MAX_TREE_NODES) throw new GitHubMarkdownError("Markdown is too complex (table expansion)")
+      if (node.type !== "element" || node.tagName !== "table") return
+      const rows: Element[][] = []
+      const pending: ElementContent[] = [...node.children].reverse()
+      let outside = 0
+      while (pending.length) {
+        const child = pending.pop()!
+        if (child.type === "text" && !child.value.trim()) continue
+        if (child.type === "element" && child.tagName === "table") continue
+        if (child.type === "element" && child.tagName === "tr") {
+          const cells: Element[] = []
+          for (const cell of child.children) {
+            if (cell.type === "text" && !cell.value.trim()) continue
+            if (cell.type !== "element" || (cell.tagName !== "td" && cell.tagName !== "th"))
+              throw new GitHubMarkdownError("Markdown is too complex (table expansion)")
+            cells.push(cell)
+          }
+          rows.push(cells)
+          continue
+        }
+        if (child.type !== "element" || !["thead", "tbody", "tfoot"].includes(child.tagName)) outside++
+        if (child.type === "element") pending.push(...[...child.children].reverse())
+      }
+      let width = 0
+      let spanning = 0
+      for (let index = 0; index < rows.length; index++) {
+        let rowWidth = 0
+        for (const cell of rows[index]!) {
+          const columns = Math.max(1, Number.parseInt(String(cell.properties.colSpan), 10) || 1)
+          const span = Math.max(1, Number.parseInt(String(cell.properties.rowSpan), 10) || 1)
+          // The converter ignores nonexistent target rows, but still loops over
+          // them. Clamping preserves its output without allowing billion-step loops.
+          const remaining = Math.min(span, rows.length - index)
+          if (cell.properties.rowSpan !== undefined) cell.properties.rowSpan = remaining
+          rowWidth += columns
+          if (remaining > 1) spanning += columns
+          if (rowWidth + spanning > MAX_TREE_NODES) throw new GitHubMarkdownError("Markdown is too complex (table expansion)")
+        }
+        width = Math.max(width, rowWidth)
+      }
+      // Include a possible generated header, straddling content, and every span
+      // that could add columns to another row before rectangular padding.
+      const rowCount = rows.length + outside + 1
+      width = Math.max(1, width + spanning + outside)
+      if (rowCount > Math.floor((MAX_TREE_NODES - projectedNodes - 8) / (2 * width + 3)))
+        throw new GitHubMarkdownError("Markdown is too complex (table expansion)")
+      projectedNodes += rowCount * (2 * width + 3) + 8
+    })
+  }
+}
+
+function boundedHtml() {
+  return (tree: Root) => {
+    assertBoundedTree(tree)
+    // Serialize the whole HAST, not individual HTML strings: raw tags may span
+    // Markdown blocks, and HTML's implied closing/adoption rules affect depth.
+    const html = toHtml(tree, { allowDangerousHtml: true })
+    if (html.length > MAX_SOURCE_BYTES || Buffer.byteLength(html, "utf8") > MAX_SOURCE_BYTES)
+      throw new GitHubMarkdownError("Markdown expansion exceeds the viewing limit")
+    assertBoundedTree(parseFragment(html))
+  }
+}
+
+export function gitHubMarkdownFallback(value: string, error: unknown): string {
+  const notice = error instanceof GitHubMarkdownError ? error.message : "Markdown conversion failed"
+  // Never send rejected input back through a Markdown parser or terminal escapes.
+  const preview = value.slice(0, 4096).replace(/[\u0000-\u0008\u000b-\u001f\u007f-\u009f]/g, "�")
+    .split("\n").slice(0, 40).join("\n")
+  return `${notice}. Showing a plain-text preview.\n\n${preview}\n\n[Preview limited to 4096 characters / 40 lines]`
 }
 
 function property(element: Element, name: string) {
@@ -52,8 +216,9 @@ function isDecorativeImage(element: Element, label: string) {
 }
 
 function safeTarget(value: string) {
+  if (/[\u0000-\u001f\u007f-\u009f]/.test(value)) return ""
   const target = value.trim()
-  if (!target || /[\u0000-\u001f\u007f]/.test(target)) return ""
+  if (!target) return ""
   if (target.startsWith("#") || target.startsWith("/") || target.startsWith("./") || target.startsWith("../") || target.startsWith("?"))
     return target
   const scheme = target.match(/^([a-z][a-z\d+.-]*):/i)?.[1]?.toLowerCase()
@@ -89,6 +254,32 @@ function isPresentationGroup(element: Element) {
     child.type === "element" && child.tagName === "br"
     || isImageLink(child)
     || child.type === "text" && child.value.trim() === "")
+}
+
+function readOnlyHtml() {
+  return (tree: Root) => {
+    assertBoundedTree(tree)
+    visit(tree, "element", (element, index, parent) => {
+      if (index === undefined || !parent) return
+      const tag = element.tagName
+      // Remove controls before rehype-remark builds elementById or dereferences
+      // input lists. This renderer needs static content, not form projections.
+      if (["base", "datalist", "select", "textarea", "option", "optgroup", "output"].includes(tag)
+        || tag === "input" && !["checkbox", "radio"].includes(property(element, "type"))) {
+        parent.children.splice(index, 1)
+        return [SKIP, index]
+      }
+      if (tag === "input") {
+        // Disabled GFM checkboxes still carry readable state. No IDs, list
+        // lookups, URLs, or user-controlled values reach the input handler.
+        element.properties = { type: property(element, "type"), checked: Boolean(element.properties.checked) }
+      }
+      if (tag === "form" || tag === "button") {
+        parent.children.splice(index, 1, ...element.children)
+        return [SKIP, index] // Visit the unwrapped children too, including controls.
+      }
+    })
+  }
 }
 
 function terminalMedia(options: { preserveImages?: boolean } = {}) {
@@ -349,6 +540,7 @@ function resolveTarget(value: string, context: GitHubMarkdownContext) {
 }
 
 function githubLinks(context: GitHubMarkdownContext) {
+  let inserted = 0
   return (tree: MarkdownRoot) => visit(tree, (node, index, parent) => {
     if (node.type === "link" || node.type === "definition") {
       node.url = resolveTarget(node.url, context)
@@ -359,9 +551,14 @@ function githubLinks(context: GitHubMarkdownContext) {
     const chunks = node.value.split(/(\uE000[^\uE001]*\uE001)/g).flatMap((part) => part.startsWith("\uE000")
       ? [{ text: part }] : referenceLinkChunks(part, context.repositoryUrl))
     if (!chunks.some((chunk) => chunk.href)) return
-    const children: PhrasingContent[] = chunks.map((chunk) => chunk.href
-      ? { type: "link", url: chunk.href, children: [{ type: "text", value: chunk.text }] }
-      : { type: "text", value: chunk.text })
+    const children: PhrasingContent[] = []
+    for (const chunk of chunks) {
+      inserted += chunk.href ? 2 : 1
+      if (inserted > MAX_TREE_NODES) throw new GitHubMarkdownError("Markdown is too complex")
+      children.push(chunk.href
+        ? { type: "link", url: chunk.href, children: [{ type: "text", value: chunk.text }] }
+        : { type: "text", value: chunk.text })
+    }
     // A text node's parent is a phrasing container, not a block-only container.
     const siblings = parent.children as PhrasingContent[]
     siblings.splice(index, 1, ...children)
@@ -369,17 +566,58 @@ function githubLinks(context: GitHubMarkdownContext) {
   })
 }
 
+function boundedOutput() {
+  return (tree: MarkdownRoot) => { assertBoundedTree(tree) }
+}
+
+function sanitizeDestinations(tree: MarkdownRoot) {
+  // Run after ALL converter/context transforms, even without GitHub context.
+  assertBoundedTree(tree)
+  const removedDefinitions = new Set<string>()
+  visit(tree, "definition", (node) => {
+    if (!safeTarget(node.url)) removedDefinitions.add(node.identifier.toUpperCase())
+  })
+  visit(tree, (node, index, parent) => {
+    if (index === undefined || !parent) return
+    if (node.type === "link" || node.type === "image" || node.type === "definition") {
+      const target = safeTarget(node.url)
+      if (target) { node.url = target; return }
+      if (node.type === "link") {
+        parent.children.splice(index, 1, ...node.children)
+      } else if (node.type === "image") {
+        parent.children.splice(index, 1, { type: "text", value: node.alt ?? "" })
+      } else {
+        parent.children.splice(index, 1)
+      }
+      return [SKIP, index]
+    }
+    if ((node.type === "linkReference" || node.type === "imageReference")
+      && removedDefinitions.has(node.identifier.toUpperCase())) {
+      if (node.type === "linkReference") parent.children.splice(index, 1, ...node.children)
+      else parent.children.splice(index, 1, { type: "text", value: node.alt ?? "" })
+      return [SKIP, index]
+    }
+  })
+  assertBoundedTree(tree)
+}
+
 const processor = unified()
   .use(remarkParse)
-  .use(remarkGfm)
+  .use(remarkGfm, { tablePipeAlign: false })
+  .use(boundedMarkdown)
   .use(sourcePositions)
   .use(githubAlerts)
+  .use(() => boundedOutput()) // A distinct plugin: unified deduplicates attachers.
   .use(remarkRehype, { allowDangerousHtml: true })
+  .use(boundedHtml)
   .use(rehypeRaw)
+  .use(readOnlyHtml)
   .use(terminalMedia)
   .use(documentAnchors)
+  .use(boundedHtmlTables)
   .use(rehypeRemark)
-  .use(remarkGfm)
+  .use(boundedOutput)
+  .use(remarkGfm, { tablePipeAlign: false })
   .use(remarkStringify, {
     bullet: "-",
     fences: true,
@@ -395,9 +633,17 @@ const panelProcessor = processor().use(plainCodeFences)
 const discussionPanelProcessor = discussionProcessor().use(plainCodeFences)
 
 export function normalizeGitHubMarkdown(value: string, options: { preserveImages?: boolean; codePanels?: boolean; context?: GitHubMarkdownContext; anchors?: boolean; sourceMap?: MarkdownSourceMap } = {}) {
+  // Check before parsing; rejected sources also use the bounded plain-text preview.
+  assertGitHubMarkdownSource(value)
   const selected = options.codePanels !== false
     ? options.preserveImages ? discussionPanelProcessor : panelProcessor
     : options.preserveImages ? discussionProcessor : processor
   const contextual = options.context?.repositoryUrl ? selected().use(githubLinks, options.context) : selected
-  return String(contextual.processSync({ value, data: { documentAnchors: options.anchors, sourceMap: options.sourceMap } })).trim()
+  const file = { value, data: { documentAnchors: options.anchors, sourceMap: options.sourceMap } }
+  const tree = contextual.runSync(contextual.parse(file), file)
+  sanitizeDestinations(tree as MarkdownRoot)
+  const markdown = String(contextual.stringify(tree, file))
+  if (markdown.length > MAX_SOURCE_BYTES || Buffer.byteLength(markdown, "utf8") > MAX_SOURCE_BYTES)
+    throw new GitHubMarkdownError("Markdown expansion exceeds the viewing limit")
+  return markdown.trim()
 }

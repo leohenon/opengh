@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test"
-import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises"
+import { chmod, mkdir, mkdtemp, readdir, readFile, rm, stat, symlink, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { loadRepositoryTabs, saveRepositoryTabs } from "../src/repository-tabs"
@@ -56,9 +56,30 @@ describe("repository tabs", () => {
     const expected = { "owner/repo": "issues", "owner/other": "actions" } as const
     expect(JSON.parse(await readFile(join(`${path}.d`, "owner%2Frepo.json"), "utf8"))).toEqual({ "owner/repo": "issues" })
     expect(await loadRepositoryTabs(path)).toEqual(expected)
+    const destination = join(`${path}.d`, "owner%2Frepo.json")
+    expect((await stat(`${path}.d`)).mode & 0o777).toBe(0o700)
+    expect((await stat(destination)).mode & 0o777).toBe(0o600)
+    await chmod(destination, 0o644)
     await saveRepositoryTabs({ "Owner/Repo": "pulls" }, path)
+    expect((await stat(destination)).mode & 0o777).toBe(0o600)
     expect(await loadRepositoryTabs(path)).toEqual({ "owner/repo": "pulls", "owner/other": "actions" })
     expect((await readdir(`${path}.d`)).sort()).toEqual(["owner%2Fother.json", "owner%2Frepo.json"])
+  })
+
+  test("rejects symlink and oversized state inputs before parsing", async () => {
+    const directory = await temporaryDirectory()
+    const path = join(directory, "repository-state.json")
+    const target = join(directory, "target.json")
+    await writeFile(target, JSON.stringify({ "owner/repo": "issues" }))
+    await symlink(target, path)
+    await expect(loadRepositoryTabs(path)).rejects.toThrow("regular file")
+    await rm(path)
+    await writeFile(path, JSON.stringify({ "owner/repo": "issues", padding: "x".repeat(1024 * 1024) }))
+    await expect(loadRepositoryTabs(path)).rejects.toThrow("byte limit")
+    await rm(path)
+    await saveRepositoryTabs({ "owner/repo": "issues" }, path)
+    await writeFile(join(`${path}.d`, "owner%2Frepo.json"), JSON.stringify({ "owner/repo": "issues", padding: "x".repeat(4096) }))
+    await expect(loadRepositoryTabs(path)).rejects.toThrow("byte limit")
   })
 
   test("propagates save failures and removes temporary files after a failed rename", async () => {
