@@ -25,8 +25,9 @@ import type {
 
 export type ResourcePhase = "load" | "pagination"
 
+// Deferred repository sections have not started a request; they must not hold refresh busy.
 export type ResourceState<T> =
-  | { status: "loading"; phase: ResourcePhase; value?: T }
+  | { status: "loading"; phase: ResourcePhase; value?: T; deferred?: true }
   | { status: "ready"; value: T }
   | { status: "error"; phase: ResourcePhase; message: string; value?: T }
 

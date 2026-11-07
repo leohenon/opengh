@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { testRender } from "@opentui/solid";
-import { CliRenderEvents, RGBA, ScrollBoxRenderable, type Renderable } from "@opentui/core";
+import { CliRenderEvents, RGBA, ScrollBoxRenderable, TextAttributes, type Renderable } from "@opentui/core";
 import { createSignal } from "solid-js";
 import { App } from "../src/ui/app";
 import { Header } from "../src/ui/components/header";
@@ -107,10 +107,12 @@ describe("opengh TUI", () => {
   test("standalone hides global navigation and expands without losing the requested detail", async () => {
     const failed = { status: "error" as const, phase: "load" as const, message: "Direct target unavailable" };
     const pages: Page[] = [];
+    const scopes: string[] = [];
     let expanded = 0;
     let quit = 0;
     const view = await testRender(() => <App data={githubDataFixture} operations={repositoryOperationsFixture}
       standalone initialNavigation={{ detail: { kind: "issue", number: 234 } }}
+      onEnsureResources={(scope) => scopes.push(scope)}
       issueDetail={{ number: 234, resource: failed, comments: failed, references: failed }}
       onPageChange={(page) => pages.push(page)} onOpenFullApp={() => expanded++} onQuit={() => quit++}
     />, { width: 120, height: 32 });
@@ -118,6 +120,9 @@ describe("opengh TUI", () => {
     await view.flush();
     expect(view.captureCharFrame()).toContain("Direct target unavailable");
     expect(view.captureCharFrame()).not.toContain("1 Overview");
+    const hasMounted = (id: string, node: Renderable = view.renderer.root): boolean => node.id === id || node.getChildren().some((child) => hasMounted(id, child));
+    expect(hasMounted("overview-document-scroll")).toBe(false);
+    expect(scopes).toEqual(["detail"]);
     for (const key of ["1", "2", "4", "h", "l"]) view.mockInput.pressKey(key);
     await view.flush();
     expect(pages).toEqual(["issues"]);
@@ -126,6 +131,8 @@ describe("opengh TUI", () => {
     view.mockInput.pressKey("o", { ctrl: true });
     await view.flush();
     expect(expanded).toBe(1);
+    expect(scopes.at(-1)).toBe("full");
+    expect(hasMounted("overview-document-scroll")).toBe(true);
     expect(view.captureCharFrame()).toContain("1 Overview");
     expect(view.captureCharFrame()).toContain("Direct target unavailable");
     view.mockInput.pressKey("2");
@@ -134,6 +141,24 @@ describe("opengh TUI", () => {
     view.mockInput.pressKey("q");
     await view.flush();
     expect(quit).toBe(1);
+  });
+
+  test("standalone Back ensures the parent list rather than the rest of the app", async () => {
+    const scopes: string[] = [];
+    const failed = { status: "error" as const, phase: "load" as const, message: "Direct target unavailable" };
+    const view = await testRender(() => <App data={githubDataFixture} operations={repositoryOperationsFixture}
+      standalone initialNavigation={{ detail: { kind: "issue", number: 234 } }}
+      issueDetail={{ number: 234, resource: failed, comments: failed, references: failed }}
+      onEnsureResources={(scope) => scopes.push(scope)}
+    />, { width: 120, height: 32 });
+    active.push(view);
+    await view.flush();
+    view.mockInput.pressEscape();
+    await Bun.sleep(30);
+    await view.flush();
+    expect(scopes).toEqual(["detail", "issues"]);
+    expect(view.captureCharFrame()).not.toContain("Direct target unavailable");
+    expect(view.captureCharFrame()).not.toContain("1 Overview");
   });
 
   test.each<[DetailTarget, Page, string]>([
@@ -663,6 +688,30 @@ describe("opengh TUI", () => {
     await Bun.sleep(210);
     await view.flush();
     expect(view.captureCharFrame()).not.toContain("Loading…");
+  });
+
+  test("tab highlight follows h/l after a complex README finishes loading", async () => {
+    const content = Array.from({ length: 24 }, (_, index) => `## Section ${index}\n\n> A quoted paragraph.\n>\n> - Quoted list item\n\n- [x] Completed item\n- [ ] Pending item\n\n\`\`\`text\nExample ${index}\n\`\`\`\n\n<a name="section-${index}"></a>\n`).join("\n");
+    const [data, setData] = createSignal<RepositoryData>({ ...githubDataFixture,
+      documents: { status: "loading", phase: "load" }, workCounts: { status: "loading", phase: "load" },
+    });
+    const view = await testRender(() => <ThemeProvider name={defaultConfig.theme}><App data={data}
+      operations={repositoryOperationsFixture} initialPage="commits" config={{ ...defaultConfig, compactHeader: true }} />
+    </ThemeProvider>, { width: 170, height: 44 });
+    active.push(view);
+    await view.flush();
+    setData((current) => ({ ...current, documents: { status: "ready", value: [{
+      ...githubDataFixture.documents.value![0]!, resource: { status: "ready", value: content },
+    }] } }));
+    await view.flush();
+    setData((current) => ({ ...current, workCounts: githubDataFixture.workCounts }));
+    await view.flush();
+    for (const [key, label] of [["l", "3 Issues"], ["l", "4 Pull requests"], ["h", "3 Issues"], ["h", "2 Commits"]]) {
+      view.mockInput.pressKey(key!);
+      await view.flush();
+      const highlighted = view.captureSpans().lines[0]!.spans.filter((span) => (span.attributes & TextAttributes.BOLD) && span.text.trim());
+      expect(highlighted.some((span) => span.text.startsWith(label!))).toBe(true);
+    }
   });
 
   test("switches screens and moves the selection", async () => {

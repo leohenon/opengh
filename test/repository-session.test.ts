@@ -47,6 +47,79 @@ function ready(session: ReturnType<typeof createRepositorySession>) {
 }
 
 describe("repository session", () => {
+  test("focused detail startup and refresh leave unrelated resources deferred, including after a repository roundtrip", async () => {
+    const calls: string[] = []
+    const base = loaders()
+    const tracked = Object.fromEntries(Object.entries(base).map(([key, load]) => [key, (...args: unknown[]) => {
+      calls.push(key)
+      return Reflect.apply(load, undefined, args)
+    }])) as RepositoryLoaders
+    const session = createRepositorySession(tracked)
+    await session.load("owner/repo", "detail")
+    await session.loadIssue(234)
+    expect(calls).toEqual(["metadata", "issue", "issueComments", "issueReferences"])
+    calls.length = 0
+    await session.refresh()
+    expect(calls).toEqual(["metadata"])
+    await session.load("owner/other", "detail")
+    calls.length = 0
+    await session.load("owner/repo", "detail")
+    expect(calls).toEqual([]) // Metadata is still fresh after the explicit refresh.
+    calls.length = 0
+    await session.ensure!("actions")
+    expect(calls).toEqual(["runs"])
+  })
+
+  test("focused page startup loads only that page and stale cached lists revalidate on demand", async () => {
+    const calls: string[] = []
+    const base = loaders()
+    const tracked = Object.fromEntries(Object.entries(base).map(([key, load]) => [key, (...args: unknown[]) => {
+      calls.push(key)
+      return Reflect.apply(load, undefined, args)
+    }])) as RepositoryLoaders
+    let now = 0
+    const session = createRepositorySession(tracked, undefined, { freshMs: 0, now: () => now })
+    await session.load("owner/repo", "actions")
+    expect(calls).toEqual(["metadata", "runs"])
+    await session.ensure!("full")
+    await session.load("owner/other", "detail")
+    now++
+    calls.length = 0
+    await session.load("owner/repo", "detail")
+    expect(calls).toEqual(["metadata"])
+    calls.length = 0
+    await session.ensure!("issues")
+    expect(calls).toEqual(["workCounts", "issues", "issues"])
+    await session.ensure!("issues")
+    expect(calls).toHaveLength(3)
+  })
+
+  test("focused pages initialize on navigation and promotion does not duplicate pending list requests", async () => {
+    const calls: string[] = []
+    const pending = deferred<{ items: string[]; hasMore: boolean }>()
+    const base = loaders({ branches: async () => pending.promise })
+    const tracked = Object.fromEntries(Object.entries(base).map(([key, load]) => [key, (...args: unknown[]) => {
+      calls.push(key)
+      return Reflect.apply(load, undefined, args)
+    }])) as RepositoryLoaders
+    const session = createRepositorySession(tracked)
+    await session.load("owner/repo", "detail")
+    const page = session.ensure!("commits")
+    const promotion = session.ensure!("full")
+    await session.ensure!("commits")
+    expect(calls.filter((key) => key === "branches")).toHaveLength(1)
+    expect(calls.filter((key) => key === "commits")).toHaveLength(1)
+    pending.resolve({ items: ["main"], hasMore: false })
+    await Promise.all([page, promotion])
+    expect(ready(session).data.documents.status).toBe("ready")
+    expect(ready(session).data.issues.closed.status).toBe("ready")
+    expect(calls.filter((key) => key === "runs")).toHaveLength(1)
+    calls.length = 0
+    await session.refresh()
+    expect(calls).toContain("runs")
+    expect(calls).toContain("commits")
+  })
+
   test("replacing a diff aborts only its same-kind request and rejects late results", async () => {
     const first = deferred<DiffContent>()
     const signals: AbortSignal[] = []

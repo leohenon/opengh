@@ -131,7 +131,7 @@ function terminalMedia(options: { preserveImages?: boolean } = {}) {
         }
         if (href) element.properties.href = href
         else if (property(element, "id") || property(element, "name")) {
-          // A target-only <a> is not an empty markdown link (which renders "()").
+          // Empty named anchors must not become []() links.
           element.properties.id = property(element, "id") || property(element, "name")
           element.tagName = "span"
         } else {
@@ -178,7 +178,7 @@ function terminalMedia(options: { preserveImages?: boolean } = {}) {
   }
 }
 
-// Capture code provenance before alerts/HTML conversion change structure.
+// Capture source positions before HTML conversion moves footnotes.
 function sourcePositions() {
   return (tree: MarkdownRoot, file: { value: unknown; data: Record<string, unknown> }) => {
     if (!file.data.documentAnchors || !file.data.sourceMap) return
@@ -195,11 +195,15 @@ function sourcePositions() {
   }
 }
 
-// IDs and original source lines must survive the HTML → markdown round trip.
-// Keep code literal: source-line targets for fences travel out of band instead.
 function documentAnchors() {
   return (tree: Root, file: { value: unknown; data: Record<string, unknown> }) => {
     if (!file.data.documentAnchors) return
+    visit(tree, (node) => {
+      const position = node.position
+      if (position && (!position.start || !position.end
+        || !Number.isSafeInteger(position.start.line) || !Number.isSafeInteger(position.end.line)
+        || position.start.line < 1 || position.end.line < position.start.line)) delete node.position
+    })
     const source = String(file.value)
     const sourceMap = file.data.sourceMap as MarkdownSourceMap | undefined
     const originalCode = file.data.sourceCode as MarkdownCodeSource[] | undefined

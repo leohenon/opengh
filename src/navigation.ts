@@ -61,7 +61,6 @@ export function openDetail(state: NavigationState, detail: DetailTarget): Naviga
   } } : next
 }
 
-// Unlike a tab switch, following a page/document link remembers its source.
 export function openPage(state: NavigationState, page: Page, document = state.document): NavigationState {
   if (state.page === page && !state.details?.[page] && !state.diffs?.[page] && document === state.document) return state
   const { details, history, ...next } = withoutDiff(state, page)

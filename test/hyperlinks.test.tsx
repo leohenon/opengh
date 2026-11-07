@@ -42,7 +42,7 @@ function codeBlocks(node: Renderable): CodeRenderable[] {
 }
 
 async function settleMarkdown(view: View) {
-  // Markdown decoration can replace blocks before their asynchronous highlighting finishes.
+  // Decoration may replace blocks during the first highlighting pass.
   for (let pass = 0; pass < 2; pass++) {
     await view.renderOnce()
     await Promise.all(codeBlocks(view.renderer.root).map((block) => block.highlightingDone))
@@ -64,7 +64,6 @@ test("opens painted wrapped markdown and table links without native OSC 8 suppor
   const commitUrl = "https://github.com/owner/repo/pull/42/commits/abc1234"
   const referenceUrl = "https://github.com/owner/repo/issues/9"
   const opened: string[] = []
-  // Own the real native driver so this assertion checks native capabilities, not a JS getter override.
   const stdout = Object.assign(new Writable({
     write(_chunk, _encoding, callback) { callback() },
   }), { columns: 32, rows: 36, isTTY: true }) as unknown as NodeJS.WriteStream
@@ -80,12 +79,11 @@ test("opens painted wrapped markdown and table links without native OSC 8 suppor
     expect(nativeSession.getCapabilities().hyperlinks).toBe(false)
     const wrapped = linkCells(view, wrappedUrl)
     expect(new Set(wrapped.map((cell) => cell.y)).size).toBeGreaterThan(1)
-    // Click the continuation, not just the first character of the authored label.
     const continuation = wrapped.find((cell) => cell.y > wrapped[0]!.y)!
     const tableCell = linkCells(view, tableUrl)[0]!
     const normal = styleAt(view, continuation)
     const normalTable = styleAt(view, tableCell)
-    const plain = { x: 0, y: 0 } // The unlinked "Before" prefix.
+    const plain = { x: 0, y: 0 }
     const normalPlain = styleAt(view, plain)
     const frame = view.captureCharFrame()
     await view.mockMouse.moveTo(continuation.x, continuation.y)
@@ -100,7 +98,7 @@ test("opens painted wrapped markdown and table links without native OSC 8 suppor
     expect(styleAt(view, tableCell)).toEqual(normalTable)
     expect(view.captureCharFrame()).toBe(frame)
     expect(view.renderer.getLinkAt(continuation.x, continuation.y)).toBe(wrappedUrl)
-    await view.renderOnce() // The tint must not accumulate on subsequent frames.
+    await view.renderOnce()
     expect(styleAt(view, continuation)).toEqual(hovered)
     view.mockInput.pressKey("k")
     await view.flush()
@@ -225,14 +223,12 @@ test("popup links open once and backdrop dismissal consumes the whole click", as
     await view.mockMouse.click(popup.x, popup.y)
     expect(opened).toEqual([popupUrl])
     expect(dismissals).toBe(0)
-    // The background anchor occupies row zero; the centered popup does not.
     await view.mockMouse.pressDown(1, 0)
     expect(dismissals).toBe(0)
     await view.mockMouse.release(1, 0)
     await view.flush()
     expect(dismissals).toBe(1)
     expect(opened).toEqual([popupUrl])
-    // The same background control works on a fresh gesture after dismissal.
     const background = linkCells(view, backgroundUrl)[0]!
     await view.mockMouse.click(background.x, background.y)
     expect(opened).toEqual([popupUrl, backgroundUrl])
@@ -294,7 +290,6 @@ The heading target is here.
       await click(backlinkUrl)
       expect(external).toEqual([])
       expect(view.captureCharFrame()).toContain("Second reference")
-      // Jump to the reference's visual row, not just the paragraph's first row.
       const referenceCells = linkCells(view, noteUrl)
       expect(referenceCells[0]!.y).toBe(scroll.viewport.y)
       scroll.scrollTo(0)
@@ -374,7 +369,6 @@ test("source-line ranges resolve original Markdown prose, code, moved footnotes 
     "PROSE_SOURCE_TARGET with an &amp; entity.", "", "```ts", "const first = 1;", "const second = 2; // CODE_SOURCE_TARGET", "", "console.log(second);", "```", "",
     "[^source]: MOVED_FOOTNOTE_SOURCE_TARGET", "", "Reference to the moved note[^source].", "",
     ...Array.from({ length: 20 }, (_, index) => `After target ${index}.\n`)]
-  // Count real source lines, not the number of strings used to assemble them.
   const source = lines.join("\n")
   const sourceLines = source.split("\n")
   const proseLine = sourceLines.findIndex((line) => line.startsWith("PROSE_SOURCE_TARGET")) + 1

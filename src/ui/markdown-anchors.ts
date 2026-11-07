@@ -1,7 +1,6 @@
 import type { LineInfo, Renderable, TextTableRenderable } from "@opentui/core"
 
-// Private-use delimiters survive the HTML → markdown round trip. The prose
-// renderer conceals them, retaining IDs without adding visible anchor text.
+// Concealed markers carry anchor IDs through HTML/markdown conversion.
 export const anchorMarker = (id: string) => `\uE000${encodeURIComponent(id)}\uE001`
 export function anchorMarkers(text: string) {
   return [...text.matchAll(/\uE000([^\uE001]*)\uE001/g)].flatMap((match) => {
@@ -32,10 +31,7 @@ export function anchorVisualRow(info: LineInfo, { line, column }: MarkdownAnchor
   return row
 }
 
-// OpenTUI 0.6.6 has no public table-cell geometry API. Read its computed layout
-// in one guarded adapter rather than duplicating column fitting/wrapping logic.
-// Keep this contract covered when upgrading Core; missing geometry must not
-// silently turn an exact cell jump into a jump to the start of the table.
+// Pinned Core 0.6.6 has no public table-cell geometry API.
 export function tableAnchorRow(table: TextTableRenderable, cell: { row: number; column: number }, position: MarkdownAnchorPosition) {
   const state = table as unknown as {
     ensureLayoutReady?: () => void

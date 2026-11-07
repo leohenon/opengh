@@ -1,4 +1,5 @@
 import type { ScrollBoxRenderable } from "@opentui/core"
+import type { RepositoryScope } from "../repository-session"
 import { useRenderer, useTerminalDimensions } from "@opentui/solid"
 import { batch, createEffect, createMemo, createSignal, For, on, onCleanup, onMount, Show } from "solid-js"
 import { defaultConfig, type Config } from "../config"
@@ -81,6 +82,7 @@ export type AppProps = {
   onCommandCaptureCancel?: (cancel: (() => void) | undefined) => void
   standalone?: boolean
   onOpenFullApp?: () => void
+  onEnsureResources?: (scope: RepositoryScope) => void
   initialPage?: Page
   initialNavigation?: InitialNavigation
   initialState?: NavigationState
@@ -163,7 +165,8 @@ function AppContent(props: AppProps) {
   const { colors } = useTheme()
   const dimensions = useTerminalDimensions()
   // Startup intent and preferences are sampled once; later writes must not navigate.
-  const [standalone, setStandalone] = createSignal(props.standalone ?? false)
+  const standaloneLaunch = props.standalone ?? false
+  const [standalone, setStandalone] = createSignal(standaloneLaunch)
   const openFullApp = () => {
     if (!standalone()) return false
     setStandalone(false)
@@ -174,7 +177,7 @@ function AppContent(props: AppProps) {
   const initialDetail = initialNavigation?.detail
   const initialPage = initialNavigation?.page ?? props.initialPage ?? "overview"
   const requestedActions = props.initialState?.page === "actions" || !!props.initialState?.details?.actions || initialNavigation?.page === "actions" || initialDetail?.kind === "run"
-  let initialPagePending = !props.initialState && !initialNavigation && initialPage === "actions"
+  let initialPagePending = !standalone() && !props.initialState && !initialNavigation && initialPage === "actions"
   const initialState: NavigationState = { page: initialPagePending ? "overview" : initialPage }
   let startingState = props.initialState ?? (initialDetail ? openDetail(initialState, initialDetail) : initialState)
   if (initialNavigation?.diff) startingState = openDiff(startingState, initialNavigation.diff)
@@ -182,13 +185,16 @@ function AppContent(props: AppProps) {
   const [navigation, setNavigation] = createSignal<NavigationState>(startingState)
   onMount(() => {
     if (initialNavigation || props.initialState) props.onPageChange?.(navigation().page)
-    for (const detail of Object.values(startingState.details ?? {})) {
+    for (const [owner, detail] of Object.entries(startingState.details ?? {})) {
+      if (standalone() && owner !== startingState.page) continue
       if (detail.kind === "commit") void props.onLoadCommit?.(detail.sha)
       if (detail.kind === "issue") void props.onLoadIssue?.(detail.number)
       if (detail.kind === "pull") void props.onLoadPull?.(detail.number)
       if (detail.kind === "run") void props.onLoadRun?.(detail.id)
     }
-    for (const target of Object.values(startingState.diffs ?? {})) void props.onLoadDiff?.(target)
+    for (const [owner, target] of Object.entries(startingState.diffs ?? {})) {
+      if (!standalone() || owner === startingState.page) void props.onLoadDiff?.(target)
+    }
   })
   const [issueState, setIssueState] = createSignal<ListState>("open")
   const [issueRefresh, setIssueRefresh] = createSignal<{ number: number }>()
@@ -244,6 +250,17 @@ function AppContent(props: AppProps) {
   const operations = () => typeof props.operations === "function" ? props.operations() : props.operations
   const page = createMemo(() => navigation().page)
   const diffTarget = () => navigation().diffs?.[page()]
+  const resourceScope = createMemo<RepositoryScope>(() => {
+    const current = navigation()
+    return !standalone() ? "full" : current.details?.[current.page] || current.diffs?.[current.page] ? "detail" : current.page
+  })
+  createEffect(() => {
+    const scope = resourceScope()
+    // Retry an ensure deferred during metadata revalidation.
+    if (operations().refresh.status !== "loading") props.onEnsureResources?.(scope)
+  })
+  const mountList = (target: Page) => !standalone() || page() === target && !navigation().details?.[target] && !diffTarget()
+  const mountDetail = (target: Page) => !standalone() || page() === target && !diffTarget()
   const resourceForDiff = (target?: DiffTarget): ResourceState<DiffContent> => {
     const loaded = target && props.diffs?.[target.kind]
     const matches = target?.kind === "commit" ? loaded?.target.kind === "commit" && loaded.target.sha === target.sha
@@ -736,7 +753,7 @@ function AppContent(props: AppProps) {
   const pullSummary = createMemo(() => listed([data().pulls.open, data().pulls.closed], (item) => item.number === pullNumber()))
   const commitSummary = createMemo(() => listed([data().commits], (item) => item.sha === commitSha()))
   const runSummary = createMemo(() => listed([data().runs], (item) => item.id === runId()))
-  const baseTabs = requestedActions ? tabs : tabs.filter((tab) => tab.page !== "actions")
+  const baseTabs = requestedActions || standalone() ? tabs : tabs.filter((tab) => tab.page !== "actions")
   const sectionAvailable = (...resources: ResourceState<{ items: readonly unknown[]; hasMore: boolean }>[]) => resources.some((resource) =>
     resource.status === "error" || Boolean(resource.value && (resource.value.items.length > 0 || resource.value.hasMore)),
   )
@@ -749,7 +766,7 @@ function AppContent(props: AppProps) {
     if (pending && previous.repository === repository && previous.resolved) return previous
     if (pending && conditional.some((resource) => resource.value === undefined)) return { repository, tabs: baseTabs, resolved: false }
     const available = tabs.filter((tab) => {
-      if (tab.page === "actions") return requestedActions || sectionAvailable(current.runs)
+      if (tab.page === "actions") return requestedActions || standaloneLaunch && navigation().page === "actions" || sectionAvailable(current.runs)
       return true
     })
     if (previous.repository === repository && previous.resolved && available.length === previous.tabs.length
@@ -997,7 +1014,6 @@ function AppContent(props: AppProps) {
     if (detail?.kind === "pull") { props.onClosePull?.(); setRevealActivity() }
     ensureDetail(next.details?.[next.page])
   })
-  // Each resource slot holds one entity; a same-tab link may have replaced it.
   const ensureDetail = (restored?: DetailTarget) => {
     if (restored?.kind === "run" && props.runDetail?.id !== restored.id) void props.onLoadRun?.(restored.id)
     if (restored?.kind === "commit" && props.commitDetail?.sha !== restored.sha) void props.onLoadCommit?.(restored.sha)
@@ -1017,7 +1033,7 @@ function AppContent(props: AppProps) {
   })
   const selectPage = (next: Page) => {
     initialPagePending = false
-    setNavigation((state) => navigate(state, next))
+    restoreNavigation(navigate(navigation(), next))
   }
   const atEntry = () => !!props.onReturnToRepository && atRepositoryEntry(navigation(), repositoryEntry)
   const canGoBack = () => Boolean(diffTarget() || atEntry() || navigation().details?.[page()] || navigation().pageOrigin?.page === page())
@@ -1460,8 +1476,6 @@ function AppContent(props: AppProps) {
     try {
       const target = resolveLinkTarget(url)
       if (!target) throw new Error("This link uses an unsupported or unsafe URL.")
-      // Match a loaded document independently of its fragment, before the
-      // browser fallback. The renderer resolves the fragment against real layout.
       const location = new URL(url)
       const documentUrl = new URL(location.href)
       documentUrl.hash = ""
@@ -1546,6 +1560,7 @@ function AppContent(props: AppProps) {
       </Show>
       <box {...pageMouse} flexGrow={1} minHeight={0} flexDirection="column">
       <SearchSurface active={!diffTarget()}>
+      <Show when={mountList("overview")}>
       <box visible={page() === "overview"} flexGrow={1} minHeight={0}>
           <OverviewScreen
             repo={data().repo}
@@ -1563,6 +1578,8 @@ function AppContent(props: AppProps) {
             scrollRef={(value) => (overviewScroll = value)}
           />
         </box>
+        </Show>
+        <Show when={mountList("commits")}>
         <box visible={page() === "commits" && !commitSha()} flexGrow={1} minHeight={0}>
           <CommitsScreen
             commits={data().commits}
@@ -1584,6 +1601,8 @@ function AppContent(props: AppProps) {
             }}
           />
         </box>
+        </Show>
+        <Show when={mountList("issues")}>
         <box visible={page() === "issues" && !issueNumber()} flexGrow={1} minHeight={0}>
           <WorkScreen
             kind="issue"
@@ -1604,6 +1623,8 @@ function AppContent(props: AppProps) {
             }}
           />
         </box>
+        </Show>
+        <Show when={mountList("pulls")}>
         <box visible={page() === "pulls" && !pullNumber()} flexGrow={1} minHeight={0}>
           <WorkScreen
             kind="pull"
@@ -1625,7 +1646,8 @@ function AppContent(props: AppProps) {
             }}
           />
         </box>
-        <Show when={visibleTabs().some((tab) => tab.page === "actions")}>
+        </Show>
+        <Show when={mountList("actions") && visibleTabs().some((tab) => tab.page === "actions")}>
           <box visible={page() === "actions" && !runId()} flexGrow={1} minHeight={0}>
             <ActionsScreen
               runs={data().runs}
@@ -1643,7 +1665,7 @@ function AppContent(props: AppProps) {
             />
           </box>
         </Show>
-      <Show when={runId()} keyed>
+      <Show when={mountDetail("actions") && runId()} keyed>
         {(id) => (
           <box visible={page() === "actions"} flexGrow={1} minHeight={0}>
             <RunScreen
@@ -1659,7 +1681,7 @@ function AppContent(props: AppProps) {
           </box>
         )}
       </Show>
-      <Show when={commitSha()} keyed>
+      <Show when={mountDetail("commits") && commitSha()} keyed>
         {(sha) => (
           <box visible={page() === "commits"} flexGrow={1} minHeight={0}>
             <CommitScreen
@@ -1674,7 +1696,7 @@ function AppContent(props: AppProps) {
           </box>
         )}
       </Show>
-      <Show when={issueNumber()} keyed>
+      <Show when={mountDetail("issues") && issueNumber()} keyed>
         {(number) => (
           <box visible={page() === "issues"} flexGrow={1} minHeight={0}>
             <IssueScreen
@@ -1694,7 +1716,7 @@ function AppContent(props: AppProps) {
           </box>
         )}
       </Show>
-      <Show when={pullNumber()} keyed>
+      <Show when={mountDetail("pulls") && pullNumber()} keyed>
         {(number) => (
           <box visible={page() === "pulls"} flexGrow={1} minHeight={0}>
             <PullScreen
@@ -1716,7 +1738,7 @@ function AppContent(props: AppProps) {
       </Show>
       </SearchSurface>
       <For each={["commits", "pulls"] as const}>
-        {(owner) => <Show when={navigation().diffs?.[owner]} keyed>
+        {(owner) => <Show when={(!standalone() || page() === owner) && navigation().diffs?.[owner]} keyed>
           {(target) => <box id={`diff-view-${owner}`} visible={page() === owner} flexGrow={1} minHeight={0} flexDirection="column">
             <DiffScreen target={target} resource={resourceForDiff(target)} active={page() === owner}
               review={reviewForDiff(target)} threads={threadsForDiff(target)} repositoryUrl={data().repo.url}

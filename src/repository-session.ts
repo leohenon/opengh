@@ -1,4 +1,7 @@
 import { createSignal, type Accessor, type Setter } from "solid-js"
+import type { Page as NavigationPage } from "./navigation"
+
+export type RepositoryScope = "full" | "detail" | NavigationPage
 import {
   loadGitHubBranches,
   loadGitHubCommit,
@@ -165,7 +168,8 @@ export type RepositorySession = {
   updateIssueDraft(number: number, draft: Partial<Pick<IssueActionState, "body" | "reason" | "duplicateTarget" | "selectedAssignees">>, parent?: IssueActionParent): void
   discardIssueDraft(number: number, parent?: IssueActionParent): void
   submitIssueAction(number: number, kind: IssueActionKind, parent?: IssueActionParent): Promise<IssueActionResult>
-  load(repository: string): Promise<void>
+  load(repository: string, scope?: RepositoryScope): Promise<void>
+  ensure?(scope: RepositoryScope): Promise<void>
   refresh(): Promise<void>
   retryResource(resource: RepositoryResource): Promise<void>
   canSwitchBranch(): boolean
@@ -247,34 +251,39 @@ async function loadDocument(load: () => Promise<string>, previous?: string): Pro
   }
 }
 
+const deferredResource = <T>(value?: T): ResourceState<T> => ({ status: "loading", phase: "load", deferred: true, ...(value === undefined ? {} : { value }) })
+const isDeferred = (resource: ResourceState<unknown>) => resource.status === "loading" && resource.deferred === true
+const isLoading = (resource: ResourceState<unknown>) => resource.status === "loading" && !resource.deferred
+const reloadResource = <T>(resource: ResourceState<T>): ResourceState<T> => isDeferred(resource) ? resource : loadingResource(resource.value)
+
 function hasLoadingDocuments(data: RepositoryData) {
-  return data.documents.status === "loading"
+  return isLoading(data.documents)
     || data.documents.value?.some((document) => document.resource.status === "loading") === true
 }
 
 function hasLoadingResource(data: RepositoryData) {
   return hasLoadingDocuments(data)
-    || data.branches.status === "loading"
-    || data.commits.status === "loading"
-    || data.runs.status === "loading"
-    || data.issues.open.status === "loading"
-    || data.issues.closed.status === "loading"
-    || data.pulls.open.status === "loading"
-    || data.pulls.closed.status === "loading"
+    || isLoading(data.branches)
+    || isLoading(data.commits)
+    || isLoading(data.runs)
+    || isLoading(data.issues.open)
+    || isLoading(data.issues.closed)
+    || isLoading(data.pulls.open)
+    || isLoading(data.pulls.closed)
 }
 
 function initialData(repo: Repo): RepositoryData {
   return {
     repo,
     currentBranch: repo.defaultBranch,
-    workCounts: loadingResource(),
-    documents: loadingResource(),
-    branches: loadingResource(),
-    commits: loadingResource(),
-    commitCount: loadingResource(),
-    issues: { open: loadingResource(), closed: loadingResource() },
-    pulls: { open: loadingResource(), closed: loadingResource() },
-    runs: loadingResource(),
+    workCounts: deferredResource(),
+    documents: deferredResource(),
+    branches: deferredResource(),
+    commits: deferredResource(),
+    commitCount: deferredResource(),
+    issues: { open: deferredResource(), closed: deferredResource() },
+    pulls: { open: deferredResource(), closed: deferredResource() },
+    runs: deferredResource(),
   }
 }
 
@@ -317,8 +326,8 @@ export function createRepositorySession(
     resource.status !== "loading" ? resource : resource.value === undefined ? undefined : { status: "ready", value: resource.value }
   // A section whose load was cut off is retained as a retryable error, never as empty data.
   const retainable = <T>(resource: ResourceState<T>): ResourceState<T> =>
-    settled(resource) ?? { status: "error", phase: "load", message: "Loading was interrupted; refresh to retry." }
-  const complete = (resources: ResourceState<unknown>[]) => resources.every((resource) => resource.status === "ready")
+    isDeferred(resource) ? resource : settled(resource) ?? { status: "error", phase: "load", message: "Loading was interrupted; refresh to retry." }
+  const complete = (resources: ResourceState<unknown>[]) => resources.every((resource) => resource.status === "ready" || isDeferred(resource))
   const [draftSaveError, setDraftSaveError] = createSignal<string>()
   const draftErrors = new Map<string, string>()
   const publishDraftError = () => setDraftSaveError(draftErrors.values().next().value)
@@ -762,19 +771,43 @@ export function createRepositorySession(
     repo: Repo,
     request: number,
     previous?: RepositoryData,
+    scope?: RepositoryScope,
+    onlyDeferred = false,
   ) => {
-    await Promise.all([
-      fetchWorkCounts(repository, request),
-      fetchDocuments(repository, repo, branch, request),
-      fetchBranches(repository, repo.defaultBranch, request, previous?.branches.value?.page),
-      fetchCommits(repository, branch, request, previous?.commits.value?.page),
-      fetchCommitCount(repository, branch, request),
-      fetchIssues(repository, "open", request, previous?.issues.open.value?.page),
-      fetchIssues(repository, "closed", request, previous?.issues.closed.value?.page),
-      fetchPulls(repository, "open", request, previous?.pulls.open.value?.page),
-      fetchPulls(repository, "closed", request, previous?.pulls.closed.value?.page),
-      fetchRuns(repository, request, previous?.runs.value?.page),
-    ])
+    const current = state()
+    if (current.status !== "ready" || request !== repositoryGeneration) return
+    const data = current.data
+    const tasks: Promise<void>[] = []
+    const start = <T>(resource: ResourceState<T>, pages: NavigationPage[], mark: () => void, fetch: () => Promise<void>) => {
+      const selected = scope ? scope === "full" || pages.includes(scope as NavigationPage) : !isDeferred(resource)
+      if (!selected || (onlyDeferred && !isDeferred(resource))) return
+      mark()
+      tasks.push(fetch())
+    }
+    const section = <K extends "workCounts" | "documents" | "branches" | "commits" | "commitCount" | "runs">(
+      key: K, pages: NavigationPage[], fetch: () => Promise<void>,
+    ) => start<unknown>(data[key], pages, () => updateReady(setState, request, generation, repository, (latest) => ({
+      ...latest, data: { ...latest.data, [key]: loadingResource(latest.data[key].value) },
+    })), fetch)
+    section("workCounts", ["issues", "pulls"], () => fetchWorkCounts(repository, request))
+    section("documents", ["overview"], () => fetchDocuments(repository, repo, branch, request))
+    section("branches", ["commits"], () => fetchBranches(repository, repo.defaultBranch, request, previous?.branches.value?.page))
+    section("commits", ["commits"], () => fetchCommits(repository, branch, request, previous?.commits.value?.page))
+    section("commitCount", ["commits"], () => fetchCommitCount(repository, branch, request))
+    for (const kind of ["issues", "pulls"] as const) for (const listState of ["open", "closed"] as const) {
+      start(data[kind][listState], [kind], () => updateReady(setState, request, generation, repository, (latest) => ({
+        ...latest, data: { ...latest.data, [kind]: { ...latest.data[kind], [listState]: loadingResource(latest.data[kind][listState].value) } },
+      })), () => kind === "issues" ? fetchIssues(repository, listState, request, previous?.issues[listState].value?.page)
+        : fetchPulls(repository, listState, request, previous?.pulls[listState].value?.page))
+    }
+    section("runs", ["actions"], () => fetchRuns(repository, request, previous?.runs.value?.page))
+    await Promise.all(tasks)
+  }
+
+  const ensure = async (scope: RepositoryScope) => {
+    const current = state()
+    if (current.status !== "ready" || current.operations.refresh.status === "loading") return
+    await loadResources(current.repository, current.data.currentBranch, current.data.repo, repositoryGeneration, current.data, scope, true)
   }
 
   const retainRun = (detail: RunDetailState | undefined, fresh: boolean) => {
@@ -1954,7 +1987,7 @@ export function createRepositorySession(
     repositoryCache.set(key, data, fresh && whole)
     if (!whole) repositoryCache.markStale(key)
   }
-  const load = async (repository: string) => {
+  const load = async (repository: string, scope: RepositoryScope = "full") => {
     clearDiff()
     // Keep the outgoing repository and its open pages reusable; cache keys are repository-scoped,
     // so details survive switching repositories (e.g. following a cross-repository reference and back).
@@ -1971,31 +2004,33 @@ export function createRepositorySession(
     if (cached) {
       // Reopen on the default branch: branch-specific commits/documents are only reusable there.
       const onDefault = cached.value.currentBranch === cached.value.repo.defaultBranch
-      const data = onDefault ? cached.value
+      let data = onDefault ? cached.value
         : { ...cached.value, currentBranch: cached.value.repo.defaultBranch, commits: loadingResource<Paginated<CommitSummary>>(),
           commitCount: loadingResource<number>(), documents: loadingResource<RepositoryDocumentState[]>() }
       const revalidate = cached.stale || !onDefault
+      if (revalidate && scope !== "full") data = {
+        ...data,
+        workCounts: deferredResource(data.workCounts.value), documents: deferredResource(data.documents.value),
+        branches: deferredResource(data.branches.value), commits: deferredResource(data.commits.value),
+        commitCount: deferredResource(data.commitCount.value), runs: deferredResource(data.runs.value),
+        issues: { open: deferredResource(data.issues.open.value), closed: deferredResource(data.issues.closed.value) },
+        pulls: { open: deferredResource(data.pulls.open.value), closed: deferredResource(data.pulls.closed.value) },
+      }
       setState({ status: "ready", repository, data, operations: { refresh: revalidate ? loading() : idle(), branch: idle() } })
-      if (!revalidate) return
+      if (!revalidate) { await ensure(scope); return }
       try {
         const repo = await loaders.metadata(repository)
         if (request !== repositoryGeneration) return
         // Revalidate in the background: retained values stay visible while sections reload.
         setState((latest) => latest.status === "ready" && latest.repository === repository ? { ...latest, data: {
           ...latest.data, repo,
-          workCounts: loadingResource(latest.data.workCounts.value), documents: loadingResource(latest.data.documents.value),
-          branches: loadingResource(latest.data.branches.value), commits: loadingResource(latest.data.commits.value),
-          commitCount: loadingResource(latest.data.commitCount.value),
-          issues: { open: loadingResource(latest.data.issues.open.value), closed: loadingResource(latest.data.issues.closed.value) },
-          pulls: { open: loadingResource(latest.data.pulls.open.value), closed: loadingResource(latest.data.pulls.closed.value) },
-          runs: loadingResource(latest.data.runs.value),
         } } : latest)
-        await loadResources(repository, repo.defaultBranch, repo, request, data)
+        await loadResources(repository, repo.defaultBranch, repo, request, data, scope)
         updateReady(setState, request, generation, repository, (latest) => ({ ...latest, operations: { ...latest.operations, refresh: idle() } }))
-        if (request === repositoryGeneration) retainRepository(state(), true)
+        if (request === repositoryGeneration) { await ensure(scope); retainRepository(state(), true) }
       } catch (error) {
         // Sections never left without a value and no way to retry.
-        const failed = <T>(resource: ResourceState<T>): ResourceState<T> => resource.status === "loading" ? failedResource(error, resource.value) : resource
+        const failed = <T>(resource: ResourceState<T>): ResourceState<T> => isLoading(resource) ? failedResource(error, resource.value) : resource
         updateReady(setState, request, generation, repository, (latest) => ({
           ...latest, operations: { ...latest.operations, refresh: { status: "error", message: messageFrom(error) } },
           data: { ...latest.data, commits: failed(latest.data.commits), commitCount: failed(latest.data.commitCount), documents: failed(latest.data.documents) } }))
@@ -2012,7 +2047,7 @@ export function createRepositorySession(
         data: initialData(repo),
         operations: { refresh: idle(), branch: idle() },
       })
-      await loadResources(repository, repo.defaultBranch, repo, request)
+      await loadResources(repository, repo.defaultBranch, repo, request, undefined, scope, true)
       if (request === repositoryGeneration) retainRepository(state(), true)
     } catch (error) {
       if (request === repositoryGeneration) {
@@ -2024,7 +2059,8 @@ export function createRepositorySession(
   const refresh = async () => {
     const current = state()
     if (current.status !== "ready" || current.operations.refresh.status === "loading"
-      || current.operations.branch.status === "loading" || hasLoadingResource(current.data)) return
+      || current.operations.branch.status === "loading" || hasLoadingResource(current.data)
+      || isLoading(current.data.workCounts) || isLoading(current.data.commitCount)) return
 
     const request = ++repositoryGeneration
     ++branchGeneration
@@ -2052,20 +2088,20 @@ export function createRepositorySession(
             data: {
               ...latest.data,
               repo,
-              workCounts: loadingResource(latest.data.workCounts.value),
-              documents: loadingResource(latest.data.documents.value),
-              branches: loadingResource(latest.data.branches.value),
-              commits: loadingResource(latest.data.commits.value),
-              commitCount: loadingResource(latest.data.commitCount.value),
+              workCounts: reloadResource(latest.data.workCounts),
+              documents: reloadResource(latest.data.documents),
+              branches: reloadResource(latest.data.branches),
+              commits: reloadResource(latest.data.commits),
+              commitCount: reloadResource(latest.data.commitCount),
               issues: {
-                open: loadingResource(latest.data.issues.open.value),
-                closed: loadingResource(latest.data.issues.closed.value),
+                open: reloadResource(latest.data.issues.open),
+                closed: reloadResource(latest.data.issues.closed),
               },
               pulls: {
-                open: loadingResource(latest.data.pulls.open.value),
-                closed: loadingResource(latest.data.pulls.closed.value),
+                open: reloadResource(latest.data.pulls.open),
+                closed: reloadResource(latest.data.pulls.closed),
               },
-              runs: loadingResource(latest.data.runs.value),
+              runs: reloadResource(latest.data.runs),
             },
           })
       await loadResources(repository, branch, repo, request, current.data)
@@ -2462,6 +2498,7 @@ export function createRepositorySession(
     load,
     refresh,
     retryResource,
+    ensure,
     canSwitchBranch,
     switchBranch,
     loadMoreBranches,

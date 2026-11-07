@@ -13,7 +13,7 @@ import { loadGitHubIssueKind } from "./github/client"
 import { createInlineComments } from "./inline-comments"
 import { createPullReviewSession } from "./pull-review-session"
 import type { PullReviewSession } from "./review-types"
-import { createRepositorySession, type RepositorySession } from "./repository-session"
+import { createRepositorySession, type RepositoryScope, type RepositorySession } from "./repository-session"
 import type { RepositoryState } from "./repository-state"
 import { App } from "./ui/app"
 import { ThemeProvider } from "./ui/theme"
@@ -218,11 +218,15 @@ export function Root(props: {
   const [repositoryReturns, setRepositoryReturns] = createSignal<RepositoryReturn[]>([])
   let pendingState: RepositoryReturn | undefined
   let pendingNavigation: (InitialNavigation & { repository: string }) | undefined
+  let loadScope: RepositoryScope = "full"
   const open = (repository: string, initial?: InitialNavigation, followingLink = false) => {
     if (!followingLink) { setRepositoryReturns([]); pendingState = undefined }
     pendingNavigation = initial ? { ...initial, repository } : undefined
     setLaunchError(undefined)
-    void session.load(repository)
+    const restored = pendingState?.state
+    loadScope = !standalone() ? "full" : initial?.detail || initial?.diff || restored?.details?.[restored.page] || restored?.diffs?.[restored.page]
+      ? "detail" : initial?.page ?? restored?.page ?? repositoryTabs()[repository.toLowerCase()] ?? "overview"
+    void session.load(repository, loadScope)
     setView("repository")
   }
   const followRepository = (repository: string, initial: InitialNavigation, origin: NavigationState, entry?: NavigationState) => {
@@ -342,7 +346,7 @@ export function Root(props: {
             <RepositoryLoadError
               repository={current().repository}
               message={current().message}
-              onRetry={() => void session.load(current().repository)}
+              onRetry={() => void session.load(current().repository, loadScope)}
               onSwitchRepository={showSwitcher}
               showStatusBarHints={config().showStatusBarHints}
               onQuit={quit}
@@ -366,6 +370,7 @@ export function Root(props: {
               initialNavigation={initialNavigation}
               standalone={standalone()}
               onOpenFullApp={() => setStandalone(false)}
+              onEnsureResources={(scope) => { void session.ensure?.(scope) }}
               initialState={restored?.state}
               repositoryEntry={restored?.entry}
               onReturnToRepository={repositoryReturns().length ? () => { returnToRepository() } : undefined}

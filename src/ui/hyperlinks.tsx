@@ -74,8 +74,7 @@ export function HyperlinkProvider(props: { identity: unknown; onOpen: (url: stri
       const tint = RGBA.fromHex(tintColor)
       matrix.set([0, 0, 0, tint.r, 0, 0, 0, tint.g, 0, 0, 0, tint.b, 0, 0, 0, 1])
     }
-    // A faint link-colored wash only on linked cells. Native color transforms
-    // preserve glyphs, underlines, selection data, and hyperlink IDs unchanged.
+    // Color-only transforms preserve wide glyphs and hyperlink IDs.
     if (used) buffer.colorMatrix(matrix, mask.subarray(0, used), 0.06, TargetChannel.BG)
   }
   renderer.addPostProcessFn(paintHover)
@@ -92,9 +91,7 @@ export function HyperlinkProvider(props: { identity: unknown; onOpen: (url: stri
   return <Hyperlinks.Provider value={links}>{props.children}</Hyperlinks.Provider>
 }
 
-// Painted-cell lookup works with wrapped prose, tables, and inline anchors alike.
-// Native selection starts before mouse-down and marks even a stationary release
-// as dragging, so cancel on actual drag events, not MouseEvent.isDragging.
+// Native selection marks stationary releases as dragging; cancel only on drag events.
 export function useHyperlinkMouse(enabled: () => boolean = () => true) {
   const renderer = useRenderer()
   const links = useContext(Hyperlinks)

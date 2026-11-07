@@ -9,8 +9,7 @@ export type LinkTarget =
   | { kind: "diff"; repository: string; target: DiffTarget }
   | { kind: "external"; url: string }
 
-// Check the original spelling before URL parsing can strip controls or normalize paths.
-// Shared with the OS opener so external URLs have the same safety boundary.
+// Validate before URL parsing strips controls or normalizes paths.
 export function parseSafeUrl(value: string): URL | undefined {
   if (!/^(?:https?:\/\/|mailto:)/i.test(value)
     || /[\s\x00-\x1f\x7f\\]/.test(value)
@@ -41,7 +40,6 @@ export function resolveLinkTarget(value: string): LinkTarget | undefined {
   const url = parseSafeUrl(value)
   if (!url) return undefined
   const external: LinkTarget = { kind: "external", url: value }
-  // Internal routes cannot honor filters, comment/line anchors, or alternate hosts/ports.
   if (url.protocol === "mailto:" || url.hostname !== "github.com" || url.port || url.search || url.hash)
     return external
 
@@ -81,6 +79,5 @@ export function resolveLinkTarget(value: string): LinkTarget | undefined {
     const number = positiveNumber(target!)
     return number === undefined ? undefined : { kind: "diff", repository, target: { kind: "pull", number } }
   }
-  // A commit URL selects its detail; anchors and .diff/.patch downloads stay external.
   return external
 }

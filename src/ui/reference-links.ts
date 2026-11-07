@@ -14,7 +14,6 @@ export function normalizeRepositoryUrl(value?: string) {
   } catch { return undefined }
 }
 
-/** Only infer repository context from a known GitHub commit entity URL. */
 export function repositoryUrlFromCommitUrl(value: string) {
   try {
     const url = new URL(value)
@@ -31,11 +30,9 @@ function httpTarget(value: string) {
   } catch { return undefined }
 }
 
-/** Pure, lossless inline scanner: no Markdown rendering, IO, or repository loading. */
 export function referenceLinkChunks(text: string, repositoryUrl?: string): LinkedTextChunk[] {
   const base = normalizeRepositoryUrl(repositoryUrl)
   const origin = base?.split("/").slice(0, 3).join("/") ?? "https://github.com"
-  // Consume comments and code first so references inside them cannot become links.
   const tokens = new RegExp(`<!--[\\s\\S]*?(?:-->|$)|(\x60+)[\\s\\S]*?\\1(?!\x60)|\\[[^\\]\\n]+\\]\\(https?:\\/\\/[^\\s<>]+?\\)|https?:\\/\\/[^\\s<>\"\x60]+|${repository}(?:#[1-9]\\d*|@${sha})|#[1-9]\\d*|${sha}|@${owner}`, "gi")
   const chunks: LinkedTextChunk[] = []
   let offset = 0
@@ -51,7 +48,6 @@ export function referenceLinkChunks(text: string, repositoryUrl?: string): Linke
     const label = match[0]
     offset = start + label.length
     if (label.startsWith("<!--") || label.startsWith("`")) { append(label); continue }
-    // Plain-text Markdown links retain every delimiter, but both label and target are useful links.
     const markdown = label.match(/^\[([^\]\n]+)\]\((https?:\/\/[^\s<>]+)\)$/i)
     if (markdown && httpTarget(markdown[2]!)) {
       append("["); append(markdown[1]!, markdown[2]); append("]("); append(markdown[2]!, markdown[2]); append(")")
