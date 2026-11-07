@@ -15,6 +15,10 @@ const navigationShortcuts: ShortcutEntry[] = [
   entry(["navigation.halfPageUp", "navigation.halfPageDown"], "half-page up / down"),
   entry(["navigation.first", "navigation.last"], "jump to top / bottom"),
 ];
+const searchShortcuts: ShortcutEntry[] = [
+  entry("search.start", "search current page / pane"),
+  entry(["search.next", "search.previous"], "next / previous search match"),
+];
 const applicationShortcuts: ShortcutEntry[] = [
   entry("global.help", "toggle help"),
   entry("global.switchRepository", "switch repository"),
@@ -165,6 +169,7 @@ export function Help(props: {
       entry("diff.focus", "switch files / diff focus"),
       entry("navigation.activate", "files → diff; error → file list"),
       ...navigationShortcuts,
+      ...searchShortcuts,
       entry(["navigation.previousTab", "navigation.nextTab"], "files: switch tabs"),
       entry(["diff.panLeft", "diff.panRight"], "diff: horizontal pan"),
       entry(["diff.previousHunk", "diff.nextHunk"], "previous / next hunk"),
@@ -177,6 +182,7 @@ export function Help(props: {
     ] : [
       ...primary,
       ...navigationShortcuts,
+      ...searchShortcuts,
       ...(!props.standalone ? [entry(["navigation.previousTab", "navigation.nextTab"], "switch tabs")] : []),
       ...options,
       ...(props.command ? [entry("command.clone", props.command)] : []),

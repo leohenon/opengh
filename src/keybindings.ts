@@ -26,6 +26,9 @@ export const keybindingDefinitions = {
   "navigation.tab5": binding(["5"], "Fifth visible tab"),
   "navigation.activate": binding(["enter"], "Open / load more"),
   "navigation.back": binding(["esc"], "Back"),
+  "search.start": binding(["/"], "Search current page / pane"),
+  "search.next": binding(["n"], "Next search match"),
+  "search.previous": binding(["N"], "Previous search match"),
   "item.open": binding(["o"], "Open on GitHub"),
   "item.copy": binding(["y"], "Copy URL / SHA"),
   "item.diff": binding(["D"], "View diff"),
@@ -195,7 +198,8 @@ const globalActions: KeyAction[] = ["global.quit", "global.interrupt", "global.r
 const navigationActions: KeyAction[] = ["navigation.up", "navigation.down", "navigation.halfPageUp", "navigation.halfPageDown", "navigation.pageUp", "navigation.pageDown", "navigation.first", "navigation.last"]
 const tabs: KeyAction[] = ["navigation.previousTab", "navigation.nextTab", "navigation.tab1", "navigation.tab2", "navigation.tab3", "navigation.tab4", "navigation.tab5"]
 const items: KeyAction[] = ["navigation.activate", "item.open", "item.copy", "view.refresh"]
-const browse: KeyAction[] = [...globalActions, ...navigationActions, ...tabs, ...items]
+const searchActions: KeyAction[] = ["search.start", "search.next", "search.previous"]
+const browse: KeyAction[] = [...globalActions, ...navigationActions, ...tabs, ...items, ...searchActions, "navigation.back"]
 const dialogs: KeyAction[] = ["global.interrupt", "global.reloadConfig", "dialog.close"]
 const picker: KeyAction[] = [...dialogs, "picker.up", "picker.down", "picker.accept"]
 const multilineActions: KeyAction[] = ["editor.newline", "editor.indent", "editor.outdent"]
@@ -213,7 +217,7 @@ export const keybindingContexts: Record<string, KeyAction[]> = {
   diffBody: [...browse.filter((action) => !["navigation.previousTab", "navigation.nextTab", "item.copy"].includes(action)), "navigation.back", "diff.focus", "diff.toggleFiles", "diff.previousHunk", "diff.nextHunk", "diff.toggleLayout", "diff.toggleWrap", "diff.panLeft", "diff.panRight"],
   picker,
   assignees: [...picker, "dialog.submit"],
-  settings: [...dialogs, "navigation.up", "navigation.down", "navigation.activate", "settings.previousValue", "settings.nextValue"],
+  settings: [...dialogs, ...searchActions, "navigation.up", "navigation.down", "navigation.activate", "settings.previousValue", "settings.nextValue"],
   references: [...dialogs, ...navigationActions, "navigation.activate", "item.open", "item.copy", "references.switchTab"],
   issueMenu: [...dialogs, "navigation.up", "navigation.down", "navigation.activate"],
   mergeMethods: [...dialogs, "navigation.up", "navigation.down", "navigation.activate", "dialog.submit"],
@@ -230,6 +234,7 @@ export const keybindingContexts: Record<string, KeyAction[]> = {
   help: [...dialogs, ...navigationActions, "global.quit", "global.help"],
   commandPreview: [...dialogs, "dialog.confirm", "command.editPath"],
   commandOutput: [...dialogs, ...navigationActions, "command.copyOutput"],
+  searchInput: [...dialogs, ...editor, "input.submit"],
   singleLineEditor: ["global.interrupt", "global.reloadConfig", ...editor, "input.submit"],
   multilineEditor: ["global.interrupt", "global.reloadConfig", ...editor, ...multilineActions],
 }

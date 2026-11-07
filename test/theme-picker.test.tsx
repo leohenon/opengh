@@ -41,7 +41,7 @@ describe("ThemePicker", () => {
     await clickControl(view, "theme-dracula")
     expect(config().theme).toBe("dracula")
     expect(view.captureCharFrame()).toContain("Settings")
-    await view.mockMouse.click(0, 0); await view.flush()
+    view.mockInput.pressEscape(); await Bun.sleep(60); await view.flush()
     expect(closes).toBe(1)
   })
 
@@ -55,7 +55,7 @@ describe("ThemePicker", () => {
         <Settings config={config()} onClose={() => { closes++ }}
           onChange={async (next) => { await save; setConfig(next) }} />
       </ThemeProvider>
-    ), { width: 100, height: 32 })
+    ), { width: 120, height: 32 })
     active.push(view)
     await view.flush()
     view.mockInput.pressEnter()

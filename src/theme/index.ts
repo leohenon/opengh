@@ -215,6 +215,10 @@ export type AppColors = {
   purple: string
   openState: string
   closedState: string
+  searchMatchFg: string
+  searchMatchBg: string
+  searchCurrentMatchFg: string
+  searchCurrentMatchBg: string
 }
 
 export function isThemeName(value: unknown): value is ThemeName {
@@ -324,8 +328,25 @@ function distinctStateColor(base: string, candidates: string[]) {
   return candidates.find((candidate) => colorDistance(base, candidate) >= 48) ?? candidates.at(-1) ?? base
 }
 
+// Opaque highlight backgrounds replace row/diff backgrounds. Choose the higher-contrast
+// black/white foreground rather than inheriting potentially low-contrast syntax colors.
+function highlightForeground(background: string) {
+  const channels = rgb(background)!.map((value) => {
+    const channel = value / 255
+    return channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4
+  })
+  const luminance = channels[0]! * 0.2126 + channels[1]! * 0.7152 + channels[2]! * 0.0722
+  return (luminance + 0.05) / 0.05 >= 1.05 / (luminance + 0.05) ? "#000000" : "#ffffff"
+}
+
 export function appColors(theme: ResolvedTheme): AppColors {
+  const searchMatchBg = theme.warning.slice(0, 7)
+  const searchCurrentMatchBg = distinctStateColor(searchMatchBg, [theme.accent, theme.primary, theme.secondary, theme.text]).slice(0, 7)
   return {
+    searchMatchFg: highlightForeground(searchMatchBg),
+    searchMatchBg,
+    searchCurrentMatchFg: highlightForeground(searchCurrentMatchBg),
+    searchCurrentMatchBg,
     header: theme.backgroundPanel,
     canvas: theme.background,
     panel: theme.backgroundElement,

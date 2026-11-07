@@ -7,7 +7,7 @@ Customize opengh shortcuts in `~/.config/opengh/config.json` (or `$XDG_CONFIG_HO
   "keybindings": {
     "global.help": ["f1"],
     "global.quit": ["ctrl+q"],
-    "navigation.down": ["n", "down"]
+    "navigation.down": ["m", "down"]
   }
 }
 ```
@@ -82,6 +82,9 @@ and enables global tab navigation without changing the current page.
     "navigation.tab5": ["5"],
     "navigation.activate": ["enter"],
     "navigation.back": ["esc"],
+    "search.start": ["/"],
+    "search.next": ["n"],
+    "search.previous": ["N"],
     "item.open": ["o"],
     "item.copy": ["y"],
     "item.diff": ["D"],
@@ -183,3 +186,29 @@ In issue and pull request details, press **z** to collapse or expand all timelin
 Comments, reviews, review threads, and commit groups keep their headers; the description
 and routine events stay unchanged. The toggle is shared across issues and pull requests
 for the current app session.
+
+## Page search
+
+Press **/** (`search.start`) to search loaded content in the current page or focused diff pane,
+without filtering lists. **Enter** accepts the query; **n** (`search.next`) and
+**N** (`search.previous`) move between matches, wrapping at either end. On lists,
+these continue from the selected row, including after manual navigation.
+**Esc** in the prompt cancels edits; outside it, Esc clears an accepted search before going back.
+
+Search is literal and uses smart case: lowercase queries ignore case; queries containing
+uppercase letters match case exactly (including Unicode). Lists count matching loaded rows; details count
+individual occurrences in rendered text, including Markdown tables. Hidden/collapsed
+content and concealed link URLs are excluded. Searching never loads another page.
+The prompt shows the current result and total (or `No matches`). Accepted queries are
+remembered per view. In diffs, an accepted query keeps its visible pane scope when focus
+moves; press **/** again to search the newly focused pane.
+
+Search also works in Settings: it highlights and selects matching setting rows without
+changing their values. The theme picker keeps its existing text filter. Other dialogs,
+pickers and editors retain their own typing behavior.
+Remap or disable these actions like any other binding; for example, disable `search.next`
+before assigning `n` to another browsing action.
+
+The renderer integration uses the version-pinned OpenTUI and Hunk patches in `patches/`:
+install with Bun so rendered-chunk decoration, exact table geometry and diff source-cell
+hooks are available. These adapters must be revalidated when upgrading either dependency.

@@ -62,6 +62,8 @@ import { MarkdownProvider } from "./markdown-preferences"
 import { HyperlinkProvider, HyperlinkSurface } from "./hyperlinks"
 import { resolveLinkTarget } from "../link-target"
 import type { MarkdownAnchorRequest } from "./markdown-anchors"
+import { SearchProvider } from "./search-context"
+import { SearchSurface } from "./components/search-surface"
 
 type Overlay = "context-menu" | "reactions" | "help" | "branch-picker" | "settings" | "issue-references" | "issue-actions" | "issue-action" | "pull-merge" | "pull-draft" | "pull-review" | "review-comment" | "inline-retry" | "command" | "switch-repo"
 type ToastState = { id: number; title: string; message: string; duration?: number; tone?: "error" | "success" | "info" }
@@ -1243,7 +1245,7 @@ function AppContent(props: AppProps) {
     if (overlay() === "issue-references") return hint(open, select, ["references.switchTab", "switch tabs"], copy, close)
     // Arrays are priority lists, identical at every terminal width. The footer
     // fits whole hints without hiding recovery/primary actions behind copy/open.
-    const common: HintEntry[] = [...(standalone() ? [["global.openFullApp", "full app"] as const] : []), ...(props.onSwitchRepository ? [["global.switchRepository", "switch repo"] as const] : []), help]
+    const common: HintEntry[] = [...(standalone() ? [["global.openFullApp", "full app"] as const] : []), ["search.start", "search"], ...(props.onSwitchRepository ? [["global.switchRepository", "switch repo"] as const] : []), help]
     const resource = activeResource()
     if (resource?.status === "loading" && resource.value === undefined) {
       const detail = diffTarget() || activeRunId() || activeCommitSha() || activeIssueNumber() || activePullNumber()
@@ -1528,13 +1530,22 @@ function AppContent(props: AppProps) {
     <MotionProvider reduced={config().reducedMotion}>
     <MarkdownProvider style={config().markdownStyle}>
     <box width={dimensions().width} height={dimensions().height} flexDirection="column" backgroundColor={colors.canvas}>
+      <SearchProvider enabled={overlay() === undefined || overlay() === "settings"} scope={overlay() === "settings" ? "settings" : undefined}
+        footer={<StatusBar kind={status()} detail={statusDetail()} error={statusError()}
+          hint={statusError() ? keys.hint("view.refresh", "retry") : shortcutHint()}
+          zIndex={overlay() && (config().showStatusBarHints || ((status() || statusError()) && !fullscreenEditorOpen())) ? 350 : 0} />}
+        identity={JSON.stringify([
+        data().repo.nameWithOwner, page(), navigation().details?.[page()], diffTarget(),
+        page() === "commits" ? data().currentBranch : page() === "issues" ? issueState() : page() === "pulls" ? pullState()
+          : page() === "overview" ? [currentOverviewDocument()?.id, currentOverviewDocument()?.ref, data().currentBranch] : undefined,
+      ])}>
       <Show when={!standalone()}>
       <Header repo={data().repo} page={page()} tabs={visibleTabs()} workCounts={data().workCounts} compact={config().compactHeader} showTabCounts={config().showTabCounts}
         interactive={overlay() === undefined} onSelect={selectHeaderPage}
         onOpenRepository={props.onSwitchRepository ? openRepositoryPicker : undefined} />
       </Show>
       <box {...pageMouse} flexGrow={1} minHeight={0} flexDirection="column">
-      <box visible={!diffTarget()} flexGrow={1} minHeight={0} flexDirection="column">
+      <SearchSurface active={!diffTarget()}>
       <box visible={page() === "overview"} flexGrow={1} minHeight={0}>
           <OverviewScreen
             repo={data().repo}
@@ -1703,7 +1714,7 @@ function AppContent(props: AppProps) {
           </box>
         )}
       </Show>
-      </box>
+      </SearchSurface>
       <For each={["commits", "pulls"] as const}>
         {(owner) => <Show when={navigation().diffs?.[owner]} keyed>
           {(target) => <box id={`diff-view-${owner}`} visible={page() === owner} flexGrow={1} minHeight={0} flexDirection="column">
@@ -1724,9 +1735,6 @@ function AppContent(props: AppProps) {
         </Show>}
       </For>
       </box>
-      <StatusBar kind={status()} detail={statusDetail()} error={statusError()}
-        hint={statusError() ? keys.hint("view.refresh", "retry") : shortcutHint()}
-        zIndex={overlay() && (config().showStatusBarHints || ((status() || statusError()) && !fullscreenEditorOpen())) ? 350 : 0} />
       <Show when={toast()} keyed>
         {(current) => (
           <Toast
@@ -1914,6 +1922,7 @@ function AppContent(props: AppProps) {
           }}
         />
       </Show>
+      </SearchProvider>
     </box>
     </MarkdownProvider>
     </MotionProvider>

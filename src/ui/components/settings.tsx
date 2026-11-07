@@ -1,4 +1,4 @@
-import { CliRenderEvents, TextAttributes, type ScrollBoxRenderable } from "@opentui/core"
+import { CliRenderEvents, RGBA, TextAttributes, type ScrollBoxRenderable } from "@opentui/core"
 import { useRenderer, useTerminalDimensions } from "@opentui/solid"
 import { createEffect, createSignal, For, on, onCleanup, Show } from "solid-js"
 import type { Config } from "../../config"
@@ -8,6 +8,8 @@ import { Action } from "./action"
 import { Popup } from "./popup"
 import { ThemePicker } from "./theme-picker"
 import { useKeyActions, useKeybindings } from "../keybindings"
+import { createRenderedSearch } from "../rendered-search"
+import { useSearchTarget } from "../search-context"
 
 type Setting = "theme" | "color-mode" | "reduced-motion" | "markdown-style" | "scrollbars" | "detail-layout" | "details-placement" | "status-bar-hints" | "icon-style" | "compact-header" | "hide-documents-tab" | "tab-counts"
 
@@ -59,7 +61,7 @@ export function Settings(props: {
   const split = () => dimensions().width >= 110
   createEffect(() => props.onHintChange?.(busy() ? "Updating settings…" : screen() === "themes"
     ? keys.hints(["picker.accept", "confirm"], [["picker.up", "picker.down"], "select"], ["dialog.close", "back"])
-    : keys.hints(["navigation.activate", selected() === "theme" ? "open" : "change"], [["navigation.up", "navigation.down"], "select"], [["settings.previousValue", "settings.nextValue"], "change"], ["dialog.close", "close"])))
+    : keys.hints(["navigation.activate", selected() === "theme" ? "open" : "change"], [["navigation.up", "navigation.down"], "select"], [["settings.previousValue", "settings.nextValue"], "change"], ["search.start", "search"], ["dialog.close", "close"])))
   onCleanup(() => props.onHintChange?.(undefined))
   const revealSetting = () => {
     if (selected() === settingOrder[0]) settingsScroll?.scrollTo(0)
@@ -70,6 +72,36 @@ export function Settings(props: {
     renderer.requestRender()
     onCleanup(() => renderer.off(CliRenderEvents.FRAME, revealSetting))
   }))
+  const searchRows = new Map<Setting, ReturnType<typeof createRenderedSearch>>()
+  const matchingRows = new Map<Setting, string>()
+  useSearchTarget({
+    scope: "settings",
+    id: () => "settings",
+    active: () => screen() === "settings" && !busy(),
+    position: () => settingOrder.indexOf(selected()),
+    selection: selected,
+    search(query) {
+      matchingRows.clear()
+      return settingOrder.flatMap((setting, index) => {
+        const matches = searchRows.get(setting)?.search(query) ?? []
+        if (!matches.length) return []
+        matchingRows.set(setting, matches[0]!.id)
+        return [{ id: setting, position: index, reveal() { setSelected(setting); revealSetting() } }]
+      })
+    },
+    highlight(id) {
+      for (const [setting, first] of matchingRows) searchRows.get(setting)?.highlight(setting === id ? first : undefined)
+    },
+    clear() { for (const row of searchRows.values()) row.clear() },
+    snapshot() {
+      const setting = selected()
+      const top = settingsScroll?.scrollTop ?? 0
+      return () => {
+        setSelected(setting)
+        if (settingsScroll && !settingsScroll.isDestroyed) settingsScroll.scrollTo(top)
+      }
+    },
+  })
   const moveSetting = (delta: number) => {
     const current = settingOrder.indexOf(selected())
     setSelected(settingOrder[Math.max(0, Math.min(settingOrder.length - 1, current + delta))]!)
@@ -203,9 +235,18 @@ export function Settings(props: {
     const definition = settingDefinitions[setting]
     const active = () => selected() === setting
     const hover = mouseHover(() => !busy(), () => setting)
+    onCleanup(() => { searchRows.get(setting)?.dispose(); searchRows.delete(setting) })
     return (
       <box
         id={`setting-${setting}`}
+        ref={(row) => searchRows.set(setting, createRenderedSearch(row, {
+          exclude: (node) => node === row.getChildren()[0]
+            || node.id === `setting-${setting}-previous` || node.id === `setting-${setting}-next`,
+          get matchBackground() { return RGBA.fromHex(colors.searchMatchBg) },
+          get matchForeground() { return RGBA.fromHex(colors.searchMatchFg) },
+          get activeBackground() { return RGBA.fromHex(colors.searchCurrentMatchBg) },
+          get activeForeground() { return RGBA.fromHex(colors.searchCurrentMatchFg) },
+        }))}
         {...mouseClick(() => changeSetting(setting, 1), () => !busy(), () => setting, hover)}
         height={rowHeight()}
         flexShrink={0}
@@ -281,7 +322,7 @@ export function Settings(props: {
   }
 
   return (
-    <Popup width={100} height={popupHeight()} zIndex={200} placement="center" onClose={requestClose}>
+    <Popup width={100} height={popupHeight()} fullscreen={!split()} zIndex={200} placement="center" onClose={requestClose}>
       <Show
         when={screen() === "settings"}
         fallback={(

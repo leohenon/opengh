@@ -1,4 +1,4 @@
-import { MouseButton, type BoxRenderable, type ScrollBoxRenderable } from "@opentui/core"
+import { MouseButton, RGBA, type BoxRenderable, type ScrollBoxRenderable } from "@opentui/core"
 import { useKeyboard } from "@opentui/solid"
 import { useKeyActions } from "../keybindings"
 import { createEffect, createMemo, createSignal, Index, onCleanup, Show, type Accessor, type JSX } from "solid-js"
@@ -8,6 +8,8 @@ import { scrollRowIntoView } from "../scroll-selection"
 import { ListLine } from "./list-line"
 import { useTheme } from "../theme"
 import { createScrollbarVisibility } from "../scrollbar-visibility"
+import { createRenderedSearch } from "../rendered-search"
+import { useSearchTarget } from "../search-context"
 
 type ItemKey = string | number
 
@@ -15,6 +17,7 @@ export function SelectableList<T>(props: {
   items: readonly T[]
   itemKey: (item: T) => ItemKey
   active: boolean
+  searchRetain?: () => boolean
   mouseActive?: boolean
   onMouseFocus?: () => void
   showScrollbar?: boolean
@@ -34,6 +37,9 @@ export function SelectableList<T>(props: {
 }) {
   const { colors } = useTheme()
   const [selectedKey, setSelectedKey] = createSignal<ItemKey>()
+  const [searchSelection, setSearchSelection] = createSignal(false)
+  const searchRows = new Map<number, ReturnType<typeof createRenderedSearch>>()
+  const matchingRows = new Map<string, { adapter: ReturnType<typeof createRenderedSearch>; first: string }>()
   const [containerHeight, setContainerHeight] = createSignal(0)
   let selectedIndex = 0
   let mousePress: { key: ItemKey; x: number; y: number; button: number } | undefined
@@ -58,14 +64,15 @@ export function SelectableList<T>(props: {
 
   const revealSelection = () => {
     const index = indexOfSelection()
-    if (followSelection && props.active && list && index >= 0) {
+    if (followSelection && (props.active || searchSelection() && props.searchRetain?.()) && list && index >= 0) {
       scrollRowIntoView(list, index, rowHeight())
       // Selection-driven scrolling emits the same native change event as the mouse.
       followSelection = true
     }
   }
 
-  const selectIndex = (index: number) => {
+  const selectIndex = (index: number, fromSearch = false) => {
+    setSearchSelection(fromSearch)
     mousePress = undefined
     followSelection = true
     if (!props.items.length) {
@@ -80,6 +87,40 @@ export function SelectableList<T>(props: {
     props.onSelect?.(item)
     revealSelection()
   }
+
+  useSearchTarget({
+    id: () => `list:${props.resetKey ?? ""}`,
+    active: () => props.active,
+    retain: () => props.searchRetain?.() ?? false,
+    position: () => Math.max(0, indexOfSelection()),
+    selection: () => selectedKey() === undefined ? undefined : String(selectedKey()),
+    search: (query) => {
+      matchingRows.clear()
+      return props.items.flatMap((item, index) => {
+        const adapter = searchRows.get(index)
+        const matches = adapter?.search(query) ?? []
+        if (!adapter || !matches.length) return []
+        const id = String(props.itemKey(item))
+        matchingRows.set(id, { adapter, first: matches[0]!.id })
+        return [{ id, position: index, reveal: () => selectIndex(index, true) }]
+      })
+    },
+    highlight: (id) => {
+      for (const [key, row] of matchingRows) row.adapter.highlight(key === id ? row.first : undefined)
+    },
+    clear: () => { for (const adapter of searchRows.values()) adapter.clear() },
+    snapshot: () => {
+      const key = selectedKey()
+      const top = list?.scrollTop ?? 0
+      const follow = followSelection
+      return () => {
+        const index = props.items.findIndex((item) => props.itemKey(item) === key)
+        if (index >= 0) selectIndex(index, true)
+        list?.scrollTo(top)
+        followSelection = follow
+      }
+    },
+  })
 
   const move = (delta: number) => {
     const current = indexOfSelection()
@@ -130,7 +171,7 @@ export function SelectableList<T>(props: {
   const onScrollChange = () => {
     // Native wheel/scrollbar browsing may intentionally leave the selected row offscreen.
     followSelection = false
-    if (!props.active || !list || list.viewport.height <= 0 || !props.items.length) return
+    if (searchSelection() || !props.active || !list || list.viewport.height <= 0 || !props.items.length) return
     const lastVisibleIndex = Math.ceil((list.scrollTop + list.viewport.height) / rowHeight()) - 1
     if (lastVisibleIndex >= props.items.length - (props.endThreshold ?? 3)) props.onEndReached?.()
   }
@@ -142,7 +183,7 @@ export function SelectableList<T>(props: {
   createEffect(() => {
     const index = indexOfSelection()
     const threshold = props.endThreshold ?? 3
-    if (props.active && (props.items.length === 0 || index >= props.items.length - threshold))
+    if (!searchSelection() && props.active && (props.items.length === 0 || index >= props.items.length - threshold))
       props.onEndReached?.()
   })
 
@@ -169,7 +210,10 @@ export function SelectableList<T>(props: {
         }}
         focusable={false}
         scrollbarOptions={{ trackOptions: { onMouse: (event) => {
-          if (event.type === "down" && event.button === MouseButton.LEFT && mouseActive()) props.onMouseFocus?.()
+          if (event.type === "down" && event.button === MouseButton.LEFT && mouseActive()) {
+            setSearchSelection(false)
+            props.onMouseFocus?.()
+          }
         } } }}
         onMouse={(event) => {
           // The previous hit target's hover-out can arrive after a new press at these cells.
@@ -178,6 +222,7 @@ export function SelectableList<T>(props: {
             || event.type === "scroll" || event.type === "out") mousePress = undefined
         }}
         onMouseScroll={(event) => {
+          setSearchSelection(false)
           if (mouseActive()) props.onMouseFocus?.()
           event.stopPropagation()
           // An underfilled list or a wheel at the bottom may not emit a position change.
@@ -203,8 +248,16 @@ export function SelectableList<T>(props: {
             {(item, index) => {
               const active = () => selectedKey() === props.itemKey(item())
               const hover = mouseHover(mouseActive, () => props.itemKey(item()))
+              onCleanup(() => { searchRows.get(index)?.dispose(); searchRows.delete(index) })
               return (
                 <box
+                  ref={(row) => { searchRows.set(index, createRenderedSearch(row, {
+                    exclude: (node) => node === row.getChildren()[0],
+                    get matchBackground() { return RGBA.fromHex(colors.searchMatchBg) },
+                    get matchForeground() { return RGBA.fromHex(colors.searchMatchFg) },
+                    get activeBackground() { return RGBA.fromHex(colors.searchCurrentMatchBg) },
+                    get activeForeground() { return RGBA.fromHex(colors.searchCurrentMatchFg) },
+                  })) }}
                   width="100%"
                   minWidth={0}
                   overflow="hidden"

@@ -1,0 +1,500 @@
+diff --git a/chunk-bun-6qjat6qa.js b/chunk-bun-6qjat6qa.js
+index f19fdead13463e5f0aabd55910cefef6a2fb7165..61f60377c1666ff844159bb16b5598c86f15dec5 100644
+--- a/chunk-bun-6qjat6qa.js
++++ b/chunk-bun-6qjat6qa.js
+@@ -14646,6 +14646,66 @@ class TextBufferRenderable2 extends Renderable2 {
+       }
+     }
+   }
++  _renderedChunks = [];
++  _textDecorator;
++  get renderedChunks() {
++    return this._renderedChunks;
++  }
++  get textDecorator() {
++    return this._textDecorator;
++  }
++  set textDecorator(value) {
++    if (value === this._textDecorator) return;
++    this._textDecorator = value;
++    this.applyRenderedText();
++    this.requestRender();
++  }
++  setRenderedText(value) {
++    this._renderedChunks = typeof value === "string" ? stringToStyledText2(value).chunks : value.chunks;
++    this.applyRenderedText();
++  }
++  applyRenderedText() {
++    const chunks = this._textDecorator ? this._textDecorator(this._renderedChunks) : this._renderedChunks;
++    const styled = new StyledText2(chunks);
++    if (this.nativeTextScene) this.nativeTextScene.setText(this, styled);
++    else this.textBuffer.setStyledText(styled);
++  }
++  /** Geometry indexes displayed logical lines, not Code's mapped source lines. */
++  get renderedLineInfo() {
++    return this.nativeTextScene ? this.nativeTextScene.getTextLineInfo(this) : this.textBufferView.logicalLineInfo;
++  }
++  get firstLineOffset() {
++    return this._firstLineOffset;
++  }
++  get textMeasurementKey() {
++    return `${this._ctx.widthMethod}:${this.textBuffer?.getTabWidth() ?? 2}`;
++  }
++  measureTextOffset(text) {
++    if (this.nativeTextScene) {
++      const probe = new TextRenderable2(this._ctx, { content: text, wrapMode: "none" });
++      try {
++        const info = probe.renderedLineInfo;
++        const last = info.lineStartCols.length - 1;
++        return last < 0 ? 0 : info.lineStartCols[last] + info.lineWidthCols[last];
++      } finally {
++        probe.destroy();
++      }
++    }
++    const buffer = TextBuffer2.create(this._ctx.widthMethod, this._ctx.nativeScene);
++    let view;
++    try {
++      buffer.setTabWidth(this.textBuffer?.getTabWidth() ?? 4);
++      buffer.setText(text);
++      view = TextBufferView2.create(buffer);
++      view.setWrapMode("none");
++      const info = view.logicalLineInfo;
++      const last = info.lineStartCols.length - 1;
++      return last < 0 ? 0 : info.lineStartCols[last] + info.lineWidthCols[last];
++    } finally {
++      view?.destroy();
++      buffer.destroy();
++    }
++  }
+   get lineInfo() {
+     if (this.nativeTextScene)
+       return this.nativeTextScene.getTextLineInfo(this);
+@@ -15063,9 +15123,9 @@ class CodeRenderable2 extends TextBufferRenderable2 {
+       this._onChunks = options.onChunks;
+       if (this._content.length > 0) {
+         if (this._initialStyledText && this._drawUnstyledText) {
+-          this.textBuffer.setStyledText(this._initialStyledText);
++          this.setRenderedText(this._initialStyledText);
+         } else {
+-          this.textBuffer.setText(this._content);
++          this.setRenderedText(this._content);
+         }
+         this.updateTextInfo();
+         this.setShouldRenderTextBuffer(this._drawUnstyledText || !this._filetype);
+@@ -15075,6 +15135,9 @@ class CodeRenderable2 extends TextBufferRenderable2 {
+       this.rollbackConstruction(error);
+     }
+   }
++  get renderedChunks() {
++    return this._shouldRenderTextBuffer ? super.renderedChunks : [];
++  }
+   get content() {
+     return this._content;
+   }
+@@ -15107,9 +15170,9 @@ class CodeRenderable2 extends TextBufferRenderable2 {
+         return;
+       }
+       if (value && this._initialStyledText && this._drawUnstyledText) {
+-        this.textBuffer.setStyledText(this._initialStyledText);
++        this.setRenderedText(this._initialStyledText);
+       } else {
+-        this.textBuffer.setText(value);
++        this.setRenderedText(value);
+       }
+       this._content = value;
+       this.invalidateHighlights();
+@@ -15121,7 +15184,7 @@ class CodeRenderable2 extends TextBufferRenderable2 {
+     this._content = content;
+     this._initialStyledText = initialStyledText;
+     this.invalidateHighlights();
+-    this.textBuffer.setStyledText(initialStyledText);
++    this.setRenderedText(initialStyledText);
+     this.setRenderedLineSources(undefined);
+     this.updateTextInfo();
+   }
+@@ -15275,9 +15338,9 @@ class CodeRenderable2 extends TextBufferRenderable2 {
+       this.setShouldRenderTextBuffer(true);
+     } else if (shouldDrawUnstyledNow) {
+       if (this._initialStyledText) {
+-        this.textBuffer.setStyledText(this._initialStyledText);
++        this.setRenderedText(this._initialStyledText);
+       } else {
+-        this.textBuffer.setText(content);
++        this.setRenderedText(content);
+       }
+       this.setRenderedLineSources(undefined);
+       this.setShouldRenderTextBuffer(true);
+@@ -15345,10 +15408,10 @@ class CodeRenderable2 extends TextBufferRenderable2 {
+         if (this.isDestroyed)
+           return;
+         const styledText = new StyledText2(chunks);
+-        this.textBuffer.setStyledText(styledText);
++        this.setRenderedText(styledText);
+         this.setRenderedLineSources(renderedLineSources);
+       } else {
+-        this.textBuffer.setText(content);
++        this.setRenderedText(content);
+         this.setRenderedLineSources(undefined);
+       }
+       this.setShouldRenderTextBuffer(true);
+@@ -15364,7 +15427,7 @@ class CodeRenderable2 extends TextBufferRenderable2 {
+       console.warn("Code highlighting failed, falling back to plain text:", error);
+       if (this.isDestroyed)
+         return;
+-      this.textBuffer.setText(content);
++      this.setRenderedText(content);
+       this.setRenderedLineSources(undefined);
+       this.setShouldRenderTextBuffer(true);
+       this._isHighlighting = false;
+@@ -15496,7 +15559,7 @@ class CodeRenderable2 extends TextBufferRenderable2 {
+       this.setHighlightsDirty(false);
+       this.clearPendingHighlight();
+       if (hasContent) {
+-        this.textBuffer.setText(this._content);
++        this.setRenderedText(this._content);
+         this.setRenderedLineSources(undefined);
+         this.updateTextInfo();
+       }
+@@ -16780,7 +16843,7 @@ class TextRenderable2 extends TextBufferRenderable2 {
+       this._ctx.nativeScene.lifecyclePasses.refresh(this);
+       return;
+     }
+-    this._ctx.nativeScene.setText(this, value);
++    this.setRenderedText(value);
+     this._text = value;
+     this._hasManualStyledText = true;
+     this._ctx.nativeScene.lifecyclePasses.refresh(this);
+@@ -16797,7 +16860,7 @@ class TextRenderable2 extends TextBufferRenderable2 {
+         link: undefined
+       };
+       const prepared = this.rootTextNode.prepareWithInheritedStyle(style);
+-      this._ctx.nativeScene.setText(this, new StyledText2(prepared.chunks));
++      this.setRenderedText(new StyledText2(prepared.chunks));
+       prepared.acknowledge();
+       this._ctx.nativeScene.lifecyclePasses.refresh(this);
+       this.refreshLocalSelection();
+@@ -16831,7 +16894,7 @@ class TextRenderable2 extends TextBufferRenderable2 {
+     return this.rootTextNode?.getChildren() ?? [];
+   }
+   clear() {
+-    this._ctx.nativeScene.setText(this, "");
++    this.setRenderedText("");
+     this._text = stringToStyledText2("");
+     this.rootTextNode?.clear();
+     this.requestRender();
+diff --git a/chunk-node-2rg7pskw.js b/chunk-node-2rg7pskw.js
+index f2b77652fe2ee3d9dc41f49ed7570a2ea1d50715..98b5dfc3d33ee2d5c3df4af7350d38f39d2cc886 100644
+--- a/chunk-node-2rg7pskw.js
++++ b/chunk-node-2rg7pskw.js
+@@ -14645,6 +14645,66 @@ class TextBufferRenderable2 extends Renderable2 {
+       }
+     }
+   }
++  _renderedChunks = [];
++  _textDecorator;
++  get renderedChunks() {
++    return this._renderedChunks;
++  }
++  get textDecorator() {
++    return this._textDecorator;
++  }
++  set textDecorator(value) {
++    if (value === this._textDecorator) return;
++    this._textDecorator = value;
++    this.applyRenderedText();
++    this.requestRender();
++  }
++  setRenderedText(value) {
++    this._renderedChunks = typeof value === "string" ? stringToStyledText2(value).chunks : value.chunks;
++    this.applyRenderedText();
++  }
++  applyRenderedText() {
++    const chunks = this._textDecorator ? this._textDecorator(this._renderedChunks) : this._renderedChunks;
++    const styled = new StyledText2(chunks);
++    if (this.nativeTextScene) this.nativeTextScene.setText(this, styled);
++    else this.textBuffer.setStyledText(styled);
++  }
++  /** Geometry indexes displayed logical lines, not Code's mapped source lines. */
++  get renderedLineInfo() {
++    return this.nativeTextScene ? this.nativeTextScene.getTextLineInfo(this) : this.textBufferView.logicalLineInfo;
++  }
++  get firstLineOffset() {
++    return this._firstLineOffset;
++  }
++  get textMeasurementKey() {
++    return `${this._ctx.widthMethod}:${this.textBuffer?.getTabWidth() ?? 2}`;
++  }
++  measureTextOffset(text) {
++    if (this.nativeTextScene) {
++      const probe = new TextRenderable2(this._ctx, { content: text, wrapMode: "none" });
++      try {
++        const info = probe.renderedLineInfo;
++        const last = info.lineStartCols.length - 1;
++        return last < 0 ? 0 : info.lineStartCols[last] + info.lineWidthCols[last];
++      } finally {
++        probe.destroy();
++      }
++    }
++    const buffer = TextBuffer2.create(this._ctx.widthMethod, this._ctx.nativeScene);
++    let view;
++    try {
++      buffer.setTabWidth(this.textBuffer?.getTabWidth() ?? 4);
++      buffer.setText(text);
++      view = TextBufferView2.create(buffer);
++      view.setWrapMode("none");
++      const info = view.logicalLineInfo;
++      const last = info.lineStartCols.length - 1;
++      return last < 0 ? 0 : info.lineStartCols[last] + info.lineWidthCols[last];
++    } finally {
++      view?.destroy();
++      buffer.destroy();
++    }
++  }
+   get lineInfo() {
+     if (this.nativeTextScene)
+       return this.nativeTextScene.getTextLineInfo(this);
+@@ -15062,9 +15122,9 @@ class CodeRenderable2 extends TextBufferRenderable2 {
+       this._onChunks = options.onChunks;
+       if (this._content.length > 0) {
+         if (this._initialStyledText && this._drawUnstyledText) {
+-          this.textBuffer.setStyledText(this._initialStyledText);
++          this.setRenderedText(this._initialStyledText);
+         } else {
+-          this.textBuffer.setText(this._content);
++          this.setRenderedText(this._content);
+         }
+         this.updateTextInfo();
+         this.setShouldRenderTextBuffer(this._drawUnstyledText || !this._filetype);
+@@ -15074,6 +15134,9 @@ class CodeRenderable2 extends TextBufferRenderable2 {
+       this.rollbackConstruction(error);
+     }
+   }
++  get renderedChunks() {
++    return this._shouldRenderTextBuffer ? super.renderedChunks : [];
++  }
+   get content() {
+     return this._content;
+   }
+@@ -15106,9 +15169,9 @@ class CodeRenderable2 extends TextBufferRenderable2 {
+         return;
+       }
+       if (value && this._initialStyledText && this._drawUnstyledText) {
+-        this.textBuffer.setStyledText(this._initialStyledText);
++        this.setRenderedText(this._initialStyledText);
+       } else {
+-        this.textBuffer.setText(value);
++        this.setRenderedText(value);
+       }
+       this._content = value;
+       this.invalidateHighlights();
+@@ -15120,7 +15183,7 @@ class CodeRenderable2 extends TextBufferRenderable2 {
+     this._content = content;
+     this._initialStyledText = initialStyledText;
+     this.invalidateHighlights();
+-    this.textBuffer.setStyledText(initialStyledText);
++    this.setRenderedText(initialStyledText);
+     this.setRenderedLineSources(undefined);
+     this.updateTextInfo();
+   }
+@@ -15274,9 +15337,9 @@ class CodeRenderable2 extends TextBufferRenderable2 {
+       this.setShouldRenderTextBuffer(true);
+     } else if (shouldDrawUnstyledNow) {
+       if (this._initialStyledText) {
+-        this.textBuffer.setStyledText(this._initialStyledText);
++        this.setRenderedText(this._initialStyledText);
+       } else {
+-        this.textBuffer.setText(content);
++        this.setRenderedText(content);
+       }
+       this.setRenderedLineSources(undefined);
+       this.setShouldRenderTextBuffer(true);
+@@ -15344,10 +15407,10 @@ class CodeRenderable2 extends TextBufferRenderable2 {
+         if (this.isDestroyed)
+           return;
+         const styledText = new StyledText2(chunks);
+-        this.textBuffer.setStyledText(styledText);
++        this.setRenderedText(styledText);
+         this.setRenderedLineSources(renderedLineSources);
+       } else {
+-        this.textBuffer.setText(content);
++        this.setRenderedText(content);
+         this.setRenderedLineSources(undefined);
+       }
+       this.setShouldRenderTextBuffer(true);
+@@ -15363,7 +15426,7 @@ class CodeRenderable2 extends TextBufferRenderable2 {
+       console.warn("Code highlighting failed, falling back to plain text:", error);
+       if (this.isDestroyed)
+         return;
+-      this.textBuffer.setText(content);
++      this.setRenderedText(content);
+       this.setRenderedLineSources(undefined);
+       this.setShouldRenderTextBuffer(true);
+       this._isHighlighting = false;
+@@ -15495,7 +15558,7 @@ class CodeRenderable2 extends TextBufferRenderable2 {
+       this.setHighlightsDirty(false);
+       this.clearPendingHighlight();
+       if (hasContent) {
+-        this.textBuffer.setText(this._content);
++        this.setRenderedText(this._content);
+         this.setRenderedLineSources(undefined);
+         this.updateTextInfo();
+       }
+@@ -16779,7 +16842,7 @@ class TextRenderable2 extends TextBufferRenderable2 {
+       this._ctx.nativeScene.lifecyclePasses.refresh(this);
+       return;
+     }
+-    this._ctx.nativeScene.setText(this, value);
++    this.setRenderedText(value);
+     this._text = value;
+     this._hasManualStyledText = true;
+     this._ctx.nativeScene.lifecyclePasses.refresh(this);
+@@ -16796,7 +16859,7 @@ class TextRenderable2 extends TextBufferRenderable2 {
+         link: undefined
+       };
+       const prepared = this.rootTextNode.prepareWithInheritedStyle(style);
+-      this._ctx.nativeScene.setText(this, new StyledText2(prepared.chunks));
++      this.setRenderedText(new StyledText2(prepared.chunks));
+       prepared.acknowledge();
+       this._ctx.nativeScene.lifecyclePasses.refresh(this);
+       this.refreshLocalSelection();
+@@ -16830,7 +16893,7 @@ class TextRenderable2 extends TextBufferRenderable2 {
+     return this.rootTextNode?.getChildren() ?? [];
+   }
+   clear() {
+-    this._ctx.nativeScene.setText(this, "");
++    this.setRenderedText("");
+     this._text = stringToStyledText2("");
+     this.rootTextNode?.clear();
+     this.requestRender();
+diff --git a/index.bun.js b/index.bun.js
+index 7b7ab4029fc44bb9984e05d365d0e314cb680f94..8da8cbc7e09ec58a18358f62049ecac091fa0330 100644
+--- a/index.bun.js
++++ b/index.bun.js
+@@ -10197,6 +10197,36 @@ class TextTableRenderable extends Renderable2 {
+       this.abortConstruction(error, () => this.destroyCells());
+     }
+   }
++  /** Cell content origin and native wrapping geometry, relative to this table. */
++  getCellGeometry(row, column) {
++    this.ensureLayoutReady();
++    const cell = this._cells[row]?.[column];
++    if (!cell) return undefined;
++    return {
++      x: (this._layout.columnOffsets[column] ?? 0) + 1 + this._cellPaddingX,
++      y: (this._layout.rowOffsets[row] ?? 0) + 1 + this._cellPaddingY,
++      width: Math.max(1, this._layout.columnWidths[column] - this.getHorizontalCellPadding()),
++      height: Math.max(1, this._layout.rowHeights[row] - this.getVerticalCellPadding()),
++      lineInfo: cell.textBufferView.logicalLineInfo,
++      measurementKey: `${this._ctx.widthMethod}:${cell.textBuffer.getTabWidth()}`,
++      measureTextOffset: (text) => {
++        const buffer = TextBuffer2.create(this._ctx.widthMethod, this._ctx.nativeScene);
++        let view;
++        try {
++          buffer.setTabWidth(cell.textBuffer.getTabWidth());
++          buffer.setText(text);
++          view = TextBufferView2.create(buffer);
++          view.setWrapMode("none");
++          const info = view.logicalLineInfo;
++          const last = info.lineStartCols.length - 1;
++          return last < 0 ? 0 : info.lineStartCols[last] + info.lineWidthCols[last];
++        } finally {
++          view?.destroy();
++          buffer.destroy();
++        }
++      }
++    };
++  }
+   get content() {
+     return this._content;
+   }
+diff --git a/index.node.js b/index.node.js
+index 8b8c735fdf567fa3faa3f21b8cb0099e39f09a23..cceb808c5bc24fae2bf79ef7b5bc62e3af37647f 100644
+--- a/index.node.js
++++ b/index.node.js
+@@ -10196,6 +10196,36 @@ class TextTableRenderable extends Renderable2 {
+       this.abortConstruction(error, () => this.destroyCells());
+     }
+   }
++  /** Cell content origin and native wrapping geometry, relative to this table. */
++  getCellGeometry(row, column) {
++    this.ensureLayoutReady();
++    const cell = this._cells[row]?.[column];
++    if (!cell) return undefined;
++    return {
++      x: (this._layout.columnOffsets[column] ?? 0) + 1 + this._cellPaddingX,
++      y: (this._layout.rowOffsets[row] ?? 0) + 1 + this._cellPaddingY,
++      width: Math.max(1, this._layout.columnWidths[column] - this.getHorizontalCellPadding()),
++      height: Math.max(1, this._layout.rowHeights[row] - this.getVerticalCellPadding()),
++      lineInfo: cell.textBufferView.logicalLineInfo,
++      measurementKey: `${this._ctx.widthMethod}:${cell.textBuffer.getTabWidth()}`,
++      measureTextOffset: (text) => {
++        const buffer = TextBuffer2.create(this._ctx.widthMethod, this._ctx.nativeScene);
++        let view;
++        try {
++          buffer.setTabWidth(cell.textBuffer.getTabWidth());
++          buffer.setText(text);
++          view = TextBufferView2.create(buffer);
++          view.setWrapMode("none");
++          const info = view.logicalLineInfo;
++          const last = info.lineStartCols.length - 1;
++          return last < 0 ? 0 : info.lineStartCols[last] + info.lineWidthCols[last];
++        } finally {
++          view?.destroy();
++          buffer.destroy();
++        }
++      }
++    };
++  }
+   get content() {
+     return this._content;
+   }
+diff --git a/renderables/TextBufferRenderable.d.ts b/renderables/TextBufferRenderable.d.ts
+index 8038a1702165e18dc2f69498c202dfe24cbc7788..415484eba1f57a57cf597cbcff3db4fa616dbd34 100644
+--- a/renderables/TextBufferRenderable.d.ts
++++ b/renderables/TextBufferRenderable.d.ts
+@@ -6,6 +6,8 @@ import { RGBA } from "../lib/RGBA.js";
+ import { type RenderContext, type LineInfoProvider } from "../types.js";
+ import type { OptimizedBuffer } from "../buffer.js";
+ import type { LineInfo } from "../zig.js";
++import type { TextChunk } from "../text-buffer.js";
++import { StyledText } from "../lib/styled-text.js";
+ import { SyntaxStyle } from "../syntax-style.js";
+ export interface TextBufferOptions extends RenderableOptions<TextBufferRenderable> {
+     fg?: string | RGBA;
+@@ -56,6 +58,18 @@ export declare abstract class TextBufferRenderable extends Renderable implements
+     constructor(ctx: RenderContext, options: TextBufferOptions, sharedText?: boolean);
+     protected onMouseEvent(event: any): void;
+     protected handleScroll(event: any): void;
++    /** Canonical displayed chunks, after JSX composition or Code chunk transforms. Treat as read-only. */
++    get renderedChunks(): TextChunk[];
++    /** Reversible paint-only decoration. Must preserve text and not mutate the input. */
++    get textDecorator(): ((chunks: TextChunk[]) => TextChunk[]) | undefined;
++    set textDecorator(value: ((chunks: TextChunk[]) => TextChunk[]) | undefined);
++    protected setRenderedText(value: string | StyledText): void;
++    private applyRenderedText;
++    /** Native wrapping geometry in displayed-text coordinates (without Code source mapping). */
++    get renderedLineInfo(): LineInfo;
++    get firstLineOffset(): number;
++    get textMeasurementKey(): string;
++    measureTextOffset(text: string): number;
+     get lineInfo(): LineInfo;
+     getLineSources(startLine: number, lineCount: number): number[];
+     protected needsLineInfoFallback(owner: object): boolean;
+diff --git a/renderables/TextTable.d.ts b/renderables/TextTable.d.ts
+index 10952babfd007393c116b052dd387d3a7d7cedc9..afd690071aa32a7a1c7fc9e53568360696e69094 100644
+--- a/renderables/TextTable.d.ts
++++ b/renderables/TextTable.d.ts
+@@ -66,6 +66,13 @@ export declare class TextTableRenderable extends Renderable {
+     private _cachedMeasureWidth;
+     private readonly _defaultOptions;
+     constructor(ctx: RenderContext, options?: TextTableOptions);
++    /** Cell content origin and native wrapping geometry, relative to this table. */
++    getCellGeometry(row: number, column: number): {
++        x: number; y: number; width: number; height: number;
++        lineInfo: import("../types.js").LineInfo;
++        measurementKey: string;
++        measureTextOffset(text: string): number;
++    } | undefined;
+     get content(): TextTableContent;
+     set content(value: TextTableContent);
+     get wrapMode(): "none" | "char" | "word";

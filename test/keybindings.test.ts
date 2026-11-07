@@ -5,7 +5,7 @@ import { join } from "node:path"
 import { defaultConfig, loadConfig, saveConfig } from "../src/config"
 import {
   canonicalKey, formatBinding, formatHints, matchesKey, normalizeKeybindings,
-  resolveKeybindings, validateKeybindingConflicts,
+  keybindingContexts, resolveKeybindings, validateKeybindingConflicts,
 } from "../src/keybindings"
 
 describe("keybindings", () => {
@@ -40,13 +40,13 @@ describe("keybindings", () => {
   })
 
   test("replaces defaults, deduplicates aliases, hides disabled hints, and preserves unrelated actions", () => {
-    const overrides = normalizeKeybindings({ "global.help": ["F1", "f1"], "global.quit": [], "navigation.down": ["n", "down"] })
+    const overrides = normalizeKeybindings({ "global.help": ["F1", "f1"], "global.quit": [], "navigation.down": ["m", "down"] })
     const bindings = resolveKeybindings(overrides)
     expect(bindings["global.help"]).toEqual(["f1"])
     expect(bindings["global.quit"]).toEqual([])
     expect(bindings["navigation.up"]).toEqual(["up", "k"])
     expect(formatBinding(bindings, "global.help")).toBe("f1")
-    expect(formatBinding(bindings, "navigation.down", true)).toBe("n/↓")
+    expect(formatBinding(bindings, "navigation.down", true)).toBe("m/↓")
     expect(formatHints(bindings, [["global.quit", "quit"], ["global.help", "help"]])).toBe("f1 help")
   })
 
@@ -63,6 +63,37 @@ describe("keybindings", () => {
     expect(() => normalizeKeybindings({ "settings.nextValue": ["u"] })).not.toThrow()
     expect(() => normalizeKeybindings({ "overview.nextDocument": ["enter"] })).not.toThrow()
     expect(() => normalizeKeybindings({ "diff.nextHunk": ["y"] })).not.toThrow()
+  })
+
+  test("search defaults distinguish n/N, support remapping/disabling, and conflict only in browsing scopes", () => {
+    const defaults = resolveKeybindings()
+    expect(defaults["search.start"]).toEqual(["/"])
+    expect(defaults["search.next"]).toEqual(["n"])
+    expect(defaults["search.previous"]).toEqual(["N"])
+    for (const event of [{ name: "N", sequence: "N" }, { name: "n", shift: true }]) {
+      expect(matchesKey(event, defaults["search.previous"][0]!)).toBe(true)
+      expect(matchesKey(event, defaults["search.next"][0]!)).toBe(false)
+    }
+    expect(matchesKey({ name: "n" }, defaults["search.next"][0]!)).toBe(true)
+    for (const action of ["search.start", "search.next", "search.previous"] as const) {
+      for (const [context, actions] of Object.entries(keybindingContexts)) {
+        const browsing = ["overview", "commits", "work", "actions", "commit", "issue", "pull", "run", "diffFiles", "diffBody", "settings"].includes(context)
+        expect(actions.includes(action)).toBe(browsing)
+      }
+    }
+    expect(() => normalizeKeybindings({ "navigation.down": ["n"] })).toThrow("search.next")
+    expect(() => normalizeKeybindings({ "search.start": ["j"] })).toThrow("navigation.down")
+    expect(() => normalizeKeybindings({ "settings.nextValue": ["n"] })).toThrow("settings")
+    expect(() => normalizeKeybindings({ "search.next": ["shift+n"] })).toThrow("search.previous")
+    expect(() => normalizeKeybindings({ "dialog.close": ["ctrl+a"] })).toThrow("searchInput")
+    expect(() => normalizeKeybindings({ "input.submit": ["esc"] })).toThrow("searchInput")
+    expect(() => normalizeKeybindings({ "search.start": ["esc"] })).toThrow("navigation.back")
+    const remapped = resolveKeybindings(normalizeKeybindings({
+      "search.start": ["f3"], "search.next": [], "search.previous": ["f4"], "navigation.down": ["n"],
+    }))
+    expect(formatBinding(remapped, "search.start")).toBe("f3")
+    expect(formatHints(remapped, [["search.next", "next"], ["search.previous", "previous"]])).toBe("f4 previous")
+    expect(() => normalizeKeybindings({ "picker.down": ["n"], "editor.move-down": ["n"] })).not.toThrow()
   })
 
   test("config round trips overrides and rejects invalid saves without replacing the last good file", async () => {

@@ -1,7 +1,23 @@
+diff --git a/dist/npm/opentui/index.d.ts b/dist/npm/opentui/index.d.ts
+index 9386c3054441f6de21bf4de75e67f31ee639761f..9247b1a52eb2bbd65afd754c92db64f1e409c957 100644
+--- a/dist/npm/opentui/index.d.ts
++++ b/dist/npm/opentui/index.d.ts
+@@ -7,3 +7,10 @@ export { HunkFileNav } from "./HunkFileNav.js";
+ export { HunkReviewStream } from "./HunkReviewStream.js";
+ export { countHunkDiffStats, createHunkDiffFile, createHunkDiffFilesFromPatch } from "./model.js";
+ export type { CanonicalHunkDiffLayout, HunkDiffBodyProps, HunkDiffFile, HunkDiffFileHeaderProps, HunkDiffFileInput, HunkDiffLayout, LegacyHunkDiffLayout, HunkDiffSelection, HunkDiffStats, HunkDiffViewProps, HunkFileNavProps, HunkReviewStreamProps, } from "./types.js";
++
++/** Configure the missing npm worker entry before mounting any highlighted diffs. */
++export declare function configureHunkHighlightWorker(url: URL): void;
++
++export type { HunkDiffSearchCell, HunkDiffSourceHighlight } from "./types.js";
++/** Computes geometry using Hunk's own sanitization, tab expansion and wrap planner. */
++export declare function getHunkDiffSearchCells(props: import("./types.js").HunkDiffBodyProps): import("./types.js").HunkDiffSearchCell[];
 diff --git a/dist/npm/opentui/index.js b/dist/npm/opentui/index.js
+index c7a61edb43329abf69be1813b88a154cb231dc63..1e4beb3a55a1c54753030efece112674d1d32059 100644
 --- a/dist/npm/opentui/index.js
 +++ b/dist/npm/opentui/index.js
-@@ -1614,8 +1614,12 @@
+@@ -1614,8 +1614,12 @@ function resolveTheme(requested, themeMode, customThemes = []) {
  }
  
  // packages/hunk/src/highlightWorkerClient.ts
@@ -15,21 +31,157 @@ diff --git a/dist/npm/opentui/index.js b/dist/npm/opentui/index.js
  }
  function supportsHighlightWorkerOffload({
    execPath = process.execPath,
-@@ -8310,6 +8314,7 @@
+@@ -7727,5 +7731,88 @@ function toInternalDiffFiles(files) {
+ // packages/hunk/src/opentui/HunkDiffBody.tsx
+ import { jsxDEV as jsxDEV5 } from "@opentui/react/jsx-dev-runtime";
++// Public source-cell search adapter. Uses the same sanitized spans and wrap planner
++// as CodeCellView; gutters, rails, padding and duplicate split context are omitted.
++function hunkSourceCells(plannedRow, layout) {
++  const row = plannedRow.row;
++  if (row.type === "split-line") {
++    const context = row.left.kind === "context" && row.right.kind === "context";
++    return [["left", row.left, layout?.left, context ? "context" : "left"],
++      ["right", row.right, layout?.right, context ? "context" : "right"]];
++  }
++  return row.type === "unified-line" ? [["unified", row.cell, layout?.cell, "unified"]] : [];
++}
++function getHunkDiffSearchCells(props) {
++  if (!props.file) return [];
++  const file = toInternalDiffFile(props.file);
++  const theme = resolveTheme(props.theme ?? "github-dark-default", null);
++  const layout = props.canonicalLayout ?? normalizeHunkDiffLayout(props.layout ?? "split");
++  const rows = layout === "split" ? buildSplitRows(file, undefined, theme, props.tabWidth ?? DEFAULT_TAB_WIDTH)
++    : buildUnifiedRows(file, undefined, theme, props.tabWidth ?? DEFAULT_TAB_WIDTH);
++  const planned = buildReviewRenderPlan({ fileId: file.id, rows, showHunkHeaders: props.showHunkHeaders ?? true, hunkGap: props.hunkGap ?? DEFAULT_HUNK_GAP });
++  const result = [];
++  const seen = new Set;
++  for (const entry of planned) {
++    if (!isPlannedCodeReviewRow(entry)) continue;
++    const geometry = planCodeRowLayout(entry, { width: props.width, lineNumberDigits: String(findMaxLineNumber(file)).length,
++      showLineNumbers: props.showLineNumbers ?? true, wrapLines: props.wrapLines ?? false });
++    for (const [side, cell, cellGeometry, key] of hunkSourceCells(entry, geometry)) {
++      const id = `${reviewRowId(entry.key)}:${key}`;
++      if (cell.kind === "empty" || seen.has(id) || cellGeometry.contentWidth <= 0) continue;
++      seen.add(id);
++      const spans = sanitizeTerminalSpans(cell.spans);
++      const text = spans.map(span => span.text).join("");
++      const visualLines = props.wrapLines ? wrapSpans(spans, cellGeometry.contentWidth).map(line => line.map(span => span.text).join("")) : [text];
++      // A glyph wider than an impossibly narrow pane may not be displayed.
++      if (visualLines.join("") !== text) continue;
++      result.push({ id, rowId: reviewRowId(entry.key), side, text, visualLines,
++        contentWidth: cellGeometry.contentWidth, hunkIndex: entry.row.hunkIndex, measureTextWidth });
++    }
++  }
++  return result;
++}
++const hunkSearchGraphemes = new Intl.Segmenter(undefined, { granularity: "grapheme" });
++function withHunkSourceHighlights(entry, highlights) {
++  if (!highlights || !isPlannedCodeReviewRow(entry)) return entry;
++  let row = entry.row;
++  for (const [side, cell, , key] of hunkSourceCells(entry)) {
++    const ranges = highlights[`${reviewRowId(entry.key)}:${key}`];
++    if (!ranges?.length) continue;
++    const source = sanitizeTerminalSpans(cell.spans);
++    const text = source.map(span => span.text).join("");
++    const ordered = [...ranges].sort((a, b) => a.start - b.start);
++    const paints = [];
++    let next = 0;
++    // Walk ordered occurrences and graphemes together. Paint expands, identities
++    // do not; an active occurrence wins even when several share one grapheme.
++    for (const { index, segment } of hunkSearchGraphemes.segment(text)) {
++      const end = index + segment.length;
++      while (ordered[next] && ordered[next].end <= index) next++;
++      let chosen;
++      for (let i = next; ordered[i] && ordered[i].start < end; i++) {
++        if (!chosen || ordered[i].active) chosen = ordered[i];
++      }
++      const previous = paints.at(-1);
++      if (previous && previous.range === chosen) previous.end = end;
++      else paints.push({ start: index, end, range: chosen });
++    }
++    let offset = 0, paint = 0;
++    const spans = [];
++    for (const span of source) {
++      const start = offset, end = start + span.text.length;
++      while (offset < end) {
++        while (paints[paint].end <= offset) paint++;
++        const { range } = paints[paint];
++        const to = Math.min(end, paints[paint].end);
++        spans.push({ ...span, text: span.text.slice(offset - start, to - start),
++          ...(range ? { fg: range.fg, bg: range.bg, transformFg: undefined } : {}) });
++        offset = to;
++      }
++    }
++    row = { ...row, [side === "unified" ? "cell" : side]: { ...cell, spans } };
++  }
++  return row === entry.row ? entry : { ...entry, row };
++}
++
+ function HunkDiffBody({
+   file,
+   layout = "split",
+@@ -7739,7 +7826,8 @@ function HunkDiffBody({
+   wrapLines = false,
+   horizontalOffset = 0,
+   highlight = true,
+-  selectedHunkIndex = 0
++  selectedHunkIndex = 0,
++  sourceHighlights
+ }) {
+   const resolvedLayout = canonicalLayout ?? normalizeHunkDiffLayout(layout);
+   const resolvedTheme = resolveTheme(theme, null);
+@@ -7802,7 +7890,7 @@ function HunkDiffBody({
+         id: reviewRowId(plannedRow.key),
+         style: { width: "100%", flexDirection: "column" },
+         children: /* @__PURE__ */ jsxDEV5(DiffRowView, {
+-          plannedRow,
++          plannedRow: withHunkSourceHighlights(plannedRow, sourceHighlights),
+           width,
+           lineNumberDigits,
+           showLineNumbers,
+@@ -8310,6 +8398,8 @@ function HunkReviewStream({
    }, undefined, false, undefined, this);
  }
  export {
++  getHunkDiffSearchCells,
 +  configureHunkHighlightWorker,
    HUNK_DIFF_THEME_NAMES,
    HunkDiffBody,
    HunkDiffFileHeader,
-diff --git a/dist/npm/opentui/index.d.ts b/dist/npm/opentui/index.d.ts
---- a/dist/npm/opentui/index.d.ts
-+++ b/dist/npm/opentui/index.d.ts
-@@ -7,3 +7,6 @@
- export { HunkReviewStream } from "./HunkReviewStream.js";
- export { countHunkDiffStats, createHunkDiffFile, createHunkDiffFilesFromPatch } from "./model.js";
- export type { CanonicalHunkDiffLayout, HunkDiffBodyProps, HunkDiffFile, HunkDiffFileHeaderProps, HunkDiffFileInput, HunkDiffLayout, LegacyHunkDiffLayout, HunkDiffSelection, HunkDiffStats, HunkDiffViewProps, HunkFileNavProps, HunkReviewStreamProps, } from "./types.js";
+diff --git a/dist/npm/opentui/types.d.ts b/dist/npm/opentui/types.d.ts
+index 1e5261ed1b4765decf0aa5841489393945a09337..4d64f7bf01e70b736c6ea5ca37f0c7d2e8f799a9 100644
+--- a/dist/npm/opentui/types.d.ts
++++ b/dist/npm/opentui/types.d.ts
+@@ -49,6 +49,8 @@ export interface HunkDiffBodyProps {
+     horizontalOffset?: number;
+     highlight?: boolean;
+     selectedHunkIndex?: number;
++    /** UTF-16 ranges in sanitized, tab-expanded source cells, before wrapping/panning. */
++    sourceHighlights?: Record<string, HunkDiffSourceHighlight[]>;
+     hunkGap?: number;
+ }
+ /** Public props for the reusable OpenTUI diff convenience component. */
+@@ -90,3 +92,23 @@ export interface HunkFileNavProps {
+     theme?: HunkDiffThemeName;
+     onSelectFile?: (fileId: string) => void;
+ }
 +
-+/** Configure the missing npm worker entry before mounting any highlighted diffs. */
-+export declare function configureHunkHighlightWorker(url: URL): void;
++/** Searchable source only; split context appears once (and decorates both sides). */
++export interface HunkDiffSearchCell {
++    id: string;
++    rowId: string;
++    side: "left" | "right" | "unified";
++    text: string;
++    visualLines: string[];
++    measureTextWidth(text: string): number;
++    contentWidth: number;
++    hunkIndex: number;
++}
++export interface HunkDiffSourceHighlight {
++    /** Wins paint precedence when occurrences share a terminal grapheme. */
++    active?: boolean;
++    start: number;
++    end: number;
++    fg: string;
++    bg: string;
++}

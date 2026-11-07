@@ -76,6 +76,10 @@ describe("themes", () => {
       purple: "#a371f7",
       openState: "#3fb950",
       closedState: "#a371f7",
+      searchMatchFg: "#000000",
+      searchMatchBg: "#d29922",
+      searchCurrentMatchFg: "#000000",
+      searchCurrentMatchBg: "#f78166",
     })
     expect(resolveTheme("github")).toMatchObject({
       markdownText: "#e6edf3",

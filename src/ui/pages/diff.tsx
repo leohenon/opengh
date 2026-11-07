@@ -1,8 +1,8 @@
-import { BoxRenderable, MouseButton, type MouseEvent, type Renderable, type ScrollBoxRenderable } from "@opentui/core"
+import { BoxRenderable, MouseButton, RGBA, type MouseEvent, type Renderable, type ScrollBoxRenderable } from "@opentui/core"
 import { insert, useKeyboard, useRenderer, useTerminalDimensions } from "@opentui/solid"
 import { useKeyActions } from "../keybindings"
-import { HUNK_DIFF_THEME_NAMES, type HunkDiffBodyProps, type HunkDiffThemeName } from "hunkdiff/opentui"
-import { createEffect, createMemo, createRoot, createSignal, For, getOwner, on, onCleanup, onMount, Show } from "solid-js"
+import { getHunkDiffSearchCells, HUNK_DIFF_THEME_NAMES, type HunkDiffBodyProps, type HunkDiffSourceHighlight, type HunkDiffThemeName } from "hunkdiff/opentui"
+import { createEffect, createMemo, createRoot, createSignal, For, getOwner, on, onCleanup, onMount, Show, untrack } from "solid-js"
 import type { DiffContent, DiffTarget, PullReviewThread } from "../../models"
 import { createDiffCommentCards, isCommentCard, isSourceRowY } from "../diff-comment-cards"
 import type { ResourceState } from "../../repository-state"
@@ -18,6 +18,11 @@ import { GitHubMarkdown } from "../components/github-markdown"
 import { createReactiveMarkdownStyle } from "../markdown-style"
 import type { DraftReviewComment, ReviewAnchor } from "../../review-types"
 import { extendReviewRange, reviewHit, reviewRows, reviewSplitBoundary, type ReviewLocation } from "../review-lines"
+import { useSearchTarget, type SearchResult } from "../search-context"
+import { searchRanges } from "../search"
+import { createRenderedSearch } from "../rendered-search"
+
+const searchGraphemes = new Intl.Segmenter(undefined, { granularity: "grapheme" })
 
 // opengh and Shiki use different IDs for some of the same theme families.
 const themeAliases: Partial<Record<string, HunkDiffThemeName>> = {
@@ -173,11 +178,159 @@ export function DiffScreen(props: {
       context={commentMarkdownContext(comment.url)} />)
     return dispose
   }, owner))
+  let cardsDirty = true
   const refreshCards = () => {
     const container = host()
-    if (!disposed && container) cards.render(container, rows(), selected()?.path, props.threads ?? [], colors, currentLayout(), width(), icons().comment)
+    if (!disposed && container && cardsDirty) {
+      cardsDirty = false
+      cards.render(container, rows(), selected()?.path, props.threads ?? [], colors, currentLayout(), width(), icons().comment)
+    }
   }
   const committed = () => { refreshCards(); revealPending(); refreshMarkers() }
+
+  const [sourceHighlights, setSourceHighlights] = createSignal<Record<string, HunkDiffSourceHighlight[]>>()
+  // Reuse these exact props for indexing and rendering: Hunk owns sanitization,
+  // tab expansion, split geometry and wrapping, rather than a parallel source map.
+  const sourceProps = (): HunkDiffBodyProps => ({
+    file: renderFile(), width: width(), theme: theme(),
+    canonicalLayout: currentLayout(), tabWidth: TAB_WIDTH,
+    wrapLines: wrap(), horizontalOffset: offset(), selectedHunkIndex: hunk(),
+    highlight: true, showLineNumbers: true, showHunkHeaders: true,
+  })
+  const sourceCells = createMemo(() => getHunkDiffSearchCells({
+    file: renderFile(), width: width(), theme: theme(), canonicalLayout: currentLayout(),
+    tabWidth: TAB_WIDTH, wrapLines: wrap(), showLineNumbers: true, showHunkHeaders: true,
+  }).map((cell) => ({ ...cell, graphemes: searchGraphemes.segment(cell.text) })))
+  const commentSearch = new Map<Renderable, ReturnType<typeof createRenderedSearch>>()
+  const syncCommentSearch = () => {
+    for (const [node, adapter] of commentSearch) {
+      if (node.isDestroyed || !node.parent) { adapter.dispose(); commentSearch.delete(node) }
+    }
+    const visit = (node: Renderable) => {
+      if (isCommentCard(node)) {
+        if (!commentSearch.has(node)) commentSearch.set(node, createRenderedSearch(node, {
+          matchForeground: RGBA.fromHex(colors.searchMatchFg), matchBackground: RGBA.fromHex(colors.searchMatchBg),
+          activeForeground: RGBA.fromHex(colors.searchCurrentMatchFg), activeBackground: RGBA.fromHex(colors.searchCurrentMatchBg),
+        }))
+      } else for (const child of node.getChildren()) visit(child)
+    }
+    const container = host()
+    if (container && !container.isDestroyed) visit(container)
+  }
+  let sourceMatches: { id: string; cellId: string; start: number; end: number }[] = []
+  let highlightKey = ""
+  let searchGeneration = 0
+  let lastSearchQuery = ""
+  const searchLayoutKey = () => JSON.stringify([width(), currentLayout(), wrap(), theme()])
+  const bodySearchVisible = () => active() && showBody()
+  const bodySearchActive = () => bodySearchVisible() && focus() === "diff"
+  const diffSearchId = () => JSON.stringify(["diff", props.repositoryUrl, props.target.kind, targetKey()])
+  const bodySearchId = () => JSON.stringify([diffSearchId(), selected()?.path, "body"])
+  // Invalidate deferred work even if a view leaves and re-enters before idle.
+  createEffect(on(() => [bodySearchId(), searchLayoutKey(), active(), focus(), selected()] as const, () => { ++searchGeneration }))
+  const clearBodySearch = () => {
+    ++searchGeneration
+    sourceMatches = []
+    lastSearchQuery = ""
+    highlightKey = ""
+    setSourceHighlights(undefined)
+    for (const adapter of commentSearch.values()) adapter.clear()
+  }
+  useSearchTarget({
+    id: bodySearchId,
+    active: bodySearchActive,
+    retain: bodySearchVisible,
+    position: () => scroll?.scrollTop ?? 0,
+    search(query) {
+      if (query !== lastSearchQuery) { lastSearchQuery = query; ++searchGeneration }
+      syncCommentSearch()
+      sourceMatches = []
+      const found: SearchResult[] = []
+      const identity = bodySearchId()
+      const file = selected()
+      const geometry = searchLayoutKey()
+      const cells = sourceCells()
+      for (const cell of cells) for (const range of searchRanges(cell.text, query)) {
+        const id = `${cell.id}:${range.start}:${range.end}`
+        sourceMatches.push({ id, cellId: cell.id, ...range })
+        // Reveal the same whole glyph that Hunk paints for a partial-grapheme match.
+        const start = cell.graphemes.containing(range.start)!.index
+        const last = cell.graphemes.containing(range.end - 1)!
+        const end = last.index + last.segment.length
+        let visualLine = 0
+        let lineStart = 0
+        while (visualLine < cell.visualLines.length - 1 && lineStart + cell.visualLines[visualLine]!.length <= start) {
+          lineStart += cell.visualLines[visualLine++]!.length
+        }
+        const column = cell.measureTextWidth(cell.text.slice(lineStart, start))
+        const node = host()?.findDescendantById(cell.rowId)
+        found.push({ id, position: node && scroll ? node.y - scroll.content.y + visualLine : 0,
+          reveal() {
+            if (disposed || !bodySearchVisible() || identity !== bodySearchId() || file !== selected() || query !== lastSearchQuery || geometry !== searchLayoutKey()) return
+            const generation = ++searchGeneration
+            pending = undefined
+            setHunk(cell.hunkIndex)
+            if (!wrap()) {
+              const endColumn = column + cell.measureTextWidth(cell.text.slice(start, end))
+              if (column < offset() || endColumn > offset() + cell.contentWidth) setOffset(column)
+            }
+            void renderer.idle().then(() => {
+              if (disposed || generation !== searchGeneration || !bodySearchVisible() || identity !== bodySearchId() || geometry !== searchLayoutKey() || !scroll) return
+              const anchor = host()?.findDescendantById(cell.rowId)
+              if (anchor) scroll.scrollTo(anchor.y - scroll.content.y + visualLine)
+            }).catch(() => {})
+          },
+        })
+      }
+      for (const [node, adapter] of commentSearch) for (const result of adapter.search(query)) {
+        found.push({ ...result, id: `comment:${node.id}:${result.id}`,
+          position: result.position,
+          reveal() {
+            if (disposed || node.isDestroyed || !bodySearchVisible() || identity !== bodySearchId() || file !== selected() || query !== lastSearchQuery) return
+            ++searchGeneration
+            pending = undefined
+            result.reveal()
+          },
+        })
+      }
+      // Source on each side is row-major; cards follow their own source row.
+      return found.sort((a, b) => (a.position ?? 0) - (b.position ?? 0))
+    },
+    highlight(activeId) {
+      const ranges: Record<string, HunkDiffSourceHighlight[]> = {}
+      for (const match of sourceMatches) (ranges[match.cellId] ??= []).push({
+        start: match.start, end: match.end, active: match.id === activeId,
+        fg: match.id === activeId ? colors.searchCurrentMatchFg : colors.searchMatchFg,
+        bg: match.id === activeId ? colors.searchCurrentMatchBg : colors.searchMatchBg,
+      })
+      const key = JSON.stringify(ranges)
+      if (key !== highlightKey) { highlightKey = key; setSourceHighlights(ranges) }
+      for (const [node, adapter] of commentSearch) {
+        const prefix = `comment:${node.id}:`
+        adapter.highlight(activeId?.startsWith(prefix) ? activeId.slice(prefix.length) : undefined)
+      }
+    },
+    clear: clearBodySearch,
+    snapshot() {
+      syncCommentSearch()
+      const restoreComments = [...commentSearch.values()].map((adapter) => adapter.snapshot())
+      const identity = bodySearchId()
+      const top = scroll?.scrollTop ?? 0
+      const pan = offset()
+      const selectedHunk = hunk()
+      return () => {
+        if (disposed || identity !== bodySearchId()) return
+        const generation = ++searchGeneration
+        pending = undefined
+        for (const restore of restoreComments) restore()
+        setOffset(pan)
+        setHunk(selectedHunk)
+        void renderer.idle().then(() => {
+          if (!disposed && generation === searchGeneration && identity === bodySearchId() && active()) scroll?.scrollTo(top)
+        }).catch(() => {})
+      }
+    },
+  })
 
   createEffect(on(selected, (file) => {
     rememberedScroll = 0
@@ -197,22 +350,25 @@ export function DiffScreen(props: {
     revealPending()
   }))
 
+  // Only structural changes invalidate posted cards. Highlight, selection and pan
+  // updates keep their Markdown tree/adapters alive (including async rendering).
+  createEffect(() => {
+    void [host(), renderFile(), rows(), width(), wrap(), theme(), props.threads,
+      colors.text, colors.muted, colors.blue, colors.border, colors.panel, icons().comment]
+    untrack(() => { cards.clear(); cardsDirty = true })
+  })
   createEffect(() => {
     const container = host()
-    const bodyProps: HunkDiffBodyProps = {
-      file: renderFile(), width: width(), theme: theme(),
-      canonicalLayout: currentLayout(), tabWidth: TAB_WIDTH,
-      wrapLines: wrap(), horizontalOffset: offset(), selectedHunkIndex: hunk(),
-      highlight: true, showLineNumbers: true, showHunkHeaders: true,
-    }
-    // Posted threads are readable even when this diff has no writable review actions.
+    const bodyProps: HunkDiffBodyProps = { ...sourceProps(), sourceHighlights: sourceHighlights() }
+    // Card-only changes still need a commit even when the source is unchanged.
     void props.threads
     void [colors.text, colors.muted, colors.blue, colors.border, colors.panel, icons().comment]
-    if (!container) return
-    cards.clear()
-    if (!bodyProps.file) { pane?.dispose(); pane = undefined; refreshCards(); return }
-    if (pane) pane.update(bodyProps)
-    else pane = mountHunk(renderer, container, bodyProps, committed)
+    untrack(() => {
+      if (!container) return
+      if (!bodyProps.file) { pane?.dispose(); pane = undefined; refreshCards(); return }
+      if (pane) pane.update(bodyProps)
+      else pane = mountHunk(renderer, container, bodyProps, committed)
+    })
   })
 
   createEffect(on(() => props.review?.jump, (anchor) => {
@@ -242,6 +398,9 @@ export function DiffScreen(props: {
   })
   onCleanup(() => {
     disposed = true
+    ++searchGeneration
+    for (const adapter of commentSearch.values()) adapter.dispose()
+    commentSearch.clear()
     pending = undefined
     scroll?.viewport.off("resize", measure)
     // Release our additions before React releases its portal and Solid removes the host.
@@ -453,7 +612,8 @@ export function DiffScreen(props: {
             Files{props.resource.value !== undefined && !parsed().error ? ` (${parsed().files.length})` : ""}
           </text>
           <SelectableList
-            items={parsed().files} itemKey={(file) => file.path} resetKey={targetKey()}
+            items={parsed().files} itemKey={(file) => file.path} resetKey={`${diffSearchId()}:files`}
+            searchRetain={() => active() && showFiles()}
             active={interactive() && showFiles() && focus() === "files" && !error()}
             mouseActive={interactive() && showFiles() && !error()}
             onMouseFocus={() => { contextMouse.onMouseDrag(); focusFiles() }}
