@@ -10,6 +10,9 @@ export function diffPath(repository: string, target: DiffTarget) {
 
 export function createGitHubDiff(transport: GitHubTransport) {
   return async (repository: string, target: DiffTarget, signal: AbortSignal, filesOnly = false): Promise<DiffContent> => {
+    // One deadline covers revision checks, patch loading, and every fallback page.
+    signal = AbortSignal.any([signal, AbortSignal.timeout(60_000)])
+    signal.throwIfAborted()
     const path = diffPath(repository, target)
     const options = { signal, maxBytes: MAX_DIFF_BYTES }
     if (!filesOnly) {

@@ -1,4 +1,4 @@
-import { expect, test } from "bun:test"
+import { expect, spyOn, test } from "bun:test"
 import { createGitHubDiff, MAX_DIFF_BYTES } from "../src/github/diff"
 import type { GitHubTransport } from "../src/github/transport"
 import { parseDiff } from "../src/ui/diff-model"
@@ -13,7 +13,8 @@ test("diff requests use authenticated API media types and preserve PR/commit ide
   const calls: Array<[string, string | undefined]> = []
   const load = createGitHubDiff(transport(async (path, accept, options) => {
     calls.push([path, accept])
-    expect(options?.signal).toBe(signal)
+    expect(options?.signal).toBeInstanceOf(AbortSignal)
+    expect(options?.signal?.aborted).toBe(false)
     expect(options?.maxBytes).toBe(MAX_DIFF_BYTES)
     return accept === "application/vnd.github+json" ? JSON.stringify({ head: "a".repeat(40), base: "b".repeat(40) }) : patchFixture
   }))
@@ -48,6 +49,37 @@ test("degraded file listings paginate without pretending absent patches are unch
   expect(result.truncated).toBe(false)
   expect(paths[1]).toEndWith("/files?per_page=100&page=2")
   expect(parseDiff(result).notice).toContain("patches unavailable")
+})
+
+test("file-list pages share a deadline and preserve caller cancellation", async () => {
+  for (const cancel of ["deadline", "caller"]) {
+    const deadline = new AbortController()
+    const caller = new AbortController()
+    const timeout = spyOn(AbortSignal, "timeout").mockReturnValue(deadline.signal)
+    const reason = new DOMException("Diff load timed out", "TimeoutError")
+    const signals: AbortSignal[] = []
+    try {
+      const load = createGitHubDiff(transport(async (_path, _accept, options) => {
+        const signal = options!.signal!
+        signals.push(signal)
+        if (signals.length === 1)
+          return JSON.stringify(Array.from({ length: 100 }, (_, index) => ({ filename: `${index}.txt` })))
+        return new Promise<string>((_resolve, reject) => {
+          signal.addEventListener("abort", () => reject(signal.reason), { once: true })
+          const controller = cancel === "deadline" ? deadline : caller
+          controller.abort(reason)
+        })
+      }))
+      await expect(load("owner/repo", { kind: "pull", number: 1 }, caller.signal, true)).rejects.toBe(reason)
+      expect(timeout).toHaveBeenCalledTimes(1)
+      expect(timeout).toHaveBeenCalledWith(60_000)
+      expect(signals).toHaveLength(2)
+      expect(signals[1]).toBe(signals[0])
+      expect(signals[1]?.aborted).toBe(true)
+    } finally {
+      timeout.mockRestore()
+    }
+  }
 })
 
 test("Hunk adapter preserves metadata-only changes and reports malformed hunks", () => {
