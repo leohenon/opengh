@@ -132,24 +132,36 @@ export function Root(props: {
   const reviews = services.createPullReviewSession()
   const inlineComments = services.createInlineComments()
   const [reviewSaveError, setReviewSaveError] = createSignal<string>()
+  const [quitDraftSaveError, setQuitDraftSaveError] = createSignal(false)
   const [localRepository, setLocalRepository] = createSignal<LocalRepository>()
   let commandCancel: (() => void) | undefined
   const refreshLocalRepository = async () => { setLocalRepository(await services.resolveLocalRepository(props.cwd)) }
   let quitting = false
 
+  const flushDraftsForQuit = () => {
+    if (session.flushDrafts?.() !== false) return true
+    quitting = false
+    setQuitDraftSaveError(true)
+    return false
+  }
+  const finishQuit = () => {
+    // The app remains editable while review/tab saves are pending.
+    if (flushDraftsForQuit()) renderer.destroy()
+  }
   const quit = () => {
     if (quitting) return
     quitting = true
-    session.flushDrafts?.()
+    setQuitDraftSaveError(false)
+    if (!flushDraftsForQuit()) return
     const tabs = flushRepositoryTabs()
     const pending = reviews.state().draft ? Promise.all([tabs, reviews.flush()]).catch((error) => {
       quitting = false
       setReviewSaveError(error instanceof Error ? error.message : "Could not save the review draft.")
       throw error
     }) : tabs
-    if (reviews.state().draft && pending) { void pending.then(() => renderer.destroy()).catch(() => {}); return }
-    if (pending) void pending.finally(() => renderer.destroy())
-    else renderer.destroy()
+    if (reviews.state().draft && pending) { void pending.then(finishQuit).catch(() => {}); return }
+    if (pending) void pending.finally(finishQuit)
+    else finishQuit()
   }
 
   const reloadConfig = async () => {
@@ -450,9 +462,14 @@ export function Root(props: {
         </Match>
         </Switch>
       </Show>
-      <Show when={session.draftSaveError?.() && session.draftSaveError?.() !== dismissedDraftError()}>
+      <Show when={!quitDraftSaveError() && session.draftSaveError?.() && session.draftSaveError?.() !== dismissedDraftError()}>
         <Toast title="Draft not saved locally" message={session.draftSaveError?.() ?? ""}
           zIndex={400} onDismiss={() => setDismissedDraftError(session.draftSaveError?.())} />
+      </Show>
+      <Show when={quitDraftSaveError()}>
+        <Toast title="Draft not saved — quit cancelled"
+          message="Your draft is retained in memory. Fix local storage and quit again to retry."
+          zIndex={400} onDismiss={() => setQuitDraftSaveError(false)} />
       </Show>
       <Show when={reviewSaveError()}>
         <Toast title="Review draft not saved — quit cancelled" message={reviewSaveError()!} onDismiss={() => setReviewSaveError(undefined)} />

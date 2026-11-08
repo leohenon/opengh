@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import { createGitHubClient } from "../src/github/client"
-import type { GitHubTransport } from "../src/github/transport"
+import { GitHubApiError, type GitHubTransport } from "../src/github/transport"
 import { githubDataFixture } from "./fixtures/github-data"
 
 const repository = { ...githubDataFixture.repo, id: 71, nodeId: "R_owner_repo", nameWithOwner: "owner/repo" }
@@ -92,11 +92,12 @@ describe("PR conversation comments", () => {
         expect(query).not.toContain("issue(")
         expect(query).not.toContain("viewerCanComment")
         if (query.includes("BodyReactions")) return bodyReactions as T
-        expect(query).toContain("isArchived viewerPermission pullRequest(number: 42) { id viewerCanClose viewerCanReopen viewerCanAssign }")
+        expect(query).toContain("isArchived viewerPermission")
+        expect(query).toContain("viewerCanClose viewerCanReopen viewerCanAssign")
         return permissionResponse(archived, permission) as T
       } })
       const detail = await client.pull("owner/repo", 42)
-      expect(detail.permissions).toEqual({ comment: expected, close: false, reopen: false, assignees: false })
+      expect(detail.permissions).toMatchObject({ comment: expected, close: false, reopen: false, assignees: false })
       expect(detail.locked).toBe(locked)
       expect(detail).toMatchObject({ body: "PR body", reactions: { heart: 3 }, viewerReactions: ["heart"], canReact: true })
       expect(queries).toHaveLength(2)
@@ -148,12 +149,17 @@ describe("PR conversation comments", () => {
     const body = "  **Conversation**, not an inline review.\r\n\n`$(untouched)`\n"
     const calls: { path: string; method: string; body: Record<string, unknown> }[] = []
     let failed = false
-    const error = new Error("Write denied")
-    const client = createGitHubClient({ ...rest(), async mutate<T>(path: string, method: "POST" | "PATCH", input: Record<string, unknown>) {
+    const error = new GitHubApiError("comments", "Write denied", 422)
+    const client = createGitHubClient({ ...rest(), async json<T>(path: string) {
+      if (path === "user") return { id: 7 } as T
+      if (path === "repositories/71/issues/42") return { number: 42, comments: 0 } as T
+      expect(path).toBe("repositories/71/issues/42/comments?per_page=100&page=1")
+      return [] as T
+    }, async mutate<T>(path: string, method: "POST" | "PATCH", input: Record<string, unknown>) {
       calls.push({ path, method, body: input })
       if (failed) throw error
-      return { id: 123, user: { login: "viewer" }, body: input.body, created_at: date, updated_at: date } as T
-    } })
+      return { id: 123, user: { id: 7, login: "viewer" }, body: input.body, created_at: date, updated_at: date } as T
+    } }, { load: async () => undefined, save: async () => {}, claim: async attempt => attempt, update: async () => {}, remove: async () => {} })
     expect(await client.createIssueComment(repository, 42, body)).toMatchObject({ id: 123, body, author: "viewer" })
     expect(calls).toEqual([{ path: "repositories/71/issues/42/comments", method: "POST", body: { body } }])
     await expect(client.createIssueComment(repository, 42, " \r\n\t")).rejects.toThrow("must not be blank")

@@ -27,9 +27,17 @@ function checkDirectory(path: string, entry: Stats, destination: boolean) {
   if (!entry.isDirectory() || untrusted) throw new Error(`Untrusted writable directory: ${path}`)
 }
 
+async function syncDirectory(path: string) {
+  const directory = await open(path, constants.O_RDONLY | (constants.O_DIRECTORY ?? 0) | (constants.O_NOFOLLOW ?? 0))
+  try {
+    checkDirectory(path, await directory.stat(), false)
+    await directory.sync()
+  } finally { await directory.close() }
+}
+
 // Resolve component by component so every intermediate symlink's parent is
 // checked. realpath alone hides unsafe hops through attacker-writable locations.
-async function trustedDirectory(path: string, create = true): Promise<string> {
+async function trustedDirectory(path: string, create = true, durable = false): Promise<string> {
   const absolute = isAbsolute(path) ? path : `${process.cwd()}${sep}${path}`
   let current = parse(absolute).root
   let pending = directoryParts(absolute.slice(current.length))
@@ -50,6 +58,7 @@ async function trustedDirectory(path: string, create = true): Promise<string> {
     }
     if (entry.isSymbolicLink()) {
       if ((!owned(entry.uid) && entry.uid !== 0) || ++hops > 40) throw new Error(`Untrusted directory symlink: ${next}`)
+      if (durable) await syncDirectory(current)
       const target = await readlink(next)
       if (isAbsolute(target)) {
         current = parse(target).root
@@ -58,14 +67,16 @@ async function trustedDirectory(path: string, create = true): Promise<string> {
       continue
     }
     checkDirectory(next, entry, false)
+    // Existing entries may come from an earlier attempt whose parent sync failed.
+    if (durable) await syncDirectory(current)
     current = next
   }
   checkDirectory(current, await lstat(current), true)
   return current
 }
 
-export async function ensureTrustedDirectory(path: string) {
-  await trustedDirectory(path)
+export async function ensureTrustedDirectory(path: string, durable = false) {
+  await trustedDirectory(path, true, durable)
 }
 
 export async function regularOwnedFile(path: string) {

@@ -500,16 +500,16 @@ describe("GitHub client", () => {
     }
     const calls: { path: string; method: string; body: Record<string, unknown> }[] = []
     const client = createGitHubClient({
-      ...transport(),
+      ...transport({ user: { id: 7 }, "repositories/123/issues/42": { number: 42, comments: 0 }, "repositories/123/issues/42/comments?per_page=100&page=1": [] }),
       async mutate<T>(path: string, method: "POST" | "PATCH", input: Record<string, unknown>) {
         calls.push({ path, method, body: input })
         return (method === "POST"
-          ? { id: 9876543210, user: null, body: input.body, created_at: date, updated_at: date }
+          ? { id: 9876543210, user: { id: 7, login: "viewer" }, body: input.body, created_at: date, updated_at: date }
           : { ...issue, state: input.state, state_reason: input.state_reason ?? null }) as T
       },
-    })
+    }, { load: async () => undefined, save: async () => {}, claim: async attempt => attempt, update: async () => {}, remove: async () => {} })
     expect(await client.createIssueComment(repository, 42, body)).toEqual({
-      id: 9876543210, author: "ghost", authorAssociation: "NONE", body, createdAt: date, updatedAt: date,
+      id: 9876543210, author: "viewer", authorAssociation: "NONE", body, createdAt: date, updatedAt: date,
     })
     expect(await client.updateIssueState(repository, 42, "closed")).toMatchObject({
       state: "closed", stateReason: "completed", body: "", author: "ghost", commentCount: 1,
@@ -634,11 +634,11 @@ describe("GitHub client", () => {
     await expect(readonly.createIssueComment(repository, 42, "body")).rejects.toThrow("does not support mutations")
     await expect(readonly.updateIssueState(repository, 42, "closed")).rejects.toThrow("does not support mutations")
     let calls = 0
-    const error = new Error("Write denied")
+    const error = new GitHubApiError("comments", "Write denied", 422)
     const client = createGitHubClient({
-      ...transport(),
+      ...transport({ user: { id: 7 }, "repositories/123/issues/42": { number: 42, comments: 0 }, "repositories/123/issues/42/comments?per_page=100&page=1": [] }),
       async mutate<T>(): Promise<T> { calls++; throw error },
-    })
+    }, { load: async () => undefined, save: async () => {}, claim: async attempt => attempt, update: async () => {}, remove: async () => {} })
     await expect(client.createIssueComment(repository, 42, " \r\n\t")).rejects.toThrow("must not be blank")
     expect(calls).toBe(0)
     await expect(client.createIssueComment(repository, 42, "body")).rejects.toBe(error)

@@ -148,7 +148,7 @@ describe("pull request conversation comments", () => {
     await expect(session.submitIssueAction(421, "comment", "pull")).rejects.toThrow("already in progress")
     pending.resolve(comment)
     expect(await posting).toEqual({ comment })
-    expect(calls).toEqual([[expect.objectContaining({ nameWithOwner: "owner/repo", id: githubDataFixture.repo.id, nodeId: githubDataFixture.repo.nodeId }), 421, comment.body]])
+    expect(calls).toEqual([[expect.objectContaining({ nameWithOwner: "owner/repo", id: githubDataFixture.repo.id, nodeId: githubDataFixture.repo.nodeId }), 421, comment.body, expect.any(Function), `owner/repo@${githubDataFixture.repo.id}#421:pull:comment`]])
     expect(session.issueAction(421, "pull").body).toBe("")
     expect(session.pullDetail()?.resource.value).toMatchObject({ commentCount: 2, updatedAt: comment.createdAt })
     expect(session.pullDetail()?.comments.value?.items.at(-1)).toEqual(comment)

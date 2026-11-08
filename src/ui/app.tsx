@@ -211,9 +211,9 @@ function AppContent(props: AppProps) {
   const [issueAction, setIssueAction] = createSignal<{ number: number; kind: IssueActionKind; parent?: IssueActionParent }>()
   const [pendingIssueActions, setPendingIssueActions] = createSignal<Array<NonNullable<ReturnType<typeof issueAction>> & { repository: string }>>([])
   const [reviewTarget, setReviewTarget] = createSignal<{ repository: string; number: number }>()
-  const [reviewAnchor, setReviewAnchor] = createSignal<ReviewAnchor>()
   const [inlineContext, setInlineContext] = createSignal<Omit<InlineCommentInput, "body">>()
-  const [inlineBody, setInlineBody] = createSignal("")
+  // Contexts are built in a stable order below, including the exact diff and anchor.
+  const inlineDrafts = new Map<string, string>()
   const [postingInline, setPostingInline] = createSignal<InlineCommentInput>()
   const [inlineRetry, setInlineRetry] = createSignal<InlineCommentInput>()
   const [postedInlineThreads, setPostedInlineThreads] = createSignal<Array<{ repository: string; number: number; headSha: string; thread: PullReviewThread }>>([])
@@ -512,9 +512,7 @@ function AppContent(props: AppProps) {
         const context = { accountId: eligible.accountId, repository: data().repo.nameWithOwner, number: target.number,
           headSha: value.headSha!, baseSha: value.baseSha!, anchor: { path: anchor.path, line: anchor.line, side: anchor.side,
             ...(anchor.startLine === undefined ? {} : { startLine: anchor.startLine, startSide: anchor.startSide }) } }
-        if (JSON.stringify(context) !== JSON.stringify(inlineContext())) setInlineBody("")
         setInlineContext(context)
-        setReviewAnchor(anchor)
         setOverlay("review-comment")
       },
       onOpenReview: () => { void openReview(target.number) },
@@ -526,12 +524,13 @@ function AppContent(props: AppProps) {
     const input = { ...context, body }
     const viewer = props.reviews?.state().eligibility
     const author = viewer?.accountId === context.accountId ? viewer.login : "You"
-    setInlineBody(body)
+    const draftKey = JSON.stringify(context)
+    inlineDrafts.set(draftKey, body)
     setPostingInline(input)
     setOverlay()
     try {
       const posted = await props.onPostInlineComment(input, retryUnconfirmed ? { retryUnconfirmed: true } : undefined)
-      if (inlineContext() === context) setInlineBody("")
+      inlineDrafts.delete(draftKey)
       if (disposed || renderer.isDestroyed || data().repo.nameWithOwner !== context.repository) return
       const now = new Date().toISOString()
       const thread: PullReviewThread = { kind: "review-thread", id: `posted-${posted.id}`, path: posted.path,
@@ -1853,10 +1852,11 @@ function AppContent(props: AppProps) {
             } else { setInlineRetry(); setOverlay() }
           }} />}
       </Show>
-      <Show when={overlay() === "review-comment" ? reviewAnchor() : undefined} keyed>
-        {(anchor) => <ReviewCommentDialog anchor={anchor} body={inlineBody()} headSha={inlineContext()?.headSha ?? ""}
+      <Show when={overlay() === "review-comment" ? inlineContext() : undefined} keyed>
+        {(context) => <ReviewCommentDialog anchor={context.anchor} body={inlineDrafts.get(JSON.stringify(context)) ?? ""} headSha={context.headSha}
           repositoryUrl={data().repo.url} showScrollbar={config().showScrollbars}
           expanded={issueEditorExpanded()} onExpandedChange={setIssueEditorExpanded} showStatusBarHints={config().showStatusBarHints}
+          onChange={(body) => { inlineDrafts.set(JSON.stringify(context), body) }}
           onSave={(body) => { void submitInlineComment(body) }} onClose={() => setOverlay()} onHintChange={setIssueActionHint} />}
       </Show>
       <Show when={overlay() === "pull-merge" ? mergeTarget() : undefined} keyed>

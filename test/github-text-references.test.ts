@@ -1,7 +1,8 @@
 import { expect, test } from "bun:test"
 import { createGitHubClient } from "../src/github/client"
+import { createRequestBudget, RequestBudgetLimitError } from "../src/github/request-budget"
 import { parseTextReferences } from "../src/github/text-references"
-import type { GitHubTransport } from "../src/github/transport"
+import type { GitHubTransport, RequestOptions } from "../src/github/transport"
 
 const repository = "owner/repo"
 const date = "2026-01-01T00:00:00Z"
@@ -72,7 +73,7 @@ test("pull descriptions resolve actual kinds and metadata, skip self, and tolera
   expect(paths).not.toContain("repos/owner/repo/issues/999")
 })
 
-test("commit full messages resolve all targets with bounded concurrency, skip self and subsequent pages", async () => {
+test("commit full messages resolve targets within the cap with bounded concurrency, skip self and subsequent pages", async () => {
   let active = 0
   let maximum = 0
   const paths: string[] = []
@@ -100,4 +101,66 @@ test("commit full messages resolve all targets with bounded concurrency, skip se
   const count = paths.length
   expect((await client.commit(repository, sha, 2)).references).toBeUndefined()
   expect(paths).toHaveLength(count + 1)
+})
+
+test.each(["commit", "issue", "pull"] as const)("%s enrichment caps unique nonself candidates with and without options", async kind => {
+  const target = { id: 42, nodeId: "R_42", nameWithOwner: repository }
+  const self = kind === "commit" ? `${sha.slice(0, 7)} ${sha}` : "#1"
+  const body = `${self} Other/Repo#2 other/repo#2 ${Array.from({ length: 1000 }, (_, i) => `#${i + 2} OWNER/REPO#${i + 2}`).join(" ")}`
+  for (const bounded of [false, true]) {
+    const budget = bounded ? createRequestBudget() : undefined
+    const options = budget ? { budget, signal: budget.signal } : undefined
+    const paths: string[] = []
+    const sourcePath = kind === "commit" ? `repositories/42/commits/${sha}?per_page=100&page=1` : `repositories/42/${kind === "issue" ? "issues" : "pulls"}/1`
+    const client = createGitHubClient({
+      async json<T>(path: string, receivedOptions?: RequestOptions) {
+        expect(receivedOptions).toBe(options)
+        receivedOptions?.budget?.takeRequest()
+        paths.push(path)
+        if (path === sourcePath) return (kind === "commit" ? commit(body) : {
+          ...issue(1), body, html_url: `https://github.com/${repository}/issues/1`, updated_at: date,
+          labels: [], assignees: [], comments: 0, locked: false, merged_at: null,
+          base: { ref: "main" }, head: { ref: "feature", repo: null }, requested_reviewers: [], requested_teams: [],
+        }) as T
+        if (path === "repositories/42/issues/3") throw new Error("private target")
+        return issue(Number(path.split("/").at(-1))) as T
+      },
+      async text() { return "" },
+    })
+    try {
+      const detail = kind === "commit" ? await client.commit(target, sha, 1, options) : await client[kind](target, 1, options)
+      expect("fullMessage" in detail ? detail.fullMessage : detail.body).toBe(body)
+      expect(paths).toEqual([sourcePath, "repos/other/repo/issues/2", ...Array.from({ length: 19 }, (_, i) => `repositories/42/issues/${i + 2}`)])
+      expect(detail.references?.map(ref => ref.kind === "commit" ? ref.sha : `${ref.repository}#${ref.number}`)).toEqual([
+        "other/repo#2", ...Array.from({ length: 19 }, (_, i) => i + 2).filter(number => number !== 3).map(number => `${repository}#${number}`),
+      ])
+      expect(budget?.signal.aborted ?? false).toBe(false)
+    } finally {
+      budget?.dispose()
+    }
+  }
+})
+
+test.each(["signal", "budget"] as const)("text enrichment stops dispatching after %s cancellation", async kind => {
+  const controller = new AbortController()
+  const budget = createRequestBudget(controller.signal)
+  const options = kind === "signal" ? { signal: controller.signal } : { budget }
+  const reason = kind === "signal" ? new DOMException("Cancelled", "AbortError") : new RequestBudgetLimitError("Loading stopped")
+  const paths: string[] = []
+  const client = createGitHubClient({
+    async json<T>(path: string, receivedOptions?: RequestOptions) {
+      receivedOptions?.budget?.takeRequest()
+      paths.push(path)
+      if (path.includes("?per_page")) return commit(Array.from({ length: 100 }, (_, i) => `#${i + 1}`).join(" ")) as T
+      controller.abort(reason)
+      return issue(1) as T
+    },
+    async text() { return "" },
+  })
+  try {
+    await expect(client.commit(repository, sha, 1, options)).rejects.toBe(reason)
+    expect(paths).toHaveLength(2)
+  } finally {
+    budget.dispose()
+  }
 })

@@ -16,6 +16,7 @@ test("drafts survive restarts, isolate subjects/actions, retain failures, and du
   const sessions: RepositorySession[] = []
   let failComment = false
   let failClose = true
+  let failAfterPublish = false
   let commentCalls = 0
   let pendingComment: Promise<IssueComment> | undefined
   const number = issueDetailFixture.number
@@ -42,7 +43,11 @@ test("drafts survive restarts, isolate subjects/actions, retain failures, and du
     },
   }
   const restart = async (repository = "owner/repo") => {
-    const session = createRepositorySession(loaders, createDiskDraftStore(drafts))
+    const disk = createDiskDraftStore(drafts)
+    const session = createRepositorySession(loaders, { ...disk, save: (...args) => {
+      disk.save(...args)
+      if (failAfterPublish) { failAfterPublish = false; throw new Error("Published save lost its acknowledgement") }
+    } })
     sessions.push(session)
     await session.load(repository)
     return session
@@ -90,13 +95,18 @@ test("drafts survive restarts, isolate subjects/actions, retain failures, and du
     session.updateIssueDraft(number, { body: "Latest retained comment" })
     renameSync(drafts, `${drafts}.backup`)
     writeFileSync(drafts, "not a directory")
-    session.flushDrafts!()
+    expect(session.flushDrafts!()).toBe(false)
     expect(session.draftSaveError!()).toContain("Draft save failed")
     expect(session.issueAction(number).body).toBe("Latest retained comment")
     rmSync(drafts)
     renameSync(`${drafts}.backup`, drafts)
-    session.flushDrafts!()
+    expect(session.flushDrafts!()).toBe(true)
     expect(session.draftSaveError!()).toBeUndefined()
+    failAfterPublish = true
+    session.updateIssueDraft(number, { body: "A published intermediate revision" })
+    expect(session.flushDrafts!()).toBe(false)
+    session.updateIssueDraft(number, { body: "Latest retained comment" })
+    expect(session.flushDrafts!()).toBe(true)
 
     session = await restart()
     session.prepareIssueAction(number, "comment")
@@ -124,7 +134,9 @@ test("drafts survive restarts, isolate subjects/actions, retain failures, and du
     const beforeRetry = commentCalls
     await session.submitIssueAction(number, "close")
     expect(commentCalls).toBe(beforeRetry)
-    expect(createDiskDraftStore(drafts).load(`owner/repo#${number}:close`)).toBeUndefined()
+    const settled = createDiskDraftStore(drafts).load(`owner/repo@${githubDataFixture.repo.id}#${number}:close`)
+    expect(settled).toMatchObject({ body: "", reason: "completed" })
+    expect(settled?.retry).toBeUndefined()
     session = await restart()
     session.prepareIssueAction(number, "close")
     expect(session.issueAction(number).retry).toBeUndefined()

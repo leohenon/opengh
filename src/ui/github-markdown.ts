@@ -218,7 +218,9 @@ function isDecorativeImage(element: Element, label: string) {
 function safeTarget(value: string) {
   if (/[\u0000-\u001f\u007f-\u009f]/.test(value)) return ""
   const target = value.trim()
-  if (!target) return ""
+  // Validate relative destinations against a harmless base too: malformed
+  // authorities such as //[ must never reach contextual URL resolution.
+  if (!target || !URL.canParse(target, "https://github.com/")) return ""
   if (target.startsWith("#") || target.startsWith("/") || target.startsWith("./") || target.startsWith("../") || target.startsWith("?"))
     return target
   const scheme = target.match(/^([a-z][a-z\d+.-]*):/i)?.[1]?.toLowerCase()

@@ -63,6 +63,24 @@ describe("GitHub Markdown normalization", () => {
     }
   })
 
+  test("malformed destinations become inert labels without losing valid neighboring links", () => {
+    for (const context of [undefined, { repositoryUrl: "https://github.com/o/r" }]) {
+      for (const target of ["//[", "https://[", "//example.com:bad", "https://%zz/"]) {
+        const source = `[broken](${target}) [reference][bad] <a href="${target}">HTML</a> ![image](${target})`
+          + `\n\n[bad]: ${target}`
+        const markdown = normalizeGitHubMarkdown(source, { context })
+        expect(markdown).toBe("broken reference HTML ▧ image")
+        const links: unknown[] = []
+        visit(unified().use(remarkParse).parse(markdown), ["link", "definition", "linkReference"], (node) => { links.push(node) })
+        expect(links).toEqual([])
+      }
+      const markdown = normalizeGitHubMarkdown('[broken](//[) [valid][good] <a href="//example.com/docs">HTML</a>'
+        + '\n\n[good]: https://example.com/guide', { context })
+      expect(markdown).toContain("broken [valid](https://example.com/guide)")
+      expect(markdown).toContain(`[HTML](${context ? "https:" : ""}//example.com/docs)`)
+    }
+  })
+
   test("drops interactive form projections before datalist inputs can expand", () => {
     const options = `<option value="${"v".repeat(20_000)}" label="choice"></option>`.repeat(4)
     const source = `<datalist id="d">${options}</datalist>` + '<input list="d" multiple>'.repeat(100)

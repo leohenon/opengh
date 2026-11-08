@@ -7,6 +7,7 @@ import { defaultConfig, type Config } from "../src/config"
 import type { CommitDetailState, IssueDetailState, PullDetailState, RepositoryState } from "../src/repository-state"
 import { parseLaunchArguments } from "../src/launch-target"
 import { Root } from "../src/root"
+import { createRepositorySession } from "../src/repository-session"
 import { GitHubApiError } from "../src/github/transport"
 import { githubDataFixture, repositoryOperationsFixture, issueDetailFixture, issuePullReferenceFixture, commitDetailFixture } from "./fixtures/github-data"
 
@@ -462,6 +463,81 @@ test("always remembers a main tab per repository and restores it on direct open"
     expect(saved["cli/cli"]).toBe("issues")
     expect(view.renderer.isDestroyed).toBe(true)
   } finally { if (!view.renderer.isDestroyed) view.renderer.destroy() }
+})
+
+test("quit retains unsaved issue and PR drafts, then retries and waits for review and tab saves", async () => {
+  let storageWritable = false
+  const savedBodies: string[] = []
+  // Use the real draft flush with injected storage; no repository requests are made.
+  const drafts = createRepositorySession(undefined, {
+    load: () => { throw new Error("Old optional draft load error") },
+    withCurrent: async (_key, _generation, _body, publish) => { await publish() },
+    save: (_key, draft) => {
+      if (!storageWritable) throw new Error("Storage unavailable")
+      savedBodies.push(draft.body)
+    },
+  })
+  for (const parent of ["issue", "pull"] as const) {
+    drafts.prepareIssueAction(42, "comment", parent)
+    drafts.updateIssueDraft(42, { body: `${parent} draft` }, parent)
+  }
+  const tabs = deferred<void>()
+  const review = deferred<void>()
+  let reviewFlushes = 0
+  let tabFlushes = 0
+  const view = await testRender(() => <Root cwd="/work" services={{
+    resolveRepository: async () => "cli/cli", resolveLocalRepository: async () => undefined,
+    loadRecentRepositories: async () => [], rememberRepository: async () => {},
+    loadRepositoryTabs: async () => ({}),
+    saveRepositoryTabs: async () => { tabFlushes++; await tabs.promise },
+    loadConfig: async () => ({ ...defaultConfig }),
+    createRepositorySession: () => ({ ...readySession(), flushDrafts: drafts.flushDrafts, draftSaveError: drafts.draftSaveError }),
+    createPullReviewSession: () => ({ ...createTestReviewSession(),
+      state: () => ({ status: "ready", draft: { accountId: 1, repository: "cli/cli", number: 42,
+        headSha: "head", body: "review draft", event: "COMMENT", comments: [] } }),
+      flush: async () => { reviewFlushes++; await review.promise },
+    }),
+  }} />, { width: 120, height: 32 })
+  active.push(view)
+  await Bun.sleep(0)
+  await view.flush()
+  view.mockInput.pressKey("2")
+  await view.flush()
+  view.mockInput.pressKey("q")
+  await view.flush()
+  expect(view.renderer.isDestroyed).toBe(false)
+  expect(view.captureCharFrame()).toContain("Draft not saved — quit cancelled")
+  expect(savedBodies).toEqual([])
+  expect(drafts.issueAction(42).body).toBe("issue draft")
+  expect(drafts.issueAction(42, "pull").body).toBe("pull draft")
+
+  storageWritable = true
+  view.mockInput.pressKey("q")
+  await Bun.sleep(0)
+  expect(savedBodies).toEqual(["issue draft", "pull draft"])
+  // A historical load warning must not veto a successful save/quit retry.
+  expect(drafts.draftSaveError!()).toContain("Old optional draft load error")
+  expect(reviewFlushes).toBe(1)
+  expect(tabFlushes).toBe(1)
+  expect(view.renderer.isDestroyed).toBe(false)
+  review.resolve()
+  await Bun.sleep(0)
+  expect(view.renderer.isDestroyed).toBe(false)
+  // Editing remains possible during async saves; exit must check those new drafts too.
+  storageWritable = false
+  drafts.updateIssueDraft(42, { body: "Edited while quitting" }, "pull")
+  tabs.resolve()
+  await Bun.sleep(0)
+  await view.flush()
+  expect(view.renderer.isDestroyed).toBe(false)
+  expect(view.captureCharFrame()).toContain("Draft not saved — quit cancelled")
+  expect(savedBodies).toEqual(["issue draft", "pull draft"])
+  expect(drafts.issueAction(42, "pull").body).toBe("Edited while quitting")
+  storageWritable = true
+  view.mockInput.pressKey("q")
+  await Bun.sleep(0)
+  expect(savedBodies).toEqual(["issue draft", "pull draft", "Edited while quitting"])
+  expect(view.renderer.isDestroyed).toBe(true)
 })
 
 test("failed tab saves remain pending and are retried on exit without writing unchanged history", async () => {

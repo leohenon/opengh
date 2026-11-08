@@ -1,4 +1,5 @@
 import { expect, test } from "bun:test"
+import type { TextareaRenderable } from "@opentui/core"
 import { createTestRenderer } from "@opentui/core/testing"
 import { render } from "@opentui/solid"
 import { createSignal } from "solid-js"
@@ -18,6 +19,8 @@ test("inline comments publish immediately and independently of the overall revie
   const number = githubDataFixture.pulls.open.value!.items[0]!.number
   const repository = githubDataFixture.repo.nameWithOwner
   const headSha = "a".repeat(40), baseSha = "b".repeat(40)
+  const [revision, setRevision] = createSignal({ headSha, baseSha })
+  const patch = patchFixture.replace("@@ -1 +1 @@", "@@ -1,2 +1,2 @@") + " const stable = 3\n"
   const [state, setState] = createSignal<ReviewSessionState>({ status: "idle" })
   const remoteThread: PullReviewThread = { kind: "review-thread", id: "remote-thread", path: "example.ts", line: 1, diffSide: "RIGHT",
     isResolved: false, isOutdated: false, comments: [{ id: "remote-comment", author: "alice", authorAssociation: "", body: "Existing GitHub comment",
@@ -49,11 +52,12 @@ test("inline comments publish immediately and independently of the overall revie
     onPostInlineComment={async (input, options) => {
       inlinePosts.push(input); retryOptions.push(options)
       if (inlinePosts.length === 1) throw new InlineCommentUncertainError("Network connection lost. No matching comment found.", true)
+      if (inlinePosts.length === 3) throw new Error("Posting failed")
       return inlineFinished.promise
     }}
     config={{ ...defaultConfig, showStatusBarHints: true }} initialNavigation={{ detail: { kind: "pull", number } }}
     onLoadPull={async () => { refreshes++ }} onLoadDiff={async () => { diffLoads++ }}
-    diffs={{ pull: { target: { kind: "pull", number }, resource: { status: "ready", value: { kind: "patch", patch: patchFixture, headSha, baseSha } } } }}
+    diffs={{ pull: { target: { kind: "pull", number }, resource: { status: "ready", value: { kind: "patch", patch, ...revision() } } } }}
     pullDetail={{ number, resource: { status: "ready", value: { ...summary, draft: false, merged: false,
       body: "PR body", url: `${githubDataFixture.repo.url}/pull/${number}`, updatedAt: summary.createdAt,
       baseBranch: "main", headBranch: "feature", headSha, additions: 1, deletions: 1, changedFiles: 1, commitCount: 1,
@@ -72,12 +76,39 @@ test("inline comments publish immediately and independently of the overall revie
     setup.mockInput.pressEscape(); await settle()
     setup.mockInput.pressKey("D"); await settle()
     expect(setup.captureCharFrame()).toContain("Existing GitHub comment")
-    const file = parseDiff({ kind: "patch", patch: patchFixture }).files[0]!.body!
-    const row = setup.renderer.root.findDescendantById(reviewRows(file, "split")[0]!.id)!
-    expect(row).toBeDefined()
-    await setup.mockMouse.click(row.x + reviewSplitBoundary(row.width) + 5, row.y, 2); await settle()
-    await clickControl(setup, "context-menu-row-0"); await settle()
+    const file = parseDiff({ kind: "patch", patch }).files[0]!.body!
+    const openInline = async (index = 0, side: "LEFT" | "RIGHT" = "RIGHT") => {
+      const row = setup.renderer.root.findDescendantById(reviewRows(file, "split")[index]!.id)!
+      expect(row).toBeDefined()
+      await setup.mockMouse.click(row.x + (side === "RIGHT" ? reviewSplitBoundary(row.width) : 0) + 5, row.y, 2); await settle()
+      await clickControl(setup, "context-menu-row-0"); await settle()
+    }
+    const editorBody = () => (setup.renderer.root.findDescendantById("review-editor-body") as TextareaRenderable).plainText
+    const closeInline = async () => { setup.mockInput.pressEscape(); await settle() }
+    await openInline()
     await setup.mockInput.typeText("Please explain this change.")
+    await closeInline()
+    await openInline(1)
+    expect(editorBody()).toBe("")
+    await setup.mockInput.typeText("Keep the second line draft")
+    await setup.mockMouse.click(0, 0); await settle() // Backdrop dismissal also preserves text.
+    expect(setup.renderer.root.findDescendantById("review-editor-body")).toBeUndefined()
+    await openInline(0, "LEFT")
+    expect(editorBody()).toBe("")
+    await closeInline()
+    const eligibility = state().eligibility!
+    for (const change of [{ accountId: 2 }, { headSha: "c".repeat(40) }, { baseSha: "d".repeat(40) }]) {
+      setState(s => ({ ...s, eligibility: { ...eligibility, ...change } }))
+      setRevision({ headSha, baseSha, ...change }); await settle()
+      await openInline()
+      expect(editorBody()).toBe("")
+      await setup.mockInput.typeText("Separate context")
+      await closeInline()
+    }
+    setState(s => ({ ...s, eligibility }))
+    setRevision({ headSha, baseSha }); await settle()
+    await openInline()
+    expect(editorBody()).toBe("Please explain this change.")
     await clickControl(setup, "review-editor-save"); await settle()
     expect(inlinePosts).toHaveLength(0)
     expect(setup.captureCharFrame()).toContain("Post inline comment?")
@@ -102,6 +133,22 @@ test("inline comments publish immediately and independently of the overall revie
       body: "Please explain this change.", url: "https://github.com/example/comment" }] }])
     await settle()
     expect(setup.captureCharFrame().split("Please explain this change.")).toHaveLength(2)
+    await openInline()
+    expect(editorBody()).toBe("") // Successful posting clears only the submitted context.
+    await setup.mockInput.typeText("Retain after failure")
+    await clickControl(setup, "review-editor-save"); await settle()
+    await clickControl(setup, "inline-comment-confirm"); await settle()
+    expect(inlinePosts).toHaveLength(3)
+    await openInline()
+    expect(editorBody()).toBe("Retain after failure")
+    setup.mockInput.pressKey("d", { ctrl: true }); await settle()
+    await closeInline()
+    await openInline()
+    expect(editorBody()).toBe("") // Explicit clear must not resurrect the old draft.
+    await closeInline()
+    await openInline(1)
+    expect(editorBody()).toBe("Keep the second line draft")
+    await closeInline()
     const beforeRefresh = diffLoads
     setup.mockInput.pressKey("r"); await settle()
     expect(diffLoads).toBe(beforeRefresh + 1)
@@ -122,4 +169,4 @@ test("inline comments publish immediately and independently of the overall revie
     expect(setup.captureCharFrame()).toContain("Review submitted")
     expect(refreshes).toBe(4)
   } finally { setup.renderer.destroy() }
-})
+}, 15_000)

@@ -17,6 +17,7 @@ export type ReviewCommentDialogProps = ComposerPresentation & {
   body?: string
   repositoryUrl: string
   headSha: string
+  onChange?(body: string): void
   onSave(body: string): void
   onClose(): void
   onHintChange(hint: string | undefined): void
@@ -131,7 +132,7 @@ export function ReviewCommentDialog(props: ReviewCommentDialogProps) {
   return <ReviewEditor title={`${props.anchor.path}:${props.anchor.startLine ? `${props.anchor.startLine}–` : ""}${props.anchor.line} (${props.anchor.side})`}
     body={props.body ?? ""} repositoryUrl={props.repositoryUrl} headSha={props.headSha} showScrollbar={props.showScrollbar}
     expanded={props.expanded} onExpandedChange={props.onExpandedChange} showStatusBarHints={props.showStatusBarHints}
-    saveLabel="Submit" onSave={props.onSave} onClose={props.onClose} onHintChange={props.onHintChange} />
+    saveLabel="Submit" onChange={props.onChange} onSave={props.onSave} onClose={props.onClose} onHintChange={props.onHintChange} />
 }
 
 export type PullReviewDialogProps = ComposerPresentation & {

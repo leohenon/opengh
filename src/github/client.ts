@@ -30,6 +30,7 @@ import type {
 import { pullMergeBlocker } from "../pull-merge"
 import { repositoryName, repositoryPath, repositorySelector, type RepositoryReference } from "./repository-target"
 import { createGitHubDocuments } from "./documents"
+import { createIssueComments, issueComment, type IssueCommentResponse, type IssueCommentStorage } from "./issue-comments"
 import { createGitHubPullContext } from "./pull-context"
 import { createGitHubReactions, parseReactions, parseReactionState, reactionFields } from "./reactions"
 import { parseTextReferences } from "./text-references"
@@ -96,17 +97,6 @@ type IssueDetailResponse = IssueResponse & {
   assignees: { login: string }[]
   milestone: { title: string; due_on: string | null; html_url?: string } | null
   comments: number
-}
-
-type IssueCommentResponse = {
-  node_id?: string
-  reactions?: unknown
-  id: number
-  user: UserResponse
-  author_association?: string
-  body: string | null
-  created_at: string
-  updated_at: string
 }
 
 type IssueTimelineResponse = {
@@ -348,19 +338,6 @@ function issueDetail(item: IssueDetailResponse, allowPullRequest = false): Issue
   }
 }
 
-function issueComment(item: IssueCommentResponse): IssueComment {
-  return {
-    id: item.id,
-    ...(typeof item.node_id === "string" && item.node_id.trim() ? { nodeId: item.node_id } : {}),
-    author: item.user?.login ?? "ghost",
-    authorAssociation: item.author_association ?? "NONE",
-    body: item.body ?? "",
-    createdAt: item.created_at,
-    updatedAt: item.updated_at,
-    reactions: parseReactions(item.reactions),
-  }
-}
-
 function commitSummary(item: CommitResponse): CommitSummary {
   return {
     sha: item.sha,
@@ -373,7 +350,7 @@ function commitSummary(item: CommitResponse): CommitSummary {
 }
 
 // Map endpoints into domain models here; transport owns execution/errors, the session owns async state.
-export function createGitHubClient(transport: GitHubTransport) {
+export function createGitHubClient(transport: GitHubTransport, commentStorage?: IssueCommentStorage) {
   const { documents, document } = createGitHubDocuments(transport)
   const { pullContext } = createGitHubPullContext(transport)
   const { addReaction, bodyReactions, commentReactions } = createGitHubReactions(transport)
@@ -447,15 +424,16 @@ export function createGitHubClient(transport: GitHubTransport) {
     const sameRepository = (target: string) => target.toLowerCase() === name.toLowerCase()
     const isSelfCommit = (target: string, sha: string) => sameRepository(target) && source.sha !== undefined
       && source.sha.toLowerCase().startsWith(sha.toLowerCase())
+    // Optional enrichment gets at most 20 requests, even without a shared detail budget.
     const candidates = parseTextReferences(text, name, markdown).filter(ref => ref.kind === "issue"
       ? !(sameRepository(ref.repository) && ref.number === source.number)
-      : !isSelfCommit(ref.repository, ref.sha))
+      : !isSelfCommit(ref.repository, ref.sha)).slice(0, 20)
     const results: (IssueReference | undefined)[] = new Array(candidates.length)
     let next = 0
-    // Bound concurrent requests without dropping references from longer messages.
     const workers = await Promise.allSettled(Array.from({ length: Math.min(4, candidates.length) }, async () => {
       while (next < candidates.length) {
         options?.signal?.throwIfAborted()
+        options?.budget?.signal.throwIfAborted()
         const index = next++
         const ref = candidates[index]!
         const target = sameRepository(ref.repository) ? repository : ref.repository
@@ -653,14 +631,7 @@ export function createGitHubClient(transport: GitHubTransport) {
     }
   }
 
-  const createIssueComment = async (repository: Repo, number: number, body: string): Promise<IssueComment> => {
-    if (!body.trim()) throw new Error("Issue comment body must not be blank.")
-    if (!transport.mutate) throw new Error("GitHub transport does not support mutations.")
-    const item = await transport.mutate<IssueCommentResponse>(
-      `${repositoryIssues(repository)}/${number}/comments`, "POST", { body },
-    )
-    return issueComment(item)
-  }
+  const createIssueComment = createIssueComments(transport, commentStorage)
 
   const updateIssueState = async (
     repository: Repo,

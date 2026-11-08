@@ -84,11 +84,12 @@ test("review requires feedback and explicit confirmation; blockers prevent submi
 })
 
 test("inline editor keeps its native buffer through preview and Ctrl+S invokes submission", async () => {
+  let draft = ""
   let saved = ""
   let rejectSave = true
   const view = await testRender(() => <ReviewCommentDialog anchor={{ path: "src/a.ts", line: 4, side: "RIGHT" }}
     repositoryUrl="https://github.com/a/b" headSha={"a".repeat(40)} showScrollbar={false}
-    onSave={body => { if (rejectSave) throw new Error("Draft could not be saved"); saved = body }} onClose={() => {}} onHintChange={() => {}} />, { width: 80, height: 24 })
+    onChange={body => { draft = body }} onSave={body => { if (rejectSave) throw new Error("Draft could not be saved"); saved = body }} onClose={() => {}} onHintChange={() => {}} />, { width: 80, height: 24 })
   try {
     await view.flush()
     const editor = view.renderer.root.findDescendantById("review-editor-body")
@@ -101,9 +102,11 @@ test("inline editor keeps its native buffer through preview and Ctrl+S invokes s
     view.mockInput.pressKey("p", { ctrl: true }); await view.flush()
     view.mockInput.pressKey("d", { ctrl: true }); await view.flush()
     expect((editor as TextareaRenderable).plainText).toBe("")
+    expect(draft).toBe("")
     expect(view.renderer.root.findDescendantById("inline-comment-confirm")).toBeUndefined()
     view.mockInput.pressKey("z", { ctrl: true }); await view.flush()
     expect((editor as TextareaRenderable).plainText).toBe("jk")
+    expect(draft).toBe("jk")
     view.mockInput.pressKey("s", { ctrl: true }); await view.flush()
     expect(saved).toBe("")
     expect(view.captureCharFrame()).toContain("Post inline comment?")
@@ -252,7 +255,7 @@ test("review and inline editors share remapped preview, expansion and undoable e
         {kind === "review" ? <PullReviewDialog {...presentation} session={fixture.session} repositoryUrl="https://github.com/a/b" showScrollbar={false}
           onSubmit={() => {}} onClose={() => { closes++ }} onOpenGitHub={() => {}} onJump={() => {}} onHintChange={value => { hint = value ?? "" }} />
           : <ReviewCommentDialog {...presentation} anchor={{ path: "src/a.ts", line: 4, side: "RIGHT" }} repositoryUrl="https://github.com/a/b"
-            headSha={"a".repeat(40)} showScrollbar={false} onSave={() => {}} onClose={() => { closes++ }} onHintChange={value => { hint = value ?? "" }} />}
+            headSha={"a".repeat(40)} showScrollbar={false} onChange={fixture.session.setBody} onSave={() => {}} onClose={() => { closes++ }} onHintChange={value => { hint = value ?? "" }} />}
       </KeybindingsProvider>, { width: 100, height: 32 })
       const suspend = spyOn(view.renderer, "suspend").mockResolvedValue(undefined)
       const resume = spyOn(view.renderer, "resume").mockResolvedValue(undefined)
@@ -291,10 +294,10 @@ test("review and inline editors share remapped preview, expansion and undoable e
         expect(editor.visible).toBe(true)
         expect(suspend).toHaveBeenCalledTimes(1)
         expect(resume).toHaveBeenCalledTimes(1)
-        if (kind === "review") expect(fixture.session.state().draft?.body).toBe("# External edit\n")
+        expect(fixture.session.state().draft?.body).toBe("# External edit\n")
         view.mockInput.pressKey("z", { ctrl: true }); await view.flush()
         expect(editor.plainText).toBe("# Heading")
-        if (kind === "review") expect(fixture.session.state().draft?.body).toBe("# Heading")
+        expect(fixture.session.state().draft?.body).toBe("# Heading")
         view.mockInput.pressEscape(); await Bun.sleep(40); await view.flush()
         if (kind === "review") {
           expect(closes).toBe(0)
