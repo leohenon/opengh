@@ -17,6 +17,7 @@ export function SelectableList<T>(props: {
   items: readonly T[]
   itemKey: (item: T) => ItemKey
   active: boolean
+  dimSelection?: boolean
   searchRetain?: () => boolean
   mouseActive?: boolean
   onMouseFocus?: () => void
@@ -267,6 +268,7 @@ export function SelectableList<T>(props: {
                   alignItems="flex-start"
                   paddingRight={1}
                   {...hover.handlers}
+                  opacity={active() && props.dimSelection ? 0.55 : 1}
                   backgroundColor={active() ? colors.panelHover : hover.hovered() ? colors.panel : props.backgroundColor ?? colors.canvas}
                   onMouseDown={(event) => {
                     mousePress = undefined

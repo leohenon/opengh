@@ -29,7 +29,7 @@ export function createDiffCommentCards(renderer: RenderContext, renderBody: (con
     clear,
     render(host: BoxRenderable, rows: readonly ReviewRow[], path: string | undefined,
       threads: readonly PullReviewThread[], colors: { text: TextOptions["fg"]; muted: TextOptions["fg"]; panel: TextOptions["fg"]; blue: TextOptions["fg"]; border: TextOptions["fg"] },
-      layout: "split" | "unified", width: number, commentIcon: string) {
+      layout: "split" | "unified", width: number, commentIcon: string, collapsed: boolean) {
       clear()
       if (host.isDestroyed) return
       for (const thread of threads) {
@@ -53,9 +53,11 @@ export function createDiffCommentCards(renderer: RenderContext, renderBody: (con
           id: `${prefix}${thread.id}:${id}`, content, fg, attributes, width: "100%", flexShrink: 0, wrapMode: "word",
         }))
         const line = thread.line ?? thread.originalLine
-        const status = [thread.isResolved ? "resolved" : "", thread.isOutdated ? "outdated" : ""].filter(Boolean)
+        const status = [collapsed ? `${thread.comments.length} ${thread.comments.length === 1 ? "comment" : "comments"}` : "",
+          thread.isResolved ? "resolved" : "", thread.isOutdated ? "outdated" : ""].filter(Boolean)
         if (!anchor) text("unplaced", `${thread.isOutdated ? "Outdated" : "Unplaced"} review comments · ${thread.path}${line ? `:${line}` : ""}`, colors.muted)
-        for (const [index, comment] of thread.comments.entries()) {
+        const comments = collapsed ? thread.comments.slice(0, 1) : thread.comments
+        for (const [index, comment] of comments.entries()) {
           if (index > 0) card.add(new BoxRenderable(renderer, {
             id: `${prefix}${thread.id}:divider:${index}`, width: "100%", height: 1, flexShrink: 0,
             border: ["top"], borderColor: colors.border,
@@ -70,13 +72,14 @@ export function createDiffCommentCards(renderer: RenderContext, renderBody: (con
           }))
           if (index === 0 && status.length) header.add(new TextRenderable(renderer, {
             id: `${prefix}${thread.id}:status`, content: `· ${status.join(" · ")}`,
-            fg: colors.muted, height: 1, flexShrink: 0, wrapMode: "none",
+            fg: colors.muted, height: 1, minWidth: 0, flexShrink: collapsed ? 1 : 0, wrapMode: "none", truncate: collapsed,
           }))
-          if (Number.isFinite(Date.parse(comment.createdAt))) header.add(new TextRenderable(renderer, {
+          if (!collapsed && Number.isFinite(Date.parse(comment.createdAt))) header.add(new TextRenderable(renderer, {
             id: `${prefix}${thread.id}:time:${index}`, content: `(${relativeTime(comment.createdAt)})`,
             fg: colors.muted, height: 1, flexShrink: 0, wrapMode: "none",
           }))
           card.add(header)
+          if (collapsed) continue
           const body = new BoxRenderable(renderer, {
             id: `${prefix}${thread.id}:body:${index}`, width: "100%", minWidth: 0, flexShrink: 0, flexDirection: "column",
           })

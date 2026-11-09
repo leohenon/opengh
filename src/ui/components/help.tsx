@@ -176,6 +176,7 @@ export function Help(props: {
       entry("diff.toggleFiles", "toggle sidebar; hide → diff focus"),
       entry("diff.toggleLayout", "toggle split / unified"),
       entry("diff.toggleWrap", "toggle line wrapping"),
+      entry("diff.toggleComments", "collapse / expand review comments"),
       entry("view.refresh", "refresh / retry"),
       entry("item.open", "open diff on GitHub"),
       ...appShortcuts,

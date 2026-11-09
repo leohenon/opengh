@@ -53,6 +53,7 @@ export function DiffScreen(props: {
   onLoadFiles: () => void
   onMovePage?: (delta: number) => void
   onFocusChange?: (focus: DiffFocus) => void
+  onCommentsCollapsedChange?: (collapsed: boolean) => void
   onContextMenu?: (position: MousePosition, items: ContextMenuItem[]) => void
   threads?: readonly PullReviewThread[]
   repositoryUrl?: string
@@ -84,6 +85,8 @@ export function DiffScreen(props: {
   const [sidebarHidden, setSidebarHidden] = createSignal(false)
   const [layout, setLayout] = createSignal<"split" | "unified">()
   const [wrap, setWrap] = createSignal(false)
+  const [commentsCollapsed, setCommentsCollapsed] = createSignal(false)
+  createEffect(() => props.onCommentsCollapsedChange?.(commentsCollapsed()))
   const [offset, setOffset] = createSignal(0)
   const [hunk, setHunk] = createSignal(0)
   const [width, setWidth] = createSignal(1)
@@ -183,7 +186,7 @@ export function DiffScreen(props: {
     const container = host()
     if (!disposed && container && cardsDirty) {
       cardsDirty = false
-      cards.render(container, rows(), selected()?.path, props.threads ?? [], colors, currentLayout(), width(), icons().comment)
+      cards.render(container, rows(), selected()?.path, props.threads ?? [], colors, currentLayout(), width(), icons().comment, commentsCollapsed())
     }
   }
   const committed = () => { refreshCards(); revealPending(); refreshMarkers() }
@@ -353,7 +356,7 @@ export function DiffScreen(props: {
   // Only structural changes invalidate posted cards. Highlight, selection and pan
   // updates keep their Markdown tree/adapters alive (including async rendering).
   createEffect(() => {
-    void [host(), renderFile(), rows(), width(), wrap(), theme(), props.threads,
+    void [host(), renderFile(), rows(), width(), wrap(), theme(), props.threads, commentsCollapsed(),
       colors.text, colors.muted, colors.blue, colors.border, colors.panel, icons().comment]
     untrack(() => { cards.clear(); cardsDirty = true })
   })
@@ -361,7 +364,7 @@ export function DiffScreen(props: {
     const container = host()
     const bodyProps: HunkDiffBodyProps = { ...sourceProps(), sourceHighlights: sourceHighlights() }
     // Card-only changes still need a commit even when the source is unchanged.
-    void props.threads
+    void [props.threads, commentsCollapsed()]
     void [colors.text, colors.muted, colors.blue, colors.border, colors.panel, icons().comment]
     untrack(() => {
       if (!container) return
@@ -532,6 +535,7 @@ export function DiffScreen(props: {
     },
     "diff.toggleLayout": toggleLayout,
     "diff.toggleWrap": toggleWrap,
+    "diff.toggleComments": () => { setCommentsCollapsed((collapsed) => !collapsed) },
     "diff.previousHunk": () => {
       if (!renderFile()?.metadata.hunks.length) return false
       setFocus("diff"); jump(-1)
@@ -615,6 +619,7 @@ export function DiffScreen(props: {
             items={parsed().files} itemKey={(file) => file.path} resetKey={`${diffSearchId()}:files`}
             searchRetain={() => active() && showFiles()}
             active={interactive() && showFiles() && focus() === "files" && !error()}
+            dimSelection={focus() !== "files"}
             mouseActive={interactive() && showFiles() && !error()}
             onMouseFocus={() => { contextMouse.onMouseDrag(); focusFiles() }}
             showScrollbar={props.showScrollbar} rowHeight={1}

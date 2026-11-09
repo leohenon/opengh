@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test"
-import { createTestRenderer } from "@opentui/core/testing"
+import { createTestRenderer, KeyCodes } from "@opentui/core/testing"
 import { render } from "@opentui/solid"
 import { createSignal } from "solid-js"
 import type { PullReviewThread } from "../src/models"
@@ -12,6 +12,9 @@ import { parseDiff } from "../src/ui/diff-model"
 import { reviewRows } from "../src/ui/review-lines"
 import { isSourceRowY } from "../src/ui/diff-comment-cards"
 import type { ContextMenuItem } from "../src/ui/components/context-menu"
+import { App } from "../src/ui/app"
+import { defaultConfig } from "../src/config"
+import { githubDataFixture, pullContextFixture, repositoryOperationsFixture } from "./fixtures/github-data"
 
 const patch = `diff --git a/message.ts b/message.ts
 --- a/message.ts
@@ -148,5 +151,89 @@ test("posted threads expand real Hunk rows, survive highlighting/layout changes,
     await settle()
     expect(setup.captureCharFrame()).toContain("Formatted feedback")
     expect(setup.captureCharFrame()).not.toContain("```")
+  } finally { setup.renderer.destroy(); await setup.renderer.closed }
+}, 10000)
+
+test("z collapses diff threads from either pane, retains summaries across files/layouts, and respects overlays/remapping", async () => {
+  const setup = await createTestRenderer({ width: 160, height: 40 })
+  initializeHunk(setup.renderer)
+  const target = { kind: "pull", number: 1 } as const
+  const loading = { status: "loading", phase: "load" } as const
+  const [config, setConfig] = createSignal({ ...defaultConfig, showStatusBarHints: true })
+  const other = { ...thread, id: "other", path: "other.ts", isResolved: false,
+    comments: [{ ...thread.comments[0]!, body: "Other file discussion" }] }
+  const threads = [thread, other,
+    { ...thread, id: "unknown", diffSide: undefined },
+    { ...thread, id: "outdated", isOutdated: true },
+  ]
+  await render(() => <App config={config()} data={githubDataFixture} operations={repositoryOperationsFixture}
+    initialNavigation={{ page: "pulls", diff: target }}
+    diffs={{ pull: { target, resource: { status: "ready", value: {
+      kind: "patch", patch: patch + patch.replaceAll("message.ts", "other.ts"), headSha: pullContextFixture.readiness.headSha,
+    } } } }}
+    pullDetail={{ number: 1, resource: loading, comments: loading, references: loading, commits: loading,
+      context: { status: "ready", value: { ...pullContextFixture, threads } } }} />, setup.renderer)
+  const settle = async () => { await Bun.sleep(40); await setup.flush(); await setup.renderer.idle(); await setup.flush() }
+  const key = async (value: string) => { setup.mockInput.pressKey(value); await settle() }
+  const card = (id: string) => setup.renderer.root.findDescendantById(`diff-comment-card:${id}`)!
+  const file = parseDiff({ kind: "patch", patch }).files[0]!.body!
+  const rowId = (layout: "split" | "unified") => reviewRows(file, layout).find((row) => row.right?.line === 2)!.id
+  try {
+    await settle()
+    const deadline = Date.now() + 5000
+    while (!setup.captureCharFrame().includes("Posted discussion body") && Date.now() < deadline) await settle()
+    expect(setup.captureCharFrame()).toContain("Posted discussion body")
+    expect(setup.captureCharFrame()).toContain("files · z collapse")
+    const expanded = card("thread")
+    const body = setup.renderer.root.findDescendantById("diff-comment-card:thread:body:0")!
+    await key("z")
+    expect(expanded.isDestroyed).toBe(true)
+    expect(body.isDestroyed).toBe(true)
+    for (const id of ["thread", "unknown", "outdated"]) {
+      expect(setup.renderer.root.findDescendantById(`diff-comment-card:${id}:body:0`)).toBeUndefined()
+      expect(setup.renderer.root.findDescendantById(`diff-comment-card:${id}:header:1`)).toBeUndefined()
+    }
+    expect(card("thread").height).toBe(1)
+    expect(card("thread").parent?.id).toBe(rowId("split"))
+    let frame = setup.captureCharFrame()
+    expect(frame).toContain("@alice · 2 comments · resolved")
+    expect(frame).toContain("resolved · outdated")
+    expect(frame).toContain("Unplaced review comments")
+    expect(frame).toContain("Outdated review comments")
+    expect(frame).toContain("const changed")
+    expect(frame).not.toContain("Posted discussion body")
+    expect(frame).not.toContain("@bob")
+    expect(frame).toContain("z expand")
+    await key("?")
+    expect(setup.captureCharFrame()).toContain("collapse / expand review comments")
+    await key("z")
+    setup.mockInput.pressEscape()
+    await settle()
+    expect(setup.captureCharFrame()).toContain("z expand")
+    await key("j")
+    expect(card("other").height).toBe(1)
+    expect(setup.captureCharFrame()).toContain("@alice · 1 comment")
+    expect(setup.captureCharFrame()).not.toContain("Other file discussion")
+    setup.mockInput.pressTab()
+    await key("t")
+    expect(card("other").height).toBe(1)
+    await key("z")
+    expect(setup.captureCharFrame()).toContain("Other file discussion")
+    expect(setup.captureCharFrame()).toContain("z collapse")
+    setup.mockInput.pressTab()
+    await key("k")
+    expect(card("thread").parent?.id).toBe(rowId("unified"))
+    expect(setup.captureCharFrame()).toContain("Posted discussion body")
+    expect(setup.captureCharFrame()).toContain("A reply in the same thread")
+    await key("z")
+    setConfig({ ...config(), keybindings: { "diff.toggleComments": ["f2"] } })
+    await key("z")
+    expect(setup.captureCharFrame()).toContain("f2 expand")
+    expect(card("thread").height).toBe(1)
+    await key(KeyCodes.F2)
+    frame = setup.captureCharFrame()
+    expect(frame).toContain("Posted discussion body")
+    expect(frame).toContain("A reply in the same thread")
+    expect(frame).toContain("f2 collapse")
   } finally { setup.renderer.destroy(); await setup.renderer.closed }
 }, 10000)

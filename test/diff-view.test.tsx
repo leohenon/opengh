@@ -223,6 +223,10 @@ test("hunk navigation follows native layout and metadata-only selection removes 
     expect(setup.captureCharFrame()).toContain("new-row-0")
     expect(setup.captureCharFrame()).not.toContain("Diff ·")
     expectFocus("files")
+    const selectionBackground = () => setup.captureSpans().lines
+      .slice(pane("files").y, pane("files").y + pane("files").height)
+      .flatMap((line) => line.spans).find((span) => span.text.includes("long.ts"))!.bg
+    const focusedSelection = selectionBackground()
     const bodyWidth = () => setup.renderer.root.findDescendantById("embedded-diff-host")!.width
     const withSidebar = bodyWidth()
     setup.mockInput.pressKey("b")
@@ -230,7 +234,7 @@ test("hunk navigation follows native layout and metadata-only selection removes 
     expect(setup.captureCharFrame()).not.toContain("Files (2)")
     expectFocus("diff")
     expect(bodyWidth()).toBeGreaterThan(withSidebar)
-    setup.mockInput.pressKey("b")
+    setup.mockInput.pressKey("f")
     await settle()
     expectFocus("files")
     expect(bodyWidth()).toBe(withSidebar)
@@ -242,6 +246,7 @@ test("hunk navigation follows native layout and metadata-only selection removes 
     await settle()
     expect(setup.captureCharFrame()).toContain("last-new")
     expectFocus("diff")
+    expect(selectionBackground().equals(focusedSelection)).toBe(false)
     expect(setup.captureCharFrame()).not.toContain("new-row-0")
     setup.mockInput.pressKey("[")
     await settle()
@@ -249,6 +254,7 @@ test("hunk navigation follows native layout and metadata-only selection removes 
     setup.mockInput.pressTab()
     await settle()
     expectFocus("files")
+    expect(selectionBackground().equals(focusedSelection)).toBe(true)
     setup.mockInput.pressTab()
     await settle()
     expectFocus("diff")

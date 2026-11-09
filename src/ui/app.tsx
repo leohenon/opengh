@@ -205,6 +205,7 @@ function AppContent(props: AppProps) {
   const overviewDocument = () => navigation().document
   const setOverviewDocument = (document: string | undefined) => setNavigation((state) => ({ ...state, document }))
   const [diffFocus, setDiffFocus] = createSignal<Partial<Record<Page, DiffFocus>>>({})
+  const [diffCommentsCollapsed, setDiffCommentsCollapsed] = createSignal<Partial<Record<Page, boolean>>>({})
   const [overlay, setOverlay] = createSignal<Overlay>()
   const [toast, setToast] = createSignal<ToastState>()
   const [commandAction, setCommandAction] = createSignal<CommandAction>()
@@ -1278,11 +1279,13 @@ function AppContent(props: AppProps) {
       const failed = resource?.status === "error"
       const recovery: HintEntry[] = failed ? [...retry, ["navigation.activate", "file list"]]
         : canRefresh && diffResource().value?.kind === "files" ? [["view.refresh", "retry full diff"]] : []
+      const comments: HintEntry[] = threadsForDiff(diffTarget()!).length
+        ? [["diff.toggleComments", diffCommentsCollapsed()[page()] ? "expand" : "collapse"]] : []
       return hint(back, ...recovery, ["diff.focus", `focus ${files ? "diff" : "files"}`], horizontal,
         [["diff.previousHunk", "diff.nextHunk"], "hunks"],
         ...(failed ? [] : [["diff.toggleLayout", "layout"], ["diff.toggleWrap", "wrap"]] as const),
         ["diff.toggleFiles", "toggle files"], [["navigation.up", "navigation.down"], files ? "files" : "scroll"],
-        ...refresh, github, ...common)
+        ...comments, ...refresh, github, ...common)
     }
     if (activeRunId()) return hint(back, ...retry,
       ...more(runDetail().jobs.status !== "loading" && runDetail().jobs.value?.hasMore), ...refresh, github, copy, ...common)
@@ -1751,6 +1754,7 @@ function AppContent(props: AppProps) {
                 )
               }
               onFocusChange={(focus) => setDiffFocus((current) => ({ ...current, [owner]: focus }))}
+              onCommentsCollapsedChange={(collapsed) => setDiffCommentsCollapsed((current) => ({ ...current, [owner]: collapsed }))}
               showScrollbar={config().showScrollbars} onLoadFiles={() => void props.onLoadDiff?.(target, true)} />
           </box>}
         </Show>}
