@@ -1553,7 +1553,7 @@ function AppContent(props: AppProps) {
           : page() === "overview" ? [currentOverviewDocument()?.id, currentOverviewDocument()?.ref, data().currentBranch] : undefined,
       ])}>
       <Show when={!standalone()}>
-      <Header repo={data().repo} page={page()} tabs={visibleTabs()} workCounts={data().workCounts} compact={config().compactHeader} showTabCounts={config().showTabCounts}
+      <Header repo={data().repo} page={page()} tabs={visibleTabs()} workCounts={data().workCounts} compact={config().compactHeader} showTabCounts={config().showTabCounts} showTabShortcuts={config().showTabShortcuts}
         interactive={overlay() === undefined} onSelect={selectHeaderPage}
         onOpenRepository={props.onSwitchRepository ? openRepositoryPicker : undefined} />
       </Show>

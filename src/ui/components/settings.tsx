@@ -11,29 +11,30 @@ import { useKeyActions, useKeybindings } from "../keybindings"
 import { createRenderedSearch } from "../rendered-search"
 import { useSearchTarget } from "../search-context"
 
-type Setting = "theme" | "color-mode" | "reduced-motion" | "markdown-style" | "scrollbars" | "detail-layout" | "details-placement" | "status-bar-hints" | "icon-style" | "compact-header" | "hide-documents-tab" | "tab-counts"
+type Setting = "tab-shortcuts" | "theme" | "color-mode" | "reduced-motion" | "markdown-style" | "scrollbars" | "detail-layout" | "details-placement" | "status-bar-hints" | "icon-style" | "compact-header" | "hide-documents-tab" | "tab-counts"
 
 const sectionOrder = ["Appearance", "Layout", "Usability"] as const
 type Section = typeof sectionOrder[number]
 const sectionSettings: Record<Section, readonly Setting[]> = {
   Appearance: ["theme", "color-mode", "markdown-style"],
   Layout: ["compact-header", "tab-counts", "hide-documents-tab", "detail-layout", "details-placement"],
-  Usability: ["icon-style", "status-bar-hints", "scrollbars", "reduced-motion"],
+  Usability: ["icon-style", "status-bar-hints", "scrollbars", "reduced-motion", "tab-shortcuts"],
 }
 const settingOrder = sectionOrder.flatMap((section) => sectionSettings[section])
-const settingDefinitions: Record<Setting, { title: string; description: string; value: (config: Config) => string }> = {
-  theme: { title: "Theme", description: "Interface color theme", value: (config) => config.theme },
-  "color-mode": { title: "Color mode", description: "System, dark, or light", value: (config) => config.colorMode },
-  "markdown-style": { title: "Markdown style", description: "Rich or minimal formatting", value: (config) => config.markdownStyle },
-  "compact-header": { title: "Compact header", description: "More room for content", value: (config) => config.compactHeader ? "on" : "off" },
-  "tab-counts": { title: "Tab counts", description: "Issue and PR totals", value: (config) => config.showTabCounts ? "on" : "off" },
-  "hide-documents-tab": { title: "Document tabs", description: "Overview document navigation", value: (config) => config.hideDocumentsTab ? "off" : "on" },
-  "detail-layout": { title: "Detail width", description: "Detail page width", value: (config) => config.detailLayout },
-  "details-placement": { title: "Details placement", description: "Issue and PR metadata", value: (config) => config.detailsPlacement },
-  "icon-style": { title: "Icon style", description: "Terminal symbols", value: (config) => config.iconStyle === "nerd" ? "Nerd Font" : config.iconStyle === "none" ? "None" : "Unicode" },
-  "status-bar-hints": { title: "Shortcut hints", description: "Keyboard shortcuts", value: (config) => config.showStatusBarHints ? "on" : "off" },
-  scrollbars: { title: "Scrollbars", description: "Lists and documents", value: (config) => config.showScrollbars ? "on" : "off" },
-  "reduced-motion": { title: "Reduced motion", description: "Static loading indicators", value: (config) => config.reducedMotion ? "on" : "off" },
+const settingDefinitions: Record<Setting, { title: string; value: (config: Config) => string }> = {
+  theme: { title: "Theme", value: (config) => config.theme },
+  "color-mode": { title: "Color mode", value: (config) => config.colorMode },
+  "markdown-style": { title: "Markdown style", value: (config) => config.markdownStyle },
+  "compact-header": { title: "Compact header", value: (config) => config.compactHeader ? "on" : "off" },
+  "tab-shortcuts": { title: "Tab shortcuts", value: (config) => config.showTabShortcuts ? "on" : "off" },
+  "tab-counts": { title: "Tab counts", value: (config) => config.showTabCounts ? "on" : "off" },
+  "hide-documents-tab": { title: "Document tabs", value: (config) => config.hideDocumentsTab ? "off" : "on" },
+  "detail-layout": { title: "Detail width", value: (config) => config.detailLayout },
+  "details-placement": { title: "Details placement", value: (config) => config.detailsPlacement },
+  "icon-style": { title: "Icon style", value: (config) => config.iconStyle === "nerd" ? "Nerd Font" : config.iconStyle === "none" ? "None" : "Unicode" },
+  "status-bar-hints": { title: "Shortcut hints", value: (config) => config.showStatusBarHints ? "on" : "off" },
+  scrollbars: { title: "Scrollbars", value: (config) => config.showScrollbars ? "on" : "off" },
+  "reduced-motion": { title: "Reduced motion", value: (config) => config.reducedMotion ? "on" : "off" },
 }
 const colorModeValues = ["system", "dark", "light"] as const
 
@@ -51,17 +52,19 @@ export function Settings(props: {
   const theme = useTheme()
   const { colors } = theme
   let settingsScroll: ScrollBoxRenderable | undefined
+  let descriptionScroll: ScrollBoxRenderable | undefined
   const [screen, setScreen] = createSignal<"settings" | "themes">("settings")
   const [selected, setSelected] = createSignal<Setting>("theme")
+  createEffect(on(selected, () => descriptionScroll?.scrollTo(0)))
   const [saving, setSaving] = createSignal(false)
   const busy = () => saving() || props.saving === true
   const [error, setError] = createSignal("")
-  const rowHeight = () => dimensions().height < 29 ? 2 : 3
+  const rowHeight = () => 1
   const popupHeight = () => settingOrder.length * rowHeight() + 11 + (sectionOrder.length - 1) * 3
   const split = () => dimensions().width >= 110
   createEffect(() => props.onHintChange?.(busy() ? "Updating settings…" : screen() === "themes"
     ? keys.hints(["picker.accept", "confirm"], [["picker.up", "picker.down"], "select"], ["dialog.close", "back"])
-    : keys.hints(["navigation.activate", selected() === "theme" ? "open" : "change"], [["navigation.up", "navigation.down"], "select"], [["settings.previousValue", "settings.nextValue"], "change"], ["search.start", "search"], ["dialog.close", "close"])))
+    : keys.hints(["navigation.activate", selected() === "theme" ? "open" : "change"], [["navigation.up", "navigation.down"], "select"], [["settings.previousValue", "settings.nextValue"], "change"], ["search.start", "search"], ...(!split() ? [[["navigation.pageUp", "navigation.pageDown"], "description"] as const] : []), ["dialog.close", "close"])))
   onCleanup(() => props.onHintChange?.(undefined))
   const revealSetting = () => {
     if (selected() === settingOrder[0]) settingsScroll?.scrollTo(0)
@@ -108,7 +111,7 @@ export function Settings(props: {
     revealSetting()
   }
 
-  const toggleBoolean = async (key: "reducedMotion" | "showScrollbars" | "showStatusBarHints" | "compactHeader" | "hideDocumentsTab" | "showTabCounts") => {
+  const toggleBoolean = async (key: "reducedMotion" | "showScrollbars" | "showStatusBarHints" | "compactHeader" | "hideDocumentsTab" | "showTabCounts" | "showTabShortcuts") => {
     if (busy()) return
     setSaving(true)
     setError("")
@@ -212,6 +215,7 @@ export function Settings(props: {
       case "reduced-motion": void toggleBoolean("reducedMotion"); break
       case "markdown-style": void changeMarkdownStyle(); break
       case "scrollbars": void toggleBoolean("showScrollbars"); break
+      case "tab-shortcuts": void toggleBoolean("showTabShortcuts"); break
       case "tab-counts": void toggleBoolean("showTabCounts"); break
       case "hide-documents-tab": void toggleBoolean("hideDocumentsTab"); break
       case "compact-header": void toggleBoolean("compactHeader"); break
@@ -226,6 +230,14 @@ export function Settings(props: {
     "dialog.close": requestClose,
     "navigation.up": () => moveSetting(-1),
     "navigation.down": () => moveSetting(1),
+    "navigation.pageUp": () => {
+      if (split() || !descriptionScroll) return false
+      descriptionScroll.scrollBy(-Math.max(1, descriptionScroll.viewport.height))
+    },
+    "navigation.pageDown": () => {
+      if (split() || !descriptionScroll) return false
+      descriptionScroll.scrollBy(Math.max(1, descriptionScroll.viewport.height))
+    },
     "settings.previousValue": () => changeSetting(selected(), -1),
     "settings.nextValue": () => changeSetting(selected(), 1),
     "navigation.activate": () => changeSetting(selected(), 1),
@@ -259,7 +271,6 @@ export function Settings(props: {
         <text width={2} fg={colors.blue}>{active() ? "›" : " "}</text>
         <box flexGrow={1} minWidth={0} flexDirection="column">
           <text width="100%" height={1} wrapMode="none" fg={colors.text} attributes={active() ? TextAttributes.BOLD : TextAttributes.NONE}>{definition.title}</text>
-          <text width="100%" height={1} wrapMode="none" fg={colors.muted}>{definition.description}</text>
         </box>
         <box width={split() ? 24 : Math.min(24, Math.max(12, Math.floor((dimensions().width - 10) * 0.35)))} height={1} flexShrink={0} flexDirection="row">
           <Action id={`setting-${setting}-previous`} onActivate={() => changeSetting(setting, -1)} disabled={busy()} fg={active() ? colors.blue : colors.muted}>‹</Action>
@@ -273,19 +284,23 @@ export function Settings(props: {
   const detail = () => {
     if (selected() === "theme") return {
       title: "Theme",
-      description: "Choose the color theme used throughout opengh. Moving through the theme list previews each theme.",
+      description: "Choose the color theme. Browse to preview.",
     }
     if (selected() === "color-mode") return {
       title: "Color mode",
-      description: "System follows your terminal's light or dark appearance, falling back to dark if detection is unavailable. Dark and Light override terminal detection for every theme.",
+      description: "Follow the terminal appearance or choose light or dark.",
     }
     if (selected() === "reduced-motion") return {
       title: "Reduced motion",
-      description: "Replace animated loading dots with a static indicator, including running workflows. Loading messages and live data updates remain enabled.",
+      description: "Replace animated loading dots with static dots.",
     }
     if (selected() === "markdown-style") return {
       title: "Markdown style",
-      description: "Rich keeps syntax colors, labels on multiline code, and decorative borders. Minimal uses neutral syntax colors, simpler code blocks, and borderless headings, quotes, and tables. Links and diff colors stay distinct.",
+      description: "Rich uses syntax colors and borders. Minimal keeps formatting simple.",
+    }
+    if (selected() === "tab-shortcuts") return {
+      title: "Tab shortcuts",
+      description: "Show number shortcuts next to tabs",
     }
     if (selected() === "tab-counts") return {
       title: "Tab counts",
@@ -293,31 +308,31 @@ export function Settings(props: {
     }
     if (selected() === "hide-documents-tab") return {
       title: "Document tabs",
-      description: "Show the document tab strip on Overview. When off, documents remain visible." + (keys.key("overview.nextDocument") ? ` Use ${keys.key("overview.nextDocument")} to cycle between them.` : ""),
+      description: "Show document tabs on Overview." + (keys.key("overview.nextDocument") ? ` ${keys.key("overview.nextDocument")} cycles documents even when hidden.` : ""),
     }
     if (selected() === "compact-header") return {
       title: "Compact header",
-      description: "Use one header row instead of five, with tabs on the left and the repository name on the right.",
+      description: "Fit tabs and the repository name on one row.",
     }
     if (selected() === "scrollbars") return {
       title: "Scrollbars",
-      description: "Show vertical scrollbars only when content exceeds the viewport.",
+      description: "Show vertical scrollbars for overflowing content.",
     }
     if (selected() === "icon-style") return {
       title: "Icon style",
-      description: "Standard Unicode works with ordinary terminal fonts. Nerd Font uses GitHub-style glyphs and requires a Nerd Font selected in your terminal. This setting cannot change or detect the terminal font.",
+      description: "Choose Unicode, Nerd Font, or no icons. Nerd Font requires a compatible terminal font.",
     }
     if (selected() === "detail-layout") return {
       title: "Detail width",
-      description: "Centered keeps a bounded reading column. Wide uses the available terminal width. Applies to repository documents and detail pages.",
+      description: "Centered limits reading width. Wide fills the available space.",
     }
     if (selected() === "details-placement") return {
       title: "Details placement",
-      description: "Auto puts issue and PR metadata in a sidebar on wide terminals and inline on narrow ones. Inline always places details below the title. Overview is not affected. --inline output always uses inline details.",
+      description: "Auto uses a sidebar when space allows. Inline keeps issue and PR details below the title.",
     }
     return {
       title: "Shortcut hints",
-      description: "Show keyboard shortcuts in the status bar on every page. Loading messages stay visible when hints are off.",
+      description: "Show keyboard shortcuts in the status bar.",
     }
   }
 
@@ -343,8 +358,10 @@ export function Settings(props: {
           />
         )}
       >
-        <box flexGrow={1} minHeight={0} flexDirection="row">
+        <box flexGrow={1} minHeight={0} flexDirection={split() ? "row" : "column"}>
           <box
+            flexGrow={1}
+            minHeight={0}
             width={split() ? "58%" : "100%"}
             minWidth={0}
             flexDirection="column"
@@ -371,7 +388,24 @@ export function Settings(props: {
               {(message) => <text fg={colors.red} wrapMode="word">{message()}</text>}
             </Show>
           </box>
-          <Show when={split()}>
+          <Show when={split()} fallback={(
+            <scrollbox
+              id="settings-description"
+              ref={(value) => { descriptionScroll = value }}
+              height={Math.min(8, Math.max(3, Math.floor(dimensions().height / 3)))}
+              flexShrink={0}
+              paddingX={4}
+              paddingY={1}
+              backgroundColor={colors.panelHover}
+              focusable={false}
+              scrollY
+              scrollX={false}
+              scrollbarOptions={{ visible: false }}
+            >
+              <text width="100%" height={1} flexShrink={0} fg={colors.blue} attributes={TextAttributes.BOLD}>{detail().title}</text>
+              <text width="100%" flexShrink={0} fg={colors.text} wrapMode="word">{detail().description}</text>
+            </scrollbox>
+          )}>
             <box
               position="relative"
               top={-1}

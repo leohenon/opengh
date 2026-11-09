@@ -1,4 +1,4 @@
-import { TextAttributes, type ScrollBoxRenderable } from "@opentui/core"
+import { RGBA, TextAttributes, type ScrollBoxRenderable } from "@opentui/core"
 import { useTerminalDimensions } from "@opentui/solid"
 import { createEffect, createMemo, createSignal, For, on, onCleanup, Show } from "solid-js"
 import { defaultConfig, type DetailLayout } from "../../config"
@@ -13,7 +13,7 @@ import { useTheme } from "../theme"
 import { useIcons } from "../icon-style"
 import { iconPrefix } from "../icons"
 import { createScrollbarVisibility } from "../scrollbar-visibility"
-import { mouseClick } from "../mouse"
+import { mouseClick, mouseHover } from "../mouse"
 import type { MarkdownAnchorRequest, MarkdownAnchorResolver } from "../markdown-anchors"
 
 function extractAboutContent(value: string) {
@@ -83,19 +83,29 @@ export function OverviewScreen(props: {
   const centered = () => (props.detailLayout ?? defaultConfig.detailLayout) === "centered"
   const { colors, theme } = useTheme()
   const icons = useIcons()
+  const inactiveTabBackground = createMemo(() => {
+    const canvas = RGBA.fromHex(colors.canvas)
+    const panel = RGBA.fromHex(colors.panel)
+    return RGBA.fromValues(
+      (canvas.r + panel.r) / 2,
+      (canvas.g + panel.g) / 2,
+      (canvas.b + panel.b) / 2,
+      (canvas.a + panel.a) / 2,
+    )
+  })
   const bindScrollbar = createScrollbarVisibility(() => props.showScrollbar)
   const repo = () => props.repo
   const about = createMemo(() => extractAboutContent(repo().description))
   const documents = () => props.documents.value ?? []
   const document = () => documents().find((item) => item.id === props.currentDocument) ?? documents()[0]
-  const documentLabel = (item: RepositoryDocumentState) => {
+  const documentLabel = (item: RepositoryDocumentState, includeIcon: boolean = showDocumentIcons()): string => {
     const name = item.path.split("/").at(-1)?.toLowerCase() ?? ""
     const kind = /^readme(?:$|[._-])/.test(name) ? "readme"
       : /^code[_-]of[_-]conduct(?:$|[._-])/.test(name) ? "conduct"
       : /^contributing(?:$|[._-])/.test(name) ? "contributing"
       : /^(?:licen[sc]e|copying|unlicense)(?:$|[._-])/.test(name) ? "license"
       : /^security(?:$|[._-])/.test(name) ? "security" : "file"
-    return `${iconPrefix(icons().document[kind])}${item.label}`
+    return `${includeIcon ? iconPrefix(icons().document[kind]) : ""}${item.label}`
   }
   // Leave the label empty during the first load so it fills in instead of being replaced.
   const currentLabel = () => (document() ? documentLabel(document()!) : undefined)
@@ -116,9 +126,12 @@ export function OverviewScreen(props: {
     : document() ? documentResource() : { status: "ready", value: null })
   const hasDocumentTabs = () => documents().length > 1
   const showAboutSidebar = () => !props.inlineAbout && aboutSidebarVisible(props.aboutSidebar, dimensions().width)
-  const documentLabelsWidth = () => documents().reduce((width, item) => width + Bun.stringWidth(documentLabel(item)) + 2, 0)
+  const availableDocumentWidth = () => Math.max(1, dimensions().width - (showAboutSidebar() ? 42 : 8))
+  const documentLabelsWidth = (includeIcons: boolean): number => documents().reduce((width, item) =>
+    width + Bun.stringWidth(documentLabel(item, includeIcons)) + 2, 0)
+  const showDocumentIcons = (): boolean => documentLabelsWidth(true) <= availableDocumentWidth()
   const compactDocuments = () => hasDocumentTabs()
-    && documentLabelsWidth() > Math.max(1, dimensions().width - (showAboutSidebar() ? 42 : 8))
+    && documentLabelsWidth(false) > availableDocumentWidth()
   const markdownStyle = createReactiveMarkdownStyle(colors, theme)
 
   let scroll: ScrollBoxRenderable | undefined
@@ -191,33 +204,36 @@ export function OverviewScreen(props: {
                 )}
               >
                 <For each={documents()}>
-                  {(item) => (
-                    <box
-                      height={1}
-                      flexShrink={0}
-                      flexDirection="row"
-                      paddingX={1}
-                      backgroundColor={item.id === document()?.id ? colors.panel : colors.header}
-                      {...mouseClick(() => props.onSelectDocument?.(item.id), () => props.interactive !== false && Boolean(props.onSelectDocument))}
-                    >
-                      <text
+                  {(item) => {
+                    const active = () => item.id === document()?.id
+                    const enabled = () => props.interactive !== false && Boolean(props.onSelectDocument)
+                    const hover = mouseHover(enabled, () => item.id)
+                    return (
+                      <box
                         height={1}
-                        wrapMode="none"
-                        fg={item.id === document()?.id ? colors.text : colors.muted}
-                        attributes={item.id === document()?.id ? TextAttributes.BOLD : TextAttributes.NONE}
-                        selectable={false}
+                        flexShrink={0}
+                        flexDirection="row"
+                        paddingX={1}
+                        backgroundColor={hover.hovered() && !active() ? colors.panelHover : active() ? colors.canvas : inactiveTabBackground()}
+                        {...mouseClick(() => props.onSelectDocument?.(item.id), enabled, () => item.id, hover)}
                       >
-                        {documentLabel(item)}
-                      </text>
-                    </box>
-                  )}
+                        <text
+                          height={1}
+                          wrapMode="none"
+                          fg={active() || hover.hovered() ? colors.text : colors.muted}
+                          attributes={active() ? TextAttributes.BOLD : TextAttributes.NONE}
+                          selectable={false}
+                        >
+                          {documentLabel(item)}
+                        </text>
+                      </box>
+                    )
+                  }}
                 </For>
               </Show>
             </Show>
           </box>
-          <text height={1} flexShrink={0} wrapMode="none" fg={colors.border}>
-            {"─".repeat(dimensions().width)}
-          </text>
+          <box height={1} flexShrink={0} />
         </Show>
         <ResourceStateView resource={viewResource()}>
           {() => (

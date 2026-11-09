@@ -23,6 +23,7 @@ export type Config = {
   iconStyle: IconStyle
   compactHeader: boolean
   hideDocumentsTab: boolean
+  showTabShortcuts: boolean
   showTabCounts: boolean
   keybindings?: KeybindingOverrides
 }
@@ -39,6 +40,7 @@ export const defaultConfig: Config = {
   iconStyle: "nerd",
   compactHeader: false,
   hideDocumentsTab: false,
+  showTabShortcuts: true,
   showTabCounts: true,
 }
 
@@ -89,6 +91,7 @@ function normalizeConfig(value: unknown): Config {
     iconStyle: input.iconStyle === "unicode" || input.iconStyle === "nerd" || input.iconStyle === "none" ? input.iconStyle : defaultConfig.iconStyle,
     compactHeader: typeof input.compactHeader === "boolean" ? input.compactHeader : defaultConfig.compactHeader,
     hideDocumentsTab: typeof input.hideDocumentsTab === "boolean" ? input.hideDocumentsTab : defaultConfig.hideDocumentsTab,
+    showTabShortcuts: typeof input.showTabShortcuts === "boolean" ? input.showTabShortcuts : defaultConfig.showTabShortcuts,
     showTabCounts: typeof input.showTabCounts === "boolean" ? input.showTabCounts : defaultConfig.showTabCounts,
     ...(input.keybindings === undefined ? {} : { keybindings: normalizeKeybindings(input.keybindings) }),
   }

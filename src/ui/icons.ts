@@ -1,3 +1,5 @@
+import type { Page } from "../navigation"
+
 // Nerd Font Octicons: keep GitHub entity and workflow states visually consistent.
 export const pullRequestIcons = {
   open: "\uf407",
@@ -28,6 +30,7 @@ export const workflowIcons = {
 } as const
 
 export type IconSet = {
+  navigation: Record<Page, string>
   pullRequest: { open: string; merged: string; closed: string; draft: string }
   issue: { open: string; closed: string }
   repository: { fork: string; star: string; watching: string }
@@ -40,11 +43,12 @@ export type IconSet = {
 }
 
 export const nerdIcons: IconSet = {
+  navigation: { overview: "\uf401", commits: "\uf417", issues: "\uf41b", pulls: "\uf407", actions: "\uf500" },
   pullRequest: pullRequestIcons,
   issue: issueIcons,
   repository: repositoryIcons,
   workflow: workflowIcons,
-  document: { readme: "\uf405", conduct: "\uf4a7", contributing: "\uf64d", license: "\uf495", security: "\uf49c", file: "\uf4a5" },
+  document: { readme: "\uf405", conduct: "\uf4ae", contributing: "\uf4fd", license: "\uf495", security: "\uf49c", file: "\uf4a5" },
   user: "\uf007",
   comment: "\uf075",
   commit: "\uf417",
@@ -52,6 +56,7 @@ export const nerdIcons: IconSet = {
 }
 
 export const unicodeIcons: IconSet = {
+  navigation: { overview: "≡", commits: "◇", issues: "◉", pulls: "⑂", actions: "▷" },
   pullRequest: { open: "⑂", merged: "⑃", closed: "×", draft: "◌" },
   issue: issueIcons,
   repository: { fork: "⑂", star: "☆", watching: "◉" },
@@ -64,6 +69,7 @@ export const unicodeIcons: IconSet = {
 }
 
 export const noIcons: IconSet = {
+  navigation: { overview: "", commits: "", issues: "", pulls: "", actions: "" },
   pullRequest: { open: "", merged: "", closed: "", draft: "" },
   issue: { open: "", closed: "" },
   repository: { fork: "", star: "", watching: "" },

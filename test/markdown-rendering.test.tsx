@@ -10,7 +10,7 @@ import { GitHubMarkdown } from "../src/ui/components/github-markdown"
 import { createReactiveMarkdownStyle } from "../src/ui/markdown-style"
 import { ThemeProvider, useTheme } from "../src/ui/theme"
 import { MarkdownProvider } from "../src/ui/markdown-preferences"
-import { resolveTheme } from "../src/theme"
+import { appColors, resolveTheme } from "../src/theme"
 
 function MarkdownSample(props: { content: string; context?: GitHubMarkdownContext; plainText?: boolean }) {
   const { colors, theme } = useTheme()
@@ -543,3 +543,31 @@ console.log(runtime)
     }
   } finally { view.renderer.destroy() }
 }, 15_000)
+
+test("GitHub alert borders keep their colors with document source anchors", async () => {
+  const [anchored, setAnchored] = createSignal(false)
+  const colors = appColors(resolveTheme("opengh"))
+  const alerts = [["NOTE", "Note", colors.blue], ["TIP", "Tip", colors.green],
+    ["IMPORTANT", "Important", colors.purple], ["WARNING", "Warning", colors.yellow],
+    ["CAUTION", "Caution", colors.red]] as const
+  const content = alerts.map(([marker]) => `> [!${marker}]\n> Alert body.`).join("\n\n")
+  const Sample = () => {
+    const theme = useTheme()
+    const style = createReactiveMarkdownStyle(theme.colors, theme.theme)
+    return <GitHubMarkdown content={content} syntaxStyle={style()}
+      anchorRef={anchored() ? () => {} : undefined} />
+  }
+  const view = await testRender(() => <ThemeProvider name="opengh"><MarkdownProvider style="rich">
+    <Sample />
+  </MarkdownProvider></ThemeProvider>, { width: 80, height: 32 })
+  try {
+    for (const anchors of [false, true]) {
+      setAnchored(anchors)
+      await settle(view)
+      for (const [, title, color] of alerts) {
+        const row = view.captureSpans().lines.find((line) => line.spans.some((span) => span.text.includes(title)))
+        expect(row?.spans.find((span) => span.text.includes("│"))?.fg).toEqual(RGBA.fromHex(color))
+      }
+    }
+  } finally { view.renderer.destroy() }
+})

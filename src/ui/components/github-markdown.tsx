@@ -174,9 +174,9 @@ export function GitHubMarkdown(props: { content: string; syntaxStyle: SyntaxStyl
       return panel
     }
     const quoteColor = (text: string) => {
-      const alert = text.match(/^\*\*(Note|Tip|Important|Warning|Caution)\*\*(?:\s|$)/)?.[1]
+      const alert = stripAnchorMarkers(text).trimStart().match(/^\*\*(Note|Tip|Important|Warning|Caution)\*\*(?:\s|$)/)?.[1]
       return alert === "Warning" ? yellow : alert === "Caution" ? red
-        : alert === "Tip" ? green : alert ? blue : border
+        : alert === "Tip" ? green : alert === "Important" ? colors.purple : alert ? blue : border
     }
     const quoteContent = (text: string) => new MarkdownRenderable(renderer, {
       content: text, syntaxStyle, fg: foreground, bg: canvas, conceal: true,

@@ -7,6 +7,7 @@ import type { Repo } from "../../models"
 import type { Page } from "../../navigation"
 import type { RepositoryData } from "../../repository-state"
 import { useTheme } from "../theme"
+import { useIcons } from "../icon-style"
 import { mouseClick } from "../mouse"
 import { useLoadingDots } from "../motion"
 
@@ -40,6 +41,7 @@ export function Header(props: {
   onSelect?: (page: Page) => void
   onOpenRepository?: () => void
   compact?: boolean
+  showTabShortcuts?: boolean
   showTabCounts?: boolean
   workCounts?: RepositoryData["workCounts"]
   tabs: ReadonlyArray<{ page: Page; label: string }>
@@ -47,15 +49,16 @@ export function Header(props: {
   const { colors } = useTheme()
   const dimensions = useTerminalDimensions()
   const keys = useKeybindings()
+  const icons = useIcons()
   const dots = useLoadingDots(() => props.showTabCounts !== false
     && !props.workCounts?.value && props.workCounts?.status !== "error"
     && props.tabs.some((tab) => tab.page === "issues" || tab.page === "pulls"))
-  const tabKey = (index: number) => index < 5 ? keys.key(`navigation.tab${index + 1}` as KeyAction) : ""
+  const tabKey = (index: number) => props.showTabShortcuts !== false && index < 5 ? keys.key(`navigation.tab${index + 1}` as KeyAction) : ""
   const tabLabel = (index: number, label: string) => [tabKey(index), label].filter(Boolean).join(" ")
   const layout = createMemo(() => {
     const width = Math.max(0, dimensions().width - 4)
-    const tabs = props.tabs.map((tab, index) => {
-      const label = tabLabel(index, tab.label)
+    let tabs = props.tabs.map((tab, index) => {
+      const label = [props.showTabShortcuts !== false ? tabKey(index) : icons().navigation[tab.page], tab.label].filter(Boolean).join(" ")
       if (props.showTabCounts === false || tab.page !== "issues" && tab.page !== "pulls") return { ...tab, label, counted: label }
       const count = props.workCounts?.value?.[tab.page]
       const placeholder = props.workCounts?.status === "error" ? "—" : "..."
@@ -63,6 +66,12 @@ export function Header(props: {
     })
     const totalWidth = (labels: string[]) => labels.reduce((sum, label) => sum + Bun.stringWidth(label), 0)
       + Math.max(0, labels.length - 1) * 3
+    if (totalWidth(tabs.map((tab) => tab.counted)) > width) {
+      tabs = tabs.map((tab, index) => {
+        const label = tabLabel(index, props.tabs[index]!.label)
+        return { ...tab, label, counted: label + tab.counted.slice(tab.label.length) }
+      })
+    }
     const countedWidth = totalWidth(tabs.map((tab) => tab.counted))
     // Compact headers hide the repository name when it cannot fit beside the tabs.
     // The expanded header keeps its full owner/repository row.
