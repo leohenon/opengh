@@ -9,6 +9,7 @@ import { ago, fitText } from "../format"
 import { issueIcon, pullRequestIcon } from "../issue-references"
 import { useTheme } from "../theme"
 import { useIcons } from "../icon-style"
+import { useLoadingDots } from "../motion"
 import { mouseClick, type MousePosition } from "../mouse"
 
 export function WorkScreen(props: {
@@ -29,6 +30,9 @@ export function WorkScreen(props: {
 }) {
   const { colors } = useTheme()
   const icons = useIcons()
+  const dots = useLoadingDots(() => props.active
+    && (props.counts.open === "…" || props.counts.closed === "…"))
+  const count = (value: string) => value === "…" ? dots() : value
   const merged = (entry: IssueSummary | PullRequestSummary) => props.kind === "pull" && "merged" in entry && entry.merged
   const entryColor = (entry: IssueSummary | PullRequestSummary) => {
     if (merged(entry)) return colors.purple
@@ -51,7 +55,7 @@ export function WorkScreen(props: {
             selectable={false}
             {...mouseClick(() => props.onStateChange?.("open"), () => props.active && props.interactive && Boolean(props.onStateChange))}
           >
-            Open ({props.counts.open})
+            Open ({count(props.counts.open)})
           </text>
           <text
             fg={props.state === "closed" ? colors.closedState : colors.muted}
@@ -59,7 +63,7 @@ export function WorkScreen(props: {
             selectable={false}
             {...mouseClick(() => props.onStateChange?.("closed"), () => props.active && props.interactive && Boolean(props.onStateChange))}
           >
-            Closed ({props.counts.closed})
+            Closed ({count(props.counts.closed)})
           </text>
         </box>
       )}
@@ -82,7 +86,7 @@ export function WorkScreen(props: {
           >
             {(entry, active) => (
               <>
-                <box height={2} width={2} flexShrink={0} alignItems="flex-start">
+                <box height={2} width={entryIcon(entry()) ? 2 : 0} flexShrink={0} alignItems="flex-start">
                   <text fg={entryColor(entry())}>{entryIcon(entry())}</text>
                 </box>
                 <box height={2} flexGrow={1} flexBasis={0} minWidth={0} flexDirection="column" overflow="hidden">

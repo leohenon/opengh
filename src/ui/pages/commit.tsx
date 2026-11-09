@@ -10,6 +10,7 @@ import { ago } from "../format"
 import { detailContentWidth } from "../detail-layout"
 import { useTheme } from "../theme"
 import { useIcons } from "../icon-style"
+import { iconPrefix } from "../icons"
 import { createScrollbarVisibility } from "../scrollbar-visibility"
 import { LinkedText } from "../components/linked-text"
 import { normalizeRepositoryUrl } from "../reference-links"
@@ -98,11 +99,11 @@ export function CommitScreen(props: {
             {(commit) => (
               <>
                 <text width="100%" flexShrink={0} marginTop={1} fg={colors.muted}>
-                  {icons().user} <b><span style={{ fg: colors.text }}>{commit().author}</span></b> authored {ago(commit().date)} · <Show when={repositoryUrl()} fallback={props.sha.slice(0, 7)}>{(url) => <a href={`${url()}/commit/${props.sha}`}>{props.sha.slice(0, 7)}</a>}</Show>
+                  {iconPrefix(icons().user)}<b><span style={{ fg: colors.text }}>{commit().author}</span></b> authored {ago(commit().date)} · <Show when={repositoryUrl()} fallback={props.sha.slice(0, 7)}>{(url) => <a href={`${url()}/commit/${props.sha}`}>{props.sha.slice(0, 7)}</a>}</Show>
                 </text>
                 <Show when={committer() && (committer()!.name !== commit().author || committer()!.date !== commit().date)}>
                   <text width="100%" flexShrink={0} fg={colors.muted}>
-                    {icons().user} Committer <b><span style={{ fg: colors.text }}>{committer()?.name}</span></b>
+                    {iconPrefix(icons().user)}Committer <b><span style={{ fg: colors.text }}>{committer()?.name}</span></b>
                     <Show when={ago(committer()!.date) !== ago(commit().date)}> · {ago(committer()!.date)}</Show>
                   </text>
                 </Show>

@@ -1,11 +1,11 @@
 import { createSignal, onCleanup, onMount, Show } from "solid-js"
 import { useTheme } from "../theme"
-import { useLoadingGlyph } from "../motion"
+import { useLoadingDots } from "../motion"
 
 export function LoadingText(props: { text: string; color?: string; delay?: number }) {
   const { colors } = useTheme()
   const [visible, setVisible] = createSignal(false)
-  const glyph = useLoadingGlyph(visible)
+  const dots = useLoadingDots(visible)
   let delayTimer: ReturnType<typeof setTimeout> | undefined
 
   onMount(() => {
@@ -20,7 +20,7 @@ export function LoadingText(props: { text: string; color?: string; delay?: numbe
 
   return (
     <Show when={visible()}>
-      <text fg={props.color ?? colors.muted}>{glyph()} {props.text}</text>
+      <text fg={props.color ?? colors.muted}>{props.text.replace(/(?:…|\.{1,3})$/, "")}{dots()}</text>
     </Show>
   )
 }

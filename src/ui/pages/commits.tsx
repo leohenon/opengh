@@ -10,6 +10,7 @@ import { SelectableList } from "../components/selectable-list"
 import { ago, fitText } from "../format"
 import { useTheme } from "../theme"
 import { useIcons } from "../icon-style"
+import { iconPrefix } from "../icons"
 import { mouseClick, type MousePosition } from "../mouse"
 
 export function CommitsScreen(props: {
@@ -55,7 +56,7 @@ export function CommitsScreen(props: {
             {...mouseClick(() => props.onOpenBranches?.(), () => props.active && props.interactive && props.canOpenBranches !== false && Boolean(props.onOpenBranches))}>
             <box flexGrow={1} flexBasis={0} minWidth={0}>
               <ListLine fg={props.canOpenBranches === false ? colors.muted : colors.blue} attributes={TextAttributes.BOLD}>
-                {(width) => fitText(`${icons().branch} ${props.currentBranch}`, width)}
+                {(width) => fitText(`${iconPrefix(icons().branch)}${props.currentBranch}`, width)}
               </ListLine>
             </box>
             <text flexShrink={0} fg={colors.muted}> ▾</text>

@@ -507,6 +507,7 @@ describe("opengh TUI", () => {
   test("shows stable open totals in work tabs across loading, state filters, and compact mode", async () => {
     const [data, setData] = createSignal<RepositoryData>({
       ...githubDataFixture, workCounts: { status: "loading", phase: "load" },
+      issues: { ...githubDataFixture.issues, closed: { status: "loading", phase: "load" } },
     });
     const [config, setConfig] = createSignal({ ...defaultConfig });
     const view = await testRender(() => (
@@ -515,8 +516,26 @@ describe("opengh TUI", () => {
     active.push(view);
     const header = () => view.captureCharFrame().split("\n").slice(0, config().compactHeader ? 1 : 5).join("\n");
     await view.flush();
-    expect(header()).toContain("Issues (…)");
-    expect(header()).toContain("Pull requests (…)");
+    expect(header()).toContain("Issues (.  )");
+    expect(header()).toContain("Pull requests (.  )");
+    view.mockInput.pressKey("3");
+    await view.flush();
+    const frame = view.captureCharFrame();
+    expect(frame).toContain("Open (.  )");
+    const closed = frame.match(/Closed \(([. ]{3})\)/)?.[0];
+    expect(closed).toBeDefined();
+    const first = header();
+    const pullsColumn = first.indexOf("Pull requests");
+    await Bun.sleep(420);
+    await view.flush();
+    expect(header()).not.toBe(first);
+    expect(header().indexOf("Pull requests")).toBe(pullsColumn);
+    expect(view.captureCharFrame()).toContain("Open (.. )");
+    setConfig({ ...defaultConfig, reducedMotion: true });
+    await view.flush();
+    expect(header()).toContain("Issues (...)");
+    expect(view.captureCharFrame()).toContain("Open (...)");
+    expect(view.captureCharFrame()).toContain("Closed (...)");
     setData((current) => ({ ...current, workCounts: { status: "ready", value: { issues: 2450, pulls: 1200 } } }));
     await view.flush();
     expect(header()).toContain("Issues (2450)");
@@ -544,7 +563,7 @@ describe("opengh TUI", () => {
     expect(header()).toContain("Pull requests (—)");
   });
 
-  test("status bar hints can be disabled on every page without disabling shortcuts or loading feedback", async () => {
+  test("shortcut hints can be disabled on every page without disabling shortcuts or loading feedback", async () => {
     const [config, setConfig] = createSignal({ ...defaultConfig });
     const [operations, setOperations] = createSignal(repositoryOperationsFixture);
     let copied = "";
@@ -580,7 +599,7 @@ describe("opengh TUI", () => {
     for (let i = 0; i < 9; i++) view.mockInput.pressArrow("down");
     view.mockInput.pressEnter();
     await view.flush();
-    expect(view.captureCharFrame()).toContain("Status bar hints");
+    expect(view.captureCharFrame()).toContain("Shortcut hints");
     expect(config().showStatusBarHints).toBe(false);
     expect(statusLine()).toBe("");
     view.mockInput.pressEscape();
@@ -600,7 +619,7 @@ describe("opengh TUI", () => {
     setOperations((value) => ({ ...value, refresh: { status: "loading" } }));
     await Bun.sleep(210);
     await view.flush();
-    expect(statusLine()).toContain("Refreshing…");
+    expect(statusLine()).toContain("Refreshing");
 
     setOperations(repositoryOperationsFixture);
     setConfig({ ...defaultConfig, showStatusBarHints: true, hideDocumentsTab: false, compactHeader: false, iconStyle: "unicode" });
@@ -668,13 +687,13 @@ describe("opengh TUI", () => {
     expect(initialFrame).toContain("anomalyco/opentui");
     expect(initialFrame).toContain("README");
     expect(initialFrame).toContain("About");
-    expect(initialFrame).not.toContain("Loading…");
+    expect(initialFrame).not.toContain("Loading");
 
     await Bun.sleep(210);
     await view.flush();
     const loadingFrame = view.captureCharFrame();
-    expect(loadingFrame).toContain("Loading…");
-    expect(loadingFrame.match(/Loading…/g)).toHaveLength(1);
+    expect(loadingFrame).toContain("Loading");
+    expect(loadingFrame.match(/Loading/g)).toHaveLength(1);
   });
 
   test("renders an empty README as loaded content", async () => {
@@ -687,7 +706,7 @@ describe("opengh TUI", () => {
 
     await Bun.sleep(210);
     await view.flush();
-    expect(view.captureCharFrame()).not.toContain("Loading…");
+    expect(view.captureCharFrame()).not.toContain("Loading");
   });
 
   test("tab highlight follows h/l after a complex README finishes loading", async () => {
@@ -809,22 +828,22 @@ describe("opengh TUI", () => {
       ["queued run", workflowIcons.clock, colors.muted],
       ["waiting run", workflowIcons.clock, colors.yellow],
     ]) expect(icon(title!, glyph!)?.fg).toEqual(RGBA.fromHex(color!));
-    const spinner = () => view.captureSpans().lines
+    const dots = () => view.captureSpans().lines
       .find((line) => line.spans.some((span) => span.text.includes("in_progress run")))?.spans
-      .find((span) => /[◐◓◑◒]/.test(span.text));
-    expect(spinner()?.fg).toEqual(RGBA.fromHex(colors.yellow));
-    const first = spinner()?.text;
-    for (let attempt = 0; attempt < 12 && spinner()?.text === first; attempt++) {
+      .find((span) => /\./.test(span.text));
+    expect(dots()?.fg).toEqual(RGBA.fromHex(colors.yellow));
+    const first = dots()?.text;
+    for (let attempt = 0; attempt < 12 && dots()?.text === first; attempt++) {
       await Bun.sleep(40);
       await view.flush();
     }
-    expect(spinner()?.text).not.toBe(first);
+    expect(dots()?.text).not.toBe(first);
     setConfig((current) => ({ ...current, reducedMotion: true }));
     await view.flush();
-    expect(spinner()?.text.trim()).toBe("◐");
+    expect(dots()?.text.trim()).toBe("...");
     await Bun.sleep(170);
     await view.flush();
-    expect(spinner()?.text.trim()).toBe("◐");
+    expect(dots()?.text.trim()).toBe("...");
     expect(view.captureCharFrame()).toContain("in progress");
   });
 
@@ -1008,8 +1027,8 @@ describe("opengh TUI", () => {
     const retainedRow = frame.split("\n").findIndex((row) => row.includes("commit row 12"));
     expect(retainedRow).toBeGreaterThanOrEqual(0);
     expect(frame.split("\n")[retainedRow]).toContain("▌");
-    expect(retainedRow + 1).toBeLessThan(frame.split("\n").findIndex((row) => row.includes("Refreshing…")));
-    expect(frame).toContain("Refreshing…");
+    expect(retainedRow + 1).toBeLessThan(frame.split("\n").findIndex((row) => row.includes("Refreshing")));
+    expect(frame).toContain("Refreshing");
   });
 
   test("keeps one stable list while moving through paginated updates", async () => {
@@ -1077,7 +1096,9 @@ describe("opengh TUI", () => {
   test("shows only repository documents that exist", async () => {
     const data = {
       ...githubDataFixture,
-      documents: { status: "ready" as const, value: githubDataFixture.documents.value!.filter((document) => document.path !== "SECURITY.md") },
+      documents: { status: "ready" as const, value: githubDataFixture.documents.value!.filter((document) => document.path !== "SECURITY.md").map((document) => document.path === "README.md"
+        ? { ...document, resource: { status: "ready" as const, value: Array.from({ length: 80 }, (_, index) => `Document line ${index}\n`).join("\n") } }
+        : document) },
     };
     const view = await testRender(
       () => <App data={data} operations={repositoryOperationsFixture} onQuit={() => {}} />,
@@ -1092,6 +1113,14 @@ describe("opengh TUI", () => {
     expect(frame).toContain("Contributing");
     expect(frame).not.toContain("Security");
     expect(frame).toContain("MIT license");
+    const scroll = view.renderer.root.findDescendantById("overview-document-scroll") as ScrollBoxRenderable;
+    scroll.scrollTo(12);
+    await view.flush();
+    expect(view.captureCharFrame()).not.toContain("Contributing");
+    view.mockInput.pressTab();
+    await view.flush();
+    expect(scroll.scrollTop).toBe(0);
+    expect(view.captureCharFrame()).toContain("Contributing");
   });
 
   test("uses a plain README heading when no other documents exist", async () => {
@@ -1457,6 +1486,18 @@ describe("opengh TUI", () => {
     await Bun.sleep(30);
     await view.flush();
     expect(view.captureCharFrame()).toContain(repositoryIcons.star);
+
+    view.mockInput.pressKey(",");
+    for (let i = 0; i < 8; i++) view.mockInput.pressArrow("down");
+    view.mockInput.pressArrow("left");
+    await view.flush();
+    expect(config().iconStyle).toBe("none");
+    expect(view.captureCharFrame()).toContain("‹ None ›");
+    view.mockInput.pressEscape();
+    await Bun.sleep(30);
+    await view.flush();
+    expect(view.captureCharFrame()).not.toContain(repositoryIcons.star);
+    expect(view.captureCharFrame()).toContain("README");
 
     view.mockInput.pressKey(",");
     for (let i = 0; i < 8; i++) view.mockInput.pressArrow("down");

@@ -9,7 +9,7 @@ export type ColorMode = "system" | "dark" | "light"
 export type DetailLayout = "centered" | "wide"
 export type DetailsPlacement = "auto" | "inline"
 export type MarkdownStyle = "rich" | "minimal"
-export type IconStyle = "unicode" | "nerd"
+export type IconStyle = "unicode" | "nerd" | "none"
 
 export type Config = {
   showScrollbars: boolean
@@ -86,7 +86,7 @@ function normalizeConfig(value: unknown): Config {
     showStatusBarHints: typeof input.showStatusBarHints === "boolean"
       ? input.showStatusBarHints
       : defaultConfig.showStatusBarHints,
-    iconStyle: input.iconStyle === "unicode" || input.iconStyle === "nerd" ? input.iconStyle : defaultConfig.iconStyle,
+    iconStyle: input.iconStyle === "unicode" || input.iconStyle === "nerd" || input.iconStyle === "none" ? input.iconStyle : defaultConfig.iconStyle,
     compactHeader: typeof input.compactHeader === "boolean" ? input.compactHeader : defaultConfig.compactHeader,
     hideDocumentsTab: typeof input.hideDocumentsTab === "boolean" ? input.hideDocumentsTab : defaultConfig.hideDocumentsTab,
     showTabCounts: typeof input.showTabCounts === "boolean" ? input.showTabCounts : defaultConfig.showTabCounts,

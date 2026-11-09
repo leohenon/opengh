@@ -11,6 +11,7 @@ import { GitHubMarkdown } from "../components/github-markdown"
 import { createReactiveMarkdownStyle } from "../markdown-style"
 import { useTheme } from "../theme"
 import { useIcons } from "../icon-style"
+import { iconPrefix } from "../icons"
 import { createScrollbarVisibility } from "../scrollbar-visibility"
 import { mouseClick } from "../mouse"
 import type { MarkdownAnchorRequest, MarkdownAnchorResolver } from "../markdown-anchors"
@@ -52,9 +53,9 @@ function InlineAbout(props: { repo: Repo }) {
         <text width="100%" flexShrink={0} fg={colors.muted}>Forked from <span style={{ fg: colors.blue }}>{props.repo.parentRepository}</span></text>
       </Show>
       <text width="100%" flexShrink={0} fg={colors.muted}>
-        {icons().repository.star} {count(props.repo.stars)} stars{" · "}
-        {icons().repository.fork} {count(props.repo.forks)} forks{" · "}
-        {icons().repository.watching} {count(props.repo.watchers)} watching
+        {iconPrefix(icons().repository.star)}{count(props.repo.stars)} stars{" · "}
+        {iconPrefix(icons().repository.fork)}{count(props.repo.forks)} forks{" · "}
+        {iconPrefix(icons().repository.watching)}{count(props.repo.watchers)} watching
         <Show when={props.repo.language && props.repo.language !== "Unknown"}>{" · "}<span style={{ fg: colors.blue }}>{props.repo.language}</span></Show>
         <Show when={props.repo.license && props.repo.license !== "None"}>{" · "}{props.repo.license}</Show>
       </text>
@@ -87,8 +88,17 @@ export function OverviewScreen(props: {
   const about = createMemo(() => extractAboutContent(repo().description))
   const documents = () => props.documents.value ?? []
   const document = () => documents().find((item) => item.id === props.currentDocument) ?? documents()[0]
+  const documentLabel = (item: RepositoryDocumentState) => {
+    const name = item.path.split("/").at(-1)?.toLowerCase() ?? ""
+    const kind = /^readme(?:$|[._-])/.test(name) ? "readme"
+      : /^code[_-]of[_-]conduct(?:$|[._-])/.test(name) ? "conduct"
+      : /^contributing(?:$|[._-])/.test(name) ? "contributing"
+      : /^(?:licen[sc]e|copying|unlicense)(?:$|[._-])/.test(name) ? "license"
+      : /^security(?:$|[._-])/.test(name) ? "security" : "file"
+    return `${iconPrefix(icons().document[kind])}${item.label}`
+  }
   // Leave the label empty during the first load so it fills in instead of being replaced.
-  const currentLabel = () => document()?.label
+  const currentLabel = () => (document() ? documentLabel(document()!) : undefined)
     ?? (props.documents.status === "loading" && props.documents.value === undefined ? "" : "Documentation")
   const markdownContext = () => {
     const source = document()
@@ -106,13 +116,13 @@ export function OverviewScreen(props: {
     : document() ? documentResource() : { status: "ready", value: null })
   const hasDocumentTabs = () => documents().length > 1
   const showAboutSidebar = () => !props.inlineAbout && aboutSidebarVisible(props.aboutSidebar, dimensions().width)
-  const documentLabelsWidth = () => documents().reduce((width, item) => width + item.label.length, 0)
-    + Math.max(0, documents().length - 1) * 2
+  const documentLabelsWidth = () => documents().reduce((width, item) => width + Bun.stringWidth(documentLabel(item)) + 2, 0)
   const compactDocuments = () => hasDocumentTabs()
     && documentLabelsWidth() > Math.max(1, dimensions().width - (showAboutSidebar() ? 42 : 8))
   const markdownStyle = createReactiveMarkdownStyle(colors, theme)
 
   let scroll: ScrollBoxRenderable | undefined
+  onCleanup(() => { scroll = undefined; props.scrollRef(undefined) })
   const [resolveAnchor, setResolveAnchor] = createSignal<MarkdownAnchorResolver>()
   createEffect(on(() => [props.documentAnchor, resolveAnchor(), document()?.id] as const, ([request, resolve, documentId]) => {
     if (!request || !resolve || request.document !== documentId) return
@@ -139,30 +149,42 @@ export function OverviewScreen(props: {
       <Show when={props.inlineAbout && props.aboutSidebar !== "hide"}>
         <InlineAbout repo={repo()} />
       </Show>
-      <box flexGrow={1} minWidth={0} minHeight={0} flexDirection="column">
+      <scrollbox
+        id="overview-document-scroll"
+        focusable={false}
+        onMouseScroll={(event) => event.stopPropagation()}
+        ref={(value) => { scroll = value; bindScrollbar(value); props.scrollRef(value) }}
+        flexGrow={1}
+        minWidth={0}
+        minHeight={0}
+        backgroundColor={colors.canvas}
+        paddingTop={props.hideDocumentsTab ? 1 : 0}
+        paddingBottom={1}
+        scrollY
+      >
         <Show when={!props.hideDocumentsTab}>
           <box
             height={1}
             flexShrink={0}
             flexDirection="row"
             alignItems="center"
-            gap={2}
-            paddingLeft={2}
+            gap={0}
+            paddingLeft={1}
             paddingRight={2}
             minWidth={0}
             overflow="hidden"
           >
             <Show
               when={hasDocumentTabs()}
-              fallback={<text fg={props.compactHeader ? colors.salmon : colors.text} attributes={TextAttributes.BOLD}>{currentLabel()}</text>}
+              fallback={<box paddingLeft={1}><text fg={colors.text} attributes={TextAttributes.BOLD}>{currentLabel()}</text></box>}
             >
               <Show
                 when={!compactDocuments()}
                 fallback={(
-                  <box flexDirection="row" gap={1}>
+                  <box flexDirection="row" gap={1} paddingLeft={1}>
                     <text fg={colors.muted} selectable={false}
                       {...mouseClick(() => props.onMoveDocument?.(-1), () => props.interactive !== false && Boolean(props.onMoveDocument))}>‹</text>
-                    <text fg={props.compactHeader ? colors.salmon : colors.text} attributes={TextAttributes.BOLD}>{currentLabel()}</text>
+                    <text fg={colors.text} bg={colors.panel} attributes={TextAttributes.BOLD}>{currentLabel()}</text>
                     <text fg={colors.muted} selectable={false}
                       {...mouseClick(() => props.onMoveDocument?.(1), () => props.interactive !== false && Boolean(props.onMoveDocument))}>›</text>
                   </box>
@@ -170,48 +192,32 @@ export function OverviewScreen(props: {
               >
                 <For each={documents()}>
                   {(item) => (
-                    <text
-                      fg={item.id === document()?.id ? props.compactHeader ? colors.salmon : colors.text : colors.muted}
-                      attributes={item.id === document()?.id ? TextAttributes.BOLD : TextAttributes.NONE}
-                      selectable={false}
+                    <box
+                      height={1}
+                      flexShrink={0}
+                      flexDirection="row"
+                      paddingX={1}
+                      backgroundColor={item.id === document()?.id ? colors.panel : colors.header}
                       {...mouseClick(() => props.onSelectDocument?.(item.id), () => props.interactive !== false && Boolean(props.onSelectDocument))}
                     >
-                      {item.label}
-                    </text>
+                      <text
+                        height={1}
+                        wrapMode="none"
+                        fg={item.id === document()?.id ? colors.text : colors.muted}
+                        attributes={item.id === document()?.id ? TextAttributes.BOLD : TextAttributes.NONE}
+                        selectable={false}
+                      >
+                        {documentLabel(item)}
+                      </text>
+                    </box>
                   )}
                 </For>
               </Show>
             </Show>
           </box>
-          <Show when={!props.compactHeader}>
-            <box height={1} flexShrink={0} flexDirection="row">
-              <Show when={hasDocumentTabs()}>
-                <Show
-                  when={!compactDocuments()}
-                  fallback={(
-                    <>
-                      <text fg={colors.border}>{"─".repeat(4)}</text>
-                      <text fg={colors.salmon}>{"─".repeat(currentLabel().length)}</text>
-                    </>
-                  )}
-                >
-                  <text fg={colors.border}>──</text>
-                  <For each={documents()}>
-                    {(item) => (
-                      <>
-                        <text fg={item.id === document()?.id ? colors.salmon : colors.border} selectable={false}
-                          {...mouseClick(() => props.onSelectDocument?.(item.id), () => props.interactive !== false && Boolean(props.onSelectDocument))}>
-                          {"─".repeat(item.label.length)}
-                        </text>
-                        <text fg={colors.border}>──</text>
-                      </>
-                    )}
-                  </For>
-                </Show>
-              </Show>
-              <box flexGrow={1} height={1} border={["bottom"]} borderColor={colors.border} />
-            </box>
-          </Show>
+          <text height={1} flexShrink={0} wrapMode="none" fg={colors.border}>
+            {"─".repeat(dimensions().width)}
+          </text>
         </Show>
         <ResourceStateView resource={viewResource()}>
           {() => (
@@ -220,40 +226,24 @@ export function OverviewScreen(props: {
                 <text fg={colors.muted}>No repository documentation.</text>
               </box>
             )}>
-              {(_) => {
-                onCleanup(() => { scroll = undefined; props.scrollRef(undefined) })
-                return (
-                  <scrollbox
-                    id="overview-document-scroll"
-                    focusable={false}
-                    onMouseScroll={(event) => event.stopPropagation()}
-                    ref={(value) => { scroll = value; bindScrollbar(value); props.scrollRef(value) }}
-                    flexGrow={1}
-                    minWidth={0}
-                    minHeight={0}
-                    backgroundColor={colors.canvas}
-                    paddingX={2}
-                    paddingY={1}
-                    scrollY
-                    contentOptions={{ alignItems: centered() ? "center" : "stretch" }}
-                  >
-                    <box width="100%" maxWidth={detailContentWidth(props.detailLayout)} minWidth={0} flexShrink={0} flexDirection="column">
-                      <GitHubMarkdown
-                        content={documentResource().value ?? ""}
-                        anchorRef={(resolve) => { setResolveAnchor(() => resolve) }}
-                        syntaxStyle={markdownStyle()}
-                        context={markdownContext()}
-                        plainText={plainDocument()}
-                        wide={!centered()}
-                      />
-                    </box>
-                  </scrollbox>
-                )
-              }}
+              {(_) => (
+                <box width="100%" paddingX={2} flexShrink={0} alignItems={centered() ? "center" : "stretch"}>
+                  <box width="100%" maxWidth={detailContentWidth(props.detailLayout)} minWidth={0} flexShrink={0} flexDirection="column">
+                    <GitHubMarkdown
+                      content={documentResource().value ?? ""}
+                      anchorRef={(resolve) => { setResolveAnchor(() => resolve) }}
+                      syntaxStyle={markdownStyle()}
+                      context={markdownContext()}
+                      plainText={plainDocument()}
+                      wide={!centered()}
+                    />
+                  </box>
+                </box>
+              )}
             </Show>
           )}
         </ResourceStateView>
-      </box>
+      </scrollbox>
 
       <Show when={showAboutSidebar()}>
         <box width={32} flexShrink={0} minHeight={0} flexDirection="column">
@@ -304,15 +294,15 @@ export function OverviewScreen(props: {
             <text height={1} flexShrink={0} fg={colors.blue}>{repo().language}</text>
             <box height={1} flexShrink={0} />
             <box height={1} flexShrink={0} flexDirection="row">
-              <text width={2} fg={colors.muted}>{icons().repository.star}</text>
+              <text width={icons().repository.star ? 2 : 0} fg={colors.muted}>{icons().repository.star}</text>
               <text fg={colors.text}>{count(repo().stars)} stars</text>
             </box>
             <box height={1} flexShrink={0} flexDirection="row">
-              <text width={2} fg={colors.muted}>{icons().repository.fork}</text>
+              <text width={icons().repository.fork ? 2 : 0} fg={colors.muted}>{icons().repository.fork}</text>
               <text fg={colors.text}>{count(repo().forks)} forks</text>
             </box>
             <box height={1} flexShrink={0} flexDirection="row">
-              <text width={2} fg={colors.muted}>{icons().repository.watching}</text>
+              <text width={icons().repository.watching ? 2 : 0} fg={colors.muted}>{icons().repository.watching}</text>
               <text fg={colors.text}>{count(repo().watchers)} watching</text>
             </box>
             <box height={1} flexShrink={0} />

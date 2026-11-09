@@ -243,7 +243,7 @@ test("overview, commit, and PR shortcuts open GitHub and copy the active URL or 
   view.mockInput.pressEnter()
   await Bun.sleep(210)
   await view.flush()
-  expect(view.captureCharFrame()).toContain("Loading…")
+  expect(view.captureCharFrame()).toContain("Loading")
   expect(view.captureCharFrame()).toContain("o GitHub · y copy SHA")
   setDetail({ sha, resource: { status: "error", phase: "load", message: "Commit unavailable" } })
   await view.flush()

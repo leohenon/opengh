@@ -3,6 +3,7 @@ import type { PullCheck, PullContext } from "../../models"
 import { relativeTime } from "../format"
 import { mergeReadinessStatus } from "../merge-readiness"
 import { useIcons } from "../icon-style"
+import { iconPrefix } from "../icons"
 import { useTheme } from "../theme"
 import { MetadataField } from "./detail-metadata"
 import { TimelineEntry } from "./timeline-entry"
@@ -134,7 +135,7 @@ export function PullReadinessPanel(props: { context: PullContext; expectedHeadSh
         )}>
           {(check) => (
             <box width="100%" minWidth={0} flexShrink={0} flexDirection="row">
-              <text width={12} flexShrink={0} fg={checkColor(check)}>{checkIcon(check)} {checkLabels[check.state]}</text>
+              <text width={12} flexShrink={0} fg={checkColor(check)}>{iconPrefix(checkIcon(check))}{checkLabels[check.state]}</text>
               <text flexGrow={1} flexBasis={0} minWidth={0} flexShrink={0} fg={colors.muted}>
                 <Show when={check.url} fallback={check.name}>
                   {(url) => <span style={{ fg: colors.blue }}><a href={url()}>{check.name}</a></span>}

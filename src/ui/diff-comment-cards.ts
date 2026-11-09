@@ -1,3 +1,4 @@
+import { iconPrefix } from "./icons"
 import { BoxRenderable, TextAttributes, TextRenderable, type Renderable, type RenderContext, type TextOptions } from "@opentui/core"
 import type { PullReviewThread, ReviewThreadComment } from "../models"
 import { relativeTime } from "./format"
@@ -64,7 +65,7 @@ export function createDiffCommentCards(renderer: RenderContext, renderBody: (con
           })
           header.add(new TextRenderable(renderer, {
             id: `${prefix}${thread.id}:author:${index}`,
-            content: `${commentIcon} @${comment.author}`,
+            content: `${iconPrefix(commentIcon)}@${comment.author}`,
             fg: colors.blue, attributes: TextAttributes.BOLD, height: 1, minWidth: 0, flexShrink: 1, wrapMode: "none", truncate: true,
           }))
           if (index === 0 && status.length) header.add(new TextRenderable(renderer, {

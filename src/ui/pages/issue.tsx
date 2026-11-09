@@ -18,6 +18,7 @@ import { issueIcon, referenceColor, referenceIcon, referenceState, referencedPul
 import { createReactiveMarkdownStyle } from "../markdown-style"
 import { useTheme } from "../theme"
 import { useIcons } from "../icon-style"
+import { iconPrefix } from "../icons"
 import { createScrollbarVisibility } from "../scrollbar-visibility"
 
 function IssueMetadata(props: { issue: IssueDetail; compact: boolean; inline?: boolean }) {
@@ -72,15 +73,15 @@ function ReferencedPulls(props: { resource: ResourceState<IssueReference[]>; rep
             <box width="100%" minWidth={0} flexShrink={0} marginTop={1}>
               <Show when={props.onOpenReference} fallback={(
                 <text width="100%" flexShrink={0} fg={referenceColor(colors, reference)}>
-                  <Show when={props.interactive} fallback={<>{referenceIcon(reference, icons())} #{reference.number} · {referenceState(reference)}</>}>
-                    <a href={reference.url}>{referenceIcon(reference, icons())} <span style={{ fg: theme.markdownLink }}>#{reference.number}</span> · {referenceState(reference)}</a>
+                  <Show when={props.interactive} fallback={<>{iconPrefix(referenceIcon(reference, icons()))}#{reference.number} · {referenceState(reference)}</>}>
+                    <a href={reference.url}>{iconPrefix(referenceIcon(reference, icons()))}<span style={{ fg: theme.markdownLink }}>#{reference.number}</span> · {referenceState(reference)}</a>
                   </Show>
                 </text>
               )}>
                 <text width="100%" flexShrink={0} fg={referenceColor(colors, reference)}
                   {...mouseClick(() => props.onOpenReference?.(reference), () => props.interactive && Boolean(props.onOpenReference), () => reference)}>
-                  <Show when={props.interactive} fallback={<>{referenceIcon(reference, icons())} #{reference.number} · {referenceState(reference)}</>}>
-                    <a href={reference.url}>{referenceIcon(reference, icons())} <span style={{ fg: theme.markdownLink }}>#{reference.number}</span> · {referenceState(reference)}</a>
+                  <Show when={props.interactive} fallback={<>{iconPrefix(referenceIcon(reference, icons()))}#{reference.number} · {referenceState(reference)}</>}>
+                    <a href={reference.url}>{iconPrefix(referenceIcon(reference, icons()))}<span style={{ fg: theme.markdownLink }}>#{reference.number}</span> · {referenceState(reference)}</a>
                   </Show>
                 </text>
               </Show>
@@ -194,7 +195,7 @@ export function IssueScreen(props: {
             {(current) => (
               <text width="100%" flexShrink={0} marginTop={1} fg={colors.muted}>
                 <span style={{ fg: current().state === "open" ? colors.openState : colors.closedState }}>
-                  {issueIcon(current().state, icons())} {current().state === "open" ? "Open" : "Closed"}
+                  {iconPrefix(issueIcon(current().state, icons()))}{current().state === "open" ? "Open" : "Closed"}
                 </span>
                 {issue()?.stateReason ? ` · ${issue()!.stateReason!.replaceAll("_", " ")}` : ""}
                 {issue()?.locked ? " · locked" : ""}
@@ -216,7 +217,7 @@ export function IssueScreen(props: {
                   </Show>
                   <box id="issue-detail-description" {...reactionMouse} width="100%" minWidth={0} flexShrink={0} backgroundColor={surface()} paddingX={2} paddingY={1} flexDirection="column">
                     <text width="100%" flexShrink={0} fg={colors.muted}>
-                      {icons().user} <b><span style={{ fg: colors.text }}><a href={`https://github.com/${current().author}`}>{current().author}</a></span></b> · author
+                      {iconPrefix(icons().user)}<b><span style={{ fg: colors.text }}><a href={`https://github.com/${current().author}`}>{current().author}</a></span></b> · author
                     </text>
                     <box width="100%" minWidth={0} flexShrink={0} marginTop={1}>
                       <Show when={current().body.trim()} fallback={<text fg={colors.muted}>No description provided.</text>}>

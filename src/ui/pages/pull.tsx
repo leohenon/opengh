@@ -17,6 +17,7 @@ import { detailContentWidth } from "../detail-layout"
 import { ago, relativeTime } from "../format"
 import type { GitHubMarkdownContext } from "../github-markdown"
 import { useIcons } from "../icon-style"
+import { iconPrefix } from "../icons"
 import { pullRequestIcon } from "../issue-references"
 import { createReactiveMarkdownStyle } from "../markdown-style"
 import { createScrollbarVisibility } from "../scrollbar-visibility"
@@ -167,7 +168,7 @@ export function PullScreen(props: {
           <Show when={header()}>
             {(current) => (
               <text width="100%" flexShrink={0} marginTop={1} fg={colors.muted}>
-                <span style={{ fg: stateColor() }}>{pullRequestIcon(current(), icons())} {state()}</span>
+                <span style={{ fg: stateColor() }}>{iconPrefix(pullRequestIcon(current(), icons()))}{state()}</span>
                 {" · "}<span style={{ fg: colors.text }}><a href={`https://github.com/${current().author}`}>{current().author}</a></span> opened <Show when={pull()?.url} fallback={ago(current().createdAt)}>{(url) => <a href={url()}>{ago(current().createdAt)}</a>}</Show>
               </text>
             )}
@@ -187,7 +188,7 @@ export function PullScreen(props: {
                 </Show>
                 <box {...reactionMouse} id="pull-detail-description" width="100%" minWidth={0} flexShrink={0} backgroundColor={surface()} paddingX={2} paddingY={1} flexDirection="column">
                   <text width="100%" flexShrink={0} fg={colors.muted}>
-                    {icons().user} <b><span style={{ fg: colors.text }}><a href={`https://github.com/${current().author}`}>{current().author}</a></span></b> · author
+                    {iconPrefix(icons().user)}<b><span style={{ fg: colors.text }}><a href={`https://github.com/${current().author}`}>{current().author}</a></span></b> · author
                   </text>
                   <box width="100%" minWidth={0} flexShrink={0} marginTop={1}>
                     <Show when={current().body.trim()} fallback={<text fg={colors.muted}>No description provided.</text>}>

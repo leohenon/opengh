@@ -30,8 +30,8 @@ const settingDefinitions: Record<Setting, { title: string; description: string; 
   "hide-documents-tab": { title: "Document tabs", description: "Overview document navigation", value: (config) => config.hideDocumentsTab ? "off" : "on" },
   "detail-layout": { title: "Detail width", description: "Detail page width", value: (config) => config.detailLayout },
   "details-placement": { title: "Details placement", description: "Issue and PR metadata", value: (config) => config.detailsPlacement },
-  "icon-style": { title: "Icon style", description: "Terminal symbols", value: (config) => config.iconStyle === "nerd" ? "Nerd Font" : "Unicode" },
-  "status-bar-hints": { title: "Status bar hints", description: "Keyboard shortcuts", value: (config) => config.showStatusBarHints ? "on" : "off" },
+  "icon-style": { title: "Icon style", description: "Terminal symbols", value: (config) => config.iconStyle === "nerd" ? "Nerd Font" : config.iconStyle === "none" ? "None" : "Unicode" },
+  "status-bar-hints": { title: "Shortcut hints", description: "Keyboard shortcuts", value: (config) => config.showStatusBarHints ? "on" : "off" },
   scrollbars: { title: "Scrollbars", description: "Lists and documents", value: (config) => config.showScrollbars ? "on" : "off" },
   "reduced-motion": { title: "Reduced motion", description: "Static loading indicators", value: (config) => config.reducedMotion ? "on" : "off" },
 }
@@ -180,7 +180,7 @@ export function Settings(props: {
     setSaving(true)
     setError("")
     try {
-      await props.onChange({ ...props.config, iconStyle: props.config.iconStyle === "nerd" ? "unicode" : "nerd" })
+      await props.onChange({ ...props.config, iconStyle: props.config.iconStyle === "unicode" ? "nerd" : props.config.iconStyle === "nerd" ? "none" : "unicode" })
     } catch (error) {
       setError(error instanceof Error ? error.message : "Could not save settings")
     } finally {
@@ -281,7 +281,7 @@ export function Settings(props: {
     }
     if (selected() === "reduced-motion") return {
       title: "Reduced motion",
-      description: "Replace animated loading glyphs with a static indicator, including running workflows. Loading messages and live data updates remain enabled.",
+      description: "Replace animated loading dots with a static indicator, including running workflows. Loading messages and live data updates remain enabled.",
     }
     if (selected() === "markdown-style") return {
       title: "Markdown style",
@@ -316,7 +316,7 @@ export function Settings(props: {
       description: "Auto puts issue and PR metadata in a sidebar on wide terminals and inline on narrow ones. Inline always places details below the title. Overview is not affected. --inline output always uses inline details.",
     }
     return {
-      title: "Status bar hints",
+      title: "Shortcut hints",
       description: "Show keyboard shortcuts in the status bar on every page. Loading messages stay visible when hints are off.",
     }
   }

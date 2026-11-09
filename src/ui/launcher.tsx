@@ -13,7 +13,7 @@ import { useKeyActions, useKeybindings } from "./keybindings";
 import { StatusBar } from "./components/status-bar";
 import { useTheme } from "./theme";
 
-// One screen covers every startup stage; only the message changes, so the spinner never remounts.
+// One screen covers every startup stage; only the message changes, so the dots never remount.
 export function LoadingScreen(props: { message: string; onSwitchRepository?: () => void }) {
   const dimensions = useTerminalDimensions();
   const { colors } = useTheme();
@@ -31,12 +31,7 @@ export function LoadingScreen(props: { message: string; onSwitchRepository?: () 
       alignItems="center"
       justifyContent="center"
     >
-      <box flexDirection="column" alignItems="center" gap={1}>
-        <text fg={colors.text} attributes={TextAttributes.BOLD}>
-          ◉ opengh
-        </text>
-        <LoadingText text={props.message} color={colors.muted} />
-      </box>
+      <LoadingText text={props.message} color={colors.muted} />
     </box>
   );
 }

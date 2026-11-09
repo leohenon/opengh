@@ -8,6 +8,7 @@ import type { Page } from "../../navigation"
 import type { RepositoryData } from "../../repository-state"
 import { useTheme } from "../theme"
 import { mouseClick } from "../mouse"
+import { useLoadingDots } from "../motion"
 
 function RepositoryName(props: { repo: Repo; short?: boolean; interactive?: boolean; onOpen?: () => void }) {
   const { colors } = useTheme()
@@ -46,6 +47,9 @@ export function Header(props: {
   const { colors } = useTheme()
   const dimensions = useTerminalDimensions()
   const keys = useKeybindings()
+  const dots = useLoadingDots(() => props.showTabCounts !== false
+    && !props.workCounts?.value && props.workCounts?.status !== "error"
+    && props.tabs.some((tab) => tab.page === "issues" || tab.page === "pulls"))
   const tabKey = (index: number) => index < 5 ? keys.key(`navigation.tab${index + 1}` as KeyAction) : ""
   const tabLabel = (index: number, label: string) => [tabKey(index), label].filter(Boolean).join(" ")
   const layout = createMemo(() => {
@@ -54,7 +58,7 @@ export function Header(props: {
       const label = tabLabel(index, tab.label)
       if (props.showTabCounts === false || tab.page !== "issues" && tab.page !== "pulls") return { ...tab, label, counted: label }
       const count = props.workCounts?.value?.[tab.page]
-      const placeholder = props.workCounts?.status === "error" ? "—" : "…"
+      const placeholder = props.workCounts?.status === "error" ? "—" : "..."
       return { ...tab, label, counted: `${label} (${count ?? placeholder})` }
     })
     const totalWidth = (labels: string[]) => labels.reduce((sum, label) => sum + Bun.stringWidth(label), 0)
@@ -121,7 +125,7 @@ export function Header(props: {
                       fg={active() ? props.compact ? colors.salmon : colors.text : colors.muted}
                       attributes={active() ? TextAttributes.BOLD : TextAttributes.NONE}
                     >
-                      {tab.label}
+                      {tab.label.includes("(...)") ? tab.label.replace("(...)", `(${dots()})`) : tab.label}
                     </text>
                     <Show when={!props.compact}>
                       <text selectable={false} fg={colors.salmon}>{active() ? "─".repeat(Bun.stringWidth(tab.label)) : " ".repeat(Bun.stringWidth(tab.label))}</text>

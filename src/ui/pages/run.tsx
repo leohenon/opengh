@@ -8,6 +8,7 @@ import { ResourceStateView } from "../components/resource-state"
 import { detailContentWidth } from "../detail-layout"
 import { ago, exactDate } from "../format"
 import { useIcons } from "../icon-style"
+import { iconPrefix } from "../icons"
 import { createScrollbarVisibility } from "../scrollbar-visibility"
 import { useTheme } from "../theme"
 import { runColor, runIcon, runState } from "../workflow-status"
@@ -87,17 +88,17 @@ export function RunScreen(props: {
           {(run) => (
             <box width="100%" maxWidth={contentWidth()} minWidth={0} flexShrink={0} flexDirection="column">
               <text width="100%" flexShrink={0} fg={runColor(run(), colors)}>
-                {runIcon(run(), icons().workflow)} {runState(run())}
+                {iconPrefix(runIcon(run(), icons().workflow))}{runState(run())}
                 <span style={{ fg: colors.muted }}> · {duration(run().startedAt, run().status === "completed" ? run().updatedAt : null, run().status === "in_progress")}</span>
               </text>
               <text width="100%" flexShrink={0} fg={colors.text}>
                 <a href={run().url}>{run().name} #{run().number}</a> · attempt {run().attempt}
               </text>
               <text width="100%" flexShrink={0} fg={colors.muted}>
-                {run().event} · {icons().user} <Show when={run().actor} fallback="Unknown actor">{(login) => <a href={`https://github.com/${login()}`}>{login()}</a>}</Show>
+                {run().event} · {iconPrefix(icons().user)}<Show when={run().actor} fallback="Unknown actor">{(login) => <a href={`https://github.com/${login()}`}>{login()}</a>}</Show>
               </text>
               <text width="100%" flexShrink={0} wrapMode="char" fg={colors.muted}>
-                {icons().branch} <Show when={run().branch} fallback="Unknown branch">{(branch) => <a href={`${repositoryUrl()}/tree/${encodeURIComponent(branch())}`}>{branch()}</a>}</Show> · <Show when={run().sha} fallback="Unknown commit">{(sha) => <a href={`${repositoryUrl()}/commit/${sha()}`}>{sha().slice(0, 7)}</a>}</Show>
+                {iconPrefix(icons().branch)}<Show when={run().branch} fallback="Unknown branch">{(branch) => <a href={`${repositoryUrl()}/tree/${encodeURIComponent(branch())}`}>{branch()}</a>}</Show> · <Show when={run().sha} fallback="Unknown commit">{(sha) => <a href={`${repositoryUrl()}/commit/${sha()}`}>{sha().slice(0, 7)}</a>}</Show>
               </text>
               <text width="100%" flexShrink={0} fg={colors.muted}>Created {exactDate(run().createdAt)} · {ago(run().createdAt)}</text>
               <Show when={run().startedAt}>
@@ -118,7 +119,7 @@ export function RunScreen(props: {
                         {(job) => (
                           <box width="100%" minWidth={0} flexShrink={0} flexDirection="column" marginTop={1}>
                             <text width="100%" flexShrink={0} fg={runColor(job, colors)}>
-                              {runIcon(job, icons().workflow)} <b><span style={{ fg: colors.text }}><a href={`${run().url}/job/${job.id}`}>{job.name}</a></span></b>
+                              {iconPrefix(runIcon(job, icons().workflow))}<b><span style={{ fg: colors.text }}><a href={`${run().url}/job/${job.id}`}>{job.name}</a></span></b>
                               {" · "}{runState(job)} · {duration(job.startedAt, job.completedAt, job.status === "in_progress")}
                             </text>
                             <text width="100%" flexShrink={0} fg={colors.muted}>  Runner: {job.runner || "Not assigned"}</text>
@@ -126,7 +127,7 @@ export function RunScreen(props: {
                               <For each={job.steps} fallback={<text width="100%" flexShrink={0} fg={colors.muted}>No steps.</text>}>
                                 {(step) => (
                                   <text width="100%" flexShrink={0} fg={runColor(step, colors)}>
-                                    {runIcon(step, icons().workflow)} <span style={{ fg: colors.text }}>{step.name}</span>
+                                    {iconPrefix(runIcon(step, icons().workflow))}<span style={{ fg: colors.text }}>{step.name}</span>
                                     {" · "}{runState(step)} · {duration(step.startedAt, step.completedAt, step.status === "in_progress")}
                                   </text>
                                 )}

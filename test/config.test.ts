@@ -90,10 +90,10 @@ describe("config", () => {
     const directory = (await Bun.$`mktemp -d`.text()).trim()
     const enabledPath = join(directory, "enabled.json")
     const invalidPath = join(directory, "invalid.json")
-    await Bun.write(enabledPath, "\ufeff" + JSON.stringify({ showScrollbars: true, theme: "nord", colorMode: "system", reducedMotion: true, markdownStyle: "minimal", showTabCounts: false, hideDocumentsTab: true, compactHeader: true, detailsPlacement: "inline", unknown: "ignored" }))
+    await Bun.write(enabledPath, "\ufeff" + JSON.stringify({ showScrollbars: true, theme: "nord", colorMode: "system", reducedMotion: true, markdownStyle: "minimal", showTabCounts: false, hideDocumentsTab: true, compactHeader: true, detailsPlacement: "inline", iconStyle: "none", unknown: "ignored" }))
     await Bun.write(invalidPath, JSON.stringify({ showScrollbars: "yes", theme: "unknown", colorMode: "system", reducedMotion: "yes", markdownStyle: "invalid", detailLayout: "invalid", detailsPlacement: "invalid", showStatusBarHints: "no", iconStyle: "invalid", compactHeader: "yes", showTabCounts: "yes", hideDocumentsTab: "yes" }))
 
-    expect(await loadConfig(enabledPath)).toEqual({ showScrollbars: true, theme: "nord", colorMode: "system", reducedMotion: true, markdownStyle: "minimal", detailLayout: "centered", detailsPlacement: "inline", showStatusBarHints: false, showTabCounts: false, hideDocumentsTab: true, compactHeader: true, iconStyle: "nerd" })
+    expect(await loadConfig(enabledPath)).toEqual({ showScrollbars: true, theme: "nord", colorMode: "system", reducedMotion: true, markdownStyle: "minimal", detailLayout: "centered", detailsPlacement: "inline", showStatusBarHints: false, showTabCounts: false, hideDocumentsTab: true, compactHeader: true, iconStyle: "none" })
     expect(await loadConfig(invalidPath)).toEqual({ showScrollbars: false, theme: "opengh", colorMode: "system", reducedMotion: false, markdownStyle: "rich", detailLayout: "centered", detailsPlacement: "auto", showStatusBarHints: false, showTabCounts: true, hideDocumentsTab: false, compactHeader: false, iconStyle: "nerd" })
   })
 
