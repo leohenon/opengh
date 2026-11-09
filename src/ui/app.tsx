@@ -1550,7 +1550,7 @@ function AppContent(props: AppProps) {
         identity={JSON.stringify([
         data().repo.nameWithOwner, page(), navigation().details?.[page()], diffTarget(),
         page() === "commits" ? data().currentBranch : page() === "issues" ? issueState() : page() === "pulls" ? pullState()
-          : page() === "overview" ? [currentOverviewDocument()?.id, currentOverviewDocument()?.ref, data().currentBranch] : undefined,
+          : page() === "overview" ? [overviewDocument() === overviewDocuments()[0]?.id ? undefined : overviewDocument(), data().currentBranch] : undefined,
       ])}>
       <Show when={!standalone()}>
       <Header repo={data().repo} page={page()} tabs={visibleTabs()} workCounts={data().workCounts} compact={config().compactHeader} showTabCounts={config().showTabCounts} showTabShortcuts={config().showTabShortcuts}

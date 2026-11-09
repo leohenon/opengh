@@ -10,6 +10,7 @@ import { SelectableList } from "../src/ui/components/selectable-list"
 import { SearchBar } from "../src/ui/components/search-bar"
 import { App } from "../src/ui/app"
 import { defaultConfig } from "../src/config"
+import type { RepositoryData } from "../src/repository-state"
 import { githubDataFixture, repositoryOperationsFixture, commitDetailFixture } from "./fixtures/github-data"
 
 test("literal smart-case search retains original Unicode offsets and wraps", () => {
@@ -134,6 +135,40 @@ test("App searches displayed list/detail content, clears before back, and leaves
     await settle()
     expect(view.captureCharFrame()).toContain("/nN")
     expect(view.captureCharFrame()).not.toContain("No matches")
+  } finally { view.renderer.destroy() }
+})
+
+test.each((["overview", "commits", "issues", "pulls", "actions"] as const).flatMap((page) =>
+  [false, true].map((accepted) => [page, accepted] as const),
+))("%s search survives initial loading (accepted: %s)", async (page, accepted) => {
+  const query = { overview: "TypeScript", commits: "duplicate", issues: "resize", pulls: "retain", actions: "retain" }[page]
+  const [data, setData] = createSignal<RepositoryData>({ ...githubDataFixture,
+    documents: { status: "loading" }, commits: { status: "loading" }, runs: { status: "loading" },
+    issues: { open: { status: "loading" }, closed: { status: "loading" } },
+    pulls: { open: { status: "loading" }, closed: { status: "loading" } },
+  })
+  const view = await testRender(() => <App data={data()} operations={repositoryOperationsFixture} initialNavigation={{ page }} />,
+    { width: 100, height: 30 })
+  try {
+    await view.flush()
+    view.mockInput.pressKey("/")
+    await view.mockInput.typeText(query)
+    await view.flush()
+    if (accepted) {
+      view.mockInput.pressEnter()
+      await view.flush()
+    }
+    expect(view.captureCharFrame()).toContain(`/${query}`)
+    setData(githubDataFixture)
+    await Bun.sleep(180)
+    await view.flush()
+    expect(view.captureCharFrame()).toContain(`/${query}`)
+    expect(view.captureCharFrame()).not.toContain("No matches")
+    if (!accepted) {
+      await view.mockInput.typeText("more")
+      await view.flush()
+      expect(view.captureCharFrame()).toContain(`/${query}more`)
+    }
   } finally { view.renderer.destroy() }
 })
 

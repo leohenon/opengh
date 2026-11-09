@@ -7,6 +7,7 @@ export type SearchResult = { id: string; reveal(): void; position?: number }
 export type SearchTarget = {
   // Overlay targets must not compete with the retained page underneath them.
   scope?: string
+  fallback?: boolean
   id(): string
   active(): boolean
   // A visible diff pane may keep its accepted scope after keyboard focus moves.
@@ -65,14 +66,17 @@ export function SearchProvider(props: { identity: string; enabled: boolean; scop
   }
   const switchTarget = (target: SearchTarget | undefined, key: string) => {
     if (key === identity && target === owner) return
-    // Restore a cancelled draft before handing ownership to another retained view.
-    cancel()
+    const handoff = owner?.fallback && target && target !== owner && viewIdentity === props.identity && owner.scope === target.scope
+    const pending = handoff ? draft() : undefined
+    const accepted = handoff ? { query: session().query } : undefined
+    if (!handoff) cancel()
     if (identity) sessions.set(identity, session())
     owner?.clear()
     owner = target
     identity = key
     viewIdentity = props.identity
-    setSession(sessions.get(key) ?? { query: "" })
+    setSession(accepted ?? sessions.get(key) ?? { query: "" })
+    if (pending && target) setDraft({ query: pending.query, restore: target.snapshot(), anchor: target.position?.() ?? 0 })
     setResults([])
     refresh(false)
     setOwnerVersion((version) => version + 1)

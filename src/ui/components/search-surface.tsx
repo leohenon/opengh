@@ -10,6 +10,7 @@ export function SearchSurface(props: { active: boolean; children: JSX.Element })
   const { colors } = useTheme()
   let adapter: ReturnType<typeof createRenderedSearch> | undefined
   useSearchTarget({
+    fallback: true,
     id: () => "page",
     active: () => props.active,
     search: (query) => adapter?.search(query) ?? [],
