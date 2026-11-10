@@ -18,13 +18,13 @@ function fixture() {
     async remove(attempt) { if (JSON.stringify(saved.get(key(attempt.input))) !== JSON.stringify(attempt)) throw new Error("changed"); saved.delete(key(attempt.input)) },
     async update(previous, next) { if (JSON.stringify(saved.get(key(previous.input))) !== JSON.stringify(previous)) throw new Error("changed"); saved.set(key(next.input), structuredClone(next)) },
   }
-  const data = { account: 7, head: input.headSha, base: input.baseSha, access: true, locked: false, fail: undefined as Error | undefined,
+  const data = { draft: false, account: 7, head: input.headSha, base: input.baseSha, access: true, locked: false, fail: undefined as Error | undefined,
     reads: 0, readFail: false, record: true, posts: [] as { path: string; method: string; body: Record<string, unknown> }[], comments: [] as any[] }
   const transport: GitHubTransport = {
     async json<T>(path: string): Promise<T> {
       if (path === "user") return { id: data.account, login: "me" } as T
       if (path === "repos/o/r") return { archived: false, private: true, permissions: { pull: data.access } } as T
-      if (path === "repos/o/r/pulls/1") return { head: { sha: data.head }, base: { sha: data.base }, state: "open", draft: false, locked: data.locked, user: { id: 8 } } as T
+      if (path === "repos/o/r/pulls/1") return { head: { sha: data.head }, base: { sha: data.base }, state: "open", draft: data.draft, locked: data.locked, user: { id: 8 } } as T
       if (path.includes("/reviews?")) return [{ id: 50, user: { id: 7 }, state: "PENDING" }] as T
       if (path.includes("/files?")) return [{ filename: "a.ts", patch: "@@ -1,2 +1,2 @@\n one\n two" }] as T
       if (path.includes("/comments?")) {
@@ -47,8 +47,9 @@ function fixture() {
   }
   return { data, storage, transport, service: createInlineComments({ storage, transport }) }
 }
-test("posts exact public comment payload independently of a pending whole review", async () => {
+test.each([false, true])("posts exact public comment payload independently of a pending whole review (draft=%s)", async (draft) => {
   const { data, service, transport } = fixture()
+  data.draft = draft
   const eligibility = await createGitHubReviews(transport).eligibility("o/r", 1)
   expect(eligibility.canComment).toBe(false)
   expect(eligibility.canInlineComment).toBe(true)

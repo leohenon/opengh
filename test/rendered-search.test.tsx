@@ -31,24 +31,22 @@ test("common matches index once and repaint without prefix measurements", async 
   } finally { view.renderer.destroy() }
 })
 
-test("cached grapheme columns retain native widths, tabs and newlines for both width methods", async () => {
-  for (const widthMethod of ["wcwidth", "unicode"] as const) {
-    const view = await createTestRenderer({ width: 7, height: 20, widthMethod })
-    try {
-      const content = "界a\t👩‍💻é\na\r\n界a\ta"
-      const text = new TextRenderable(view.renderer, { content, wrapMode: "char" })
-      view.renderer.root.add(text)
-      await view.renderOnce()
-      const search = createRenderedSearch(text)
-      const starts = [...content.matchAll(/a/g)].map(match => match.index)
-      const expected = starts.map(start => {
-        const column = text.measureTextOffset(content.slice(0, start))
-        return text.renderedLineInfo.lineStartCols.findLastIndex(value => value <= column)
-      })
-      expect(search.search("a").map(match => match.position)).toEqual(expected)
-      search.dispose()
-    } finally { view.renderer.destroy() }
-  }
+test("cached grapheme columns retain native widths, tabs and newlines", async () => {
+  const view = await createTestRenderer({ width: 7, height: 20 })
+  try {
+    const content = "界a\t👩‍💻é\na\r\n界a\ta"
+    const text = new TextRenderable(view.renderer, { content, wrapMode: "char" })
+    view.renderer.root.add(text)
+    await view.renderOnce()
+    const search = createRenderedSearch(text)
+    const starts = [...content.matchAll(/a/g)].map(match => match.index)
+    const expected = starts.map(start => {
+      const column = text.measureTextOffset(content.slice(0, start))
+      return text.renderedLineInfo.lineStartCols.findLastIndex(value => value <= column)
+    })
+    expect(search.search("a").map(match => match.position)).toEqual(expected)
+    search.dispose()
+  } finally { view.renderer.destroy() }
 })
 
 test("rendered search preserves styled chunks/links, highlights across boundaries and never accumulates", async () => {

@@ -502,6 +502,8 @@ export function createRepositorySession(
     issueWriteRevision.set(key, (issueWriteRevision.get(key) ?? 0) + 1)
     // Confirmed writes may land after the page closed; a retained snapshot must revalidate before reuse.
     const [repository, rest] = key.split("#")
+    // The stable write key names the origin, even when another repository is now active.
+    if (repository) repositoryCache.markStale(repository.split("@")[0]!)
     const number = Number(rest?.replace(":pull", ""))
     if (repository && Number.isSafeInteger(number)) (rest?.endsWith(":pull") ? pullCache : issueCache).markStale(`${repository}:${rest?.endsWith(":pull") ? "pull" : "issue"}:${number}`)
   }
@@ -1105,6 +1107,7 @@ export function createRepositorySession(
     const requested = current.status === "ready" && current.data.repo.nameWithOwner.toLowerCase() === repository.toLowerCase()
       ? current.repository : repository
     pullCache.markStale(detailCacheKey(requested, number, "pull"))
+    repositoryCache.markStale(requested.toLowerCase())
   }
   const pendingReactions = (owner: "issue" | "pull") => [...reactionRequests.keys()].some((key) => key.startsWith(`${owner}:`))
   // Leaving a page retains it. A pending reaction can no longer publish into it, so its result arrives on revalidation.
@@ -1744,10 +1747,21 @@ export function createRepositorySession(
     return message
   }
 
+  const revalidateReturnedOverview = (key: string, scope: "issues" | "pulls") => {
+    const current = state()
+    const originId = Number(key.split("#")[0]?.split("@")[1])
+    if (current.status !== "ready" || current.data.repo.id !== originId) return
+    void loadResources(current.repository, current.data.currentBranch, current.data.repo,
+      repositoryGeneration, current.data, scope)
+  }
+
   const reconcileIssueState = (repository: string, number: number, updated: IssueDetail, scope: number, reactionRead: number, key: string) => {
     confirmIssueWrite(key)
     const stillHere = () => scope === repositoryScope && state().repository === repository
-    if (!stillHere()) return updated
+    if (!stillHere()) {
+      revalidateReturnedOverview(key, "issues")
+      return updated
+    }
     updated = withReactionFields({ kind: "issue", number }, updated, reactionRead)
     setIssueDetail((latest) => latest?.number === number
       ? { ...latest, resource: { status: "ready", value: updated }, references: loadingResource(latest.references.value) } : latest)
@@ -1837,7 +1851,10 @@ export function createRepositorySession(
   const reconcilePullState = (repository: string, number: number, updated: PullRequestDetail, scope: number, reactionRead: number, key: string) => {
     confirmIssueWrite(key)
     pullActionRevision.set(key, (pullActionRevision.get(key) ?? 0) + 1)
-    if (scope !== repositoryScope || state().repository !== repository) return updated
+    if (scope !== repositoryScope || state().repository !== repository) {
+      revalidateReturnedOverview(key, "pulls")
+      return updated
+    }
     updated = withReactionFields({ kind: "pull", number }, updated, reactionRead)
     setPullDetail((latest) => latest?.number === number
       ? { ...latest, resource: { status: "ready", value: updated }, references: loadingResource(latest.references.value) } : latest)
@@ -2277,9 +2294,16 @@ export function createRepositorySession(
         if (repo.id !== data.repo.id || expectedId !== undefined && repo.id !== expectedId) return invalidateRepository(repository)
         if (canonical.toLowerCase() !== repository.toLowerCase()) return load(canonical, scope, repo.id)
         repositoryIds.set(canonical.toLowerCase(), repo.id)
-        // Revalidate in the background: retained values stay visible while sections reload.
+        // Reopen on the fresh default branch before starting branch-guarded requests.
+        // Keep stale values only on the same branch; unrequested sections remain deferred.
+        const branchResources = data.currentBranch === repo.defaultBranch ? {} : {
+          documents: deferredResource<RepositoryDocumentState[]>(),
+          commits: deferredResource<Paginated<CommitSummary>>(),
+          commitCount: deferredResource<number>(),
+        }
+        data = { ...data, repo, currentBranch: repo.defaultBranch, ...branchResources }
         setState((latest) => latest.status === "ready" && latest.repository === repository ? { ...latest, data: {
-          ...latest.data, repo,
+          ...latest.data, repo, currentBranch: repo.defaultBranch, ...branchResources,
         } } : latest)
         await loadResources(repository, repo.defaultBranch, repo, request, data, scope)
         updateReady(setState, request, generation, repository, (latest) => ({ ...latest, operations: { ...latest.operations, refresh: idle() } }))

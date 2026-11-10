@@ -22,6 +22,7 @@ import { useSearchTarget, type SearchResult } from "../search-context"
 import { searchRanges } from "../search"
 import { createRenderedSearch } from "../rendered-search"
 
+const MAX_SOURCE_SEARCH_RESULTS = 10_000
 const searchGraphemes = new Intl.Segmenter(undefined, { granularity: "grapheme" })
 
 // opengh and Shiki use different IDs for some of the same theme families.
@@ -221,6 +222,7 @@ export function DiffScreen(props: {
     if (container && !container.isDestroyed) visit(container)
   }
   let sourceMatches: { id: string; cellId: string; start: number; end: number }[] = []
+  let sourceTruncated = false
   let highlightKey = ""
   let searchGeneration = 0
   let lastSearchQuery = ""
@@ -234,6 +236,7 @@ export function DiffScreen(props: {
   const clearBodySearch = () => {
     ++searchGeneration
     sourceMatches = []
+    sourceTruncated = false
     lastSearchQuery = ""
     highlightKey = ""
     setSourceHighlights(undefined)
@@ -244,46 +247,59 @@ export function DiffScreen(props: {
     active: bodySearchActive,
     retain: bodySearchVisible,
     position: () => scroll?.scrollTop ?? 0,
+    truncated: () => sourceTruncated,
     search(query) {
       if (query !== lastSearchQuery) { lastSearchQuery = query; ++searchGeneration }
       syncCommentSearch()
       sourceMatches = []
+      sourceTruncated = false
       const found: SearchResult[] = []
       const identity = bodySearchId()
       const file = selected()
       const geometry = searchLayoutKey()
       const cells = sourceCells()
-      for (const cell of cells) for (const range of searchRanges(cell.text, query)) {
-        const id = `${cell.id}:${range.start}:${range.end}`
-        sourceMatches.push({ id, cellId: cell.id, ...range })
-        // Reveal the same whole glyph that Hunk paints for a partial-grapheme match.
-        const start = cell.graphemes.containing(range.start)!.index
-        const last = cell.graphemes.containing(range.end - 1)!
-        const end = last.index + last.segment.length
+      for (const cell of cells) {
+        // Read one extra occurrence to distinguish an exact count from truncation.
+        const ranges = searchRanges(cell.text, query, MAX_SOURCE_SEARCH_RESULTS - sourceMatches.length + 1)
+        const node = ranges.length ? host()?.findDescendantById(cell.rowId) : undefined
         let visualLine = 0
         let lineStart = 0
-        while (visualLine < cell.visualLines.length - 1 && lineStart + cell.visualLines[visualLine]!.length <= start) {
-          lineStart += cell.visualLines[visualLine++]!.length
+        for (const range of ranges) {
+          if (sourceMatches.length === MAX_SOURCE_SEARCH_RESULTS) { sourceTruncated = true; break }
+          const id = `${cell.id}:${range.start}:${range.end}`
+          sourceMatches.push({ id, cellId: cell.id, ...range })
+          // Wrapped lines never split a grapheme; raw match offsets identify the
+          // same visual line. Walk the lines once, not from zero for every match.
+          while (visualLine < cell.visualLines.length - 1 && lineStart + cell.visualLines[visualLine]!.length <= range.start) {
+            lineStart += cell.visualLines[visualLine++]!.length
+          }
+          const matchLine = visualLine
+          const matchLineStart = lineStart
+          found.push({ id, position: node && scroll ? node.y - scroll.content.y + matchLine : 0,
+            reveal() {
+              if (disposed || !bodySearchVisible() || identity !== bodySearchId() || file !== selected() || query !== lastSearchQuery || geometry !== searchLayoutKey()) return
+              const generation = ++searchGeneration
+              pending = undefined
+              setHunk(cell.hunkIndex)
+              if (!wrap()) {
+                // Only the active result needs horizontal geometry. Reveal the
+                // same whole glyph that Hunk paints for a partial-grapheme match.
+                const start = cell.graphemes.containing(range.start)!.index
+                const last = cell.graphemes.containing(range.end - 1)!
+                const end = last.index + last.segment.length
+                const column = cell.measureTextWidth(cell.text.slice(matchLineStart, start))
+                const endColumn = column + cell.measureTextWidth(cell.text.slice(start, end))
+                if (column < offset() || endColumn > offset() + cell.contentWidth) setOffset(column)
+              }
+              void renderer.idle().then(() => {
+                if (disposed || generation !== searchGeneration || !bodySearchVisible() || identity !== bodySearchId() || geometry !== searchLayoutKey() || !scroll) return
+                const anchor = host()?.findDescendantById(cell.rowId)
+                if (anchor) scroll.scrollTo(anchor.y - scroll.content.y + matchLine)
+              }).catch(() => {})
+            },
+          })
         }
-        const column = cell.measureTextWidth(cell.text.slice(lineStart, start))
-        const node = host()?.findDescendantById(cell.rowId)
-        found.push({ id, position: node && scroll ? node.y - scroll.content.y + visualLine : 0,
-          reveal() {
-            if (disposed || !bodySearchVisible() || identity !== bodySearchId() || file !== selected() || query !== lastSearchQuery || geometry !== searchLayoutKey()) return
-            const generation = ++searchGeneration
-            pending = undefined
-            setHunk(cell.hunkIndex)
-            if (!wrap()) {
-              const endColumn = column + cell.measureTextWidth(cell.text.slice(start, end))
-              if (column < offset() || endColumn > offset() + cell.contentWidth) setOffset(column)
-            }
-            void renderer.idle().then(() => {
-              if (disposed || generation !== searchGeneration || !bodySearchVisible() || identity !== bodySearchId() || geometry !== searchLayoutKey() || !scroll) return
-              const anchor = host()?.findDescendantById(cell.rowId)
-              if (anchor) scroll.scrollTo(anchor.y - scroll.content.y + visualLine)
-            }).catch(() => {})
-          },
-        })
+        if (sourceTruncated) break
       }
       for (const [node, adapter] of commentSearch) for (const result of adapter.search(query)) {
         found.push({ ...result, id: `comment:${node.id}:${result.id}`,
@@ -355,18 +371,21 @@ export function DiffScreen(props: {
 
   // Only structural changes invalidate posted cards. Highlight, selection and pan
   // updates keep their Markdown tree/adapters alive (including async rendering).
-  createEffect(() => {
-    void [host(), renderFile(), rows(), width(), wrap(), theme(), props.threads, commentsCollapsed(),
-      colors.text, colors.muted, colors.blue, colors.border, colors.panel, icons().comment]
-    untrack(() => { cards.clear(); cardsDirty = true })
-  })
+  const cardStructure = createMemo(() => [host(), renderFile(), rows(), width(), wrap(), theme(), props.threads, commentsCollapsed(),
+    colors.text, colors.muted, colors.blue, colors.border, colors.panel, icons().comment])
+  let previousCardStructure: ReturnType<typeof cardStructure> | undefined
   createEffect(() => {
     const container = host()
     const bodyProps: HunkDiffBodyProps = { ...sourceProps(), sourceHighlights: sourceHighlights() }
-    // Card-only changes still need a commit even when the source is unchanged.
-    void [props.threads, commentsCollapsed()]
-    void [colors.text, colors.muted, colors.blue, colors.border, colors.panel, icons().comment]
+    // Invalidate before the commit in this same effect: sibling effects can run
+    // in either order after their dependencies change.
+    const structure = cardStructure()
     untrack(() => {
+      if (structure !== previousCardStructure) {
+        cards.clear()
+        cardsDirty = true
+        previousCardStructure = structure
+      }
       if (!container) return
       if (!bodyProps.file) { pane?.dispose(); pane = undefined; refreshCards(); return }
       if (pane) pane.update(bodyProps)

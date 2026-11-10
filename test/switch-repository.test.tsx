@@ -3,9 +3,50 @@ import { testRender } from "@opentui/solid"
 import { defaultConfig } from "../src/config"
 import { createRepositorySession, type RepositoryLoaders } from "../src/repository-session"
 import { Root } from "../src/root"
+import { SwitchRepositoryScreen } from "../src/ui/pages/switch-repository"
+import { ThemeProvider } from "../src/ui/theme"
 import type { CommandResult } from "../src/command-actions"
 import { clickControl } from "./fixtures/mouse"
 import { commitDetailFixture, githubDataFixture, issueDetailFixture, pullContextFixture } from "./fixtures/github-data"
+
+test("repository picker opens its visible typed or recent selection", async () => {
+  for (const scenario of [
+    { query: "owner/repo", down: true, expected: "owner/repo-two" },
+    { query: "owner/repo", mouse: true, expected: "owner/repo-two" },
+    { query: "owner/repo", expected: "owner/repo" },
+    { query: "https://github.com/owner/repo.git", expected: "owner/repo" },
+    { query: "https://github.com/OWNER/REPO-TWO", expected: "owner/repo-two", current: true },
+  ]) {
+    const opened: string[] = []
+    const view = await testRender(() => <ThemeProvider name="github">
+      <SwitchRepositoryScreen recent={["owner/repo-two", "OWNER/REPO-TWO"]} current="owner/repo-two"
+        showStatusBarHints={false} onOpen={(repository) => opened.push(repository)} onClose={() => {}} />
+    </ThemeProvider>, { width: 100, height: 24, exitOnCtrlC: false })
+    const settle = async () => { await Bun.sleep(0); await view.flush() }
+    try {
+      await settle()
+      await view.mockInput.typeText(scenario.query)
+      await settle()
+      expect(view.captureCharFrame()).toContain(scenario.current ? "› owner / repo-two" : "› owner / repo ")
+      expect(view.captureCharFrame()).toContain("✓ current")
+      if (scenario.current) {
+        expect(view.captureCharFrame()).not.toContain("typed")
+        expect(view.renderer.root.findDescendantById("picker-row-1")).toBeUndefined()
+      } else {
+        expect(view.captureCharFrame()).toContain("typed")
+      }
+      if (scenario.down) {
+        view.mockInput.pressArrow("down")
+        await settle()
+        expect(view.captureCharFrame()).toContain("› owner / repo-two")
+      }
+      if (scenario.mouse) await clickControl(view, "picker-row-1")
+      else view.mockInput.pressEnter()
+      await settle()
+      expect(opened).toEqual([scenario.expected])
+    } finally { view.renderer.destroy() }
+  }
+})
 
 // Exercise the real Root, session, focused input, and mounted repository pages without GitHub or disk writes.
 test("repository switch popup isolates input, preserves cancelled navigation, and resets confirmed switches", async () => {
@@ -209,9 +250,13 @@ test("repository switch popup isolates input, preserves cancelled navigation, an
     expect(view.captureCharFrame()).toContain("› cli / cli")
     await view.mockInput.typeText("owner/pending")
     view.mockInput.pressEnter()
-    await Bun.sleep(210) // The loading message appears after LoadingText's delay.
     await settle()
-    expect(view.captureCharFrame()).toContain("Loading owner/pending…")
+    expect(view.captureCharFrame()).not.toContain("Loading owner/pending")
+    for (let attempt = 0; attempt < 40 && !view.captureCharFrame().includes("Loading owner/pending"); attempt++) {
+      await Bun.sleep(25)
+      await settle()
+    }
+    expect(view.captureCharFrame()).toContain("Loading owner/pending")
     expect(recent).not.toContain("owner/pending")
     await switchPage() // A slow load is escapable; an obsolete response must not replace the chosen repo.
     await view.mockInput.typeText("cli/cli")

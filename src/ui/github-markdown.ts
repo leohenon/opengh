@@ -42,6 +42,47 @@ export function assertGitHubMarkdownSource(value: string) {
   lineBreaks(value, MAX_SOURCE_LINES - 1)
 }
 
+// A lexical work bound, not a second Markdown parser or a universal deadline.
+// Count potential containers even where Markdown might treat them as literal.
+// Indentation can continue lists from earlier lines (tabs use four-column stops).
+// Do not track fences/HTML here: their meaning depends on surrounding containers.
+// Ordinary code is unaffected; pathological prefix-looking literal code may be
+// conservatively rejected too. The downstream AST checks remain authoritative.
+function assertMarkdownParseComplexity(value: string) {
+  let prefixes = 0
+  for (const line of value.split(/\r\n|[\r\n]/)) {
+    let index = 0
+    let column = 0
+    let indentation = 0
+    let depth = 0
+    while (index < line.length) {
+      const startColumn = column
+      while (line[index] === " " || line[index] === "\t") {
+        column += line[index++] === "\t" ? 4 - column % 4 : 1
+      }
+      indentation += column - startColumn
+      const start = index
+      if (line[index] === ">") index++
+      else {
+        if (line[index] === "-" || line[index] === "+" || line[index] === "*") index++
+        else {
+          while (index - start < 9 && line[index] !== undefined && line[index]! >= "0" && line[index]! <= "9") index++
+          if (index === start || (line[index] !== "." && line[index] !== ")")) break
+          index++
+        }
+        if (index < line.length && line[index] !== " " && line[index] !== "\t") break
+      }
+      column += index - start
+      if (++depth + Math.floor(indentation / 2) > MAX_TREE_DEPTH || ++prefixes > MAX_TREE_NODES)
+        throw new GitHubMarkdownError("Markdown is too complex (container prefixes before parsing)")
+      // One separator belongs to the marker, not continuation indentation.
+      if (line[index] === " " || line[index] === "\t") {
+        column += line[index++] === "\t" ? 4 - column % 4 : 1
+      }
+    }
+  }
+}
+
 // Both unist and parse5 trees are checked iteratively, before recursive visitors
 // or the parse5-to-HAST converter can see attacker-controlled nesting.
 type BoundedNode = {
@@ -637,6 +678,7 @@ const discussionPanelProcessor = discussionProcessor().use(plainCodeFences)
 export function normalizeGitHubMarkdown(value: string, options: { preserveImages?: boolean; codePanels?: boolean; context?: GitHubMarkdownContext; anchors?: boolean; sourceMap?: MarkdownSourceMap } = {}) {
   // Check before parsing; rejected sources also use the bounded plain-text preview.
   assertGitHubMarkdownSource(value)
+  assertMarkdownParseComplexity(value)
   const selected = options.codePanels !== false
     ? options.preserveImages ? discussionPanelProcessor : panelProcessor
     : options.preserveImages ? discussionProcessor : processor

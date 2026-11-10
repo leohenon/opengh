@@ -8,6 +8,7 @@ import type { CommitDetailState, IssueDetailState, PullDetailState, RepositorySt
 import { parseLaunchArguments } from "../src/launch-target"
 import { Root } from "../src/root"
 import { createRepositorySession } from "../src/repository-session"
+import { createPullReviewSession } from "../src/pull-review-session"
 import { GitHubApiError } from "../src/github/transport"
 import { githubDataFixture, repositoryOperationsFixture, issueDetailFixture, issuePullReferenceFixture, commitDetailFixture } from "./fixtures/github-data"
 
@@ -227,7 +228,13 @@ describe("application root", () => {
     active.push(view)
     await view.flush()
 
-    expect(view.captureCharFrame()).toContain("opengh")
+    expect(view.captureCharFrame().trim()).toBe("")
+    for (let attempt = 0; attempt < 40 && !view.captureCharFrame().includes("Finding repository"); attempt++) {
+      await Bun.sleep(25)
+      await view.flush()
+    }
+    expect(view.captureCharFrame()).toContain("Finding repository")
+    expect(view.captureCharFrame()).not.toContain("Open a GitHub repository")
     expect(receivedArgument).toBe(".")
     expect(receivedCwd).toBe("/work/repository")
 
@@ -241,6 +248,7 @@ describe("application root", () => {
     expect(picker).toContain("No GitHub repository found")
 
     view.mockInput.pressCtrlC()
+    await Bun.sleep(0)
     expect(view.renderer.isDestroyed).toBe(true)
   })
 
@@ -540,6 +548,70 @@ test("quit retains unsaved issue and PR drafts, then retries and waits for revie
   expect(view.renderer.isDestroyed).toBe(true)
 })
 
+test.each([false, true])("quit drains late review edits after delayed tab saves (already open=%s)", async (alreadyOpen) => {
+  const tabs = deferred<void>()
+  const save = deferred<void>()
+  const savedBodies: string[] = []
+  let failSave = true
+  let tabFlushes = 0
+  const reviews = createPullReviewSession({
+    transport: {
+      async json<T>(path: string): Promise<T> {
+        if (path === "user") return { id: 1, login: "viewer" } as T
+        if (path === "repos/cli/cli") return { private: true, permissions: { pull: true } } as T
+        if (path === "repos/cli/cli/pulls/42") return { head: { sha: "a".repeat(40) }, base: { sha: "b".repeat(40) }, state: "open", user: { id: 2 } } as T
+        if (path.includes("/reviews?")) return [] as T
+        throw new Error(`Unexpected request: ${path}`)
+      },
+      async text() { throw new Error("Unexpected request") },
+    },
+    storage: {
+      async load() { return undefined },
+      async save(draft) {
+        await save.promise
+        if (failSave) throw new Error("Review storage unavailable")
+        savedBodies.push(draft.body)
+      },
+      async remove() {},
+    },
+  })
+  if (alreadyOpen) await reviews.open("cli/cli", 42)
+  const view = await testRender(() => <Root cwd="/work" services={{
+    resolveRepository: async () => "cli/cli", resolveLocalRepository: async () => undefined,
+    loadRecentRepositories: async () => [], rememberRepository: async () => {},
+    loadRepositoryTabs: async () => ({}),
+    saveRepositoryTabs: async () => { tabFlushes++; await tabs.promise },
+    loadConfig: async () => ({ ...defaultConfig }),
+    createRepositorySession: readySession,
+    createPullReviewSession: () => reviews,
+  }} />, { width: 120, height: 32 })
+  active.push(view)
+  await Bun.sleep(0)
+  await view.flush()
+  view.mockInput.pressKey("2")
+  view.mockInput.pressKey("q")
+  await Bun.sleep(0)
+  expect(tabFlushes).toBe(1)
+  expect(view.renderer.isDestroyed).toBe(false)
+  if (!alreadyOpen) await reviews.open("cli/cli", 42)
+  reviews.setBody("Edited during tab save")
+  tabs.resolve()
+  await Bun.sleep(0)
+  expect(view.renderer.isDestroyed).toBe(false)
+  view.mockInput.pressKey("q") // Reentrant quit must not bypass the pending save.
+  save.resolve()
+  await Bun.sleep(0)
+  await view.flush()
+  expect(view.renderer.isDestroyed).toBe(false)
+  expect(view.captureCharFrame()).toContain("Review storage unavailable")
+  failSave = false
+  reviews.setBody("Retried latest review")
+  view.mockInput.pressKey("q")
+  await Bun.sleep(0)
+  expect(savedBodies).toEqual(["Retried latest review"])
+  expect(view.renderer.isDestroyed).toBe(true)
+})
+
 test("failed tab saves remain pending and are retried on exit without writing unchanged history", async () => {
   let attempts = 0
   const updates: unknown[] = []
@@ -615,6 +687,7 @@ test("reloads bindings in place, keeps the last valid config on failure, and rem
   await view.flush()
   expect(view.captureCharFrame()).toContain("Help")
   view.mockInput.pressKey("x", { ctrl: true })
+  await Bun.sleep(0)
   expect(view.renderer.isDestroyed).toBe(true)
 })
 
@@ -727,6 +800,7 @@ test("remapped interrupt cancels commands without quitting, then quits after com
   await Bun.sleep(0)
   expect(copied).toBe("command output\n")
   view.mockInput.pressKey("x", { ctrl: true })
+  await Bun.sleep(0)
   expect(view.renderer.isDestroyed).toBe(true)
 })
 

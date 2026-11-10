@@ -1,6 +1,7 @@
 import { expect, test } from "bun:test"
 import { CodeRenderable, RGBA, TextAttributes, type Renderable } from "@opentui/core"
 import type { GitHubMarkdownContext } from "../src/ui/github-markdown"
+import type { MarkdownAnchorResolver } from "../src/ui/markdown-anchors"
 import { testRender } from "@opentui/solid"
 import { createSignal } from "solid-js"
 import type { DetailLayout, MarkdownStyle } from "../src/config"
@@ -12,10 +13,10 @@ import { ThemeProvider, useTheme } from "../src/ui/theme"
 import { MarkdownProvider } from "../src/ui/markdown-preferences"
 import { appColors, resolveTheme } from "../src/theme"
 
-function MarkdownSample(props: { content: string; context?: GitHubMarkdownContext; plainText?: boolean }) {
+function MarkdownSample(props: { content: string; context?: GitHubMarkdownContext; plainText?: boolean; anchorRef?: (resolver: MarkdownAnchorResolver | undefined) => void }) {
   const { colors, theme } = useTheme()
   const style = createReactiveMarkdownStyle(colors, theme)
-  return <GitHubMarkdown content={props.content} syntaxStyle={style()} context={props.context} plainText={props.plainText} />
+  return <GitHubMarkdown content={props.content} syntaxStyle={style()} context={props.context} plainText={props.plainText} anchorRef={props.anchorRef} />
 }
 
 function codeBlocks(node: Renderable): CodeRenderable[] {
@@ -35,15 +36,19 @@ async function settle(view: Awaited<ReturnType<typeof testRender>>) {
 }
 
 test("rejected Markdown uses bounded plain text and recovers in rich and minimal modes", async () => {
-  const [content, setContent] = createSignal("Initial **Markdown**.")
+  const [content, setContent] = createSignal("# Initial\n\n```text\nstale code\n```")
+  let resolveAnchor: MarkdownAnchorResolver | undefined
   const [style, setStyle] = createSignal<MarkdownStyle>("rich")
   const view = await testRender(() => <ThemeProvider name="github"><MarkdownProvider style={style()}>
-    <MarkdownSample content={content()} />
+    <MarkdownSample content={content()} anchorRef={(resolver) => { resolveAnchor = resolver }} />
   </MarkdownProvider></ThemeProvider>, { width: 120, height: 20 })
   try {
+    await settle(view)
+    expect(await resolveAnchor?.("L4")).toBeDefined()
     for (const preference of ["rich", "minimal"] as const) {
       setStyle(preference)
       for (const [source, notice] of [
+        ["> ".repeat(65) + "text", "Markdown is too complex (container prefixes before parsing)"],
         ["<a>" + "<span>".repeat(12_000) + "hello" + "</span>".repeat(12_000) + "</a>", "Markdown is too complex"],
         ["Readable oversize preview\n" + "x".repeat(1024 * 1024), "Markdown is too large"],
         ["|" + "h|".repeat(3000) + "\n|" + "-|".repeat(3000) + "\n" + "|x|\n".repeat(4000), "Markdown is too complex"],
@@ -53,16 +58,25 @@ test("rejected Markdown uses bounded plain text and recovers in rich and minimal
         await settle(view)
         const frame = view.captureCharFrame()
         expect(frame).toContain(notice)
-        expect(frame).toContain("Showing a plain-text preview.")
+        expect(frame).toMatch(/Showing a plain-text\s+preview\./)
         expect(codeBlocks(view.renderer.root)).toHaveLength(0)
+        expect(await resolveAnchor?.("L4")).toBeUndefined()
+        expect(await resolveAnchor?.("initial")).toBeUndefined()
+        expect(frame).not.toContain("stale code")
       }
-      setContent("Recovered **Markdown**.\n\n| Resource | Status |\n| --- | --- |\n| Ragged |\n| Complete | Ready |")
+      setContent("Recovered **Markdown**.\n\n| Resource | Status |\n| --- | --- |\n| Ragged |\n| Complete | Ready |\n\n```text\nfresh code\n```")
       await settle(view)
       const recovered = view.captureCharFrame()
       for (const text of ["Recovered Markdown.", "Resource", "Status", "Ragged", "Complete", "Ready"])
         expect(recovered).toContain(text)
       expect(recovered).not.toContain("plain-text preview")
       expect(codeBlocks(view.renderer.root).length).toBeGreaterThan(0)
+      expect(await resolveAnchor?.("L1")).toBeDefined()
+      const codeTarget = await resolveAnchor?.("L9")
+      expect(codeTarget?.node).toBeInstanceOf(CodeRenderable)
+      expect((codeTarget?.node as CodeRenderable).content.trim()).toBe("fresh code")
+      expect(await resolveAnchor?.("initial")).toBeUndefined()
+      expect(recovered).not.toContain("stale code")
     }
   } finally { view.renderer.destroy() }
 }, 15_000)

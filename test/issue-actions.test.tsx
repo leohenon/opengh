@@ -11,7 +11,7 @@ import type {
 } from "../src/repository-state";
 import { App } from "../src/ui/app";
 import { StatusBar } from "../src/ui/components/status-bar";
-import { IssueActionDialog } from "../src/ui/components/issue-actions";
+import { IssueActionDialog, IssueActionsMenu } from "../src/ui/components/issue-actions";
 import { KeybindingsProvider, replaceEditorText } from "../src/ui/keybindings";
 import { IssueAssigneesPicker } from "../src/ui/components/issue-assignees-picker";
 import { clickControl } from "./fixtures/mouse";
@@ -22,6 +22,49 @@ import {
   issueDetailFixture,
   repositoryOperationsFixture,
 } from "./fixtures/github-data";
+
+test("PR action menu reveals selection in a short viewport and after resize before opening a dialog", async () => {
+  const selected: string[] = [];
+  const view = await testRender(() => <KeybindingsProvider>
+    <IssueActionsMenu number={42} parent="pull" state="open"
+      permissions={{ close: true, assignees: true }} merge={{ reason: "Blocked" }}
+      onReview={() => selected.push("review")} onMerge={() => selected.push("merge")}
+      onSelect={kind => selected.push(kind)} onClose={() => {}} />
+  </KeybindingsProvider>, { width: 80, height: 8 });
+  try {
+    await view.flush();
+    expect(view.captureCharFrame()).toContain("PR #42 · Actions");
+    expect(view.captureCharFrame()).toContain("› Review…");
+    expect(view.captureCharFrame()).not.toContain("Close PR…");
+    view.mockInput.pressArrow("down"); await view.flush();
+    expect(view.captureCharFrame()).toContain("› Merge…");
+    view.mockInput.pressEnter(); await view.flush();
+    await clickControl(view, "issue-menu-merge");
+    expect(selected).toEqual([]);
+    view.mockInput.pressArrow("down");
+    view.mockInput.pressArrow("down"); await view.flush();
+    expect(view.captureCharFrame()).toContain("› Close PR…");
+    expect(selected).toEqual([]);
+    view.resize(80, 24); await view.flush();
+    expect(view.captureCharFrame()).toContain("› Close PR…");
+    const scroll = view.renderer.root.findDescendantById("issue-actions-scroll") as ScrollBoxRenderable;
+    expect(scroll.height).toBeLessThan(8);
+    view.resize(80, 7); await view.flush();
+    expect(view.captureCharFrame()).toContain("PR #42 · Actions");
+    expect(view.captureCharFrame()).toContain("› Close PR…");
+    view.resize(80, 6); await view.flush();
+    view.mockInput.pressArrow("up");
+    view.mockInput.pressEnter(); await view.flush();
+    expect(selected).toEqual([]);
+    view.resize(80, 8); await view.flush();
+    expect(view.captureCharFrame()).toContain("› Close PR…");
+    view.mockInput.pressEnter(); await view.flush();
+    // The menu only requests the dialog; submission remains its separate confirmation flow.
+    expect(selected).toEqual(["close"]);
+    await clickControl(view, "issue-menu-assignees");
+    expect(selected).toEqual(["close", "assignees"]);
+  } finally { view.renderer.destroy(); }
+});
 
 test("issue action overlays isolate input and confirm comments, closing, reopening, and duplicates", async () => {
   const number = issueDetailFixture.number;
@@ -244,12 +287,21 @@ test("issue action overlays isolate input and confirm comments, closing, reopeni
     await clickControl(view, "issue-action-confirm");
     view.mockInput.pressEnter();
     view.mockInput.pressKey("s", { ctrl: true });
-    view.mockInput.pressEscape();
-    view.mockInput.pressKey("q");
     await settle();
-    await view.mockMouse.click(0, 0);
+    // Confirmation closes the composer while the mutation runs in the background.
+    expect(view.renderer.root.findDescendantById("issue-action-submit")).toBeUndefined();
+    expect(action().operation.status).toBe("loading");
+    view.mockInput.pressKey("c");
+    view.mockInput.pressKey("a");
+    view.mockInput.pressKey("s", { ctrl: true });
     await settle();
-    expect(view.renderer.root.findDescendantById("issue-action-submit")).toBeDefined();
+    expect(view.renderer.root.findDescendantById("issue-action-submit")).toBeUndefined();
+    expect(view.captureCharFrame()).not.toContain(`Post comment to #${number}?`);
+    // Other navigation remains available without editing or resubmitting the draft.
+    view.mockInput.pressKey(","); await settle();
+    expect(view.captureCharFrame()).toContain("Settings");
+    view.mockInput.pressEscape(); await settle();
+    expect(view.captureCharFrame()).not.toContain("Settings");
     expect(submitted).toEqual(["comment"]);
     expect(quit).toBe(0);
     expect(action().body).toBe("**Draft** qrs?h1l,\n");
@@ -304,7 +356,7 @@ test("issue action overlays isolate input and confirm comments, closing, reopeni
     await view.flush();
     await Bun.sleep(220);
     await settle();
-    expect(statusLine()).toContain("Closing issue…");
+    expect(statusLine()).toContain("Closing issue");
     expect(statusLine()).not.toContain("Reopening");
     completeClose();
     await settle();
@@ -441,22 +493,34 @@ test("assignee suggestions filter locally, preserve selection, retry and save in
     expect(view.captureCharFrame().replace(/\s+/g, " ")).toContain("GitHub before retrying.");
     expect(action().selectedAssignees).toEqual(["max", "jane"]);
     expect(action().body).toBe("Comment draft");
+    expect(view.renderer.root.findDescendantById("assignees-save")).toBeUndefined();
     fail = false;
+    // Failed background saves report a toast; retry by reopening the picker.
+    view.mockInput.pressKey("a"); await settle();
+    view.mockInput.pressEnter(); await settle();
+    expect(action().selectedAssignees).toEqual(["max", "jane"]);
     await clickControl(view, "assignees-save"); await settle();
     await clickControl(view, "assignees-confirm"); await settle();
     // Saving feedback lives in the status bar, which delays its loading indicator.
     await Bun.sleep(220); await view.flush();
-    expect(view.captureCharFrame()).toContain("Saving assignees…");
-    await clickControl(view, "assignees-save");
-    expect(view.renderer.root.findDescendantById("assignees-back")).toBeUndefined();
-    await view.mockMouse.click(0, 0); await settle();
-    expect(view.captureCharFrame()).toContain(`Assignees · #${issueDetailFixture.number}`);
-    view.mockInput.pressEscape(); view.mockInput.pressKey("s", { ctrl: true });
-    await view.mockInput.typeText("ignored"); await settle();
+    expect(view.captureCharFrame()).toContain("Saving assignees");
+    expect(view.renderer.root.findDescendantById("assignees-save")).toBeUndefined();
+    expect(view.renderer.root.findDescendantById("assignees-confirm")).toBeUndefined();
+    expect(view.captureCharFrame()).not.toContain(`Assignees · #${issueDetailFixture.number}`);
+    expect(action().operation.status).toBe("loading");
+    view.mockInput.pressKey("a");
+    view.mockInput.pressKey("s", { ctrl: true });
+    view.mockInput.pressEnter(); await settle();
+    expect(view.renderer.root.findDescendantById("assignees-save")).toBeUndefined();
+    view.mockInput.pressKey(","); await settle();
+    expect(view.captureCharFrame()).toContain("Settings");
+    view.mockInput.pressEscape(); await settle();
+    expect(view.captureCharFrame()).not.toContain("Settings");
     expect(submitted).toEqual(["assignees", "assignees"]);
     expect(action().selectedAssignees).toEqual(["max", "jane"]);
-    expect(view.captureCharFrame()).not.toContain("ignored");
-    finishSave?.(); await settle();
+    expect(action().body).toBe("Comment draft");
+    expect(finishSave).toBeDefined();
+    finishSave!(); await settle();
     expect(view.captureCharFrame()).toContain("Issue assignees updated");
     expect(action().body).toBe("Comment draft");
   } finally { view.renderer.destroy(); }

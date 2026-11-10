@@ -32,7 +32,7 @@ function endpoint(repository: string, number: number) {
     || !Number.isSafeInteger(number) || number <= 0) throw new Error("Invalid review repository or pull request.")
   return `repos/${repository}/pulls/${number}`
 }
-type RemoteReview = { id: number; user: { id: number }; state: string; body: string; commit_id: string; html_url?: string; submitted_at?: string }
+type RemoteReview = { id: number; user: { id: number } | null; state: string; body: string; commit_id: string; html_url?: string; submitted_at?: string }
 type RemoteComment = { path: string; line: number | null; original_line?: number; side: string; start_line?: number | null; original_start_line?: number | null; start_side?: string | null; body: string }
 const reviewState = { COMMENT: "COMMENTED", APPROVE: "APPROVED", REQUEST_CHANGES: "CHANGES_REQUESTED" }
 
@@ -70,19 +70,24 @@ export function createGitHubReviews(transport: GitHubTransport = githubTransport
         explicitAccess = await transport.text(`repos/${repository}/collaborators/${encodeURIComponent(account.login)}`) === ""
       } catch { /* No collaborator evidence: keep approval disabled. */ }
     }
-    if (reviews.some(review => !Number.isSafeInteger(review.id) || !Number.isSafeInteger(review.user?.id) || typeof review.state !== "string")) throw new Error("Cannot verify existing GitHub reviews.")
-    const pending = reviews.find(review => review.user.id === account.id && review.state === "PENDING")
-    const active = pull.state === "open" && pull.draft === false && repo.archived === false
+    if (reviews.some(review => !review || typeof review !== "object" || Array.isArray(review)
+      || !Number.isSafeInteger(review.id) || review.id <= 0
+      || (review.user !== null && (!review.user || typeof review.user !== "object" || Array.isArray(review.user)
+        || !Number.isSafeInteger(review.user.id) || review.user.id <= 0))
+      || !["PENDING", "COMMENTED", "APPROVED", "CHANGES_REQUESTED", "DISMISSED"].includes(review.state))) throw new Error("Cannot verify existing GitHub reviews.")
+    const pending = reviews.find(review => review.user?.id === account.id && review.state === "PENDING")
+    const active = pull.state === "open" && repo.archived === false
     const access = repo.permissions?.pull === true
     const unlocked = pull.locked === false || (pull.locked === true && (repo.permissions?.push === true || repo.permissions?.maintain === true || repo.permissions?.admin === true))
     const canInlineComment = active && access && unlocked
     const canComment = canInlineComment && !pending
-    const canApprove = canComment && explicitAccess && pull.user.id !== account.id
+    const canApprove = canComment && pull.draft === false && explicitAccess && pull.user.id !== account.id
     return { accountId: account.id, login: account.login, repository, number, headSha: pull.head.sha, baseSha: pull.base?.sha,
       url: `https://github.com/${repository}/pull/${number}`, canComment, canInlineComment, canApprove, canRequestChanges: canApprove,
       pendingReviewUrl: pending ? `https://github.com/${repository}/pull/${number}/files#pending-review` : undefined,
-      reason: pending ? "An existing pending GitHub review must be finished on GitHub first." : !active ? "Reviews require an open, non-draft pull request in an unarchived repository."
-        : !access || !unlocked ? "Review comment permission could not be verified." : pull.user.id === account.id ? "You cannot approve or request changes on your own pull request."
+      reason: pending ? "An existing pending GitHub review must be finished on GitHub first." : !active ? "Reviews require an open pull request in an unarchived repository."
+        : !access || !unlocked ? "Review comment permission could not be verified."
+          : pull.draft !== false ? "Approval and request changes require a non-draft pull request." : pull.user.id === account.id ? "You cannot approve or request changes on your own pull request."
           : !explicitAccess ? "Approval permission cannot be verified; use GitHub." : undefined }
   }
   async function validateAnchors(draft: ReviewDraft) {

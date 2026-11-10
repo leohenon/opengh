@@ -154,14 +154,14 @@ export function Root(props: {
     setQuitDraftSaveError(false)
     if (!flushDraftsForQuit()) return
     const tabs = flushRepositoryTabs()
-    const pending = reviews.state().draft ? Promise.all([tabs, reviews.flush()]).catch((error) => {
+    void Promise.all([tabs, reviews.flush()]).then(() => {
+      // Tab saves can outlast the first drain, and a review may first open
+      // while quitting. Always drain again before the synchronous final flush.
+      return reviews.flush()
+    }).then(finishQuit).catch((error) => {
       quitting = false
       setReviewSaveError(error instanceof Error ? error.message : "Could not save the review draft.")
-      throw error
-    }) : tabs
-    if (reviews.state().draft && pending) { void pending.then(finishQuit).catch(() => {}); return }
-    if (pending) void pending.finally(finishQuit)
-    else finishQuit()
+    })
   }
 
   const reloadConfig = async () => {

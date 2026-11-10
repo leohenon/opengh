@@ -276,7 +276,16 @@ describe("opengh TUI", () => {
     await view.flush();
     expect(view.captureCharFrame()).toContain("Settings");
     await view.mockMouse.click(0, 0); await view.flush();
+    expect(view.captureCharFrame()).toContain("Settings");
+    view.resize(120, 40);
+    await view.flush();
+    await view.mockMouse.click(0, 0); await view.flush();
     expect(view.captureCharFrame()).not.toContain("Settings");
+    expect(view.captureCharFrame()).toContain("4 of 4 commits");
+    view.mockInput.pressKey("y");
+    await view.flush();
+    expect(copies).toEqual([sha, sha]);
+    expect(refreshes).toBe(1);
   });
 
   test("mouse navigation selects documents and work filters, retains documents, and uses compact arrows", async () => {
@@ -300,8 +309,12 @@ describe("opengh TUI", () => {
     await view.flush();
     const scroll = view.renderer.root.findDescendantById("overview-document-scroll") as ScrollBoxRenderable;
     expect(scroll.scrollTop).toBeGreaterThan(0);
-    await click("Contributing", 1);
+    view.mockInput.pressTab();
+    await view.flush();
     expect(scroll.scrollTop).toBe(0);
+    await click("README");
+    expect(view.captureCharFrame()).toContain("Paragraph 0");
+    await click("Contributing");
     expect(view.captureCharFrame()).toContain("Thanks for helping");
     view.mockInput.pressKey("?");
     await view.flush();
@@ -616,7 +629,7 @@ describe("opengh TUI", () => {
     expect(statusLine()).toBe("");
     setConfig({ ...defaultConfig, showStatusBarHints: true, hideDocumentsTab: false, compactHeader: false, iconStyle: "unicode" });
     await view.flush();
-    expect(statusLine()).toBe("tab documents · b sidebar · r refresh · o GitHub · y copy URL · ? help");
+    expect(statusLine()).toBe("tab documents · b sidebar · r refresh · o GitHub · y copy URL · / search · ? help");
 
     view.mockInput.pressKey("?");
     await view.flush();
@@ -625,7 +638,7 @@ describe("opengh TUI", () => {
     await Bun.sleep(30);
     view.mockInput.pressKey(",");
     await view.flush();
-    expect(statusLine()).toBe("enter open · ↑/↓ select · ←/→ change · esc close");
+    expect(statusLine()).toBe("enter open · ↑/↓ select · ←/→ change · / search · esc close");
     for (let i = 0; i < 9; i++) view.mockInput.pressArrow("down");
     view.mockInput.pressEnter();
     await view.flush();
@@ -654,7 +667,7 @@ describe("opengh TUI", () => {
     setOperations(repositoryOperationsFixture);
     setConfig({ ...defaultConfig, showStatusBarHints: true, hideDocumentsTab: false, compactHeader: false, iconStyle: "unicode" });
     await view.flush();
-    expect(statusLine()).toBe("esc back · D diff · r refresh · o GitHub · y copy SHA · ? help");
+    expect(statusLine()).toBe("esc back · D diff · r refresh · o GitHub · y copy SHA · / search · ? help");
   });
 
   test("About sidebar links open the parent repository internally and description URLs externally", async () => {

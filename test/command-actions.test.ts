@@ -57,6 +57,65 @@ test("cancellation kills descendants, including a child ignoring SIGTERM", async
   expect(alive).toBe(false)
 })
 
+for (const parentExits of [false, true]) {
+  test.skipIf(process.platform === "win32")(`shutdown drains command groups before exit (parent exits early: ${parentExits})`, async () => {
+    // Keep the process-wide shutdown latch out of this test runner.
+    const descendant = "process.on('SIGTERM',()=>{}); console.log('ready'); setInterval(()=>{},1000)"
+    const parent = `
+      const { spawn } = require('node:child_process');
+      const child = spawn(process.execPath, ['-e', ${JSON.stringify(descendant)}], { stdio: ['ignore', 'pipe', 'inherit'] });
+      child.stdout.once('data', () => {
+        console.log(process.pid + ':' + child.pid + ':ready');
+        ${parentExits ? "process.exit(0)" : ""}
+      });
+      setInterval(() => {}, 1000);
+    `
+    // Inherited stderr keeps the command open even after the parent exits.
+    const script = `
+      import { runCommand, stopCommandProcesses } from ${JSON.stringify(join(import.meta.dir, "../src/command-actions.ts"))};
+      import assert from 'node:assert/strict';
+      const deadline = setTimeout(() => process.exit(3), 5000);
+      let ready;
+      const started = new Promise(resolve => ready = resolve);
+      let output = '';
+      const task = runCommand({ cwd: ${JSON.stringify(cwd)}, args: [process.execPath, '-e', ${JSON.stringify(parent)}] }, chunk => {
+        output += chunk;
+        if (output.includes(':ready')) ready();
+      });
+      await started;
+      process.stdout.write(output);
+      ${parentExits ? "await Bun.sleep(100);" : "task.cancel();"}
+      const stopped = stopCommandProcesses();
+      assert.equal(stopCommandProcesses(), stopped);
+      assert.throws(() => runCommand({ cwd: ${JSON.stringify(cwd)}, args: [process.execPath, '-e', 'process.exit(9)'] }, () => {}), /shutting down/);
+      await stopped;
+      assert.equal((await task.result).cancelled, true);
+      await stopCommandProcesses();
+      clearTimeout(deadline);
+      process.exit(0);
+    `
+    const owner = Bun.spawn([process.execPath, "-e", script], { cwd, stdout: "pipe", stderr: "pipe" })
+    let group = 0, pid = 0
+    try {
+      const output = await new Response(owner.stdout).text()
+      group = Number(output.split(":")[0])
+      pid = Number(output.split(":")[1])
+      const error = await new Response(owner.stderr).text()
+      expect({ code: await owner.exited, error }).toEqual({ code: 0, error: "" })
+      expect(pid).toBeGreaterThan(0)
+      let alive = true
+      for (let attempt = 0; attempt < 40 && alive; attempt++) {
+        try { process.kill(pid, 0); await Bun.sleep(25) } catch { alive = false }
+      }
+      expect(alive).toBe(false)
+    } finally {
+      owner.kill()
+      if (group > 0) { try { process.kill(-group, "SIGKILL") } catch {} }
+      if (pid > 0) { try { process.kill(pid, "SIGKILL") } catch {} }
+    }
+  }, 10000)
+}
+
 test("clone arguments cannot turn destination into flags and expand home paths", () => {
   const local = { directory: cwd, repository: "cli/cli" }
   expect(matchesLocalRepository(local, "CLI/cli")).toBe(true)

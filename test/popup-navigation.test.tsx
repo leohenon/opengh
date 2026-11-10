@@ -11,7 +11,7 @@ test("popups have no Back buttons and retain outside-click dismissal", async () 
   const view = await testRender(() => (
     <Switch>
       <Match when={screen() === "help"}>
-        <Help view="diff" tabCount={5} onClose={() => setScreen("settings")} />
+        <Help view="diff" onClose={() => setScreen("settings")} />
       </Match>
       <Match when={screen() === "settings"}>
         <Settings config={defaultConfig} onChange={async () => {}} onClose={() => setScreen("reactions")} />
@@ -32,7 +32,19 @@ test("popups have no Back buttons and retain outside-click dismissal", async () 
     expect(view.captureCharFrame()).toContain("Settings")
     expect(view.renderer.root.findDescendantById("settings-close")).toBeUndefined()
     expect(view.captureCharFrame()).not.toContain("Close")
+    // Narrow Settings is fullscreen: its top-left corner is inside, not a backdrop.
     await view.mockMouse.click(0, 0); await view.flush()
+    expect(screen()).toBe("settings")
+    expect(view.captureCharFrame()).toContain("Settings")
+    // At the split-layout breakpoint Settings has a real outside-click target.
+    view.resize(120, 40); await view.flush()
+    const lines = view.captureCharFrame().split("\n")
+    const titleRow = lines.findIndex((line) => line.includes("Settings"))
+    expect(titleRow).toBeGreaterThan(-1)
+    await view.mockMouse.click(lines[titleRow]!.indexOf("Settings"), titleRow); await view.flush()
+    expect(screen()).toBe("settings")
+    await view.mockMouse.click(0, 0); await view.flush()
+    expect(screen()).toBe("reactions")
     expect(view.captureCharFrame()).toContain("Reactions")
     expect(view.renderer.root.findDescendantById("reaction-picker-back")).toBeUndefined()
     await view.mockMouse.click(0, 0); await view.flush()

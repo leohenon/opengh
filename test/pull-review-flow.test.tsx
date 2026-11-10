@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test"
-import type { TextareaRenderable } from "@opentui/core"
+import { TextBufferRenderable, type Renderable, type TextareaRenderable } from "@opentui/core"
 import { createTestRenderer } from "@opentui/core/testing"
 import { render } from "@opentui/solid"
 import { createSignal } from "solid-js"
@@ -15,7 +15,7 @@ import { clickControl } from "./fixtures/mouse"
 import { githubDataFixture, repositoryOperationsFixture, pullContextFixture } from "./fixtures/github-data"
 import { patchFixture } from "./fixtures/diff"
 
-test("inline comments publish immediately and independently of the overall review", async () => {
+test("draft PR inline comments publish immediately and independently of the overall review", async () => {
   const number = githubDataFixture.pulls.open.value!.items[0]!.number
   const repository = githubDataFixture.repo.nameWithOwner
   const headSha = "a".repeat(40), baseSha = "b".repeat(40)
@@ -36,7 +36,8 @@ test("inline comments publish immediately and independently of the overall revie
     open: async (repo, n) => {
       expect([repo, n]).toEqual([repository, number])
       setState(s => ({ status: "ready", eligibility: { accountId: 1, login: "reviewer", repository, number, headSha, baseSha,
-        url: `${githubDataFixture.repo.url}/pull/${number}`, canComment: true, canApprove: true, canRequestChanges: true },
+        url: `${githubDataFixture.repo.url}/pull/${number}`, canComment: true, canInlineComment: true, canApprove: false, canRequestChanges: false,
+        reason: "Approval and request changes require a non-draft pull request." },
         draft: s.draft ?? { accountId: 1, repository, number, headSha, baseSha, event: "COMMENT", body: "", comments: [] } }))
     },
     setBody: body => setState(s => ({ ...s, draft: { ...s.draft!, body } })),
@@ -58,7 +59,7 @@ test("inline comments publish immediately and independently of the overall revie
     config={{ ...defaultConfig, showStatusBarHints: true }} initialNavigation={{ detail: { kind: "pull", number } }}
     onLoadPull={async () => { refreshes++ }} onLoadDiff={async () => { diffLoads++ }}
     diffs={{ pull: { target: { kind: "pull", number }, resource: { status: "ready", value: { kind: "patch", patch, ...revision() } } } }}
-    pullDetail={{ number, resource: { status: "ready", value: { ...summary, draft: false, merged: false,
+    pullDetail={{ number, resource: { status: "ready", value: { ...summary, draft: true, merged: false,
       body: "PR body", url: `${githubDataFixture.repo.url}/pull/${number}`, updatedAt: summary.createdAt,
       baseBranch: "main", headBranch: "feature", headSha, additions: 1, deletions: 1, changedFiles: 1, commitCount: 1,
       commentCount: 0, labels: [], assignees: [], reviewers: [], mergeable: null, permissions: { comment: true } } },
@@ -73,6 +74,7 @@ test("inline comments publish immediately and independently of the overall revie
     setup.mockInput.pressKey("a"); await settle()
     await clickControl(setup, "issue-menu-review"); await settle()
     expect(setup.captureCharFrame()).toContain(`Review PR #${number}`)
+    expect(setup.captureCharFrame()).toContain("Approval and request changes require a non-draft")
     setup.mockInput.pressEscape(); await settle()
     setup.mockInput.pressKey("D"); await settle()
     expect(setup.captureCharFrame()).toContain("Existing GitHub comment")
@@ -132,6 +134,16 @@ test("inline comments publish immediately and independently of the overall revie
     setThreads([remoteThread, { ...remoteThread, id: "new-server-thread", comments: [{ ...remoteThread.comments[0]!, id: "new-server-comment",
       body: "Please explain this change.", url: "https://github.com/example/comment" }] }])
     await settle()
+    // Reconciliation must rebuild the server card, not just remove the local one.
+    const diffBody = setup.renderer.root.findDescendantById("diff-body-scroll")!
+    expect(diffBody.findDescendantById("diff-comment-card:posted-123")).toBeUndefined()
+    expect(diffBody.findDescendantById("diff-comment-card:new-server-thread")).toBeDefined()
+    expect(diffBody.findDescendantById("diff-comment-card:remote-thread")).toBeDefined()
+    const bodyTexts = (node: Renderable): string[] => [
+      ...(node instanceof TextBufferRenderable ? [node.plainText] : []),
+      ...node.getChildren().flatMap(bodyTexts),
+    ]
+    expect(bodyTexts(diffBody).filter(text => text === "Please explain this change.")).toHaveLength(1)
     expect(setup.captureCharFrame().split("Please explain this change.")).toHaveLength(2)
     await openInline()
     expect(editorBody()).toBe("") // Successful posting clears only the submitted context.

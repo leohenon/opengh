@@ -18,6 +18,7 @@ export function SwitchRepositoryScreen(props: {
   const { colors } = useTheme()
   const keys = useKeybindings()
   const [error, setError] = createSignal("")
+  const [query, setQuery] = createSignal("")
   const repositories = createMemo(() => {
     const seen = new Set<string>()
     return [...(props.current ? [props.current] : []), ...props.recent].filter((repository) => {
@@ -27,8 +28,17 @@ export function SwitchRepositoryScreen(props: {
       return true
     })
   })
+  const typedRepository = createMemo(() => {
+    const repository = normalizeRepository(query())
+    return repository && !repositories().some((recent) => recent.toLowerCase() === repository.toLowerCase())
+      ? repository : undefined
+  })
+  const candidates = createMemo(() => {
+    const typed = typedRepository()
+    return typed ? [typed, ...repositories()] : repositories()
+  })
   const submit = (query: string, selected?: string) => {
-    const repository = normalizeRepository(query) ?? selected
+    const repository = selected ?? normalizeRepository(query)
     if (!repository) return setError("Enter owner/repository or a GitHub URL")
     props.onOpen(repository)
   }
@@ -38,20 +48,24 @@ export function SwitchRepositoryScreen(props: {
       <SearchablePicker
         placement="center"
         width={80}
-        height={7 + Math.max(1, Math.min(20, repositories().length)) + (error() ? 1 : 0)}
+        height={7 + Math.max(1, Math.min(20, candidates().length)) + (error() ? 1 : 0)}
         title="Switch repository"
         placeholder="Search recent repositories, owner/repository or GitHub URL"
-        items={repositories()}
-        itemKey={(repository) => repository}
+        items={candidates()}
+        // Reset selection when the query adds a typed candidate after the picker's own query update.
+        itemKey={(repository) => `${query()}:${repository.toLowerCase()}`}
         match={(repository, query) => {
-          const index = repository.toLowerCase().indexOf(query.toLowerCase())
+          const needle = (normalizeRepository(query) ?? query).toLowerCase()
+          const name = repository.toLowerCase()
+          if (name === needle) return -1
+          const index = name.indexOf(needle)
           return index < 0 ? undefined : index
         }}
-        listTitle="Recent repositories"
+        listTitle={typedRepository() ? "Repositories" : "Recent repositories"}
         empty="No matching repositories — enter owner/repository or a GitHub URL"
         showScrollbar={props.showScrollbar}
         error={error()}
-        onQueryChange={() => setError("")}
+        onQueryChange={(value) => { setQuery(value); setError("") }}
         onSelect={props.onOpen}
         onSubmit={submit}
         onClose={props.onClose}
@@ -64,7 +78,7 @@ export function SwitchRepositoryScreen(props: {
                 <text flexShrink={0} fg={colors.muted}>{owner} / </text>
                 <text minWidth={0} flexShrink={1} height={1} wrapMode="none" truncate fg={colors.blue} attributes={TextAttributes.BOLD}>{nameParts.join("/")}</text>
               </box>
-              <text width={10} flexShrink={0} fg={colors.green}>{repository.toLowerCase() === props.current?.toLowerCase() ? "✓ current" : ""}</text>
+              <text width={10} flexShrink={0} fg={colors.green}>{repository.toLowerCase() === props.current?.toLowerCase() ? "✓ current" : repository === typedRepository() ? "typed" : ""}</text>
             </>
           )
         }}

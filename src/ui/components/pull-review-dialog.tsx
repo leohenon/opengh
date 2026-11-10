@@ -280,7 +280,7 @@ export function PullReviewDialog(props: PullReviewDialogProps) {
   const warning = () => [...new Set([
     state().message && (state().status === "error" || state().message !== eligibility()?.reason && state().message !== "Review submitted.") ? state().message : undefined,
     localError(),
-    !eligibility()?.canComment ? eligibility()?.reason : undefined,
+    !eligibility()?.canComment || (stage() === "choose" && !eligibility()?.canApprove) ? eligibility()?.reason : undefined,
     state().uncertain || draft()?.submission ? "Submission outcome uncertain. Draft preserved; check GitHub before retrying." : undefined,
     mismatch() ? "The diff changed. Inspect the latest changes before using the current commit." : undefined,
   ].filter(Boolean))].join("\n")

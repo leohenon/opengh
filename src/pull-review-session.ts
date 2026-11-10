@@ -172,7 +172,11 @@ export function createPullReviewSession(options: PullReviewSessionOptions = {}):
     })
   }
   async function flush() {
-    await queue
+    let pending: Promise<void>
+    do {
+      pending = queue
+      await pending
+    } while (pending !== queue)
     if (persistenceError) throw persistenceError
   }
   function edit(transform: (draft: ReviewDraft) => ReviewDraft) {

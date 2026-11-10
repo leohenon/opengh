@@ -1,4 +1,4 @@
-import { expect, test } from "bun:test"
+import { expect, spyOn, test } from "bun:test"
 import { testRender } from "@opentui/solid"
 import { RGBA, type TextRenderable } from "@opentui/core"
 import { appColors, resolveTheme } from "../src/theme"
@@ -23,6 +23,15 @@ test("literal smart-case search retains original Unicode offsets and wraps", () 
   expect(searchRanges("🙂中é İ foo FOO", "foo")).toEqual([{ start: 8, end: 11 }, { start: 12, end: 15 }])
   expect(searchRanges("aaaa", "aa")).toEqual([{ start: 0, end: 2 }, { start: 2, end: 4 }])
   expect(searchRanges("abc", "")).toEqual([])
+  const exec = spyOn(RegExp.prototype, "exec")
+  try {
+    const capped = searchRanges("x".repeat(100_000), "x", 10_000)
+    const calls = exec.mock.calls.length
+    expect(capped).toHaveLength(10_000)
+    expect(calls).toBeLessThan(10_010) // Stop near the cap, rather than scanning every match before slicing.
+  } finally { exec.mockRestore() }
+  expect(searchRanges("🙂中é İ foo FOO", "foo", 1)).toEqual([{ start: 8, end: 11 }])
+  expect(searchRanges("abc", "a", 0)).toEqual([])
   expect(wrapSearchIndex(0, -1, 3)).toBe(2)
   expect(wrapSearchIndex(2, 1, 3)).toBe(0)
   expect(wrapSearchIndex(0, 1, 0)).toBe(-1)
@@ -143,9 +152,9 @@ test.each((["overview", "commits", "issues", "pulls", "actions"] as const).flatM
 ))("%s search survives initial loading (accepted: %s)", async (page, accepted) => {
   const query = { overview: "TypeScript", commits: "duplicate", issues: "resize", pulls: "retain", actions: "retain" }[page]
   const [data, setData] = createSignal<RepositoryData>({ ...githubDataFixture,
-    documents: { status: "loading" }, commits: { status: "loading" }, runs: { status: "loading" },
-    issues: { open: { status: "loading" }, closed: { status: "loading" } },
-    pulls: { open: { status: "loading" }, closed: { status: "loading" } },
+    documents: { status: "loading", phase: "load" }, commits: { status: "loading", phase: "load" }, runs: { status: "loading", phase: "load" },
+    issues: { open: { status: "loading", phase: "load" }, closed: { status: "loading", phase: "load" } },
+    pulls: { open: { status: "loading", phase: "load" }, closed: { status: "loading", phase: "load" } },
   })
   const view = await testRender(() => <App data={data()} operations={repositoryOperationsFixture} initialNavigation={{ page }} />,
     { width: 100, height: 30 })

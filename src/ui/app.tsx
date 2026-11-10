@@ -474,7 +474,7 @@ function AppContent(props: AppProps) {
   }))
   const canOfferReview = () => {
     const pull = pullDetail().resource.value
-    return !!(props.reviews && activePullNumber() && pull?.permissions?.comment && pull.state === "open" && pull.draft === false && !pull.merged)
+    return !!(props.reviews && activePullNumber() && pull?.permissions?.comment && pull.state === "open" && !pull.merged)
   }
   const openReview = async (number = activePullNumber()) => {
     if (!number || !props.reviews || reviewSubmitting()) return

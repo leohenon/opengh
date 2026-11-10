@@ -8,6 +8,20 @@ export type CommandSpec = { args: string[]; cwd: string }
 export type CommandResult = { exitCode: number | null; cancelled: boolean }
 export type CommandTask = { cancel(): void; result: Promise<CommandResult> }
 
+const activeCommands = new Set<CommandTask>()
+let stopping = false
+let shutdown: Promise<void> | undefined
+
+export function stopCommandProcesses(): Promise<void> {
+  if (shutdown) return shutdown
+  stopping = true
+  const tasks = [...activeCommands]
+  for (const task of tasks) task.cancel()
+  // Results settle only after close and any remaining group escalation.
+  shutdown = Promise.all(tasks.map((task) => task.result)).then(() => {})
+  return shutdown
+}
+
 // Never inherit repository overrides: local commands must refer to the actual cwd.
 function commandEnvironment() {
   const env = githubEnvironment()
@@ -16,6 +30,7 @@ function commandEnvironment() {
 }
 
 export function runCommand(spec: CommandSpec, onOutput: (chunk: string) => void): CommandTask {
+  if (stopping) throw new Error("Command processes are shutting down")
   const child = spawn(spec.args[0]!, spec.args.slice(1), {
     cwd: spec.cwd, env: commandEnvironment(), stdio: ["ignore", "pipe", "pipe"], detached: true,
   })
@@ -47,7 +62,10 @@ export function runCommand(spec: CommandSpec, onOutput: (chunk: string) => void)
       done({ exitCode, cancelled })
     })
   })
-  return { cancel, result }
+  const task = { cancel, result }
+  activeCommands.add(task)
+  void result.then(() => activeCommands.delete(task))
+  return task
 }
 
 async function git(cwd: string, args: string[]) {

@@ -1,10 +1,47 @@
 import { describe, expect, test } from "bun:test"
+import { spawnSync } from "node:child_process"
 import { unified } from "unified"
 import remarkParse from "remark-parse"
 import { visit } from "unist-util-visit"
 import { gitHubMarkdownFallback, normalizeGitHubMarkdown } from "../src/ui/github-markdown"
 
 describe("GitHub Markdown normalization", () => {
+  test("rejects container-prefix attacks before parsing, under a parent-enforced deadline", () => {
+    // A regression must not block the test runner's event loop. This is a hang
+    // backstop, not a latency benchmark; assertions identify the pre-parse guard.
+    const result = spawnSync(process.execPath, ["--eval", `
+      import { strict as assert } from "node:assert"
+      import { GitHubMarkdownError, normalizeGitHubMarkdown, assertGitHubMarkdownSource } from "./src/ui/github-markdown"
+      const attacks = [
+        "> ".repeat(100000) + "text",
+        "> ".repeat(65) + "text",
+        ">".repeat(65) + "text",
+        ...["- ", "+ ", "* ", "1. ", "1) ", "> - 1. >\\t"].map(prefix => prefix.repeat(65) + "text"),
+        "- start\\r\\n" + "\\t".repeat(33) + "- text",
+        "- start\\r\\n" + " ".repeat(130) + "1) text",
+        ("> ".repeat(4) + "text\\r\\n").repeat(5001),
+      ]
+      for (const source of attacks) {
+        assertGitHubMarkdownSource(source) // Plain-text documents keep their limits.
+        assert.throws(() => normalizeGitHubMarkdown(source), error =>
+          error instanceof GitHubMarkdownError && error.message === "Markdown is too complex (container prefixes before parsing)")
+      }
+    `], { cwd: new URL("..", import.meta.url), timeout: 10_000, encoding: "utf8" })
+    expect(result.error).toBeUndefined()
+    expect(result.signal).toBeNull()
+    expect(result.stderr).toBe("")
+    expect(result.status).toBe(0)
+  })
+
+  test("prefix guard preserves ordinary README lists, fences, links, and alerts", () => {
+    const source = "# Guide\r\n\r\n" + "- [Guide](https://example.com/)\r\n  1. Child\r\n".repeat(500)
+      + "\r\n> [!NOTE]\r\n> Read this.\r\n\r\n```text\r\n>>> sample\r\n- 1. literal\r\n```"
+    const markdown = normalizeGitHubMarkdown(source)
+    expect(markdown.match(/\[Guide\]/g)).toHaveLength(500)
+    expect(markdown).toContain("> **Note**")
+    expect(markdown).toContain("```text\n>>> sample\r\n- 1. literal\n```")
+  })
+
   test("bounds source size and tree complexity before recursive conversion", () => {
     const attack = "<a>" + "<span>".repeat(12_000) + "hello" + "</span>".repeat(12_000) + "</a>"
     for (const source of [attack, "> ".repeat(80) + "deep", "*x* ".repeat(10_001), "<template>".repeat(80) + "hello" + "</template>".repeat(80)])

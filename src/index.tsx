@@ -4,6 +4,7 @@ import { Root } from "./root"
 import { initializeHunk } from "./ui/hunk-host"
 import { stopGitHubProcesses } from "./github/process"
 import { stopClipboardProcesses } from "./clipboard"
+import { stopCommandProcesses } from "./command-actions"
 import { saveRepositoryTabs } from "./repository-tabs"
 import { saveConfig } from "./config"
 import { rememberRepository } from "./github/repository"
@@ -59,6 +60,7 @@ const renderer = await createCliRenderer({
       renderer.closed,
       stopGitHubProcesses(),
       stopClipboardProcesses(),
+      stopCommandProcesses(),
       ...pendingSaves,
     ]).then(() => process.exit(process.exitCode ?? 0))
   },

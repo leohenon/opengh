@@ -47,6 +47,47 @@ test("Hunk paints whole partial-match graphemes, including either active occurre
   } finally { pane.dispose(); setup.renderer.destroy(); await setup.renderer.closed }
 })
 
+test("large repetitive diff search caps source results and reveals first/last without per-match row lookup", async () => {
+  const setup = await createTestRenderer({ width: 72, height: 12 })
+  initializeHunk(setup.renderer)
+  const source = Array.from({ length: 10_001 }, (_, i) => `x${String(i).padStart(9, "0")}`).join("")
+  const patch = `diff --git a/large.txt b/large.txt\n--- a/large.txt\n+++ b/large.txt\n@@ -1 +1,2 @@\n-old\n+${source}\n+x later cell\n`
+  await render(() => <KeybindingsProvider><ThemeProvider name="github" mode="dark">
+    <box width="100%" height="100%" flexDirection="column"><SearchProvider identity="large" enabled>
+      <DiffScreen target={{ kind: "commit", sha: "large" }}
+        resource={{ status: "ready", value: { kind: "patch", patch } }} interactive
+        showScrollbar={false} onLoadFiles={() => {}} />
+    </SearchProvider></box>
+  </ThemeProvider></KeybindingsProvider>, setup.renderer)
+  const settle = async () => { await setup.flush(); await setup.renderer.idle(); await setup.flush() }
+  try {
+    await settle()
+    const host = setup.renderer.root.findDescendantById("embedded-diff-host")!
+    const lookup = host.findDescendantById.bind(host)
+    let lookups = 0
+    host.findDescendantById = (id) => { lookups++; return lookup(id) }
+    setup.mockInput.pressKey("/")
+    await setup.mockInput.pasteBracketedText("x")
+    await settle()
+    setup.mockInput.pressEnter()
+    await settle()
+    expect(setup.captureCharFrame()).toContain("1/10000+")
+    expect(setup.captureCharFrame()).toContain("x000000000")
+    // Includes layout callbacks and refreshes, but must not scale with matches.
+    expect(lookups).toBeLessThan(100)
+    lookups = 0
+    setup.mockInput.pressKey("N")
+    await settle()
+    expect(setup.captureCharFrame()).toContain("10000/10000+")
+    expect(setup.captureCharFrame()).toContain("x000009999")
+    expect(lookups).toBeLessThan(100)
+    setup.mockInput.pressKey("n")
+    await settle()
+    expect(setup.captureCharFrame()).toContain("1/10000+")
+    expect(setup.captureCharFrame()).toContain("x000000000")
+  } finally { setup.renderer.destroy(); await setup.renderer.closed }
+}, 20_000)
+
 const lines = Array.from({ length: 36 }, (_, index) => index === 0 ? " const needleContext = 1"
   : index === 1 ? '-const before = "old"\n+const after = "new"'
   : index === 11 ? `-const far = "old"\n+const far = "${"x".repeat(110)} 👩‍💻 needle"`

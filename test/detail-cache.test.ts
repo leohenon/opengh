@@ -136,6 +136,132 @@ describe("detail cache invalidation", () => {
     expect(session.issueDetail()?.comments.value?.items.map((comment) => comment.id)).toContain(posted.id)
   })
 
+  test.each((["issue", "pull"] as const).flatMap(parent =>
+    (["offscreen", "returned", "replaced", "read failure"] as const).map(scenario => [parent, scenario] as const),
+  ))("a %s close confirmed %s revalidates only the origin overview", async (parent, scenario) => {
+    const pending = deferred<void>()
+    const started = deferred<void>()
+    const oldReads = deferred<void>()
+    const oldReadsStarted = deferred<void>()
+    const freshReads = deferred<void>()
+    let oldReadCount = 0
+    let holdOldReads = false
+    let now = 0
+    let firstId = 1
+    let closed = false
+    const waitForRead = async (wasClosed: boolean) => {
+      if (wasClosed && scenario !== "offscreen") {
+        await freshReads.promise
+        if (scenario === "read failure") throw new Error("Overview offline")
+      } else if (holdOldReads) {
+        if (++oldReadCount === 3) oldReadsStarted.resolve()
+        await oldReads.promise
+      }
+    }
+    const metadataCalls: Record<string, number> = {}
+    const issue = { ...structuredClone(issueDetailFixture), number: 1, state: "open" as const }
+    const pull = { ...await loaders().pull!({ ...githubDataFixture.repo, nameWithOwner: "owner/first" }, 1), state: "open" as const,
+      merged: false, permissions: { comment: true, close: true, reopen: true, assignees: true } }
+    const list: RepositoryLoaders["pulls"] = async (repository, state) => {
+      const wasClosed = closed
+      await waitForRead(wasClosed)
+      return { items: repository.nameWithOwner === "owner/first" && state === (wasClosed ? "closed" : "open")
+        ? [{ ...pull, state }] : [], hasMore: false }
+    }
+    const session = createRepositorySession(loaders({
+      metadata: async (repository) => {
+        metadataCalls[repository] = (metadataCalls[repository] ?? 0) + 1
+        return { ...structuredClone(githubDataFixture.repo), nameWithOwner: repository,
+          id: repository === "owner/first" ? firstId : 2, nodeId: `R_${repository}` }
+      },
+      issue: async () => ({ ...issue, state: closed ? "closed" : "open" }),
+      pull: async () => ({ ...pull, state: closed ? "closed" : "open" }),
+      ...(parent === "issue" ? { issues: list } : { pulls: list }),
+      workCounts: async (repository) => {
+        const wasClosed = closed
+        await waitForRead(wasClosed)
+        return { issues: parent === "issue" && repository.nameWithOwner === "owner/first" && !wasClosed ? 1 : 0,
+          pulls: parent === "pull" && repository.nameWithOwner === "owner/first" && !wasClosed ? 1 : 0 }
+      },
+      updateIssueState: async () => { started.resolve(); await pending.promise; closed = true; return { ...issue, state: "closed" } },
+      updatePullState: async () => { started.resolve(); await pending.promise; closed = true; return { ...pull, state: "closed" } },
+    }), undefined, { freshMs: 60_000, now: () => now })
+    const section = parent === "issue" ? "issues" : "pulls"
+    await session.load("owner/first")
+    const initial = session.state()
+    if (initial.status !== "ready") throw new Error("expected ready")
+    expect(initial.data[section].open.value?.items).toMatchObject([{ number: 1, state: "open" }])
+    expect(initial.data[section].closed.value?.items).toEqual([])
+    expect(initial.data.workCounts.value?.[section]).toBe(1)
+    if (parent === "issue") await session.loadIssue(1)
+    else await session.loadPull(1)
+    const closing = session.submitIssueAction(1, "close", parent)
+    await started.promise
+    await session.load("owner/second")
+    if (scenario === "replaced") { firstId = 3; now = 60_001 }
+    if (scenario !== "offscreen") await session.load("owner/first")
+    if (scenario === "replaced") {
+      expect(session.state().status).toBe("error")
+      await session.load("owner/first")
+      const replacement = session.state()
+      if (replacement.status !== "ready") throw new Error("expected replacement ready")
+      expect(replacement.data.repo.id).toBe(3)
+    }
+    const before = session.state()
+    let refreshing: Promise<void> | undefined
+    if (scenario === "returned") {
+      holdOldReads = true
+      refreshing = session.refresh()
+      await oldReadsStarted.promise
+      holdOldReads = false
+    }
+    pending.resolve()
+    await closing
+    if (scenario === "offscreen" || scenario === "replaced") expect(session.state()).toBe(before)
+    if (scenario === "replaced") return
+    if (scenario === "offscreen") await session.load("owner/first")
+    else {
+      const revalidating = session.state()
+      if (revalidating.status !== "ready") throw new Error("expected ready")
+      expect(revalidating.data[section].open).toMatchObject({ status: "loading", value: { items: [{ number: 1, state: "open" }] } })
+      expect(revalidating.data[section].closed.status).toBe("loading")
+      expect(revalidating.data.workCounts).toMatchObject({ status: "loading", value: { [section]: 1 } })
+      freshReads.resolve()
+      // Let the background list/count reads settle, without starting another refresh.
+      await new Promise(resolve => setTimeout(resolve, 0))
+    }
+    if (scenario === "read failure") {
+      const failed = session.state()
+      if (failed.status !== "ready") throw new Error("expected ready")
+      expect(failed.data[section].open).toMatchObject({ status: "error", message: "Overview offline" })
+      expect(failed.data[section].closed.status).toBe("error")
+      expect(failed.data.workCounts).toMatchObject({ status: "error", message: "Overview offline" })
+      expect(session.issueAction(1, parent).operation.status).toBe("idle")
+      return
+    }
+    const returned = session.state()
+    expect(returned.status).toBe("ready")
+    if (returned.status !== "ready") throw new Error("expected ready")
+    expect(returned.data[section].open.value?.items).toEqual([])
+    expect(returned.data[section].closed.value?.items).toMatchObject([{ number: 1, state: "closed" }])
+    expect(returned.data.workCounts.value?.[section]).toBe(0)
+    expect(metadataCalls["owner/first"]).toBe(2)
+    if (refreshing) {
+      oldReads.resolve()
+      await refreshing
+      const settled = session.state()
+      if (settled.status !== "ready") throw new Error("expected ready")
+      expect(settled.data[section]).toEqual(returned.data[section])
+      expect(settled.data.workCounts).toEqual(returned.data.workCounts)
+    }
+    // The unrelated repository remains fresh, and the retained origin detail still revalidates.
+    if (parent === "issue") await session.loadIssue(1)
+    else await session.loadPull(1)
+    expect((parent === "issue" ? session.issueDetail() : session.pullDetail())?.resource.value?.state).toBe("closed")
+    await session.load("owner/second")
+    expect(metadataCalls["owner/second"]).toBe(1)
+  })
+
   test("failed sections are retained as errors, never as fresh empty data", async () => {
     let failComments = true
     const session = createRepositorySession(loaders({

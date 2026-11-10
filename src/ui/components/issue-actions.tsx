@@ -1,5 +1,5 @@
 import { TextAttributes, type ScrollBoxRenderable, type TextareaRenderable } from "@opentui/core"
-import { usePaste, useRenderer } from "@opentui/solid"
+import { usePaste, useRenderer, useTerminalDimensions } from "@opentui/solid"
 import { createEffect, createMemo, createSignal, For, Index, onCleanup, Show, untrack } from "solid-js"
 import type { IssueActionKind, IssueActionParent, IssueCloseReason } from "../../models"
 import type { IssueActionState } from "../../repository-state"
@@ -13,6 +13,7 @@ import { Popup } from "./popup"
 import { KeyInput, replaceEditorText, useKeyActions, useKeybindings } from "../keybindings"
 import { Action } from "./action"
 import { mouseClick, mouseHover } from "../mouse"
+import { scrollRowIntoView } from "../scroll-selection"
 
 export function IssueActionsMenu(props: {
   number: number
@@ -52,9 +53,25 @@ export function IssueActionsMenu(props: {
     return visible
   })
   const active = () => Math.min(selected(), items().length - 1)
+  const dimensions = useTerminalDimensions()
+  let list: ScrollBoxRenderable | undefined
+  // Renderable height getters clamp to one even when Yoga has no rows left.
+  // Popup reserves two terminal rows; its padding, title and gap use four more.
+  const hasRows = () => dimensions().height > 6
+  const revealSelection = () => {
+    if (hasRows() && active() >= 0) scrollRowIntoView(list, active(), 1)
+  }
+  createEffect(revealSelection)
+  onCleanup(() => list?.viewport.off("resize", revealSelection))
+  const move = (delta: number) => {
+    if (!hasRows()) return
+    setSelected(Math.max(0, Math.min(items().length - 1, active() + delta)))
+    revealSelection()
+  }
   const activate = (index = active()) => {
     const item = items()[index]
-    if (!item || item.disabled) return
+    if (!item || item.disabled || !hasRows() || !list
+      || index < list.scrollTop || index >= list.scrollTop + list.viewport.height) return
     setSelected(index)
     if (item.kind === "merge") props.onMerge?.()
     else if (item.kind === "review") props.onReview?.()
@@ -64,8 +81,8 @@ export function IssueActionsMenu(props: {
   }
   useKeyActions({
     "dialog.close": () => props.onClose(),
-    "navigation.up": () => { setSelected(Math.max(0, active() - 1)) },
-    "navigation.down": () => { setSelected(Math.min(items().length - 1, active() + 1)) },
+    "navigation.up": () => move(-1),
+    "navigation.down": () => move(1),
     "navigation.activate": () => activate(),
   }, { priority: 100, modal: true })
   return (
@@ -73,6 +90,10 @@ export function IssueActionsMenu(props: {
       <box flexGrow={1} minHeight={0} paddingX={2} paddingBottom={1} flexDirection="column">
         <text height={1} flexShrink={0} fg={colors.text} attributes={TextAttributes.BOLD}>{props.parent === "pull" ? "PR" : "Issue"} #{props.number} · Actions</text>
         <box height={1} flexShrink={0} />
+        <scrollbox id="issue-actions-scroll" ref={(value) => {
+          list = value
+          list.viewport.on("resize", revealSelection)
+        }} flexGrow={1} flexShrink={1} minHeight={0} focusable={false} scrollX={false} scrollY>
         <Index each={items()}>{(item, index) => {
           const hover = mouseHover(() => !item().disabled, () => item().kind)
           return (
@@ -83,7 +104,7 @@ export function IssueActionsMenu(props: {
             </box>
           )
         }}</Index>
-        <box flexGrow={1} minHeight={0} />
+        </scrollbox>
       </box>
     </Popup>
   )

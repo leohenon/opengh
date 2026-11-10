@@ -13,6 +13,7 @@ export type SearchTarget = {
   // A visible diff pane may keep its accepted scope after keyboard focus moves.
   retain?(): boolean
   search(query: string): SearchResult[]
+  truncated?(): boolean
   highlight(activeId?: string): void
   clear(): void
   snapshot(): () => void
@@ -35,6 +36,7 @@ export function SearchProvider(props: { identity: string; enabled: boolean; scop
   const [draft, setDraft] = createSignal<Draft>()
   const [session, setSession] = createSignal<Session>({ query: "" })
   const [results, setResults] = createSignal<SearchResult[]>([])
+  const [truncated, setTruncated] = createSignal(false)
   const sessions = new Map<string, Session>()
   let owner: SearchTarget | undefined
   let identity = ""
@@ -56,6 +58,7 @@ export function SearchProvider(props: { identity: string; enabled: boolean; scop
     if (!owner) return
     const found = owner.search(query())
     setResults(found)
+    setTruncated(owner.truncated?.() ?? false)
     const previous = session().current
     let selected = found.find((result) => result.id === previous)
     if (draft() && (reveal || !selected)) selected = found.find((result) => (result.position ?? 0) >= draft()!.anchor) ?? found[0]
@@ -107,7 +110,7 @@ export function SearchProvider(props: { identity: string; enabled: boolean; scop
     const matches = results()
     const selection = owner?.selection?.()
     const index = selection === undefined ? currentIndex() : matches.findIndex((result) => result.id === selection)
-    let result = matches[wrapSearchIndex(index, delta, matches.length)]
+    let result: SearchResult | undefined = matches[wrapSearchIndex(index, delta, matches.length)]
     if (selection !== undefined && index < 0) {
       const cursor = owner?.position?.() ?? 0
       result = delta > 0
@@ -145,7 +148,7 @@ export function SearchProvider(props: { identity: string; enabled: boolean; scop
   } }}>
     {props.children}
     <Show when={props.enabled && (!!draft() || !!session().query)} fallback={props.footer}>
-      <SearchBar query={query()} editing={!!draft()} current={currentIndex() + 1} total={results().length}
+      <SearchBar query={query()} editing={!!draft()} current={currentIndex() + 1} total={results().length} truncated={truncated()}
         zIndex={props.scope === undefined ? 0 : 350}
         onInput={(query) => { setDraft((draft) => draft && { ...draft, query }); refresh(true) }} />
     </Show>

@@ -10,12 +10,12 @@ import type { ReviewDraft } from "../src/review-types"
 const sha = "a".repeat(40)
 const baseSha = "c".repeat(40)
 function fixture() {
-  const data = { accountId: 7, head: sha, base: baseSha as string | undefined, author: 8, private: true, pull: true, collaborator: false, triage: false, locked: false, push: false, collaboratorChecks: 0, reviews: [] as any[], comments: [] as any[], posts: [] as any[], failPost: false, recordPost: true }
+  const data = { draft: false, archived: false, state: "open", accountId: 7, head: sha, base: baseSha as string | undefined, author: 8, private: true, pull: true, collaborator: false, triage: false, locked: false, push: false, collaboratorChecks: 0, reviews: [] as any[], comments: [] as any[], posts: [] as any[], failPost: false, recordPost: true }
   const transport: GitHubTransport = {
     async json<T>(path: string): Promise<T> {
       if (path === "user") return { id: data.accountId, login: "viewer" } as T
-      if (path === "repos/o/r") return { archived: false, private: data.private, permissions: { pull: data.pull, triage: data.triage, push: data.push } } as T
-      if (path === "repos/o/r/pulls/1") return { head: { sha: data.head }, ...(data.base === undefined ? {} : { base: { sha: data.base } }), state: "open", draft: false, locked: data.locked, user: { id: data.author } } as T
+      if (path === "repos/o/r") return { archived: data.archived, private: data.private, permissions: { pull: data.pull, triage: data.triage, push: data.push } } as T
+      if (path === "repos/o/r/pulls/1") return { head: { sha: data.head }, ...(data.base === undefined ? {} : { base: { sha: data.base } }), state: data.state, draft: data.draft, locked: data.locked, user: { id: data.author } } as T
       if (path.includes("/files?")) return [{ filename: "a.ts", patch: "@@ -1,2 +1,2 @@\n old\n-new\n+new" }] as T
       if (path.includes("/comments?")) return data.comments as T
       if (path.includes("/reviews?")) return data.reviews as T
@@ -48,6 +48,42 @@ function memory(): ReviewDraftStorage {
 const draft = (): ReviewDraft => ({ accountId: 7, repository: "o/r", number: 1, headSha: sha, baseSha, body: "Review", event: "COMMENT", comments: [] })
 
 describe("pull reviews", () => {
+  test.each([false, true])("flush drains edits queued during a save and preserves failure/retry (fail=%s)", async (fail) => {
+    const first = Promise.withResolvers<void>()
+    const second = Promise.withResolvers<void>()
+    const secondStarted = Promise.withResolvers<void>()
+    const storage = memory()
+    const session = createPullReviewSession({ transport: fixture().transport, storage: { ...storage,
+      async save(draft) {
+        if (draft.body === "first") await first.promise
+        else {
+          secondStarted.resolve()
+          await second.promise
+          if (fail) throw new Error("disk full")
+        }
+        await storage.save(draft)
+      },
+    } })
+    await session.open("o/r", 1)
+    session.setBody("first")
+    let settled = false
+    const flushing = session.flush().then(() => { settled = true }, error => { settled = true; throw error })
+    session.setBody("latest")
+    first.resolve()
+    await secondStarted.promise
+    await Bun.sleep(0)
+    expect(settled).toBe(false)
+    second.resolve()
+    if (fail) await expect(flushing).rejects.toThrow("disk full")
+    else await flushing
+    if (fail) {
+      fail = false
+      session.setBody("latest")
+      await session.flush()
+    }
+    expect((await storage.load(draft()) as ReviewDraft).body).toBe("latest")
+  })
+
   test("preloaded reviews share in-flight requests and reopen immediately without losing drafts", async () => {
     const { data, transport } = fixture()
     const gate = Promise.withResolvers<void>()
@@ -108,6 +144,63 @@ describe("pull reviews", () => {
     await api.validateAnchors(value)
     await api.post(value)
     expect(data.posts[0]).toEqual({ path: "repos/o/r/pulls/1/reviews", method: "POST", body: { commit_id: sha, event: "COMMENT", body: "Review", comments: [{ path: "a.ts", line: 2, side: "RIGHT", start_line: 1, start_side: "RIGHT", body: "Inline" }] } })
+  })
+  test("draft PRs allow COMMENT submission but retain decision, access, state, and pending review gates", async () => {
+    const { data, transport } = fixture()
+    data.draft = true
+    const api = createGitHubReviews(transport)
+    expect(await api.eligibility("o/r", 1)).toMatchObject({ canComment: true, canInlineComment: true,
+      canApprove: false, canRequestChanges: false, reason: "Approval and request changes require a non-draft pull request." })
+    const session = createPullReviewSession({ transport, storage: memory() })
+    await session.open("o/r", 1)
+    session.setBody("Draft feedback")
+    for (const event of ["APPROVE", "REQUEST_CHANGES"] as const) {
+      session.setEvent(event)
+      expect(await session.submit()).toBe(false)
+    }
+    session.setEvent("COMMENT")
+    for (const change of [{ archived: true }, { state: "closed" }, { locked: true }, { pull: false }]) {
+      Object.assign(data, change)
+      expect(await api.eligibility("o/r", 1)).toMatchObject({ canComment: false, canInlineComment: false })
+      expect(await session.submit()).toBe(false)
+      Object.assign(data, { archived: false, state: "open", locked: false, pull: true })
+    }
+    data.reviews = [{ id: 1, user: { id: 7 }, state: "PENDING" }]
+    expect(await api.eligibility("o/r", 1)).toMatchObject({ canComment: false, canInlineComment: true })
+    expect(await session.submit()).toBe(false)
+    expect(data.posts).toHaveLength(0)
+    data.reviews = []
+    expect(await session.submit()).toBe(true)
+    expect(data.posts).toHaveLength(1)
+    expect(data.posts[0].body).toMatchObject({ event: "COMMENT", body: "Draft feedback", commit_id: sha })
+  })
+  test("null historical reviewers allow submission, but pending viewer reviews and malformed authors fail closed", async () => {
+    const { data, transport } = fixture()
+    const api = createGitHubReviews(transport)
+    const historical = { id: 1, user: null, state: "COMMENTED" }
+    data.reviews = [historical]
+    expect(await api.eligibility("o/r", 1)).toMatchObject({ canComment: true, canApprove: true, canRequestChanges: true })
+    const session = createPullReviewSession({ transport, storage: memory() })
+    await session.open("o/r", 1)
+    session.setBody("Review")
+    for (const malformed of [
+      { id: 2, state: "COMMENTED" },
+      ...[{}, [], "viewer", { id: "7" }, { id: 0 }, { id: -1 }, { id: 1.5 }].map(user => ({ id: 2, user, state: "COMMENTED" })),
+      null, [], "review", { ...historical, id: 0 }, { ...historical, id: "2" }, { ...historical, state: null }, { ...historical, state: "UNKNOWN" },
+    ]) {
+      data.reviews = [historical, malformed]
+      await expect(api.eligibility("o/r", 1)).rejects.toThrow("Cannot verify existing GitHub reviews")
+      expect(await session.submit()).toBe(false)
+      expect(data.posts).toHaveLength(0)
+    }
+    data.reviews = [historical, { id: 2, user: { id: 7 }, state: "PENDING" }]
+    expect(await api.eligibility("o/r", 1)).toMatchObject({ canComment: false, canApprove: false, canRequestChanges: false })
+    expect(await session.submit()).toBe(false)
+    expect(data.posts).toHaveLength(0)
+    data.reviews = [historical]
+    expect(await session.submit()).toBe(true)
+    expect(data.posts).toHaveLength(1)
+    expect(api.confirmedResponse(draft(), { ...data.reviews[1], user: null })).toBe(false)
   })
   test("public outsider approvals never POST, while verified private READ can approve", async () => {
     const { data, transport } = fixture()

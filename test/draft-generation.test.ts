@@ -142,6 +142,49 @@ test("an exact save retries file and directory fsync after a published write rep
     expect(() => store.save(key, { ...original, body: "Changed under same generation" }, original.generation))
       .toThrow(DraftConflictError)
     expect(fs.statSync(path).mode & 0o777).toBe(0o600)
+
+    const { createRepositorySession } = await import(${JSON.stringify(new URL("../src/repository-session.ts", import.meta.url).pathname)})
+    const { githubDataFixture } = await import(${JSON.stringify(new URL("./fixtures/github-data.ts", import.meta.url).pathname)})
+    const session = createRepositorySession({ metadata: async () => githubDataFixture.repo }, store)
+    await session.load(githubDataFixture.repo.nameWithOwner, "detail")
+    const number = 42
+    const sessionKey = githubDataFixture.repo.nameWithOwner.toLowerCase() + "@" + githubDataFixture.repo.id + "#42:comment"
+    session.prepareIssueAction(number, "comment")
+    failDirectory = true
+    session.updateIssueDraft(number, { body: "edit 1" })
+    expect(session.flushDrafts()).toBe(false)
+    expect(store.load(sessionKey).body).toBe("edit 1")
+    session.updateIssueDraft(number, { body: "edit 2" })
+    expect(session.flushDrafts()).toBe(true)
+    expect(session.draftSaveError()).toBeUndefined()
+    expect(store.load(sessionKey).body).toBe("edit 2")
+
+    failDirectory = true
+    session.updateIssueDraft(number, { body: "edit 3" })
+    expect(session.flushDrafts()).toBe(false)
+    const published = store.load(sessionKey)
+    const other = createDiskDraftStore(directory)
+    const replacement = { ...published, generation: crypto.randomUUID(), body: "another writer" }
+    other.save(sessionKey, replacement, published.generation)
+    session.updateIssueDraft(number, { body: "edit 4" })
+    expect(session.flushDrafts()).toBe(false)
+    expect(session.draftSaveError()).toMatch(/draft.*changed/i)
+    expect(other.load(sessionKey)).toEqual(replacement)
+    session.discardIssueDraft(number)
+    expect(session.flushDrafts()).toBe(true)
+
+    const cleared = { ...replacement, generation: crypto.randomUUID(), body: "" }
+    other.save(sessionKey, cleared, replacement.generation)
+    const recreated = { ...replacement, generation: crypto.randomUUID() }
+    other.save(sessionKey, recreated, cleared.generation)
+    expect(() => store.save(sessionKey, { ...cleared, generation: crypto.randomUUID() }, replacement.generation))
+      .toThrow(DraftConflictError)
+    let publishedStale = false
+    await expect(store.withCurrent(sessionKey, replacement.generation, replacement.body, async () => {
+      publishedStale = true
+    })).rejects.toThrow(DraftConflictError)
+    expect(publishedStale).toBe(false)
+    expect(other.load(sessionKey)).toEqual(recreated)
   `
   const child = Bun.spawn([process.execPath, "--eval", script], { stdout: "pipe", stderr: "pipe" })
   const timeout = setTimeout(() => child.kill("SIGKILL"), 10_000)

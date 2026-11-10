@@ -99,6 +99,77 @@ describe("repository session", () => {
     expect(calls).toHaveLength(3)
   })
 
+  test.each(["full", "overview", "commits"] as const)("cached return reconciles a changed default branch before loading %s resources", async (scope) => {
+    let now = 0
+    let defaultBranch = "main"
+    let metadataCalls = 0
+    let gate: ReturnType<typeof deferred<void>> | undefined
+    const started = deferred<void>()
+    const base = loaders()
+    const waitForBranch = async (branch: string) => {
+      if (branch === "trunk" && gate) {
+        started.resolve()
+        await gate.promise
+      }
+    }
+    const session = createRepositorySession(loaders({
+      metadata: async (repository) => {
+        metadataCalls++
+        return { ...await base.metadata(repository), defaultBranch }
+      },
+      documents: async (repo, branch, options) => {
+        await waitForBranch(branch)
+        return base.documents(repo, branch, options)
+      },
+      commits: async (_repo, branch) => {
+        await waitForBranch(branch)
+        return { items: [{ ...githubDataFixture.commits.value!.items[0]!, sha: branch }], hasMore: false }
+      },
+      commitCount: async (_repo, branch) => {
+        await waitForBranch(branch)
+        return branch === "trunk" ? 7 : 4
+      },
+    }), undefined, { freshMs: 10, now: () => now })
+    await session.load("owner/repo")
+    expect(ready(session).data.currentBranch).toBe("main")
+    expect(ready(session).data.commits.value?.items[0]?.sha).toBe("main")
+    await session.load("owner/other")
+    now = 11
+    defaultBranch = "trunk"
+    gate = deferred<void>()
+    const returning = session.load("owner/repo", scope)
+    await started.promise
+    const loading = ready(session).data
+    expect(loading.currentBranch).toBe("trunk")
+    expect(loading.documents.value).toBeUndefined()
+    expect(loading.commits.value).toBeUndefined()
+    expect(loading.commitCount.value).toBeUndefined()
+    gate.resolve()
+    await returning
+    if (scope === "overview") {
+      expect(ready(session).data.commits).toMatchObject({ status: "loading", deferred: true })
+      expect(ready(session).data.commitCount).toMatchObject({ status: "loading", deferred: true })
+    } else if (scope === "commits") {
+      expect(ready(session).data.documents).toMatchObject({ status: "loading", deferred: true })
+    }
+    await session.ensure!("full")
+    const settled = ready(session)
+    expect(settled.operations.refresh.status).toBe("idle")
+    expect(settled.data.documents.status).toBe("ready")
+    expect(settled.data.documents.value!.every((document) => document.ref === "trunk" && document.resource.status === "ready")).toBe(true)
+    expect(settled.data.commits).toMatchObject({ status: "ready", value: { items: [{ sha: "trunk" }] } })
+    expect(settled.data.commitCount).toEqual({ status: "ready", value: 7 })
+    expect(session.canSwitchBranch()).toBe(true)
+    await session.switchBranch("main")
+    expect(ready(session).data.currentBranch).toBe("main")
+    const beforeRefresh = metadataCalls
+    await session.refresh()
+    expect(metadataCalls).toBe(beforeRefresh + 1)
+    expect(ready(session).operations.refresh.status).toBe("idle")
+    expect(ready(session).data.commits.status).toBe("ready")
+    expect(session.canSwitchBranch()).toBe(true)
+  })
+
   test("focused pages initialize on navigation and promotion does not duplicate pending list requests", async () => {
     const calls: string[] = []
     const pending = deferred<{ items: string[]; hasMore: boolean }>()
