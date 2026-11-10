@@ -174,11 +174,13 @@ export function Help(props: {
       entry(["diff.panLeft", "diff.panRight"], "diff: horizontal pan"),
       entry(["diff.previousHunk", "diff.nextHunk"], "previous / next hunk"),
       entry("diff.toggleFiles", "toggle sidebar; hide → diff focus"),
+      entry("diff.filterFiles", "filter file paths; Enter/Tab accept, Esc clear/cancel"),
       entry("diff.toggleLayout", "toggle split / unified"),
       entry("diff.toggleWrap", "toggle line wrapping"),
       entry("diff.toggleComments", "collapse / expand review comments"),
       entry("view.refresh", "refresh / retry"),
       entry("item.open", "open diff on GitHub"),
+      entry("diff.openViewer", "open diff in external viewer"),
       ...appShortcuts,
     ] : [
       ...primary,

@@ -2,6 +2,7 @@ import type { ScrollBoxRenderable } from "@opentui/core"
 import type { RepositoryScope } from "../repository-session"
 import { useRenderer, useTerminalDimensions } from "@opentui/solid"
 import { batch, createEffect, createMemo, createSignal, For, on, onCleanup, onMount, Show } from "solid-js"
+import { openExternalDiff } from "../external-actions"
 import { defaultConfig, type Config } from "../config"
 import type { HintEntry } from "../keybindings"
 import { KeybindingsBoundary, useKeyActions, useKeybindings } from "./keybindings"
@@ -1094,6 +1095,19 @@ function AppContent(props: AppProps) {
       openingBrowser = false
     }
   }
+  const openCurrentDiffGitHub = (target = diffTarget()) => {
+    if (target) void openInBrowser(target.kind === "pull" ? target.number : target.sha, undefined, "diff")
+  }
+  const openDiffTool = async (target: DiffTarget) => {
+    const origin = navigation()
+    try {
+      await openExternalDiff({ terminal: renderer, command: config().diffViewerCommand,
+        content: resourceForDiff(target).value })
+    } catch (error) {
+      if (!disposed && !renderer.isDestroyed && navigation() === origin)
+        setToast({ id: ++toastId, title: "External tool unavailable", message: error instanceof Error ? error.message : String(error), tone: "error" })
+    }
+  }
   let copying = false
   const copyToClipboard = async (value: string, label: "SHA" | "URL" | "Text") => {
     if (copying) return
@@ -1284,8 +1298,8 @@ function AppContent(props: AppProps) {
       return hint(back, ...recovery, ["diff.focus", `focus ${files ? "diff" : "files"}`], horizontal,
         [["diff.previousHunk", "diff.nextHunk"], "hunks"],
         ...(failed ? [] : [["diff.toggleLayout", "layout"], ["diff.toggleWrap", "wrap"]] as const),
-        ["diff.toggleFiles", "toggle files"], [["navigation.up", "navigation.down"], files ? "files" : "scroll"],
-        ...comments, ...refresh, github, ...common)
+        ["diff.toggleFiles", "toggle files"], ["diff.filterFiles", "filter files"], [["navigation.up", "navigation.down"], files ? "files" : "scroll"],
+        ...comments, ["diff.openViewer", "viewer"], ...refresh, github, ...common)
     }
     if (activeRunId()) return hint(back, ...retry,
       ...more(runDetail().jobs.status !== "loading" && runDetail().jobs.value?.hasMore), ...refresh, github, copy, ...common)
@@ -1366,7 +1380,7 @@ function AppContent(props: AppProps) {
     "navigation.nextTab": () => { if (diffTarget() || standalone()) return false; movePage(1) },
     "item.open": () => {
       const diff = diffTarget()
-      if (diff) void openInBrowser(diff.kind === "pull" ? diff.number : diff.sha, undefined, "diff")
+      if (diff) openCurrentDiffGitHub(diff)
       else if (activeRunId()) void openInBrowser(`actions/runs/${activeRunId()}`)
       else if (activeCommitSha()) void openInBrowser(activeCommitSha())
       else if (activeIssueNumber() || activePullNumber()) void openInBrowser(activeIssueNumber() ?? activePullNumber())
@@ -1746,6 +1760,8 @@ function AppContent(props: AppProps) {
               review={reviewForDiff(target)} threads={threadsForDiff(target)} repositoryUrl={data().repo.url}
               interactive={page() === owner && overlay() === undefined}
               onMovePage={movePage}
+              onOpenGitHub={() => openCurrentDiffGitHub(target)}
+              onOpenExternal={() => { void openDiffTool(target) }}
               onContextMenu={(position, items) =>
                 openContextMenu(
                   position,

@@ -1,4 +1,5 @@
 import { join } from "node:path"
+import { validateExternalCommand } from "./external-actions"
 import { configDirectory } from "./paths"
 import { normalizeKeybindings, type KeybindingOverrides } from "./keybindings"
 import { atomicPrivateWrite, readPrivateJson, trustedConfigDestination } from "./filesystem"
@@ -25,6 +26,7 @@ export type Config = {
   hideDocumentsTab: boolean
   showTabShortcuts: boolean
   showTabCounts: boolean
+  diffViewerCommand?: string[]
   keybindings?: KeybindingOverrides
 }
 
@@ -93,6 +95,7 @@ function normalizeConfig(value: unknown): Config {
     hideDocumentsTab: typeof input.hideDocumentsTab === "boolean" ? input.hideDocumentsTab : defaultConfig.hideDocumentsTab,
     showTabShortcuts: typeof input.showTabShortcuts === "boolean" ? input.showTabShortcuts : defaultConfig.showTabShortcuts,
     showTabCounts: typeof input.showTabCounts === "boolean" ? input.showTabCounts : defaultConfig.showTabCounts,
+    ...(input.diffViewerCommand === undefined ? {} : { diffViewerCommand: validateExternalCommand(input.diffViewerCommand) }),
     ...(input.keybindings === undefined ? {} : { keybindings: normalizeKeybindings(input.keybindings) }),
   }
 }
@@ -110,7 +113,10 @@ export async function saveConfig(config: Config, path = configPath()): Promise<v
   try {
     // Follow intentional config links only through trusted intermediate paths.
     const destination = await trustedConfigDestination(path)
-    const output = config.keybindings === undefined ? config : { ...config, keybindings: normalizeKeybindings(config.keybindings) }
+    const output = { ...config,
+      ...(config.keybindings === undefined ? {} : { keybindings: normalizeKeybindings(config.keybindings) }),
+      ...(config.diffViewerCommand === undefined ? {} : { diffViewerCommand: validateExternalCommand(config.diffViewerCommand) }),
+    }
     await atomicPrivateWrite(destination, JSON.stringify(output, null, 2) + "\n", true)
   } catch (error) {
     throw new ConfigFileError("save", path, error)

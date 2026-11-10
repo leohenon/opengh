@@ -1,6 +1,6 @@
 import { BoxRenderable, MouseButton, RGBA, type MouseEvent, type Renderable, type ScrollBoxRenderable } from "@opentui/core"
 import { insert, useKeyboard, useRenderer, useTerminalDimensions } from "@opentui/solid"
-import { useKeyActions } from "../keybindings"
+import { KeyInput, useKeyActions, useKeybindings } from "../keybindings"
 import { getHunkDiffSearchCells, HUNK_DIFF_THEME_NAMES, type HunkDiffBodyProps, type HunkDiffSourceHighlight, type HunkDiffThemeName } from "hunkdiff/opentui"
 import { createEffect, createMemo, createRoot, createSignal, For, getOwner, on, onCleanup, onMount, Show, untrack } from "solid-js"
 import type { DiffContent, DiffTarget, PullReviewThread } from "../../models"
@@ -52,6 +52,8 @@ export function DiffScreen(props: {
   active?: boolean
   showScrollbar: boolean
   onLoadFiles: () => void
+  onOpenGitHub?: () => void
+  onOpenExternal?: () => void
   onMovePage?: (delta: number) => void
   onFocusChange?: (focus: DiffFocus) => void
   onCommentsCollapsedChange?: (collapsed: boolean) => void
@@ -84,6 +86,14 @@ export function DiffScreen(props: {
   const [focus, setFocus] = createSignal<DiffFocus>(dimensions().width < 80 ? "diff" : "files")
   createEffect(() => props.onFocusChange?.(focus()))
   const [sidebarHidden, setSidebarHidden] = createSignal(false)
+  const keys = useKeybindings()
+  const [fileFilter, setFileFilter] = createSignal("")
+  const [filterOpen, setFilterOpen] = createSignal(false)
+  // Match Hunk's live path filter, not rendered-text search (which truncates paths).
+  const filteredFiles = createMemo(() => {
+    const query = fileFilter().trim().toLowerCase()
+    return parsed().files.filter((file) => !query || [file.path, file.previousPath].filter(Boolean).join(" ").toLowerCase().includes(query))
+  })
   const [layout, setLayout] = createSignal<"split" | "unified">()
   const [wrap, setWrap] = createSignal(false)
   const [commentsCollapsed, setCommentsCollapsed] = createSignal(false)
@@ -451,16 +461,27 @@ export function DiffScreen(props: {
     bodyMouse.onMouseDrag()
     callback(scroll)
   }
-  const focusFiles = () => { setSidebarHidden(false); setFocus("files") }
+  const focusFiles = () => { setFilterOpen(false); setSidebarHidden(false); setFocus("files") }
+  useKeyActions({
+    "dialog.close": () => { if (fileFilter()) setFileFilter(""); else focusFiles() },
+    "input.submit": focusFiles,
+    "diff.focus": focusFiles,
+  }, { when: () => interactive() && filterOpen(), priority: 50, modal: true })
   const toggleSidebar = () => {
     const hide = showFiles()
+    setFilterOpen(false)
     setSidebarHidden(hide)
     setFocus(hide ? "diff" : "files")
   }
   const toggleLayout = () => setLayout(currentLayout() === "split" ? "unified" : "split")
   const toggleWrap = () => setWrap((value) => !value)
   let contextLocation: ReviewLocation | undefined
+  const externalItems = (): ContextMenuItem[] => [
+    { label: "Open diff on GitHub", run: () => props.onOpenGitHub?.() },
+    { label: "Open diff in external viewer", run: () => props.onOpenExternal?.() },
+  ]
   const contextMouse = mouseContextMenu((position) => props.onContextMenu?.(position, [
+    ...externalItems(),
     ...(props.review && contextLocation ? [{ label: "Add review comment…", run: () => {
       if (props.review && contextLocation) props.review.onComment(contextLocation.anchor)
     } }] : []),
@@ -489,7 +510,7 @@ export function DiffScreen(props: {
     }
   }
   const clickedLocation = (event: MouseEvent) => {
-    if (!props.review || !interactive()) return
+    if (!interactive() || !props.review) return
     for (let node = event.target; node && node !== host(); node = node.parent) {
       if (isCommentCard(node)) return
       const row = rowMap().get(node.id)
@@ -520,6 +541,7 @@ export function DiffScreen(props: {
   const focusBody = (event: MouseEvent) => {
     if (event.button !== MouseButton.LEFT || !interactive()) return
     pending = undefined
+    setFilterOpen(false)
     setFocus("diff")
   }
   const bodyWheel = (event: MouseEvent) => {
@@ -547,7 +569,10 @@ export function DiffScreen(props: {
       if (focus() === "diff") focusFiles()
       else setFocus("diff")
     },
+    "item.open": () => props.onOpenGitHub ? props.onOpenGitHub() : false,
+    "diff.openViewer": () => props.onOpenExternal?.(),
     "diff.toggleFiles": toggleSidebar,
+    "diff.filterFiles": () => { focusFiles(); setFilterOpen(true) },
     "navigation.activate": () => {
       if (!error()) return false
       props.onLoadFiles()
@@ -628,26 +653,41 @@ export function DiffScreen(props: {
           width={narrow() ? "100%" : 30}
           flexShrink={0} minHeight={0} minWidth={0} flexDirection="column"
           onMouseDown={(event) => {
-            if (event.button === MouseButton.LEFT && interactive()) { event.preventDefault(); focusFiles() }
+            if (event.button === MouseButton.LEFT && interactive() && !filterOpen()) { event.preventDefault(); focusFiles() }
           }}
         >
           <text height={1} fg={colors.muted}>
-            Files{props.resource.value !== undefined && !parsed().error ? ` (${parsed().files.length})` : ""}
+            Files{props.resource.value !== undefined && !parsed().error ? ` (${fileFilter().trim() ? `${filteredFiles().length}/` : ""}${parsed().files.length})` : ""}
           </text>
           <SelectableList
-            items={parsed().files} itemKey={(file) => file.path} resetKey={`${diffSearchId()}:files`}
+            items={filteredFiles()} itemKey={(file) => file.path} resetKey={`${diffSearchId()}:files`}
             searchRetain={() => active() && showFiles()}
-            active={interactive() && showFiles() && focus() === "files" && !error()}
+            active={interactive() && showFiles() && focus() === "files" && !filterOpen() && !error()}
             dimSelection={focus() !== "files"}
             mouseActive={interactive() && showFiles() && !error()}
             onMouseFocus={() => { contextMouse.onMouseDrag(); focusFiles() }}
             showScrollbar={props.showScrollbar} rowHeight={1}
-            empty={props.resource.status === "ready" && !error() ? "No changed files." : ""}
+            empty={props.resource.status === "ready" && !error() ? fileFilter().trim() ? "No matching files." : "No changed files." : ""}
+            onContextMenu={(file, position) => {
+              setPath(file.path)
+              setLocation(undefined)
+              props.onContextMenu?.(position, [...externalItems(),
+                { label: "Change layout", run: toggleLayout }, { label: "Toggle files", run: toggleSidebar }])
+            }}
             onSelect={(file) => setPath(file.path)}
             onActivate={(file) => { setPath(file.path); setFocus("diff") }}
           >
             {(file) => <text height={1} flexGrow={1} minWidth={0} wrapMode="none" truncate fg={colors.text}>{file().path}</text>}
           </SelectableList>
+          <Show when={filterOpen()} fallback={<Show when={fileFilter()}><text height={1} wrapMode="none" truncate fg={colors.muted}>filter: {fileFilter()}</text></Show>}>
+            <box height={1} flexShrink={0} flexDirection="row">
+              <text fg={colors.blue}>filter: </text>
+              <KeyInput id="diff-file-filter" flexGrow={1} minWidth={0} value={fileFilter()}
+                focused={interactive() && filterOpen()} placeholder="type to filter files"
+                onInput={setFileFilter} textColor={colors.text} cursorColor={colors.blue} />
+            </box>
+            <text height={1} wrapMode="none" truncate fg={colors.muted}>{keys.hints(["input.submit", "accept"], ["dialog.close", fileFilter() ? "clear" : "cancel"])}</text>
+          </Show>
         </box>
         <box id="diff-content-pane" visible={showBody()}
           {...bodyMouse}

@@ -23,7 +23,7 @@ export function stopCommandProcesses(): Promise<void> {
 }
 
 // Never inherit repository overrides: local commands must refer to the actual cwd.
-function commandEnvironment() {
+export function commandEnvironment() {
   const env = githubEnvironment()
   for (const key of Object.keys(env)) if (key.startsWith("GIT_") || key === "GH_REPO") delete env[key]
   return { ...env, GH_PROMPT_DISABLED: "1", GIT_TERMINAL_PROMPT: "0", GIT_ASKPASS: "/usr/bin/false", SSH_ASKPASS: "/usr/bin/false", GIT_SSH_COMMAND: "ssh -oBatchMode=yes" }

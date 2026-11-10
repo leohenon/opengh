@@ -68,6 +68,16 @@ describe("keybindings", () => {
     expect(() => normalizeKeybindings({ "diff.nextHunk": ["y"] })).not.toThrow()
   })
 
+  test("diff file filtering is distinct from sidebar toggling and repository switching", () => {
+    const bindings = resolveKeybindings()
+    expect(bindings["diff.toggleFiles"]).toEqual(["b"])
+    expect(bindings["diff.filterFiles"]).toEqual(["f"])
+    expect(bindings["global.switchRepository"]).toEqual(["s"])
+    for (const scope of ["diffFiles", "diffBody"] as const) expect(keybindingContexts[scope]).toContain("diff.filterFiles")
+    expect(() => normalizeKeybindings({ "diff.filterFiles": ["b"] })).toThrow("diff.toggleFiles")
+    expect(() => normalizeKeybindings({ "diff.filterFiles": ["s"] })).toThrow("global.switchRepository")
+  })
+
   test("search defaults distinguish n/N, support remapping/disabling, and conflict only in browsing scopes", () => {
     const defaults = resolveKeybindings()
     expect(defaults["search.start"]).toEqual(["/"])
