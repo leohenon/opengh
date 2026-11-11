@@ -638,7 +638,7 @@ describe("opengh TUI", () => {
     await Bun.sleep(30);
     view.mockInput.pressKey(",");
     await view.flush();
-    expect(statusLine()).toBe("enter open · / search · esc close");
+    expect(statusLine()).toBe("enter open · esc close · / search");
     for (let i = 0; i < 9; i++) view.mockInput.pressArrow("down");
     view.mockInput.pressEnter();
     await view.flush();
@@ -1445,7 +1445,7 @@ describe("opengh TUI", () => {
   });
 
   test("opens settings and applies saved changes immediately", async () => {
-    const [config, setConfig] = createSignal<Config>({ showScrollbars: false, theme: "github", colorMode: "system", reducedMotion: false, markdownStyle: "rich", detailLayout: "centered", detailsPlacement: "auto", showStatusBarHints: true, showTabShortcuts: true, showTabCounts: true, hideDocumentsTab: false, compactHeader: false, iconStyle: "unicode" });
+    const [config, setConfig] = createSignal<Config>({ showScrollbars: false, theme: "github", colorMode: "system", reducedMotion: false, markdownStyle: "rich", detailLayout: "centered", detailsPlacement: "auto", diffLayout: "auto", diffWrap: false, showStatusBarHints: true, showTabShortcuts: true, showTabCounts: true, hideDocumentsTab: false, compactHeader: false, iconStyle: "unicode" });
     let saves = 0;
     const view = await testRender(
       () => (
@@ -1517,7 +1517,7 @@ describe("opengh TUI", () => {
     await Bun.sleep(0);
     await view.flush();
     expect(saves).toBe(1);
-    expect(config()).toEqual({ showScrollbars: true, theme: "github", colorMode: "system", reducedMotion: false, markdownStyle: "rich", detailLayout: "centered", detailsPlacement: "auto", showStatusBarHints: true, showTabShortcuts: true, showTabCounts: true, hideDocumentsTab: false, compactHeader: false, iconStyle: "unicode" });
+    expect(config()).toEqual({ showScrollbars: true, theme: "github", colorMode: "system", reducedMotion: false, markdownStyle: "rich", detailLayout: "centered", detailsPlacement: "auto", diffLayout: "auto", diffWrap: false, showStatusBarHints: true, showTabShortcuts: true, showTabCounts: true, hideDocumentsTab: false, compactHeader: false, iconStyle: "unicode" });
     expect(view.captureCharFrame()).toContain("‹ on ›");
 
     for (let i = 0; i < 4; i++) view.mockInput.pressArrow("up");
@@ -1650,8 +1650,42 @@ describe("opengh TUI", () => {
     expect(canvas()).toBe(resolveTheme("opengh", "light").background);
   });
 
+  test("diff layout and wrapping defaults are configurable from the Diffs settings section", async () => {
+    const [config, setConfig] = createSignal<Config>({ ...defaultConfig, iconStyle: "unicode" });
+    const view = await testRender(() => <App data={githubDataFixture} operations={repositoryOperationsFixture}
+      config={config()} onConfigChange={async (next) => { setConfig(next); }} />, { width: 120, height: 40 });
+    active.push(view);
+    await view.flush();
+    view.mockInput.pressKey(",");
+    await view.flush();
+    expect(view.captureCharFrame()).toContain("Diffs");
+    for (let i = 0; i < 13; i++) view.mockInput.pressArrow("down");
+    await view.flush();
+    expect(view.captureCharFrame()).toContain("Diff layout");
+    expect(view.captureCharFrame()).toContain("‹ auto ›");
+    expect(view.captureCharFrame()).toContain("toggles the layout");
+    view.mockInput.pressArrow("right");
+    await view.flush();
+    expect(config().diffLayout).toBe("split");
+    view.mockInput.pressArrow("right");
+    await view.flush();
+    expect(config().diffLayout).toBe("unified");
+    expect(view.captureCharFrame()).toContain("‹ unified ›");
+    view.mockInput.pressArrow("right");
+    await view.flush();
+    expect(config().diffLayout).toBe("auto");
+    view.mockInput.pressArrow("down");
+    await view.flush();
+    expect(view.captureCharFrame()).toContain("Diff wrapping");
+    expect(view.captureCharFrame()).toContain("Wrap long diff lines");
+    view.mockInput.pressArrow("right");
+    await view.flush();
+    expect(config().diffWrap).toBe(true);
+    expect(view.captureCharFrame()).toContain("‹ on ›");
+  });
+
   test("previews and saves a theme from settings", async () => {
-    const [config, setConfig] = createSignal<Config>({ showScrollbars: false, theme: "github", colorMode: "system", reducedMotion: false, markdownStyle: "rich", detailLayout: "centered", detailsPlacement: "auto", showStatusBarHints: true, showTabShortcuts: true, showTabCounts: true, hideDocumentsTab: false, compactHeader: false, iconStyle: "unicode" });
+    const [config, setConfig] = createSignal<Config>({ showScrollbars: false, theme: "github", colorMode: "system", reducedMotion: false, markdownStyle: "rich", detailLayout: "centered", detailsPlacement: "auto", diffLayout: "auto", diffWrap: false, showStatusBarHints: true, showTabShortcuts: true, showTabCounts: true, hideDocumentsTab: false, compactHeader: false, iconStyle: "unicode" });
     let canvas = () => "";
     const ThemedApp = () => {
       const current = useTheme();
@@ -1740,7 +1774,7 @@ describe("opengh TUI", () => {
   });
 
   test("restores the configured theme when preview is cancelled", async () => {
-    const config: Config = { showScrollbars: false, theme: "github", colorMode: "system", reducedMotion: false, markdownStyle: "rich", detailLayout: "centered", detailsPlacement: "auto", showStatusBarHints: true, showTabShortcuts: true, showTabCounts: true, hideDocumentsTab: false, compactHeader: false, iconStyle: "unicode" };
+    const config: Config = { showScrollbars: false, theme: "github", colorMode: "system", reducedMotion: false, markdownStyle: "rich", detailLayout: "centered", detailsPlacement: "auto", diffLayout: "auto", diffWrap: false, showStatusBarHints: true, showTabShortcuts: true, showTabCounts: true, hideDocumentsTab: false, compactHeader: false, iconStyle: "unicode" };
     let canvas = () => "";
     const ThemedApp = () => {
       const current = useTheme();
@@ -1781,7 +1815,7 @@ describe("opengh TUI", () => {
         <App
           data={githubDataFixture}
           operations={repositoryOperationsFixture}
-          config={{ showScrollbars: false, theme: "github", colorMode: "system", reducedMotion: false, markdownStyle: "rich", detailLayout: "centered", detailsPlacement: "auto", showStatusBarHints: true, showTabShortcuts: true, showTabCounts: true, hideDocumentsTab: false, compactHeader: false, iconStyle: "unicode" }}
+          config={{ showScrollbars: false, theme: "github", colorMode: "system", reducedMotion: false, markdownStyle: "rich", detailLayout: "centered", detailsPlacement: "auto", diffLayout: "auto", diffWrap: false, showStatusBarHints: true, showTabShortcuts: true, showTabCounts: true, hideDocumentsTab: false, compactHeader: false, iconStyle: "unicode" }}
           onConfigChange={async () => { throw new Error("Config directory is read-only") }}
         />
       ),

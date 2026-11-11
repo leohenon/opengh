@@ -338,7 +338,7 @@ describe("application root", () => {
             saveRepositoryTabs: async () => {},
             loadRecentRepositories: async () => [],
             rememberRepository: idle,
-            loadConfig: async () => ({ showScrollbars: false, theme: "github", colorMode: "system", reducedMotion: false, markdownStyle: "rich", detailLayout: "centered", detailsPlacement: "auto", showStatusBarHints: true, showTabShortcuts: true, showTabCounts: true, hideDocumentsTab: false, compactHeader: false, iconStyle: "unicode" }),
+            loadConfig: async () => ({ showScrollbars: false, theme: "github", colorMode: "system", reducedMotion: false, markdownStyle: "rich", detailLayout: "centered", detailsPlacement: "auto", diffLayout: "auto", diffWrap: false, showStatusBarHints: true, showTabShortcuts: true, showTabCounts: true, hideDocumentsTab: false, compactHeader: false, iconStyle: "unicode" }),
             saveConfig: async (config) => {
               saved.push(config)
               await writes[saved.length - 1]!.promise
@@ -359,7 +359,7 @@ describe("application root", () => {
     await Bun.sleep(0)
     await view.flush()
 
-    expect(saved).toEqual([{ showScrollbars: true, theme: "github", colorMode: "system", reducedMotion: false, markdownStyle: "rich", detailLayout: "centered", detailsPlacement: "auto", showStatusBarHints: true, showTabShortcuts: true, showTabCounts: true, hideDocumentsTab: false, compactHeader: false, iconStyle: "unicode" }])
+    expect(saved).toEqual([{ showScrollbars: true, theme: "github", colorMode: "system", reducedMotion: false, markdownStyle: "rich", detailLayout: "centered", detailsPlacement: "auto", diffLayout: "auto", diffWrap: false, showStatusBarHints: true, showTabShortcuts: true, showTabCounts: true, hideDocumentsTab: false, compactHeader: false, iconStyle: "unicode" }])
     expect(view.captureCharFrame()).toContain("‹ off ›")
     expect(view.captureCharFrame()).not.toContain("Saving…")
 
@@ -393,7 +393,7 @@ describe("application root", () => {
     await view.flush()
     expect(view.captureCharFrame()).toContain("Themes")
     expect(view.captureCharFrame()).not.toContain("Saving…")
-    expect(saved[1]).toEqual({ showScrollbars: true, theme: "nord", colorMode: "system", reducedMotion: false, markdownStyle: "rich", detailLayout: "centered", detailsPlacement: "auto", showStatusBarHints: true, showTabShortcuts: true, showTabCounts: true, hideDocumentsTab: false, compactHeader: false, iconStyle: "unicode" })
+    expect(saved[1]).toEqual({ showScrollbars: true, theme: "nord", colorMode: "system", reducedMotion: false, markdownStyle: "rich", detailLayout: "centered", detailsPlacement: "auto", diffLayout: "auto", diffWrap: false, showStatusBarHints: true, showTabShortcuts: true, showTabCounts: true, hideDocumentsTab: false, compactHeader: false, iconStyle: "unicode" })
 
     writes[1]!.resolve()
     await view.flush()

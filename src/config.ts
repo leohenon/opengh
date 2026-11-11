@@ -8,6 +8,7 @@ import { defaultTheme, isThemeName, type ThemeName } from "./theme"
 export type ColorMode = "system" | "dark" | "light"
 
 export type DetailLayout = "centered" | "wide"
+export type DiffLayout = "auto" | "split" | "unified"
 export type DetailsPlacement = "auto" | "inline"
 export type MarkdownStyle = "rich" | "minimal"
 export type IconStyle = "unicode" | "nerd" | "none"
@@ -20,6 +21,8 @@ export type Config = {
   markdownStyle: MarkdownStyle
   detailLayout: DetailLayout
   detailsPlacement: DetailsPlacement
+  diffLayout: DiffLayout
+  diffWrap: boolean
   showStatusBarHints: boolean
   iconStyle: IconStyle
   compactHeader: boolean
@@ -38,6 +41,8 @@ export const defaultConfig: Config = {
   markdownStyle: "rich",
   detailLayout: "centered",
   detailsPlacement: "auto",
+  diffLayout: "auto",
+  diffWrap: false,
   showStatusBarHints: false,
   iconStyle: "nerd",
   compactHeader: false,
@@ -87,6 +92,10 @@ function normalizeConfig(value: unknown): Config {
     detailsPlacement: input.detailsPlacement === "auto" || input.detailsPlacement === "inline"
       ? input.detailsPlacement
       : defaultConfig.detailsPlacement,
+    diffLayout: input.diffLayout === "auto" || input.diffLayout === "split" || input.diffLayout === "unified"
+      ? input.diffLayout
+      : defaultConfig.diffLayout,
+    diffWrap: typeof input.diffWrap === "boolean" ? input.diffWrap : defaultConfig.diffWrap,
     showStatusBarHints: typeof input.showStatusBarHints === "boolean"
       ? input.showStatusBarHints
       : defaultConfig.showStatusBarHints,

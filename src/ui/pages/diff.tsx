@@ -52,6 +52,9 @@ export function DiffScreen(props: {
   interactive: boolean
   active?: boolean
   showScrollbar: boolean
+  /** Configured defaults; `t` and `w` override them for this view only. */
+  defaultLayout?: "split" | "unified"
+  defaultWrap?: boolean
   onLoadFiles: () => void
   onOpenGitHub?: () => void
   onOpenExternal?: () => void
@@ -122,7 +125,8 @@ export function DiffScreen(props: {
     }))
   })
   const [layout, setLayout] = createSignal<"split" | "unified">()
-  const [wrap, setWrap] = createSignal(false)
+  const [wrapOverride, setWrapOverride] = createSignal<boolean>()
+  const wrap = () => wrapOverride() ?? props.defaultWrap ?? false
   const [commentsCollapsed, setCommentsCollapsed] = createSignal(false)
   createEffect(() => props.onCommentsCollapsedChange?.(commentsCollapsed()))
   const [offset, setOffset] = createSignal(0)
@@ -132,7 +136,7 @@ export function DiffScreen(props: {
   const narrow = () => dimensions().width < 80
   const showFiles = () => !sidebarHidden() && (!narrow() || focus() === "files")
   const showBody = () => !narrow() || focus() === "diff"
-  const currentLayout = () => layout() ?? (narrow() ? "unified" : "split")
+  const currentLayout = () => layout() ?? props.defaultLayout ?? (narrow() ? "unified" : "split")
   const targetKey = () => props.target.kind === "commit" ? props.target.sha : `PR #${props.target.number}`
   const label = () => props.target.kind === "commit" ? props.target.sha.slice(0, 7) : `PR #${props.target.number}`
   const error = () => props.resource.status === "error" ? props.resource.message : parsed().error
@@ -503,7 +507,7 @@ export function DiffScreen(props: {
     setFocus(hide ? "diff" : "files")
   }
   const toggleLayout = () => setLayout(currentLayout() === "split" ? "unified" : "split")
-  const toggleWrap = () => setWrap((value) => !value)
+  const toggleWrap = () => setWrapOverride(!wrap())
   let contextLocation: ReviewLocation | undefined
   const externalItems = (): ContextMenuItem[] => [
     { label: "Open diff on GitHub", run: () => props.onOpenGitHub?.() },

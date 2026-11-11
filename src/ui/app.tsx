@@ -258,6 +258,7 @@ function AppContent(props: AppProps) {
   const operations = () => typeof props.operations === "function" ? props.operations() : props.operations
   const page = createMemo(() => navigation().page)
   const diffTarget = () => navigation().diffs?.[page()]
+  const configuredDiffLayout = () => { const layout = config().diffLayout; return layout === "auto" ? undefined : layout }
   const resourceScope = createMemo<RepositoryScope>(() => {
     const current = navigation()
     return !standalone() ? "full" : current.details?.[current.page] || current.diffs?.[current.page] ? "detail" : current.page
@@ -1786,6 +1787,7 @@ function AppContent(props: AppProps) {
         {(owner) => <Show when={(!standalone() || page() === owner) && navigation().diffs?.[owner]} keyed>
           {(target) => <box id={`diff-view-${owner}`} visible={page() === owner} flexGrow={1} minHeight={0} flexDirection="column">
             <DiffScreen target={target} resource={resourceForDiff(target)} active={page() === owner}
+              defaultLayout={configuredDiffLayout()} defaultWrap={config().diffWrap}
               review={reviewForDiff(target)} threads={threadsForDiff(target)} repositoryUrl={data().repo.url}
               interactive={page() === owner && overlay() === undefined}
               onMovePage={movePage}

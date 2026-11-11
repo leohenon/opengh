@@ -113,6 +113,42 @@ test("F filters complete current and previous paths live, accepts, clears and ca
   } finally { setup.renderer.destroy(); await setup.renderer.closed }
 })
 
+test("configured diff layout and wrapping defaults match toggling t and w, and remain per-view overrides", async () => {
+  const patch = `diff --git a/wide.txt b/wide.txt\n--- a/wide.txt\n+++ b/wide.txt\n@@ -1 +1 @@\n-${"old ".repeat(40)}\n+${"new ".repeat(40)}\n`
+  const frames: Record<string, string> = {}
+  for (const variant of ["toggled", "configured", "auto"] as const) {
+    const setup = await createTestRenderer({ width: 120, height: 16 })
+    initializeHunk(setup.renderer)
+    const [defaults, setDefaults] = createSignal<{ defaultLayout?: "split" | "unified"; defaultWrap?: boolean }>(
+      variant === "configured" ? { defaultLayout: "unified", defaultWrap: true } : {})
+    await render(() => <box width="100%" height="100%"><DiffScreen target={{ kind: "commit", sha: "defaults" }}
+      resource={{ status: "ready", value: { kind: "patch", patch } }} interactive showScrollbar={false} onLoadFiles={() => {}}
+      defaultLayout={defaults().defaultLayout} defaultWrap={defaults().defaultWrap} /></box>, setup.renderer)
+    const settle = async () => { await setup.flush(); await setup.renderer.idle(); await setup.flush() }
+    try {
+      await settle()
+      setup.mockInput.pressTab() // Focus the diff body so frames compare like for like.
+      await settle()
+      if (variant === "toggled") { setup.mockInput.pressKey("t"); setup.mockInput.pressKey("w"); await settle() }
+      frames[variant] = setup.captureCharFrame()
+      if (variant === "configured") {
+        setup.mockInput.pressKey("w") // The per-view toggle still wins over the configured default…
+        await settle()
+        const unwrapped = setup.captureCharFrame()
+        expect(unwrapped).not.toBe(frames.configured)
+        setDefaults({ defaultLayout: "unified", defaultWrap: false }) // …and config changes don't undo an explicit toggle:
+        await settle()
+        expect(setup.captureCharFrame()).toBe(unwrapped)
+        setDefaults({ defaultLayout: "unified", defaultWrap: true }) // re-enabling wrap in config must not re-wrap this view.
+        await settle()
+        expect(setup.captureCharFrame()).toBe(unwrapped)
+      }
+    } finally { setup.renderer.destroy(); await setup.renderer.closed }
+  }
+  expect(frames.configured).toBe(frames.toggled) // Unified + wrapped by config renders exactly like pressing t and w.
+  expect(frames.auto).not.toBe(frames.configured) // The width-based default is split and unwrapped at 120 columns.
+})
+
 test("mouse diff gestures select hunks in place, isolate pane wheels, pan, wrap, and reach both narrow panes", async () => {
   const setup = await createTestRenderer({ width: 110, height: 26 })
   initializeHunk(setup.renderer)

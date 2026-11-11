@@ -11,14 +11,15 @@ import { useKeyActions, useKeybindings } from "../keybindings"
 import { createRenderedSearch } from "../rendered-search"
 import { useSearchTarget } from "../search-context"
 
-type Setting = "tab-shortcuts" | "theme" | "color-mode" | "reduced-motion" | "markdown-style" | "scrollbars" | "detail-layout" | "details-placement" | "status-bar-hints" | "icon-style" | "compact-header" | "hide-documents-tab" | "tab-counts"
+type Setting = "tab-shortcuts" | "theme" | "color-mode" | "reduced-motion" | "markdown-style" | "scrollbars" | "detail-layout" | "details-placement" | "status-bar-hints" | "icon-style" | "compact-header" | "hide-documents-tab" | "tab-counts" | "diff-layout" | "diff-wrap"
 
-const sectionOrder = ["Appearance", "Layout", "Usability"] as const
+const sectionOrder = ["Appearance", "Layout", "Usability", "Diffs"] as const
 type Section = typeof sectionOrder[number]
 const sectionSettings: Record<Section, readonly Setting[]> = {
   Appearance: ["theme", "color-mode", "markdown-style"],
   Layout: ["compact-header", "tab-counts", "hide-documents-tab", "detail-layout", "details-placement"],
   Usability: ["icon-style", "status-bar-hints", "scrollbars", "reduced-motion", "tab-shortcuts"],
+  Diffs: ["diff-layout", "diff-wrap"],
 }
 const settingOrder = sectionOrder.flatMap((section) => sectionSettings[section])
 const settingDefinitions: Record<Setting, { title: string; value: (config: Config) => string }> = {
@@ -35,7 +36,10 @@ const settingDefinitions: Record<Setting, { title: string; value: (config: Confi
   "status-bar-hints": { title: "Shortcut hints", value: (config) => config.showStatusBarHints ? "on" : "off" },
   scrollbars: { title: "Scrollbars", value: (config) => config.showScrollbars ? "on" : "off" },
   "reduced-motion": { title: "Reduced motion", value: (config) => config.reducedMotion ? "on" : "off" },
+  "diff-layout": { title: "Diff layout", value: (config) => config.diffLayout },
+  "diff-wrap": { title: "Diff wrapping", value: (config) => config.diffWrap ? "on" : "off" },
 }
+const diffLayoutValues = ["auto", "split", "unified"] as const
 const colorModeValues = ["system", "dark", "light"] as const
 
 export function Settings(props: {
@@ -64,7 +68,7 @@ export function Settings(props: {
   const split = () => dimensions().width >= 110
   createEffect(() => props.onHintChange?.(busy() ? "Updating settings…" : screen() === "themes"
     ? keys.hints(["picker.accept", "confirm"], ["dialog.close", "back"])
-    : keys.hints(["navigation.activate", selected() === "theme" ? "open" : "change"], ["search.start", "search"], ...(!split() ? [[["navigation.pageUp", "navigation.pageDown"], "description"] as const] : []), ["dialog.close", "close"])))
+    : keys.hints(["navigation.activate", selected() === "theme" ? "open" : "change"], ["dialog.close", "close"], ["search.start", "search"])))
   onCleanup(() => props.onHintChange?.(undefined))
   const revealSetting = () => {
     if (selected() === settingOrder[0]) settingsScroll?.scrollTo(0)
@@ -111,7 +115,7 @@ export function Settings(props: {
     revealSetting()
   }
 
-  const toggleBoolean = async (key: "reducedMotion" | "showScrollbars" | "showStatusBarHints" | "compactHeader" | "hideDocumentsTab" | "showTabCounts" | "showTabShortcuts") => {
+  const toggleBoolean = async (key: "reducedMotion" | "showScrollbars" | "showStatusBarHints" | "compactHeader" | "hideDocumentsTab" | "showTabCounts" | "showTabShortcuts" | "diffWrap") => {
     if (busy()) return
     setSaving(true)
     setError("")
@@ -132,6 +136,21 @@ export function Settings(props: {
     setError("")
     try {
       await props.onChange({ ...props.config, colorMode: next })
+    } catch (error) {
+      setError(error instanceof Error ? error.message : "Could not save settings")
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const changeDiffLayout = async (direction: number) => {
+    if (busy()) return
+    const current = diffLayoutValues.indexOf(props.config.diffLayout)
+    const next = diffLayoutValues[(current + direction + diffLayoutValues.length) % diffLayoutValues.length]!
+    setSaving(true)
+    setError("")
+    try {
+      await props.onChange({ ...props.config, diffLayout: next })
     } catch (error) {
       setError(error instanceof Error ? error.message : "Could not save settings")
     } finally {
@@ -223,6 +242,8 @@ export function Settings(props: {
       case "detail-layout": void changeDetailLayout(); break
       case "details-placement": void changeDetailsPlacement(); break
       case "icon-style": void changeIconStyle(); break
+      case "diff-layout": void changeDiffLayout(direction); break
+      case "diff-wrap": void toggleBoolean("diffWrap"); break
     }
   }
   useKeyActions({}, { when: () => screen() === "settings" && busy(), priority: 200, modal: true })
@@ -329,6 +350,14 @@ export function Settings(props: {
     if (selected() === "details-placement") return {
       title: "Details placement",
       description: "Auto uses a sidebar when space allows. Inline keeps issue and PR details below the title.",
+    }
+    if (selected() === "diff-layout") return {
+      title: "Diff layout",
+      description: "Auto splits diffs side by side on wide terminals and stacks them on narrow ones." + (keys.key("diff.toggleLayout") ? ` ${keys.key("diff.toggleLayout")} toggles the layout of the open diff.` : ""),
+    }
+    if (selected() === "diff-wrap") return {
+      title: "Diff wrapping",
+      description: "Wrap long diff lines instead of panning horizontally." + (keys.key("diff.toggleWrap") ? ` ${keys.key("diff.toggleWrap")} toggles wrapping for the open diff.` : ""),
     }
     return {
       title: "Shortcut hints",
