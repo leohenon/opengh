@@ -102,6 +102,15 @@ test("draft PR inline comments open from Hunk's [+] in opengh's editor and publi
       }
       expect(composer()?.focused).toBe(true)
     }
+    const savedDraftMarkers = (node: Renderable = setup.renderer.root): Renderable[] => [
+      ...(node.id.startsWith("diff-comment-card:draft:") ? [node] : []),
+      ...node.getChildren().flatMap(child => savedDraftMarkers(child)),
+    ]
+    const resumeDraft = async (marker: Renderable) => {
+      const resume = marker.getChildren()[0]!.getChildren().find(child => child.id.startsWith("inline-draft-resume:"))!
+      await clickControl(setup, resume.id)
+      await settle()
+    }
     const closeInline = async () => { setup.mockInput.pressEscape(); await settle() }
     const post = async () => { setup.mockInput.pressKey("s", { ctrl: true }); await settle() }
     await openInline()
@@ -124,6 +133,18 @@ test("draft PR inline comments open from Hunk's [+] in opengh's editor and publi
     expect(inlinePosts).toHaveLength(0)
     await closeInline()
     expect(composer()).toBeUndefined()
+    expect(setup.captureCharFrame()).toContain("Draft saved · Resume")
+    expect(savedDraftMarkers()).toHaveLength(1)
+    expect(savedDraftMarkers()[0]!.parent).toBe(sourceRow(0))
+    setup.mockInput.pressEscape(); await settle() // Leaving the diff does not lose the saved marker.
+    setup.mockInput.pressKey("D"); await settle()
+    expect(savedDraftMarkers()).toHaveLength(1)
+    expect(savedDraftMarkers()[0]!.parent).toBe(sourceRow(0))
+    await resumeDraft(savedDraftMarkers()[0]!)
+    expect(editorBody()).toBe("Please explain this change.")
+    expect(composer()?.focused).toBe(true)
+    expect(savedDraftMarkers()).toHaveLength(0)
+    await closeInline()
     await openInline(1)
     expect(editorBody()).toBe("")
     await setup.mockInput.typeText("Keep the second line draft")
@@ -132,11 +153,15 @@ test("draft PR inline comments open from Hunk's [+] in opengh's editor and publi
     expect(editorBody()).toBe("Keep the second line draft")
     await openInline(0, "LEFT")
     expect(editorBody()).toBe("")
+    await setup.mockInput.typeText(" \n ")
     await closeInline()
+    expect(savedDraftMarkers()).toHaveLength(2) // Empty or whitespace-only drafts do not leave a marker.
+    expect(savedDraftMarkers().map(marker => marker.parent)).toEqual([sourceRow(0), sourceRow(1)])
     const eligibility = state().eligibility!
     for (const change of [{ accountId: 2 }, { headSha: "c".repeat(40) }, { baseSha: "d".repeat(40) }]) {
       setState(s => ({ ...s, eligibility: { ...eligibility, ...change } }))
       setRevision({ headSha, baseSha, ...change }); await settle()
+      expect(savedDraftMarkers()).toHaveLength(0) // Drafts belong to their account and exact diff revision.
       await openInline()
       expect(editorBody()).toBe("")
       await setup.mockInput.typeText("Separate context")
@@ -168,6 +193,8 @@ test("draft PR inline comments open from Hunk's [+] in opengh's editor and publi
     expect(setup.captureCharFrame()).toContain("Inline comment posted")
     expect(setup.captureCharFrame()).toContain("Please explain this change.")
     expect(composer()).toBeUndefined()
+    expect(savedDraftMarkers()).toHaveLength(1)
+    expect(savedDraftMarkers()[0]!.parent).toBe(sourceRow(1)) // The posted draft's marker was removed.
     setThreads([remoteThread, { ...remoteThread, id: "new-server-thread", comments: [{ ...remoteThread.comments[0]!, id: "new-server-comment",
       body: "Please explain this change.", url: "https://github.com/example/comment" }] }])
     await settle()

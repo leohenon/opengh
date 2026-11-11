@@ -1,11 +1,14 @@
 import { iconPrefix } from "./icons"
 import { BoxRenderable, TextAttributes, TextRenderable, type Renderable, type RenderContext, type TextOptions } from "@opentui/core"
 import type { PullReviewThread, ReviewThreadComment } from "../models"
+import type { ReviewAnchor } from "../review-types"
 import { relativeTime } from "./format"
 import { reviewSplitBoundary, type ReviewRow } from "./review-lines"
 
 const prefix = "diff-comment-card:"
+export type SavedDiffDraft = { id: string; anchor: ReviewAnchor }
 export const isCommentCard = (node: Renderable) => node.id.startsWith(prefix)
+export const isSavedDraftCard = (node: Renderable) => node.id.startsWith(`${prefix}draft:`)
 
 // Review cards sit under their line, indented to its code. A wide split side holds the card for
 // its own line; narrower sides would wrap comments heavily, so there cards span the diff.
@@ -30,7 +33,10 @@ export function isSourceRowY(row: Renderable, y: number) {
 }
 
 /** Own only the appended cards, never Hunk's rows or source renderables. Clear before React updates. */
-export function createDiffCommentCards(renderer: RenderContext, renderBody: (container: BoxRenderable, comment: ReviewThreadComment) => () => void) {
+export function createDiffCommentCards(renderer: RenderContext,
+  renderBody: (container: BoxRenderable, comment: ReviewThreadComment) => () => void,
+  renderDraft?: (container: BoxRenderable, draft: SavedDiffDraft) => () => void,
+) {
   let owned: { card: BoxRenderable; disposeBodies: (() => void)[] }[] = []
   const clear = () => {
     for (const { card, disposeBodies } of owned) {
@@ -45,7 +51,7 @@ export function createDiffCommentCards(renderer: RenderContext, renderBody: (con
     clear,
     render(host: BoxRenderable, rows: readonly ReviewRow[], path: string | undefined,
       threads: readonly PullReviewThread[], colors: { text: TextOptions["fg"]; muted: TextOptions["fg"]; panel: TextOptions["fg"]; blue: TextOptions["fg"]; border: TextOptions["fg"] },
-      layout: "split" | "unified", width: number, commentIcon: string, collapsed: boolean) {
+      layout: "split" | "unified", width: number, commentIcon: string, collapsed: boolean, savedDrafts: readonly SavedDiffDraft[] = []) {
       clear()
       if (host.isDestroyed) return
       for (const thread of threads) {
@@ -93,6 +99,19 @@ export function createDiffCommentCards(renderer: RenderContext, renderBody: (con
         }
         // Host children follow the file diff when no current source-side anchor exists.
         ;(anchor ?? host).add(card)
+      }
+      if (!renderDraft) return
+      for (const draft of savedDrafts) {
+        if (draft.anchor.path !== path) continue
+        const row = rows.find((row) => (draft.anchor.side === "LEFT" ? row.left : row.right)?.line === draft.anchor.line)
+        const anchor = row && host.findDescendantById(row.id)
+        if (!anchor) continue
+        const card = new BoxRenderable(renderer, {
+          id: `${prefix}draft:${draft.id}`, ...noteBox(width, layout, draft.anchor.side),
+          height: 1, flexShrink: 0, flexDirection: "column",
+        })
+        owned.push({ card, disposeBodies: [renderDraft(card, draft)] })
+        anchor.add(card)
       }
     },
   }

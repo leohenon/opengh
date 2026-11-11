@@ -7,7 +7,7 @@ import {
 } from "hunkdiff/opentui"
 import { createEffect, createMemo, createRoot, createSignal, For, getOwner, on, onCleanup, onMount, Show, untrack, type JSX } from "solid-js"
 import type { DiffContent, DiffTarget, PullReviewThread } from "../../models"
-import { createDiffCommentCards, isCommentCard, isSourceRowY, noteBox } from "../diff-comment-cards"
+import { createDiffCommentCards, isCommentCard, isSavedDraftCard, isSourceRowY, noteBox, type SavedDiffDraft } from "../diff-comment-cards"
 import type { ResourceState } from "../../repository-state"
 import { SelectableList } from "../components/selectable-list"
 import { mouseClick, mouseContextMenu, mouseHover, type MousePosition } from "../mouse"
@@ -20,6 +20,7 @@ import { useTheme } from "../theme"
 import { useIcons } from "../icon-style"
 import { GitHubMarkdown } from "../components/github-markdown"
 import { InlineCommentComposer } from "../components/inline-comment-composer"
+import { Action } from "../components/action"
 import { createReactiveMarkdownStyle } from "../markdown-style"
 import type { DraftReviewComment, ReviewAnchor } from "../../review-types"
 import { extendReviewRange, reviewHit, reviewRows, reviewSplitBoundary, type ReviewLocation } from "../review-lines"
@@ -71,6 +72,7 @@ export function DiffScreen(props: {
   commentable?: boolean
   /** The open inline comment. It stays mounted while review is briefly withheld; its text seeds the composer. */
   draft?: { anchor: ReviewAnchor; body: string }
+  savedDrafts?: readonly SavedDiffDraft[]
   onDraftInput?: (body: string) => void
   onContextMenu?: (position: MousePosition, items: ContextMenuItem[]) => void
   threads?: readonly PullReviewThread[]
@@ -101,6 +103,10 @@ export function DiffScreen(props: {
   })
   const [path, setPath] = createSignal<string>()
   const selected = createMemo(() => parsed().files.find((file) => file.path === path()) ?? parsed().files[0])
+  // Typing in the open composer must not rebuild posted cards or saved-draft markers.
+  const savedDrafts = createMemo(() => (props.savedDrafts ?? []).filter(draft => draft.anchor.path === selected()?.path), [], {
+    equals: (previous, next) => previous.length === next.length && previous.every((draft, index) => draft.id === next[index]?.id),
+  })
   const [focus, setFocus] = createSignal<DiffFocus>(dimensions().width < 80 ? "diff" : "files")
   createEffect(() => props.onFocusChange?.(focus()))
   const [sidebarHidden, setSidebarHidden] = createSignal(false)
@@ -250,13 +256,20 @@ export function DiffScreen(props: {
       syntaxStyle={markdownStyle()} backgroundColor={colors.panel} preserveImages codePanels wide
       context={commentMarkdownContext(comment.url)} />)
     return dispose
+  }, owner), (container, draft) => createRoot(dispose => {
+    insert(container, () => <box width="100%" height={1} flexShrink={0} flexDirection="row" paddingX={1} backgroundColor={colors.panel}>
+      <text height={1} flexShrink={0} fg={colors.muted}>Draft saved · </text>
+      <Action id={`inline-draft-resume:${draft.id}`} disabled={!interactive() || !props.review}
+        onActivate={() => startDraft(draft.anchor)}>Resume</Action>
+    </box>)
+    return dispose
   }, owner))
   let cardsDirty = true
   const refreshCards = () => {
     const container = host()
     if (!disposed && container && cardsDirty) {
       cardsDirty = false
-      cards.render(container, rows(), selected()?.path, props.threads ?? [], colors, currentLayout(), width(), icons().comment, commentsCollapsed())
+      cards.render(container, rows(), selected()?.path, props.threads ?? [], colors, currentLayout(), width(), icons().comment, commentsCollapsed(), savedDrafts())
     }
   }
   // Like posted cards, the composer lives in Hunk's row. It keeps its editor across React and card
@@ -331,6 +344,7 @@ export function DiffScreen(props: {
       if (node.isDestroyed || !node.parent) { adapter.dispose(); commentSearch.delete(node) }
     }
     const visit = (node: Renderable) => {
+      if (isSavedDraftCard(node)) return
       if (isCommentCard(node)) {
         if (!commentSearch.has(node)) commentSearch.set(node, createRenderedSearch(node, {
           matchForeground: RGBA.fromHex(colors.searchMatchFg), matchBackground: RGBA.fromHex(colors.searchMatchBg),
@@ -491,7 +505,7 @@ export function DiffScreen(props: {
 
   // Only structural changes invalidate posted cards. Highlight, selection and pan
   // updates keep their Markdown tree/adapters alive (including async rendering).
-  const cardStructure = createMemo(() => [host(), renderFile(), rows(), width(), wrap(), theme(), props.threads, commentsCollapsed(),
+  const cardStructure = createMemo(() => [host(), renderFile(), rows(), width(), wrap(), theme(), props.threads, commentsCollapsed(), savedDrafts(),
     colors.text, colors.muted, colors.blue, colors.border, colors.panel, icons().comment])
   let previousCardStructure: ReturnType<typeof cardStructure> | undefined
   createEffect(() => {

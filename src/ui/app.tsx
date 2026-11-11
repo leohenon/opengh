@@ -221,7 +221,11 @@ function AppContent(props: AppProps) {
   const [reviewTarget, setReviewTarget] = createSignal<{ repository: string; number: number }>()
   const [inlineContext, setInlineContext] = createSignal<Omit<InlineCommentInput, "body">>()
   // Contexts are built in a stable order below, including the exact diff and anchor.
-  const inlineDrafts = new Map<string, string>()
+  const [inlineDrafts, setInlineDrafts] = createSignal(new Map<string, InlineCommentInput>())
+  const saveInlineDraft = (context: Omit<InlineCommentInput, "body">, body: string) => setInlineDrafts(current => {
+    const id = JSON.stringify(context)
+    return current.get(id)?.body === body ? current : new Map(current).set(id, { ...context, body })
+  })
   // The inline composer for inlineContext stays open until posted or cancelled.
   const [inlineDraftOpen, setInlineDraftOpen] = createSignal(false)
   const [inlineDraftFocused, setInlineDraftFocused] = createSignal<Partial<Record<Page, boolean>>>({})
@@ -537,7 +541,16 @@ function AppContent(props: AppProps) {
     if (target.kind !== "pull" || !commentable || !inlineDraftOpen() || overlay() === "review-comment" || !context || context.accountId !== commentable.eligible.accountId
       || context.repository !== data().repo.nameWithOwner || context.number !== target.number
       || context.headSha !== commentable.headSha || context.baseSha !== commentable.baseSha) return undefined
-    return { anchor: context.anchor, body: inlineDrafts.get(JSON.stringify(context)) ?? "" }
+    return { anchor: context.anchor, body: inlineDrafts().get(JSON.stringify(context))?.body ?? "" }
+  }
+  const savedDraftsForDiff = (target: DiffTarget) => {
+    const commentable = commentableDiff(target)
+    if (target.kind !== "pull" || !commentable) return []
+    const open = inlineDraftOpen() ? JSON.stringify(inlineContext()) : undefined
+    return [...inlineDrafts()].flatMap(([id, draft]) => id !== open && draft.body.trim()
+      && draft.accountId === commentable.eligible.accountId && draft.repository === data().repo.nameWithOwner
+      && draft.number === target.number && draft.headSha === commentable.headSha && draft.baseSha === commentable.baseSha
+      ? [{ id, anchor: draft.anchor }] : [])
   }
   // A refreshed diff of a new PR revision invalidates an open draft's anchor. Say so, and carry its
   // text to the same line of the new revision if it is reopened there; closed drafts stay per revision.
@@ -551,7 +564,7 @@ function AppContent(props: AppProps) {
     if (value?.kind !== "patch" || !value.headSha || value.headSha === context.headSha && value.baseSha === context.baseSha) return
     untrack(() => {
       setInlineDraftOpen(false)
-      const body = inlineDrafts.get(JSON.stringify(context))
+      const body = inlineDrafts().get(JSON.stringify(context))?.body
       if (!body?.trim()) return
       carriedDraft = { anchor: anchorKey(context), body }
       setToast({ id: ++toastId, title: "Pull request updated", message: "Your comment draft was kept. Reopen it on its line to continue.", tone: "info" })
@@ -571,7 +584,7 @@ function AppContent(props: AppProps) {
             ...(anchor.startLine === undefined ? {} : { startLine: anchor.startLine, startSide: anchor.startSide }) } }
         if (carriedDraft?.anchor === anchorKey(context)) {
           const key = JSON.stringify(context)
-          if (!inlineDrafts.get(key)?.trim()) inlineDrafts.set(key, carriedDraft.body)
+          if (!inlineDrafts().get(key)?.body.trim()) saveInlineDraft(context, carriedDraft.body)
           carriedDraft = undefined
         }
         batch(() => { setInlineContext(context); setInlineDraftOpen(true) })
@@ -579,7 +592,7 @@ function AppContent(props: AppProps) {
       onDraftSave: (body: string) => {
         const context = inlineContext()
         if (!context || !body.trim()) return
-        inlineDrafts.set(JSON.stringify(context), body)
+        saveInlineDraft(context, body)
         setInlineConfirm({ ...context, body })
         setOverlay("inline-confirm")
       },
@@ -596,12 +609,12 @@ function AppContent(props: AppProps) {
     const viewer = props.reviews?.state().eligibility
     const author = viewer?.accountId === context.accountId ? viewer.login : "You"
     const draftKey = JSON.stringify(context)
-    inlineDrafts.set(draftKey, body)
+    saveInlineDraft(context, body)
     setPostingInline(input)
     setOverlay()
     try {
       const posted = await props.onPostInlineComment(input, retryUnconfirmed ? { retryUnconfirmed: true } : undefined)
-      inlineDrafts.delete(draftKey)
+      setInlineDrafts(current => { const next = new Map(current); next.delete(draftKey); return next })
       if (inlineContext() === context) setInlineDraftOpen(false)
       if (disposed || renderer.isDestroyed || data().repo.nameWithOwner !== context.repository) return
       const now = new Date().toISOString()
@@ -1850,8 +1863,8 @@ function AppContent(props: AppProps) {
           {(target) => <box id={`diff-view-${owner}`} visible={page() === owner} flexGrow={1} minHeight={0} flexDirection="column">
             <DiffScreen target={target} resource={resourceForDiff(target)} active={page() === owner}
               defaultLayout={configuredDiffLayout()} defaultWrap={config().diffWrap}
-              review={reviewForDiff(target)} commentable={!!commentableDiff(target)} draft={draftForDiff(target)}
-              onDraftInput={(body) => { const context = inlineContext(); if (context) inlineDrafts.set(JSON.stringify(context), body) }}
+              review={reviewForDiff(target)} commentable={!!commentableDiff(target)} draft={draftForDiff(target)} savedDrafts={savedDraftsForDiff(target)}
+              onDraftInput={(body) => { const context = inlineContext(); if (context) saveInlineDraft(context, body) }}
               threads={threadsForDiff(target)} repositoryUrl={data().repo.url}
               interactive={page() === owner && overlay() === undefined}
               onMovePage={movePage}
@@ -1979,10 +1992,10 @@ function AppContent(props: AppProps) {
           }} />}
       </Show>
       <Show when={overlay() === "review-comment" ? inlineContext() : undefined} keyed>
-        {(context) => <ReviewCommentDialog anchor={context.anchor} body={inlineDrafts.get(JSON.stringify(context)) ?? ""} headSha={context.headSha}
+        {(context) => <ReviewCommentDialog anchor={context.anchor} body={inlineDrafts().get(JSON.stringify(context))?.body ?? ""} headSha={context.headSha}
           repositoryUrl={data().repo.url} showScrollbar={config().showScrollbars}
           expanded={issueEditorExpanded()} onExpandedChange={setIssueEditorExpanded} showStatusBarHints={config().showStatusBarHints}
-          onChange={(body) => { inlineDrafts.set(JSON.stringify(context), body) }}
+          onChange={(body) => { saveInlineDraft(context, body) }}
           onSave={(body) => { void submitInlineComment(body) }} onClose={() => setOverlay()} onHintChange={setIssueActionHint} />}
       </Show>
       <Show when={overlay() === "pull-merge" ? mergeTarget() : undefined} keyed>
