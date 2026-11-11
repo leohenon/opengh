@@ -1,5 +1,5 @@
-import { expect, test } from "bun:test"
-import { CodeRenderable, RGBA, TextAttributes, type Renderable, type ScrollBoxRenderable } from "@opentui/core"
+import { expect, spyOn, test } from "bun:test"
+import { CodeRenderable, MarkdownRenderable, RGBA, TextAttributes, type Renderable, type ScrollBoxRenderable } from "@opentui/core"
 import type { GitHubMarkdownContext } from "../src/ui/github-markdown"
 import type { MarkdownAnchorResolver } from "../src/ui/markdown-anchors"
 import { testRender } from "@opentui/solid"
@@ -674,5 +674,29 @@ test("GitHub alert borders keep their colors with document source anchors", asyn
         expect(row?.spans.find((span) => span.text.includes("│"))?.fg).toEqual(RGBA.fromHex(color))
       }
     }
+  } finally { view.renderer.destroy() }
+})
+
+test("paragraph spacing settles once per parent, including hidden documents and updates", async () => {
+  const [content, setContent] = createSignal(Array.from({ length: 80 }, (_, i) => `## Heading ${i}\n\nBody ${i}.`).join("\n\n"))
+  const view = await testRender(() => <ThemeProvider name="github"><box visible={false}><MarkdownSample content={content()} /></box></ThemeProvider>, { width: 80, height: 10 })
+  const find = (node: Renderable): MarkdownRenderable | undefined => node instanceof MarkdownRenderable ? node : node.getChildren().map(find).find(Boolean)
+  try {
+    await settle(view)
+    const markdown = find(view.renderer.root)!
+    const children = markdown.getChildren()
+    expect(children.length).toBe(160)
+    for (const node of children) expect(node.onLifecyclePass).toBeNull()
+    for (let i = 1; i < children.length; i += 2) expect(children[i]!.marginTop).toBe(0)
+    const siblings = spyOn(markdown, "getChildren")
+    for (let i = 0; i < 5; i++) await view.renderOnce()
+    expect(siblings).not.toHaveBeenCalled()
+    siblings.mockRestore()
+    setContent("First paragraph.\n\nSecond paragraph.\n\n## New heading\n\nNew body.")
+    await settle(view)
+    const updated = find(view.renderer.root)!.getChildren()
+    expect(updated[1]!.marginTop).toBe(1)
+    expect(updated[3]!.marginTop).toBe(0)
+    for (const node of updated) expect(node.onLifecyclePass).toBeNull()
   } finally { view.renderer.destroy() }
 })

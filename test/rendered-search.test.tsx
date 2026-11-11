@@ -5,6 +5,32 @@ import { createRenderedSearch } from "../src/ui/rendered-search"
 
 const chunk = (text: string, extra = {}) => ({ __isChunk: true as const, text, ...extra })
 
+test("unchanged search reuses results without tree walks and observes same-size text and topology changes", async () => {
+  const view = await createTestRenderer({ width: 30, height: 5 })
+  try {
+    const root = new BoxRenderable(view.renderer, {})
+    const text = new TextRenderable(view.renderer, { content: "needle" })
+    root.add(text)
+    view.renderer.root.add(root)
+    await view.renderOnce()
+    const search = createRenderedSearch(root)
+    search.search("needle")
+    await view.renderOnce()
+    const matches = search.search("needle")
+    const walk = spyOn(root, "getChildren")
+    for (let i = 0; i < 20; i++) expect(search.search("needle")).toBe(matches)
+    expect(walk).not.toHaveBeenCalled()
+    walk.mockRestore()
+    text.content = "absent"
+    expect(search.search("needle")).toHaveLength(0)
+    const replacement = new TextRenderable(view.renderer, { content: "needle" })
+    text.destroy()
+    root.add(replacement)
+    expect(search.search("needle")).toHaveLength(1)
+    search.dispose()
+  } finally { view.renderer.destroy() }
+})
+
 test("common matches index once and repaint without prefix measurements", async () => {
   const view = await createTestRenderer({ width: 80, height: 8 })
   try {

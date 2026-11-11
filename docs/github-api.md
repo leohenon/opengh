@@ -26,7 +26,7 @@ Keep response parsing in the clients. `json<T>` and `graphql<T>` parse JSON but 
 ## Authentication and safety
 
 - Users authenticate with `gh auth login --hostname github.com`. `GH_TOKEN` or `GITHUB_TOKEN` can override saved CLI credentials; error guidance accounts for this.
-- The transport remembers the initial viewer and checks viewer identity again before REST mutations and GraphQL requests. The latter check currently applies to queries as well as mutations.
+- The transport remembers the initial viewer and checks viewer identity again before writes, including GraphQL mutations. Read-only queries reuse the initial identity check.
 - REST endpoints must be relative and pass transport validation. Preserve this restriction: `gh api --hostname` does not prevent an absolute endpoint URL from targeting another host.
 - A failed mutation may have reached GitHub. Preserve reconciliation and draft handling rather than retrying automatically. `GitHubRequestNotSentError` is reserved for proven pre-dispatch failures.
 - Read access does not imply mutation permission. Check operation-specific capabilities and repository state; report permission or SSO failures explicitly.
@@ -40,9 +40,12 @@ GitHub's REST issues listing includes PRs. PR conversation comments are issue co
 ## Current boundaries
 
 - The transport targets **GitHub.com**, not arbitrary GitHub Enterprise hosts.
-- Requests have a 20-second process timeout; selected text requests support cancellation and byte limits. Diff viewing is capped at 4 MiB.
+- Requests have a 20-second process timeout and bounded output. Request options carry cancellation and shared budgets through nested reads. Diff viewing is capped at 4 MiB.
+- Detail and review operations use aggregate budgets of 100 requests, 16 MiB of transport output, 10,000 items, and 60 seconds. Automatic review pagination also stops at 20 pages per collection. Borrowed budgets are not disposed by nested clients.
+- Repository and branch changes cancel obsolete list reads and stop dispatching their remaining pages. Writes are not cancelled by repository navigation.
+- Inline-comment preflight is bounded and cancellable; after dispatch, uncertain confirmation uses a separate bounded scope independent of view cancellation. Incomplete confirmation retains the marker and never authorizes an automatic retry.
 - GraphQL variables currently use `Record<string, string>` and `gh api -f`; supporting other variable types requires explicit transport design rather than assuming coercion.
-- Error handling provides rate-limit guidance; the transport does not provide automatic retries or general rate-limit scheduling.
+- The scheduler limits concurrent requests to four and observes rate-limit cooldowns. It does not automatically retry mutations.
 - `transport.page()` is a separate anonymous HTML fetch restricted to `https://github.com`, with redirects rejected. It is not an authenticated API fallback.
 
 ## Official references

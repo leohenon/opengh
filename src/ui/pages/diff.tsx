@@ -339,12 +339,24 @@ export function DiffScreen(props: {
     onAddNote: reviewable() ? addNote : undefined,
   }).map((cell) => ({ ...cell, graphemes: searchGraphemes.segment(cell.text) })))
   const commentSearch = new Map<Renderable, ReturnType<typeof createRenderedSearch>>()
+  // Native topology/geometry mutations invalidate one shared lookup, never one
+  // recursive lookup per matching cell. This also catches Hunk's async rebuilds.
+  const rowNodes = new Map<string, Renderable>()
+  let treeRevision = -1
+  let treeHost: Renderable | undefined
   const syncCommentSearch = () => {
+    const container = host()
+    const revision = renderer.nativeScene.currentGeometryRevision
+    if (treeHost === container && treeRevision === revision) return
+    treeHost = container
+    treeRevision = revision
+    rowNodes.clear()
     for (const [node, adapter] of commentSearch) {
       if (node.isDestroyed || !node.parent) { adapter.dispose(); commentSearch.delete(node) }
     }
     const visit = (node: Renderable) => {
       if (isSavedDraftCard(node)) return
+      rowNodes.set(node.id, node)
       if (isCommentCard(node)) {
         if (!commentSearch.has(node)) commentSearch.set(node, createRenderedSearch(node, {
           matchForeground: RGBA.fromHex(colors.searchMatchFg), matchBackground: RGBA.fromHex(colors.searchMatchBg),
@@ -352,12 +364,18 @@ export function DiffScreen(props: {
         }))
       } else for (const child of node.getChildren()) visit(child)
     }
-    const container = host()
     if (container && !container.isDestroyed) visit(container)
   }
+  let cachedBody: { cells: ReturnType<typeof sourceCells>; query: string; identity: string; file: ReturnType<typeof selected>; geometry: number; layout: number | undefined; comments: SearchResult[][]; results: SearchResult[] } | undefined
+  let indexedCells: ReturnType<typeof sourceCells> | undefined
+  let indexedQuery = ""
+  const indexedRanges = new Map<string, ReturnType<typeof searchRanges>>()
   let sourceMatches: { id: string; cellId: string; start: number; end: number }[] = []
   let sourceTruncated = false
   let highlightKey = ""
+  let paintedMatches: typeof sourceMatches | undefined
+  let paintedActive: string | undefined
+  let paintedColors = ""
   let searchGeneration = 0
   let lastSearchQuery = ""
   const searchLayoutKey = () => JSON.stringify([width(), currentLayout(), wrap(), theme()])
@@ -369,6 +387,9 @@ export function DiffScreen(props: {
   createEffect(on(() => [bodySearchId(), searchLayoutKey(), active(), focus(), selected()] as const, () => { ++searchGeneration }))
   const clearBodySearch = () => {
     ++searchGeneration
+    cachedBody = undefined
+    indexedCells = undefined
+    indexedRanges.clear()
     sourceMatches = []
     sourceTruncated = false
     lastSearchQuery = ""
@@ -385,17 +406,31 @@ export function DiffScreen(props: {
     search(query) {
       if (query !== lastSearchQuery) { lastSearchQuery = query; ++searchGeneration }
       syncCommentSearch()
+      const cells = sourceCells()
+      const comments = [...commentSearch].map(([node, adapter]) => ({ node, results: adapter.search(query) }))
+      const scene = renderer.nativeScene
+      if (cachedBody?.cells === cells && cachedBody.query === query && cachedBody.identity === bodySearchId() && cachedBody.file === selected()
+        && cachedBody.geometry === scene.currentGeometryRevision && cachedBody.layout === scene.observedLayoutRevision
+        && cachedBody.comments.length === comments.length && comments.every((entry, i) => entry.results === cachedBody!.comments[i])) return cachedBody.results
+      if (indexedCells !== cells || indexedQuery !== query) {
+        indexedCells = cells
+        indexedQuery = query
+        indexedRanges.clear()
+      }
       sourceMatches = []
       sourceTruncated = false
       const found: SearchResult[] = []
       const identity = bodySearchId()
       const file = selected()
       const geometry = searchLayoutKey()
-      const cells = sourceCells()
       for (const cell of cells) {
         // Read one extra occurrence to distinguish an exact count from truncation.
-        const ranges = searchRanges(cell.text, query, MAX_SOURCE_SEARCH_RESULTS - sourceMatches.length + 1)
-        const node = ranges.length ? host()?.findDescendantById(cell.rowId) : undefined
+        let ranges = indexedRanges.get(cell.id)
+        if (!ranges) {
+          ranges = searchRanges(cell.text, query, MAX_SOURCE_SEARCH_RESULTS - sourceMatches.length + 1)
+          indexedRanges.set(cell.id, ranges)
+        }
+        const node = ranges.length ? rowNodes.get(cell.rowId) : undefined
         let visualLine = 0
         let lineStart = 0
         for (const range of ranges) {
@@ -427,7 +462,8 @@ export function DiffScreen(props: {
               }
               void renderer.idle().then(() => {
                 if (disposed || generation !== searchGeneration || !bodySearchVisible() || identity !== bodySearchId() || geometry !== searchLayoutKey() || !scroll) return
-                const anchor = host()?.findDescendantById(cell.rowId)
+                syncCommentSearch()
+                const anchor = rowNodes.get(cell.rowId)
                 if (anchor) scroll.scrollTo(anchor.y - scroll.content.y + matchLine)
               }).catch(() => {})
             },
@@ -435,7 +471,7 @@ export function DiffScreen(props: {
         }
         if (sourceTruncated) break
       }
-      for (const [node, adapter] of commentSearch) for (const result of adapter.search(query)) {
+      for (const { node, results } of comments) for (const result of results) {
         found.push({ ...result, id: `comment:${node.id}:${result.id}`,
           position: result.position,
           reveal() {
@@ -447,17 +483,25 @@ export function DiffScreen(props: {
         })
       }
       // Source on each side is row-major; cards follow their own source row.
-      return found.sort((a, b) => (a.position ?? 0) - (b.position ?? 0))
+      found.sort((a, b) => (a.position ?? 0) - (b.position ?? 0))
+      cachedBody = { cells, query, identity, file, geometry: scene.currentGeometryRevision, layout: scene.observedLayoutRevision, comments: comments.map((entry) => entry.results), results: found }
+      return found
     },
     highlight(activeId) {
-      const ranges: Record<string, HunkDiffSourceHighlight[]> = {}
-      for (const match of sourceMatches) (ranges[match.cellId] ??= []).push({
-        start: match.start, end: match.end, active: match.id === activeId,
-        fg: match.id === activeId ? colors.searchCurrentMatchFg : colors.searchMatchFg,
-        bg: match.id === activeId ? colors.searchCurrentMatchBg : colors.searchMatchBg,
-      })
-      const key = JSON.stringify(ranges)
-      if (key !== highlightKey) { highlightKey = key; setSourceHighlights(ranges) }
+      const palette = [colors.searchCurrentMatchFg, colors.searchMatchFg, colors.searchCurrentMatchBg, colors.searchMatchBg].join(",")
+      if (paintedMatches !== sourceMatches || paintedActive !== activeId || paintedColors !== palette) {
+        paintedMatches = sourceMatches
+        paintedActive = activeId
+        paintedColors = palette
+        const ranges: Record<string, HunkDiffSourceHighlight[]> = {}
+        for (const match of sourceMatches) (ranges[match.cellId] ??= []).push({
+          start: match.start, end: match.end, active: match.id === activeId,
+          fg: match.id === activeId ? colors.searchCurrentMatchFg : colors.searchMatchFg,
+          bg: match.id === activeId ? colors.searchCurrentMatchBg : colors.searchMatchBg,
+        })
+        const key = JSON.stringify(ranges)
+        if (key !== highlightKey) { highlightKey = key; setSourceHighlights(ranges) }
+      }
       for (const [node, adapter] of commentSearch) {
         const prefix = `comment:${node.id}:`
         adapter.highlight(activeId?.startsWith(prefix) ? activeId.slice(prefix.length) : undefined)

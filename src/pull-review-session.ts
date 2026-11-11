@@ -5,7 +5,8 @@ import { createSignal } from "solid-js"
 import { configDirectory } from "./paths"
 import { cleanupDraftTemporaryFiles } from "./draft-cleanup"
 import { createGitHubReviews, validateReviewAnchor, validateReviewDraft } from "./github/reviews"
-import { GitHubApiError, GitHubRequestNotSentError, type GitHubTransport } from "./github/transport"
+import { GitHubApiError, GitHubRequestNotSentError, type GitHubTransport, type RequestOptions } from "./github/transport"
+import { createRequestBudget } from "./github/request-budget"
 import type { PullReviewSession, ReviewDraft, ReviewEligibility, ReviewSessionState } from "./review-types"
 
 export type ReviewDraftScope = Pick<ReviewDraft, "accountId" | "repository" | "number">
@@ -162,21 +163,45 @@ export function createPullReviewSession(options: PullReviewSessionOptions = {}):
   const [state, setState] = createSignal<ReviewSessionState>({ status: "idle" })
   let generation = 0
   let queue = Promise.resolve()
+  let draining = false
+  let pendingSave: { draft: ReviewDraft; token: number } | undefined
+  let saveTimer: ReturnType<typeof setTimeout> | undefined
   let persistenceError: unknown
   let busy = false
+  function drain() {
+    clearTimeout(saveTimer)
+    saveTimer = undefined
+    if (draining || !pendingSave) return queue
+    draining = true
+    queue = (async () => {
+      // At most one in-flight snapshot and the newest edit are retained. A slow
+      // disk must not build a queue containing every intermediate keystroke.
+      while (pendingSave) {
+        const { draft, token } = pendingSave
+        pendingSave = undefined
+        try { await storage.save(draft); persistenceError = undefined }
+        catch (error) {
+          persistenceError = error
+          if (token === generation) setState(s => ({ ...s, message: `Draft was not saved: ${message(error)}` }))
+        }
+      }
+    })().finally(() => { draining = false })
+    return queue
+  }
   function schedule(draft: ReviewDraft) {
-    const token = generation
-    queue = queue.catch(() => {}).then(() => storage.save(draft)).then(() => { persistenceError = undefined }, error => {
-      persistenceError = error
-      if (token === generation) setState(s => ({ ...s, message: `Draft was not saved: ${message(error)}` }))
-    })
+    pendingSave = { draft, token: generation }
+    clearTimeout(saveTimer)
+    saveTimer = setTimeout(() => { void drain() }, 200)
+    saveTimer.unref?.()
   }
   async function flush() {
     let pending: Promise<void>
     do {
-      pending = queue
+      pending = drain()
       await pending
-    } while (pending !== queue)
+    } while (pendingSave || pending !== queue)
+    // Submission markers use this same immediate drain while editing is locked;
+    // they are never debounced past the POST or replaced by an ordinary edit.
     if (persistenceError) throw persistenceError
   }
   function edit(transform: (draft: ReviewDraft) => ReviewDraft) {
@@ -193,8 +218,8 @@ export function createPullReviewSession(options: PullReviewSessionOptions = {}):
       schedule(draft)
     } catch (error) { setState({ ...current, message: message(error) }); throw error }
   }
-  async function confirm(draft: ReviewDraft, token: number, response?: unknown) {
-    if (!api.confirmedResponse(draft, response) && !await api.reconcile(draft)) return false
+  async function confirm(draft: ReviewDraft, token: number, requestOptions: RequestOptions, response?: unknown) {
+    if (!api.confirmedResponse(draft, response) && !await api.reconcile(draft, requestOptions)) return false
     try { await storage.remove(draft) }
     catch (error) {
       if (token === generation) setState(s => ({ ...s, status: "error", uncertain: true,
@@ -206,7 +231,11 @@ export function createPullReviewSession(options: PullReviewSessionOptions = {}):
     return true
   }
   let opening: { key: string; promise: Promise<void> } | undefined
+  let openingAbort: AbortController | undefined
   async function loadReview(repository: string, number: number) {
+    openingAbort?.abort()
+    const controller = new AbortController()
+    openingAbort = controller
     const token = ++generation
     // Only a different target or a retry needs to lock editing and fetch again.
     setState(s => ({ ...s, status: "loading" }))
@@ -216,16 +245,19 @@ export function createPullReviewSession(options: PullReviewSessionOptions = {}):
     }
     if (busy || token !== generation) return
     setState({ status: "loading" })
+    const budget = createRequestBudget(controller.signal)
+    const requestOptions = { signal: controller.signal, budget }
     try {
-      const eligibility = await api.eligibility(repository, number)
+      const eligibility = await api.eligibility(repository, number, requestOptions)
       const loaded = await storage.load(eligibility)
       const draft = loaded === undefined ? blank(eligibility) : parsedDraft(loaded, eligibility)
       if (token !== generation) return
       setState({ status: "ready", eligibility, draft, uncertain: Boolean(draft.submission),
         message: draft.submission ? uncertainMessage : draft.headSha !== eligibility.headSha ? "Pull request head changed; draft preserved. Inspect the new diff before using the current head."
           : draft.comments.length && (!draft.baseSha || draft.baseSha !== eligibility.baseSha) ? "Pull request base changed or is unknown; inline draft preserved. Inspect the latest diff and recreate inline comments." : eligibility.reason })
-      if (draft.submission) await confirm(draft, token)
+      if (draft.submission) await confirm(draft, token, requestOptions)
     } catch (error) { if (token === generation) setState(s => ({ ...s, status: "error", message: message(error) })) }
+    finally { budget.dispose() }
   }
   return {
     state, flush,
@@ -275,17 +307,19 @@ export function createPullReviewSession(options: PullReviewSessionOptions = {}):
       if (!current.draft || busy || current.status === "loading") return false
       busy = true
       let draft = current.draft
+      const budget = createRequestBudget()
+      const requestOptions = { budget }
       setState(s => ({ ...s, status: "submitting", message: undefined }))
       try {
         await flush()
         if (draft.submission) {
-          if (await confirm(draft, token)) return true
+          if (await confirm(draft, token, requestOptions)) return true
           throw new Error(uncertainMessage)
         }
         validateReviewDraft(draft, true)
-        await api.validateAnchors(draft)
-        const reviews = await api.list(draft.repository, draft.number)
-        const eligibility = await api.eligibility(draft.repository, draft.number)
+        await api.validateAnchors(draft, requestOptions)
+        const reviews = await api.list(draft.repository, draft.number, requestOptions)
+        const eligibility = await api.eligibility(draft.repository, draft.number, requestOptions)
         if (token !== generation) return false
         setState(s => ({ ...s, eligibility }))
         if (eligibility.accountId !== draft.accountId) throw new Error("GitHub account changed; draft preserved for its original account. Reopen the pull request.")
@@ -300,7 +334,7 @@ export function createPullReviewSession(options: PullReviewSessionOptions = {}):
         if (token !== generation) return false
         setState(s => ({ ...s, draft, uncertain: true }))
         let response: unknown
-        try { response = await api.post(draft) } catch (error) {
+        try { response = await api.post(draft, requestOptions) } catch (error) {
           // Only known pre-dispatch failures and explicit HTTP rejections are safe.
           // Timeouts, connection failures, 408 and 5xx remain ambiguous.
           if (error instanceof GitHubRequestNotSentError || (error instanceof GitHubApiError && error.status !== undefined && [400, 401, 403, 404, 409, 422, 429].includes(error.status))) {
@@ -311,12 +345,13 @@ export function createPullReviewSession(options: PullReviewSessionOptions = {}):
             throw error
           }
         }
-        if (await confirm(draft, token, response)) return true
+        if (await confirm(draft, token, requestOptions, response)) return true
         throw new Error(uncertainMessage)
       } catch (error) {
         if (token === generation) setState(s => ({ ...s, status: "error", draft, uncertain: Boolean(draft.submission), message: message(error) }))
         return false
       } finally {
+        budget.dispose()
         busy = false
         if (token === generation && state().status === "submitting") setState(s => ({ ...s, status: "ready" }))
       }

@@ -66,7 +66,7 @@ export function SearchProvider(props: { identity: string; enabled: boolean; scop
     let selected = found.find((result) => result.id === previous)
     if (draft() && (reveal || !selected)) selected = found.find((result) => (result.position ?? 0) >= draft()!.anchor) ?? found[0]
     else selected ??= found[0]
-    setSession((session) => ({ ...session, current: selected?.id }))
+    if (previous !== selected?.id) setSession((session) => ({ ...session, current: selected?.id }))
     owner.highlight(selected?.id)
     if (reveal || draft() && selected?.id !== previous) selected?.reveal()
   }
@@ -96,7 +96,9 @@ export function SearchProvider(props: { identity: string; enabled: boolean; scop
     untrack(() => switchTarget(target, key))
   })
   // Native Markdown and Hunk finish asynchronously and do not publish Solid
-  // dependencies. Reconcile loaded content and geometry only while searching.
+  // dependencies. Adapters cache their index and poll native revision/content
+  // identities here; unchanged results do not publish a new search session.
+  // Reconcile loaded content and geometry only while searching.
   const timer = setInterval(() => { if (query() && props.enabled) refresh(false) }, 150)
   onCleanup(() => { clearInterval(timer); owner?.clear() })
 

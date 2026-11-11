@@ -354,8 +354,9 @@ export function createGitHubClient(transport: GitHubTransport, commentStorage?: 
   const { documents, document } = createGitHubDocuments(transport)
   const { pullContext } = createGitHubPullContext(transport)
   const { addReaction, bodyReactions, commentReactions } = createGitHubReactions(transport)
-  const metadata = async (repository: string): Promise<Repo> => {
-    const repo = await transport.json<RepositoryResponse>(`repos/${repository}`)
+  const metadata = async (repository: string, options?: RequestOptions): Promise<Repo> => {
+    const repo = await transport.json<RepositoryResponse>(`repos/${repository}`, options)
+    options?.budget?.consumeItems(1)
     if (!Number.isSafeInteger(repo.id) || repo.id <= 0) throw new Error("Repository ID must be a positive safe integer.")
     if (typeof repo.node_id !== "string" || !repo.node_id.trim()) throw new Error("Repository node ID must not be blank.")
     return {
@@ -376,32 +377,34 @@ export function createGitHubClient(transport: GitHubTransport, commentStorage?: 
     }
   }
 
-  const branches = async (repository: RepositoryReference, fallbackBranch: string, page = 1): Promise<Page<string>> => {
+  const branches = async (repository: RepositoryReference, fallbackBranch: string, page = 1, options?: RequestOptions): Promise<Page<string>> => {
     const items = await transport.json<BranchResponse[]>(
-      `${repositoryPath(repository)}/branches?per_page=${BRANCH_PAGE_SIZE}&page=${page}`,
+      `${repositoryPath(repository)}/branches?per_page=${BRANCH_PAGE_SIZE}&page=${page}`, options,
     )
+    options?.budget?.consumeItems(items.length)
     return {
       items: items.length || page > 1 ? items.map((branch) => branch.name) : [fallbackBranch],
       hasMore: items.length === BRANCH_PAGE_SIZE,
     }
   }
 
-  const commits = async (repository: RepositoryReference, branch: string, page = 1): Promise<Page<CommitSummary>> => {
+  const commits = async (repository: RepositoryReference, branch: string, page = 1, options?: RequestOptions): Promise<Page<CommitSummary>> => {
     const branchQuery = branch ? `&sha=${encodeURIComponent(branch)}` : ""
     const items = await transport.json<CommitResponse[]>(
-      `${repositoryPath(repository)}/commits?per_page=${PAGE_SIZE}&page=${page}${branchQuery}`,
+      `${repositoryPath(repository)}/commits?per_page=${PAGE_SIZE}&page=${page}${branchQuery}`, options,
     )
+    options?.budget?.consumeItems(items.length)
     return { items: items.map(commitSummary), hasMore: items.length === PAGE_SIZE }
   }
 
-  const commitCount = async (repository: RepositoryReference, branch: string): Promise<number> => {
+  const commitCount = async (repository: RepositoryReference, branch: string, options?: RequestOptions): Promise<number> => {
     const selector = repositorySelector(repository)
     if (!branch.trim()) throw new Error("Branch for commit count must not be blank.")
     const failure = `Commit count for ${repositoryName(repository)} branch ${branch} could not be verified.`
     if (!transport.graphql) throw new Error(failure)
     const response = record(await transport.graphql<unknown>(
       `query(${selector.declarations}, $ref: String!) { ${selector.select("ref(qualifiedName: $ref) { target { __typename ... on Commit { history { totalCount } } } }")} }`,
-      { ...selector.variables, ref: `refs/heads/${branch}` },
+      { ...selector.variables, ref: `refs/heads/${branch}` }, options,
     ))
     if (response?.errors != null && (!Array.isArray(response.errors) || response.errors.length)) {
       const messages = Array.isArray(response.errors)
@@ -512,23 +515,24 @@ export function createGitHubClient(transport: GitHubTransport, commentStorage?: 
     }
   }
 
-  const issues = async (repository: RepositoryReference, state: ListState, page = 1): Promise<Page<IssueSummary>> => {
+  const issues = async (repository: RepositoryReference, state: ListState, page = 1, options?: RequestOptions): Promise<Page<IssueSummary>> => {
     const items = await transport.json<IssueResponse[]>(
-      `${repositoryPath(repository)}/issues?state=${state}&per_page=${PAGE_SIZE}&page=${page}`,
+      `${repositoryPath(repository)}/issues?state=${state}&per_page=${PAGE_SIZE}&page=${page}`, options,
     )
+    options?.budget?.consumeItems(items.length)
     return {
       items: items.filter((item) => !item.pull_request).map(issueSummary),
       hasMore: items.length === PAGE_SIZE,
     }
   }
 
-  const workCounts = async (repository: RepositoryReference): Promise<{ issues: number; pulls: number }> => {
+  const workCounts = async (repository: RepositoryReference, options?: RequestOptions): Promise<{ issues: number; pulls: number }> => {
     const selector = repositorySelector(repository)
     const failure = "Open issue and pull request counts could not be verified."
     if (!transport.graphql) throw new Error(failure)
     const response = record(await transport.graphql<unknown>(
       `query(${selector.declarations}) { ${selector.select("issues(states: OPEN) { totalCount } pullRequests(states: OPEN) { totalCount }")} }`,
-      selector.variables,
+      selector.variables, options,
     ))
     if (response?.errors != null && (!Array.isArray(response.errors) || response.errors.length)) {
       const messages = Array.isArray(response.errors)
@@ -544,7 +548,7 @@ export function createGitHubClient(transport: GitHubTransport, commentStorage?: 
     return { issues, pulls }
   }
 
-  const hasIssues = async (repository: RepositoryReference, state: ListState): Promise<boolean> => {
+  const hasIssues = async (repository: RepositoryReference, state: ListState, options?: RequestOptions): Promise<boolean> => {
     if (!transport.graphql) throw new Error("Issue availability could not be verified.")
     const selector = repositorySelector(repository)
     const response = await transport.graphql<{
@@ -552,7 +556,7 @@ export function createGitHubClient(transport: GitHubTransport, commentStorage?: 
       errors?: { message?: string }[]
     }>(
       `query(${selector.declarations}, $state: IssueState!) { ${selector.select("issues(states: [$state]) { totalCount }")} }`,
-      { ...selector.variables, state: state.toUpperCase() },
+      { ...selector.variables, state: state.toUpperCase() }, options,
     )
     if (response.errors?.length) throw new Error(response.errors.map((error) => error.message).filter(Boolean).join(" · ") || "Issue availability could not be verified.")
     const count = response.data?.repository?.issues?.totalCount
@@ -647,8 +651,9 @@ export function createGitHubClient(transport: GitHubTransport, commentStorage?: 
     return withIssuePermissions(repository, number, issueDetail(item))
   }
 
-  const assignableUsers = async (repository: RepositoryReference, page = 1): Promise<Page<string>> => {
-    const users = await transport.json<{ login: string }[]>(`${repositoryPath(repository)}/assignees?per_page=100&page=${page}`)
+  const assignableUsers = async (repository: RepositoryReference, page = 1, options?: RequestOptions): Promise<Page<string>> => {
+    const users = await transport.json<{ login: string }[]>(`${repositoryPath(repository)}/assignees?per_page=100&page=${page}`, options)
+    options?.budget?.consumeItems(users.length)
     return { items: users.map((user) => user.login), hasMore: users.length === 100 }
   }
 
@@ -966,10 +971,11 @@ export function createGitHubClient(transport: GitHubTransport, commentStorage?: 
   const issueReferences = async (repository: RepositoryReference, number: number, options?: RequestOptions): Promise<IssueReference[]> =>
     (await issueTimeline(repository, number, options)).references
 
-  const pulls = async (repository: RepositoryReference, state: ListState, page = 1): Promise<Page<PullRequestSummary>> => {
+  const pulls = async (repository: RepositoryReference, state: ListState, page = 1, options?: RequestOptions): Promise<Page<PullRequestSummary>> => {
     const items = await transport.json<PullResponse[]>(
-      `${repositoryPath(repository)}/pulls?state=${state}&per_page=${PAGE_SIZE}&page=${page}`,
+      `${repositoryPath(repository)}/pulls?state=${state}&per_page=${PAGE_SIZE}&page=${page}`, options,
     )
+    options?.budget?.consumeItems(items.length)
     return {
       items: items.map((item) => ({ ...issueSummary(item), merged: item.merged_at != null, draft: item.draft === true })),
       hasMore: items.length === PAGE_SIZE,
@@ -1192,10 +1198,11 @@ export function createGitHubClient(transport: GitHubTransport, commentStorage?: 
     }
   }
 
-  const runs = async (repository: RepositoryReference, page = 1): Promise<Page<WorkflowRunSummary>> => {
+  const runs = async (repository: RepositoryReference, page = 1, options?: RequestOptions): Promise<Page<WorkflowRunSummary>> => {
     const response = await transport.json<WorkflowRunsResponse>(
-      `${repositoryPath(repository)}/actions/runs?per_page=${PAGE_SIZE}&page=${page}`,
+      `${repositoryPath(repository)}/actions/runs?per_page=${PAGE_SIZE}&page=${page}`, options,
     )
+    options?.budget?.consumeItems(response.workflow_runs?.length ?? 0)
     const items = (response.workflow_runs ?? []).map((item) => ({
       id: item.id,
       name: item.name,

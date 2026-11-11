@@ -1,10 +1,10 @@
-import { describe, expect, test } from "bun:test"
+import { describe, expect, spyOn, test } from "bun:test"
 import { mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { createGitHubReviews } from "../src/github/reviews"
 import { createPullReviewSession, createReviewDraftStorage, type ReviewDraftStorage } from "../src/pull-review-session"
-import { GitHubApiError, GitHubRequestNotSentError, type GitHubTransport } from "../src/github/transport"
+import { createGitHubTransport, GitHubApiError, GitHubRequestNotSentError, type GitHubTransport, type RequestOptions } from "../src/github/transport"
 import type { ReviewDraft } from "../src/review-types"
 
 const sha = "a".repeat(40)
@@ -48,6 +48,29 @@ function memory(): ReviewDraftStorage {
 const draft = (): ReviewDraft => ({ accountId: 7, repository: "o/r", number: 1, headSha: sha, baseSha, body: "Review", event: "COMMENT", comments: [] })
 
 describe("pull reviews", () => {
+  test("draft bursts coalesce and a slow save retains only the latest edit", async () => {
+    const saved: string[] = []
+    const gate = Promise.withResolvers<void>()
+    const storage = memory()
+    const session = createPullReviewSession({ transport: fixture().transport, storage: { ...storage,
+      async save(draft) {
+        saved.push(draft.body)
+        if (saved.length === 1) await gate.promise
+        await storage.save(draft)
+      },
+    } })
+    await session.open("o/r", 1)
+    for (let i = 0; i < 100; i++) session.setBody(`first ${i}`)
+    expect(saved).toEqual([])
+    const flushing = session.flush()
+    expect(saved).toEqual(["first 99"])
+    for (let i = 0; i < 100; i++) session.setBody(`latest ${i}`)
+    gate.resolve()
+    await flushing
+    expect(saved).toEqual(["first 99", "latest 99"])
+    expect((await storage.load(draft()) as ReviewDraft).body).toBe("latest 99")
+  })
+
   test.each([false, true])("flush drains edits queued during a save and preserves failure/retry (fail=%s)", async (fail) => {
     const first = Promise.withResolvers<void>()
     const second = Promise.withResolvers<void>()
@@ -82,6 +105,90 @@ describe("pull reviews", () => {
       await session.flush()
     }
     expect((await storage.load(draft()) as ReviewDraft).body).toBe("latest")
+  })
+
+  test("opening another review cancels obsolete eligibility reads", async () => {
+    const { transport } = fixture()
+    const started = Promise.withResolvers<AbortSignal>()
+    const session = createPullReviewSession({ storage: memory(), transport: { ...transport,
+      async json<T>(path: string, options?: RequestOptions): Promise<T> {
+        if (path === "repos/o/r/pulls/1") {
+          const signal = options!.budget!.signal
+          started.resolve(signal)
+          return new Promise((_, reject) => {
+            signal.addEventListener("abort", () => reject(signal.reason), { once: true })
+          })
+        }
+        return transport.json<T>(path.replace("/pulls/2", "/pulls/1"), options)
+      },
+    } })
+    const first = session.open("o/r", 1)
+    const signal = await started.promise
+    await session.open("o/r", 2)
+    await first
+    expect(signal.aborted).toBe(true)
+    expect(session.state().draft?.number).toBe(2)
+    expect(session.state().status).toBe("ready")
+  })
+
+  test("budget expiry while storing the submission marker unlocks a known-unsent review", async () => {
+    const { transport } = fixture()
+    const storage = memory()
+    const real = createGitHubTransport()
+    let options: RequestOptions | undefined
+    let attempts = 0
+    const spawn = spyOn(Bun, "spawn").mockImplementation(() => { throw new Error("No gh request should be spawned") })
+    const session = createPullReviewSession({ storage: { ...storage,
+      async save(draft) {
+        await storage.save(draft)
+        if (draft.submission) {
+          // Expire the actual shared budget during the awaited marker save.
+          try { options!.budget!.consumeBytes(17 * 1024 * 1024) } catch {}
+        }
+      },
+    }, transport: { ...transport,
+      async json<T>(path: string, requestOptions?: RequestOptions): Promise<T> {
+        options = requestOptions
+        return transport.json<T>(path, requestOptions)
+      },
+      async mutate<T>(path: string, method: "POST" | "PATCH", body: Record<string, unknown>, requestOptions?: RequestOptions): Promise<T> {
+        attempts++
+        return real.mutate!<T>(path, method, body, requestOptions)
+      },
+    } })
+    try {
+      await session.open("o/r", 1)
+      session.setBody("Review")
+      for (let attempt = 1; attempt <= 2; attempt++) {
+        expect(await session.submit()).toBe(false)
+        expect(attempts).toBe(attempt)
+        expect(session.state().uncertain).toBe(false)
+        expect(session.state().draft?.submission).toBeUndefined()
+        expect((await storage.load(draft()) as ReviewDraft).submission).toBeUndefined()
+      }
+      expect(spawn).not.toHaveBeenCalled()
+    } finally { spawn.mockRestore() }
+  })
+
+  test("a response budget failure after POST preserves the marker and reconciles without reposting", async () => {
+    const { data, transport } = fixture()
+    const storage = memory()
+    const session = createPullReviewSession({ storage, transport: { ...transport,
+      async mutate<T>(path: string, method: "POST" | "PATCH", body: Record<string, unknown>, options?: RequestOptions): Promise<T> {
+        const response = await transport.mutate!<T>(path, method, body, options)
+        options!.budget!.consumeBytes(17 * 1024 * 1024)
+        return response
+      },
+    } })
+    await session.open("o/r", 1)
+    session.setBody("Review")
+    expect(await session.submit()).toBe(false)
+    expect(session.state().uncertain).toBe(true)
+    expect((await storage.load(draft()) as ReviewDraft).submission).toBeDefined()
+    expect(data.posts).toHaveLength(1)
+    expect(await session.submit()).toBe(true)
+    expect(data.posts).toHaveLength(1)
+    expect(await storage.load(draft())).toBeUndefined()
   })
 
   test("preloaded reviews share in-flight requests and reopen immediately without losing drafts", async () => {

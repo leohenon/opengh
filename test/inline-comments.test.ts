@@ -101,6 +101,30 @@ test("definitive rejection releases marker; cleanup failure after success still 
   expect((await service.post(input)).id).toBe(1002)
   expect(data.posts).toHaveLength(2)
 })
+test("cancellation during marker persistence prevents dispatch and releases the unsent marker", async () => {
+  const { data, service, storage } = fixture()
+  const controller = new AbortController()
+  const save = storage.save
+  storage.save = async (attempt) => { await save(attempt); controller.abort() }
+  await expect(service.post(input, { signal: controller.signal })).rejects.toBeInstanceOf(GitHubRequestNotSentError)
+  expect(data.posts).toHaveLength(0)
+  expect(await storage.load(input)).toBeUndefined()
+})
+
+test("cancelling an unsent explicit retry preserves the original uncertain receipt", async () => {
+  const { data, service, storage } = fixture()
+  data.record = false
+  data.fail = new Error("original timeout")
+  await expect(service.post(input)).rejects.toMatchObject({ retryAllowed: true })
+  const previous = await storage.load(input)
+  const controller = new AbortController()
+  const update = storage.update
+  storage.update = async (before, after) => { await update(before, after); controller.abort() }
+  await expect(service.post(input, { retryUnconfirmed: true, signal: controller.signal })).rejects.toBeInstanceOf(GitHubRequestNotSentError)
+  expect(data.posts).toHaveLength(1)
+  expect(await storage.load(input)).toEqual(previous)
+})
+
 test("known-unsent account guard clears the inline marker and preserves the original error", async () => {
   const { data, service, storage, transport } = fixture()
   const post = transport.mutate!

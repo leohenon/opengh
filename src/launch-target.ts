@@ -42,7 +42,7 @@ Quote URLs containing shell metacharacters and identifiers such as '#123'.
 Options:
   --resume                                Restore the last interactive page (no repository or target)
   --standalone                            Hide global navigation; Ctrl+O opens the full app
-  --inline                                Print the complete page to stdout and exit
+  --inline                                Print a bounded page snapshot to stdout and exit
   -h, --help                              Show this help
   -v, --version                           Show version
 `

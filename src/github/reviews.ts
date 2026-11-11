@@ -1,5 +1,13 @@
 import type { ReviewAnchor, ReviewDraft, ReviewEligibility } from "../review-types"
-import { githubTransport, GitHubRequestNotSentError, type GitHubTransport } from "./transport"
+import { githubTransport, GitHubRequestNotSentError, type GitHubTransport, type RequestOptions } from "./transport"
+
+import { createRequestBudget, isRequestInterrupted, MAX_AUTOMATIC_PAGES, RequestBudgetLimitError } from "./request-budget"
+
+async function bounded<T>(options: RequestOptions | undefined, run: (options: RequestOptions) => Promise<T>): Promise<T> {
+  const owned = options?.budget ? undefined : createRequestBudget(options?.signal)
+  try { return await run({ ...options, budget: options?.budget ?? owned }) }
+  finally { owned?.dispose() }
+}
 
 const MAX_BODY = 65_536
 export function validateReviewAnchor(anchor: ReviewAnchor): void {
@@ -37,25 +45,29 @@ type RemoteComment = { path: string; line: number | null; original_line?: number
 const reviewState = { COMMENT: "COMMENTED", APPROVE: "APPROVED", REQUEST_CHANGES: "CHANGES_REQUESTED" }
 
 export function createGitHubReviews(transport: GitHubTransport = githubTransport) {
-  async function pages<T>(path: string): Promise<T[]> {
+  async function pages<T>(path: string, options: RequestOptions): Promise<T[]> {
     const result: T[] = []
-    for (let page = 1; page <= 100; page++) {
-      const values = await transport.json<T[]>(`${path}?per_page=100&page=${page}`)
-      if (!Array.isArray(values)) throw new Error("Invalid paginated GitHub review response.")
+    for (let page = 1; page <= MAX_AUTOMATIC_PAGES; page++) {
+      options.signal?.throwIfAborted()
+      options.budget?.signal.throwIfAborted()
+      const values = await transport.json<T[]>(`${path}?per_page=100&page=${page}`, options)
+      if (!Array.isArray(values) || values.length > 100) throw new Error("Invalid paginated GitHub review response.")
+      options.budget?.consumeItems(values.length)
       result.push(...values)
       if (values.length < 100) return result
     }
-    throw new Error("Too many GitHub review records to verify safely. Check GitHub.")
+    throw new RequestBudgetLimitError("Too many GitHub review records to verify safely")
   }
-  const list = (repository: string, number: number) => pages<RemoteReview>(`${endpoint(repository, number)}/reviews`)
-  async function eligibility(repository: string, number: number): Promise<ReviewEligibility> {
+  const list = (repository: string, number: number, options?: RequestOptions) => bounded(options, options => pages<RemoteReview>(`${endpoint(repository, number)}/reviews`, options))
+  async function eligibilityRead(repository: string, number: number, options: RequestOptions): Promise<ReviewEligibility> {
     const path = endpoint(repository, number)
-    const account = await transport.json<{ id: number; login: string }>("user")
+    const account = await transport.json<{ id: number; login: string }>("user", options)
     if (!Number.isSafeInteger(account?.id) || account.id <= 0 || typeof account.login !== "string" || !account.login.trim()) throw new Error("Cannot verify the current GitHub account.")
     const [pull, repo, reviews] = await Promise.all([
-      transport.json<{ head: { sha: string }; base?: { sha: string }; state: string; draft: boolean; locked: boolean; user: { id: number }; html_url: string }>(path),
-      transport.json<{ archived: boolean; private?: boolean; permissions?: { pull?: boolean; triage?: boolean; push?: boolean; maintain?: boolean; admin?: boolean } }>(`repos/${repository}`), list(repository, number),
+      transport.json<{ head: { sha: string }; base?: { sha: string }; state: string; draft: boolean; locked: boolean; user: { id: number }; html_url: string }>(path, options),
+      transport.json<{ archived: boolean; private?: boolean; permissions?: { pull?: boolean; triage?: boolean; push?: boolean; maintain?: boolean; admin?: boolean } }>(`repos/${repository}`, options), list(repository, number, options),
     ])
+    options.budget?.consumeItems(3)
     if (!/^[a-f0-9]{40,64}$/i.test(pull?.head?.sha) || !Number.isSafeInteger(pull?.user?.id)) throw new Error("Cannot verify pull request head or author.")
     if (pull.base !== undefined && (typeof pull.base?.sha !== "string" || !/^[a-f0-9]{40,64}$/i.test(pull.base.sha))) throw new Error("Cannot verify pull request base.")
     // Public repositories can restrict approvals to explicitly granted READ or
@@ -67,8 +79,8 @@ export function createGitHubReviews(transport: GitHubTransport = githubTransport
     if (!explicitAccess) {
       try {
         // This documented GET returns 204 with an empty body for collaborators.
-        explicitAccess = await transport.text(`repos/${repository}/collaborators/${encodeURIComponent(account.login)}`) === ""
-      } catch { /* No collaborator evidence: keep approval disabled. */ }
+        explicitAccess = await transport.text(`repos/${repository}/collaborators/${encodeURIComponent(account.login)}`, undefined, options) === ""
+      } catch (error) { if (isRequestInterrupted(error, options)) throw error /* Otherwise keep approval disabled. */ }
     }
     if (reviews.some(review => !review || typeof review !== "object" || Array.isArray(review)
       || !Number.isSafeInteger(review.id) || review.id <= 0
@@ -90,9 +102,9 @@ export function createGitHubReviews(transport: GitHubTransport = githubTransport
           : pull.draft !== false ? "Approval and request changes require a non-draft pull request." : pull.user.id === account.id ? "You cannot approve or request changes on your own pull request."
           : !explicitAccess ? "Approval permission cannot be verified; use GitHub." : undefined }
   }
-  async function validateAnchors(draft: ReviewDraft) {
+  async function validateAnchorsRead(draft: ReviewDraft, options: RequestOptions) {
     if (!draft.comments.length) return
-    const files = await pages<{ filename: string; patch?: string }>(`${endpoint(draft.repository, draft.number)}/files`)
+    const files = await pages<{ filename: string; patch?: string }>(`${endpoint(draft.repository, draft.number)}/files`, options)
     for (const comment of draft.comments) {
       const patch = files.find(file => file.filename === comment.path)?.patch
       if (!patch) throw new Error(`Cannot verify diff anchor for ${comment.path}; inspect the latest diff.`)
@@ -116,13 +128,13 @@ export function createGitHubReviews(transport: GitHubTransport = githubTransport
       && value.state === reviewState[draft.event] && (value.body ?? "") === draft.body
       && value.commit_id === draft.headSha && Number.isFinite(Date.parse(value.submitted_at ?? ""))
   }
-  async function reconcile(draft: ReviewDraft): Promise<boolean> {
+  async function reconcileRead(draft: ReviewDraft, options: RequestOptions): Promise<boolean> {
     if (!draft.submission) return false
-    const reviews = await list(draft.repository, draft.number)
+    const reviews = await list(draft.repository, draft.number, options)
     const candidates = reviews.filter(review => !draft.submission!.reviewIds.includes(review.id) && review.user?.id === draft.accountId
       && review.state === reviewState[draft.event] && review.body === draft.body && review.commit_id === draft.headSha && Boolean(review.submitted_at))
     for (const review of candidates) {
-      const comments = await pages<RemoteComment>(`${endpoint(draft.repository, draft.number)}/reviews/${review.id}/comments`)
+      const comments = await pages<RemoteComment>(`${endpoint(draft.repository, draft.number)}/reviews/${review.id}/comments`, options)
       const actual = comments.map(comment => JSON.stringify([comment.path, comment.line ?? comment.original_line, comment.side,
         comment.start_line ?? comment.original_start_line ?? null, comment.start_side ?? null, comment.body])).sort()
       const expected = draft.comments.map(comment => JSON.stringify([comment.path, comment.line, comment.side, comment.startLine ?? null, comment.startSide ?? null, comment.body])).sort()
@@ -130,14 +142,21 @@ export function createGitHubReviews(transport: GitHubTransport = githubTransport
     }
     return false
   }
-  async function post(draft: ReviewDraft) {
+  async function post(draft: ReviewDraft, options?: RequestOptions) {
     validateReviewDraft(draft, true)
     if (!transport.mutate) throw new GitHubRequestNotSentError("GitHub review writes are unavailable.")
     return transport.mutate<RemoteReview>(`${endpoint(draft.repository, draft.number)}/reviews`, "POST", {
       commit_id: draft.headSha, event: draft.event, body: draft.body,
       comments: draft.comments.map(comment => ({ path: comment.path, line: comment.line, side: comment.side,
         ...(comment.startLine === undefined ? {} : { start_line: comment.startLine, start_side: comment.startSide }), body: comment.body })),
-    })
+    }, options)
   }
-  return { eligibility, list, validateAnchors, confirmedResponse, reconcile, post }
+  return {
+    eligibility: (repository: string, number: number, options?: RequestOptions) => bounded(options, options => eligibilityRead(repository, number, options)),
+    list,
+    validateAnchors: (draft: ReviewDraft, options?: RequestOptions) => bounded(options, options => validateAnchorsRead(draft, options)),
+    confirmedResponse,
+    reconcile: (draft: ReviewDraft, options?: RequestOptions) => bounded(options, options => reconcileRead(draft, options)),
+    post,
+  }
 }

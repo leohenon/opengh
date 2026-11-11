@@ -88,6 +88,49 @@ test("large repetitive diff search caps source results and reveals first/last wi
   } finally { setup.renderer.destroy(); await setup.renderer.closed }
 }, 20_000)
 
+test("many matching diff rows use a shared row map, not a descendant lookup per cell", async () => {
+  const setup = await createTestRenderer({ width: 72, height: 12 })
+  initializeHunk(setup.renderer)
+  const patch = `diff --git a/rows.txt b/rows.txt\n--- a/rows.txt\n+++ b/rows.txt\n@@ -1 +1,600 @@\n-old\n${Array.from({ length: 600 }, (_, i) => `+needle ${i}`).join("\n")}\n`
+  await render(() => <KeybindingsProvider><ThemeProvider name="github" mode="dark">
+    <box width="100%" height="100%" flexDirection="column"><SearchProvider identity="rows" enabled>
+      <DiffScreen target={{ kind: "commit", sha: "rows" }} resource={{ status: "ready", value: { kind: "patch", patch } }}
+        interactive showScrollbar={false} onLoadFiles={() => {}} />
+    </SearchProvider></box>
+  </ThemeProvider></KeybindingsProvider>, setup.renderer)
+  const settle = async () => { await setup.flush(); await setup.renderer.idle(); await setup.flush() }
+  try {
+    await settle()
+    const host = setup.renderer.root.findDescendantById("embedded-diff-host")!
+    const lookup = host.findDescendantById.bind(host)
+    let calls = 0
+    host.findDescendantById = (id) => { calls++; return lookup(id) }
+    setup.mockInput.pressKey("/")
+    await setup.mockInput.pasteBracketedText("needle")
+    await settle()
+    setup.mockInput.pressEnter()
+    await settle()
+    expect(setup.captureCharFrame()).toContain("1/600")
+    expect(calls).toBeLessThan(20)
+    calls = 0
+    setup.mockInput.pressKey("N")
+    await settle()
+    expect(setup.captureCharFrame()).toContain("600/600")
+    expect(setup.captureCharFrame()).toContain("needle 599")
+    expect(calls).toBeLessThan(20)
+    // Allow the reveal's layout to settle, then leave the accepted search idle
+    // through multiple provider polls. Unchanged geometry needs no tree walk.
+    await Bun.sleep(180)
+    await settle()
+    const children = host.getChildren.bind(host)
+    let walks = 0
+    host.getChildren = () => { walks++; return children() }
+    await Bun.sleep(350)
+    await settle()
+    expect(walks).toBe(0)
+  } finally { setup.renderer.destroy(); await setup.renderer.closed }
+})
+
 const lines = Array.from({ length: 36 }, (_, index) => index === 0 ? " const needleContext = 1"
   : index === 1 ? '-const before = "old"\n+const after = "new"'
   : index === 11 ? `-const far = "old"\n+const far = "${"x".repeat(110)} 👩‍💻 needle"`

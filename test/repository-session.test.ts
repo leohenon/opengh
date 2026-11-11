@@ -52,6 +52,71 @@ function ready(session: ReturnType<typeof createRepositorySession>) {
 }
 
 describe("repository session", () => {
+  test("document budget exhaustion settles queued documents and leaves recovery available", async () => {
+    for (const recovery of ["retry", "refresh", "branch"] as const) {
+      let fail = false
+      let calls = 0
+      const session = createRepositorySession(loaders({
+        documents: async (repo, branch) => Array.from({ length: 6 }, (_, index) => ({
+          id: `doc${index}`, path: `doc${index}.md`, label: `Document ${index}`, repository: repo.nameWithOwner, ref: branch,
+        })),
+        document: async (_repo, source, options) => {
+          calls++
+          // Let the four workers start before exhausting their shared budget.
+          await Promise.resolve()
+          if (fail) options!.budget!.consumeItems(10_001)
+          return `cached ${source.id}`
+        },
+      }))
+      await session.load("owner/repo")
+      fail = true
+      await session.refresh()
+      expect(calls).toBe(10) // Six initial reads, four failed workers, two never dispatched.
+      const documents = ready(session).data.documents
+      expect(documents.status).toBe("error")
+      expect(documents.value!.map(document => document.resource.status)).toEqual(Array(6).fill("error"))
+      expect(documents.value!.map(document => document.resource.value)).toEqual(Array.from({ length: 6 }, (_, i) => `cached doc${i}`))
+      expect(session.canSwitchBranch()).toBe(true)
+      fail = false
+      if (recovery === "retry") await session.retryResource({ kind: "documents" })
+      else if (recovery === "refresh") await session.refresh()
+      else await session.switchBranch("next")
+      expect(calls).toBe(16)
+      expect(ready(session).data.documents.value!.every(document => document.resource.status === "ready")).toBe(true)
+      if (recovery === "branch") expect(ready(session).data.currentBranch).toBe("next")
+    }
+  })
+
+  test("repository replacement aborts list reads and stops queued refresh pages", async () => {
+    const gate = deferred<void>()
+    const started = deferred<void>()
+    let refreshing = false
+    let calls = 0
+    const signals: AbortSignal[] = []
+    const session = createRepositorySession(loaders({
+      runs: async (_repo, _page, options) => {
+        if (refreshing) {
+          calls++
+          signals.push(options!.signal!)
+          if (calls === 4) started.resolve()
+          await gate.promise
+        }
+        return { items: [], hasMore: true }
+      },
+    }))
+    await session.load("owner/repo", "actions")
+    for (let i = 0; i < 5; i++) await session.loadMoreRuns()
+    refreshing = true
+    const refresh = session.refresh()
+    await started.promise
+    await session.load("owner/other", "detail")
+    expect(signals.every(signal => signal.aborted)).toBe(true)
+    gate.resolve()
+    await refresh
+    expect(calls).toBe(4)
+    expect(session.state().repository).toBe("owner/other")
+  })
+
   test("focused detail startup and refresh leave unrelated resources deferred, including after a repository roundtrip", async () => {
     const calls: string[] = []
     const base = loaders()

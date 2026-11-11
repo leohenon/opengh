@@ -70,18 +70,26 @@ function responseParts(output: string) {
 }
 
 async function request(scheduler: GitHubRequestScheduler, ...[path, accept, fields, mutation, options]: RequestArguments) {
-  validateEndpoint(path)
   const write = writeRequest([path, accept, fields, mutation, options])
   const signal = requestSignal(options)
-  signal?.throwIfAborted()
-  scheduler.assertAvailable(path, write)
-  options?.budget?.takeRequest()
-  const args = ["api", "--hostname", "github.com", path, "--include"]
-  if (accept) args.push("-H", `Accept: ${accept}`)
-  if (options?.jq) args.push("--jq", options.jq)
-  if (fields) for (const [key, value] of Object.entries(fields)) args.push("-f", `${key}=${value}`)
-  if (mutation) args.push("--method", mutation.method, "--input", "-")
-  const process = spawnGitHub(args, undefined, mutation ? JSON.stringify(mutation.body) : undefined)
+  let process: ReturnType<typeof spawnGitHub>
+  try {
+    validateEndpoint(path)
+    signal?.throwIfAborted()
+    scheduler.assertAvailable(path, write)
+    options?.budget?.takeRequest()
+    const args = ["api", "--hostname", "github.com", path, "--include"]
+    if (accept) args.push("-H", `Accept: ${accept}`)
+    if (options?.jq) args.push("--jq", options.jq)
+    if (fields) for (const [key, value] of Object.entries(fields)) args.push("-f", `${key}=${value}`)
+    if (mutation) args.push("--method", mutation.method, "--input", "-")
+    process = spawnGitHub(args, undefined, mutation ? JSON.stringify(mutation.body) : undefined)
+  } catch (error) {
+    // No child was dispatched. Errors while reading its response below remain
+    // ambiguous, even if the same budget or signal caused them.
+    if (write) throw new GitHubRequestNotSentError(error instanceof Error ? error.message : "GitHub request could not be started; no changes were sent.")
+    throw error
+  }
   let finished = false
   const exited = process.exited.finally(() => { finished = true })
   const abort = () => process.kill()
@@ -194,12 +202,12 @@ export function createGitHubTransport(scheduler: GitHubRequestScheduler = github
   }
   async function authenticatedRequest(...args: RequestArguments) {
     const [path, , , , options] = args
-    validateEndpoint(path)
     const signal = requestSignal(options)
-    signal?.throwIfAborted()
     const write = writeRequest(args)
     let expected: Viewer
     try {
+      validateEndpoint(path)
+      signal?.throwIfAborted()
       // Remember the account that loaded this session, not its credentials. A failed
       // initial login remains retryable after authenticating outside the app.
       initialViewer ??= viewer().catch((error) => { initialViewer = undefined; throw error })

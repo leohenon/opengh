@@ -1,6 +1,6 @@
 import { expect, spyOn, test } from "bun:test"
 import { repositoryFromDirectory } from "../src/github/repository"
-import { createRequestBudget, MAX_DETAIL_BYTES } from "../src/github/request-budget"
+import { createRequestBudget, MAX_DETAIL_BYTES, MAX_DETAIL_REQUESTS, RequestBudgetLimitError, ResponseLimitError } from "../src/github/request-budget"
 import { GitHubRequestScheduler } from "../src/github/request-scheduler"
 import { GitHubApiError, GitHubRequestNotSentError, createGitHubTransport } from "../src/github/transport"
 
@@ -285,6 +285,66 @@ test("read-only GraphQL skips redundant probes but changed accounts cannot send 
   } finally {
     spawn.mockRestore()
   }
+})
+
+test("pre-dispatch budget failures are unsent only for writes", async () => {
+  const transport = createGitHubTransport(new GitHubRequestScheduler())
+  const budget = createRequestBudget()
+  const spawn = spyOn(Bun, "spawn").mockImplementation(() => result('{"id":1,"login":"viewer"}'))
+  try {
+    try { budget.consumeBytes(MAX_DETAIL_BYTES + 1) } catch {}
+    await expect(transport.mutate!("repos/o/r/issues", "POST", {}, { budget })).rejects.toBeInstanceOf(GitHubRequestNotSentError)
+    await expect(transport.json("repos/o/r", { budget })).rejects.toBe(budget.signal.reason)
+    expect(spawn).not.toHaveBeenCalled()
+  } finally { budget.dispose(); spawn.mockRestore() }
+})
+
+test("request exhaustion after identity verification is unsent, response limits after dispatch are ambiguous", async () => {
+  const transport = createGitHubTransport(new GitHubRequestScheduler())
+  const budget = createRequestBudget()
+  const spawn = spyOn(Bun, "spawn").mockImplementation((args) => result((args as string[])[4] === "user"
+    ? '{"id":1,"login":"viewer"}' : '{"ok":true}'))
+  try {
+    await transport.json("repos/o/r")
+    spawn.mockClear()
+    for (let i = 0; i < MAX_DETAIL_REQUESTS - 1; i++) budget.takeRequest()
+    await expect(transport.mutate!("repos/o/r/issues", "POST", {}, { budget })).rejects.toBeInstanceOf(GitHubRequestNotSentError)
+    expect(budget.signal.reason).toBeInstanceOf(RequestBudgetLimitError)
+    expect(spawn.mock.calls.map(call => (call[0] as string[])[4])).toEqual(["user"])
+    await expect(transport.mutate!("repos/o/r/issues", "POST", {}, { maxBytes: 1 })).rejects.toBeInstanceOf(ResponseLimitError)
+    expect((spawn.mock.calls.at(-1)![0] as string[])[4]).toBe("repos/o/r/issues")
+  } finally { budget.dispose(); spawn.mockRestore() }
+})
+
+test("queued and acquired-slot cancellations are unsent but dispatched task failures are not", async () => {
+  const scheduler = new GitHubRequestScheduler()
+  const release = Promise.withResolvers<void>()
+  const started = Promise.withResolvers<void>()
+  let active = 0, dispatched = 0
+  const occupied = Array.from({ length: 4 }, () => scheduler.run("read", () => {
+    if (++active === 4) started.resolve()
+    return release.promise
+  }))
+  await started.promise
+  try {
+    for (const write of [false, true]) {
+      const controller = new AbortController()
+      const reason = new Error("cancelled while queued")
+      const queued = scheduler.run("queued", async () => { dispatched++ }, controller.signal, write).catch(error => error)
+      controller.abort(reason)
+      const error = await queued
+      if (write) expect(error).toBeInstanceOf(GitHubRequestNotSentError)
+      else expect(error).toBe(reason)
+    }
+  } finally { release.resolve(); await Promise.all(occupied) }
+  const controller = new AbortController()
+  const acquired = scheduler.run("acquired", async () => { dispatched++ }, controller.signal, true)
+  controller.abort(new Error("cancelled before task"))
+  await expect(acquired).rejects.toBeInstanceOf(GitHubRequestNotSentError)
+  expect(dispatched).toBe(0)
+  const reason = new RequestBudgetLimitError("response exhausted")
+  await expect(scheduler.run("write", async () => { throw reason }, undefined, true)).rejects.toBe(reason)
+  expect(await scheduler.run("next", async () => "available")).toBe("available")
 })
 
 function apiResult(body: unknown, headers: Record<string, string> = {}, status = 200, error = "", code = 0) {

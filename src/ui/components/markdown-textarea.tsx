@@ -3,6 +3,7 @@ import { useRenderer } from "@opentui/solid"
 import { createEffect, createSignal, onCleanup, splitProps, type ComponentProps } from "solid-js"
 import { KeyTextarea } from "../keybindings"
 import { useTheme } from "../theme"
+import { markdownEditorOffsets } from "../markdown-editor-offsets"
 
 // Reserved for this wrapper; never clear highlights belonging to the caller.
 const highlightRef = 0x4d44
@@ -60,20 +61,7 @@ export function MarkdownTextarea(props: ComponentProps<typeof KeyTextarea>) {
         // (as its ExtmarksController does). Let the buffer measure Unicode,
         // tabs and control notation with its own settings rather than guessing.
         const highlights = result.highlights ?? []
-        const boundaries = [...new Set(highlights.flatMap(([start, end]) =>
-          [Math.min(start, text.length), Math.min(end, text.length)]))].sort((a, b) => a - b)
-        const offsets = new Map<number, number>()
-        let lineStart = 0
-        let lineEnd = text.indexOf("\n")
-        let lineOffset = 0
-        for (const index of boundaries) {
-          while (lineEnd !== -1 && lineEnd < index) {
-            lineOffset += target.editBuffer.measureText(text.slice(lineStart, lineEnd))
-            lineStart = lineEnd + 1
-            lineEnd = text.indexOf("\n", lineStart)
-          }
-          offsets.set(index, lineOffset + target.editBuffer.measureText(text.slice(lineStart, index)))
-        }
+        const offsets = markdownEditorOffsets(text, (value) => target.editBuffer.measureText(value))
         target.editBuffer.runMutation(() => {
           // Keep the previous colors while parsing, then replace them in one
           // mutation so no frame displays an unhighlighted buffer between edits.
@@ -89,8 +77,8 @@ export function MarkdownTextarea(props: ComponentProps<typeof KeyTextarea>) {
             }
             if (styleId === null || start >= text.length || end <= start) continue
             target.editBuffer.addHighlightByCharRange({
-              start: offsets.get(start)!,
-              end: offsets.get(Math.min(end, text.length))!,
+              start: offsets.starts[start]!,
+              end: offsets.ends[Math.min(end, text.length)]!,
               styleId,
               priority: name === "conceal" ? 200 : 100,
               hlRef: highlightRef,

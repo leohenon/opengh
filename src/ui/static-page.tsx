@@ -3,12 +3,17 @@ import { BoxRenderable, CliRenderer, CodeRenderable, RGBA, ScrollBoxRenderable, 
 import { render } from "@opentui/solid"
 import type { JSX } from "solid-js"
 import type { Config } from "../config"
+import { INLINE_INCOMPLETE, safeOutput } from "../inline"
+
 import type { AppColors } from "../theme"
 import { IconProvider } from "./icon-style"
 import { KeybindingsProvider } from "./keybindings"
 import { MarkdownProvider } from "./markdown-preferences"
 import { MotionProvider } from "./motion"
 import { ThemeProvider, useTheme } from "./theme"
+
+export const STATIC_MAX_LINES = 4096
+export const STATIC_MAX_BYTES = 1024 * 1024
 
 function descendants(root: Renderable): Renderable[] {
   return root.getChildren().flatMap(child => [child, ...descendants(child)])
@@ -25,7 +30,7 @@ function sameRGB(left: RGBA, right: RGBA): boolean {
 }
 
 function serializeLine(line: CapturedLine, color: boolean, palette: { text: RGBA; muted: RGBA }): string {
-  if (!color) return line.spans.map(span => span.text).join("").trimEnd()
+  if (!color) return line.spans.map(span => safeOutput(span.text)).join("").trimEnd()
   return line.spans.map(span => {
     const codes = [0]
     for (const [attribute, code] of [
@@ -40,7 +45,7 @@ function serializeLine(line: CapturedLine, color: boolean, palette: { text: RGBA
     } else codes.push(38, 2, ...span.fg.toInts().slice(0, 3))
     // All inline surfaces use the terminal background, including code and comments.
     codes.push(49)
-    return `\x1b[${codes.join(";")}m${span.text}`
+    return `\x1b[${codes.join(";")}m${safeOutput(span.text)}`
   }).join("") + "\x1b[0m"
 }
 
@@ -51,7 +56,7 @@ export async function renderStaticPage(
   node: () => JSX.Element,
   options: { width: number; config: Config; color?: boolean },
 ): Promise<string> {
-  const width = Math.max(1, Math.floor(options.width || 80))
+  const width = Math.max(1, Math.min(500, Math.floor(Number.isFinite(options.width) ? options.width || 80 : 80)))
   const stdin = Object.assign(new PassThrough(), { isTTY: false, setRawMode: () => stdin })
   const stdout = Object.assign(new Writable({ write(_chunk, _encoding, done) { done() } }), {
     columns: width, rows: 64, isTTY: false,
@@ -95,24 +100,34 @@ export async function renderStaticPage(
       </IconProvider>
     </ThemeProvider>, renderer)
     let height = 64
+    let incomplete = false
     for (let pass = 0; pass < 10; pass++) {
       await settle()
       const overflow = Math.max(0, ...descendants(root).filter((node): node is ScrollBoxRenderable => node instanceof ScrollBoxRenderable)
         .map(scroll => scroll.scrollHeight - scroll.viewport.height))
       if (overflow <= 0) break
-      height += Math.ceil(overflow)
+      const next = height + Math.ceil(overflow)
+      height = Math.min(STATIC_MAX_LINES, next)
       root.height = height
+      if (next > STATIC_MAX_LINES) { incomplete = true; await settle(); break }
       if (pass === 9) throw new Error("Inline page layout did not settle.")
     }
-    const lines: CapturedLine[] = []
-    for (let offset = 0; offset < height; offset += 64) {
+    const lines: { text: string; blank: boolean }[] = []
+    const palette = { text: RGBA.fromHex(colors.text), muted: RGBA.fromHex(colors.muted) }
+    let bytes = 0
+    capture: for (let offset = 0; offset < height; offset += 64) {
       root.top = -offset
       await idle()
-      lines.push(...renderer.currentRenderBuffer.getSpanLines().slice(0, Math.min(64, height - offset)))
+      // Serialize each window immediately; do not retain native span snapshots.
+      for (const line of renderer.currentRenderBuffer.getSpanLines().slice(0, Math.min(64, height - offset))) {
+        const text = serializeLine(line, options.color !== false, palette)
+        bytes += Buffer.byteLength(text) + 1
+        if (bytes > STATIC_MAX_BYTES) { incomplete = true; break capture }
+        lines.push({ text, blank: line.spans.every(span => !span.text.trim()) })
+      }
     }
-    while (lines.length && lines.at(-1)!.spans.every(span => !span.text.trim())) lines.pop()
-    const palette = { text: RGBA.fromHex(colors.text), muted: RGBA.fromHex(colors.muted) }
-    return lines.map(line => serializeLine(line, options.color !== false, palette)).join("\n") + "\n\n"
+    while (lines.at(-1)?.blank) lines.pop()
+    return lines.map(line => line.text).join("\n") + "\n\n" + (incomplete ? `${INLINE_INCOMPLETE}\n` : "")
   } finally {
     renderer.destroy()
     try {

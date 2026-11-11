@@ -130,6 +130,7 @@ export function GitHubMarkdown(props: { content: string; syntaxStyle: SyntaxStyl
     const tables = tableOptions()
     const codePanels = new WeakSet<Renderable>()
     const headings = new WeakSet<Renderable>()
+    const paragraphs = new WeakSet<Renderable>()
     const codePanel = (source: CodeRenderable, language = source.filetype ?? "text") => {
       const short = !source.content.trimEnd().includes("\n")
       const parent = source.parent
@@ -284,12 +285,22 @@ export function GitHubMarkdown(props: { content: string; syntaxStyle: SyntaxStyl
         ...(section && !simple ? { border: ["bottom"], borderColor: border } : {}),
       })
       if (token.type === "heading") headings.add(wrapper)
-      if (token.type === "paragraph") wrapper.onLifecyclePass = () => {
-        // Core applies its block margins after renderNode; tighten heading/body
-        // gaps here, before layout, without changing paragraph or list spacing.
-        const siblings = wrapper.parent?.getChildren() ?? []
-        const previous = siblings[siblings.indexOf(wrapper) - 1]
-        if (previous && headings.has(previous) && wrapper.marginTop !== 0) wrapper.marginTop = 0
+      if (token.type === "paragraph") {
+        paragraphs.add(wrapper)
+        wrapper.onLifecyclePass = () => {
+          // Core applies margins after renderNode. Settle the whole parent once,
+          // then unregister every paragraph hook (including hidden paragraphs).
+          // A content/style change replaces renderNode and recreates these blocks.
+          if (!wrapper.parent) return
+          let previous: Renderable | undefined
+          for (const sibling of wrapper.parent.getChildren()) {
+            if (paragraphs.has(sibling)) {
+              if (previous && headings.has(previous)) sibling.marginTop = 0
+              sibling.onLifecyclePass = null
+            }
+            previous = sibling
+          }
+        }
       }
       wrapper.add(block)
       return wrapper

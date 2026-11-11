@@ -60,7 +60,9 @@ opengh owner/repo --pr 456 --inline
 opengh owner/repo '#12' --inline
 ```
 
-Prints the complete page in the command line without launching the app.
+Prints a bounded page snapshot without launching the interactive app. Lists fetch at most five pages; retained list records are limited to 500 items and 256 KiB across the snapshot. Redirected text is capped at 256 KiB. Terminal rendering also bounds its input tree to 256 KiB and capture to 4,096 lines / 1 MiB (including color escapes).
+
+When a limit is reached, output explicitly says it is incomplete and links to GitHub. Small pages retain their normal output; this mode is not an exhaustive history export.
 
 ## Development
 

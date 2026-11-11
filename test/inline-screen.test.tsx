@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test"
-import { renderStaticPage } from "../src/ui/static-page"
+import { renderStaticPage, STATIC_MAX_BYTES, STATIC_MAX_LINES } from "../src/ui/static-page"
 import { InlineScreen } from "../src/inline-screen"
 import { defaultConfig } from "../src/config"
 import { testRender } from "@opentui/solid"
@@ -9,6 +9,17 @@ import { IconProvider } from "../src/ui/icon-style"
 import { MarkdownProvider } from "../src/ui/markdown-preferences"
 import type { InlineScreenData } from "../src/inline-screen"
 import { issueDetailFixture, issueCommentsFixture, issuePullReferenceFixture, pullContextFixture, githubDataFixture } from "./fixtures/github-data"
+
+test("static capture bounds tall pages and explicitly marks the retained prefix incomplete", async () => {
+  const content = "Useful row\n".repeat(STATIC_MAX_LINES + 100) + "Beyond the limit"
+  const output = await renderStaticPage(() => <scrollbox><text>{content}</text></scrollbox>,
+    { width: 80, config: defaultConfig, color: false })
+  expect(output).toContain("Useful row")
+  expect(output).not.toContain("Beyond the limit")
+  expect(output).toContain("Output is incomplete")
+  expect(Buffer.byteLength(output)).toBeLessThan(STATIC_MAX_BYTES + 256)
+  expect(output.split("\n").length).toBeLessThan(STATIC_MAX_LINES + 5)
+})
 
 test("static issue uses the real page layout and prints content beyond the capture window", async () => {
   const body = Array.from({ length: 100 }, (_, index) => `Paragraph ${index + 1}: **styled content**.`).join("\n\n")

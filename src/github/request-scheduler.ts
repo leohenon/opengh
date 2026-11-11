@@ -19,36 +19,47 @@ export class GitHubRequestScheduler {
   }
 
   async run<T>(path: string, task: () => Promise<T>, signal?: AbortSignal, write = false): Promise<T> {
-    signal?.throwIfAborted()
-    this.assertAvailable(path, write)
-    await new Promise<void>((resolve, reject) => {
-      const start = () => {
-        signal?.removeEventListener("abort", abort)
-        try {
-          signal?.throwIfAborted()
-          this.assertAvailable(path, write)
-          this.active++
-          resolve()
-        } catch (error) { reject(error) }
-      }
-      const abort = () => {
-        const index = this.queue.indexOf(start)
-        if (index !== -1) this.queue.splice(index, 1)
-        reject(signal?.reason)
-      }
-      if (this.active < MAX_CONCURRENT_REQUESTS) start()
-      else {
-        this.queue.push(start)
-        signal?.addEventListener("abort", abort, { once: true })
-      }
-    })
+    let acquired = false
     try {
-      signal?.throwIfAborted()
-      this.assertAvailable(path, write)
+      // Only failures before task dispatch are known unsent. In particular,
+      // a task's response-budget or cancellation error must pass through.
+      try {
+        signal?.throwIfAborted()
+        this.assertAvailable(path, write)
+        await new Promise<void>((resolve, reject) => {
+          const start = () => {
+            signal?.removeEventListener("abort", abort)
+            try {
+              signal?.throwIfAborted()
+              this.assertAvailable(path, write)
+              this.active++
+              acquired = true
+              resolve()
+            } catch (error) { reject(error) }
+          }
+          const abort = () => {
+            const index = this.queue.indexOf(start)
+            if (index !== -1) this.queue.splice(index, 1)
+            reject(signal?.reason)
+          }
+          if (this.active < MAX_CONCURRENT_REQUESTS) start()
+          else {
+            this.queue.push(start)
+            signal?.addEventListener("abort", abort, { once: true })
+          }
+        })
+        signal?.throwIfAborted()
+        this.assertAvailable(path, write)
+      } catch (error) {
+        if (write) throw new GitHubRequestNotSentError(error instanceof Error ? error.message : "GitHub request cancelled; no changes were sent.")
+        throw error
+      }
       return await task()
     } finally {
-      this.active--
-      while (this.active < MAX_CONCURRENT_REQUESTS && this.queue.length) this.queue.shift()!()
+      if (acquired) {
+        this.active--
+        while (this.active < MAX_CONCURRENT_REQUESTS && this.queue.length) this.queue.shift()!()
+      }
     }
   }
 

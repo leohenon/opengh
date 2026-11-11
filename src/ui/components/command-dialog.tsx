@@ -1,7 +1,8 @@
 import type { ScrollBoxRenderable } from "@opentui/core"
 import { useRenderer } from "@opentui/solid"
 import { createEffect, createSignal, onCleanup, Show } from "solid-js"
-import { plainCommandOutput, type CommandSpec, type CommandTask } from "../../command-actions"
+import type { CommandSpec, CommandTask } from "../../command-actions"
+import { createCommandOutputBuffer } from "../../command-output"
 import { copyText } from "../clipboard"
 import { mouseClick } from "../mouse"
 import { Popup } from "./popup"
@@ -25,6 +26,7 @@ export function CommandDialog(props: {
   const [destination, setDestination] = createSignal(props.action.destination ?? "")
   const [phase, setPhase] = createSignal("Preview")
   const [output, setOutput] = createSignal("")
+  const outputBuffer = createCommandOutputBuffer()
   const [notice, setNotice] = createSignal("")
   const [editing, setEditing] = createSignal(false)
   const abort = new AbortController()
@@ -42,7 +44,7 @@ export function CommandDialog(props: {
   const preview = () => {
     try { return props.action.command(destination()) } catch { return undefined }
   }
-  const append = (chunk: string) => { if (!disposed) setOutput((value) => value + chunk) }
+  const append = (chunk: string) => { if (!disposed) setOutput(outputBuffer.append(chunk)) }
   const cancel = () => {
     if (!running()) return
     cancelled = true
@@ -68,7 +70,7 @@ export function CommandDialog(props: {
     }
   }
   const copy = async () => {
-    const result = await copyText(renderer, props.onCopy, plainCommandOutput(output()), "Text", () => !disposed)
+    const result = await copyText(renderer, props.onCopy, output(), "Text", () => !disposed)
     if (result) setNotice(result.tone === "success" ? "Output copied"
       : result.tone === "info" ? "Output sent to terminal clipboard (OSC 52)" : result.message)
   }
@@ -109,7 +111,7 @@ export function CommandDialog(props: {
         </Show>
         <Show when={phase() !== "Preview"}>
           <scrollbox ref={(value) => { scroll = value }} focusable={false} flexGrow={1} minHeight={0} scrollX={false} scrollY stickyScroll stickyStart="bottom">
-            <text fg={colors.text}>{plainCommandOutput(output())}</text>
+            <text fg={colors.text}>{output()}</text>
           </scrollbox>
         </Show>
         <Show when={notice()}><text height={1} flexShrink={0} fg={colors.muted}>{notice()}</text></Show>

@@ -1,6 +1,7 @@
 import { expect, test } from "bun:test"
 import { createGitHubClient } from "../src/github/client"
-import { inlinePage } from "../src/inline"
+import { allPages, inlinePage, INLINE_MAX_BYTES, INLINE_MAX_PAGES } from "../src/inline"
+import { RequestBudgetLimitError } from "../src/github/request-budget"
 import { issueDetailFixture, issueCommentsFixture, pullContextFixture } from "./fixtures/github-data"
 
 const unusedClient = createGitHubClient({
@@ -45,4 +46,56 @@ test("inline PR output includes its description, reviews, and review thread bodi
   expect(output).toContain("Review body.")
   expect(output).toContain("src/file.ts:12")
   expect(output).toContain("Full thread body.")
+})
+
+test("inline stops unending pagination and preserves the bounded prefix with GitHub guidance", async () => {
+  const pages: number[] = []
+  const budgets = new Set<unknown>()
+  const output = await inlinePage("owner/repo", { initialPage: "issues" }, {
+    ...unusedClient,
+    issues: async (_repository, _state, page = 1, options) => {
+      pages.push(page)
+      budgets.add(options?.budget)
+      return { items: [{ ...issueDetailFixture, number: page, title: `Item ${page}` }], hasMore: true }
+    },
+  })
+  expect(pages).toEqual([1, 2, 3, 4, 5])
+  expect(budgets.size).toBe(1)
+  expect(budgets.has(undefined)).toBe(false)
+  expect(output).toContain("Item 1")
+  expect(output).toContain(`Item ${INLINE_MAX_PAGES}`)
+  expect(output).toContain("Output is incomplete")
+  expect(output).toContain("https://github.com/owner/repo")
+})
+
+test("inline retains completed comment pages when the shared request budget is exhausted", async () => {
+  const output = await inlinePage("owner/repo", { initialDetail: { kind: "issue", number: 412 } }, {
+    ...unusedClient,
+    issue: async () => issueDetailFixture,
+    issueComments: async (_repository, _number, page = 1) => {
+      if (page > 1) throw new RequestBudgetLimitError("Request limit")
+      return { items: [issueCommentsFixture[0]!], hasMore: true }
+    },
+  })
+  expect(output).toContain(issueDetailFixture.title)
+  expect(output).toContain(issueCommentsFixture[0]!.body)
+  expect(output).toContain("Output is incomplete")
+})
+
+test("inline bounds aggregate Unicode output and stops fetching after a large description", async () => {
+  let commentsCalled = false
+  const output = await inlinePage("owner/repo", { initialDetail: { kind: "issue", number: 412 } }, {
+    ...unusedClient,
+    issue: async () => ({ ...issueDetailFixture, body: "Useful prefix\n\x1b\x07" + "界".repeat(INLINE_MAX_BYTES) }),
+    issueComments: async () => { commentsCalled = true; return { items: [], hasMore: false } },
+  })
+  expect(Buffer.byteLength(output)).toBeLessThan(INLINE_MAX_BYTES + 256)
+  expect(output).toContain("Useful prefix")
+  expect(output).toContain("Output is incomplete")
+  expect(output).not.toMatch(/[\x1b\x07\ufffd]/)
+  expect(commentsCalled).toBe(false)
+})
+
+test("standalone allPages cannot silently return an incomplete result", async () => {
+  await expect(allPages(async () => ({ items: [1], hasMore: true }))).rejects.toBeInstanceOf(RequestBudgetLimitError)
 })

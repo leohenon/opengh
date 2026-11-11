@@ -1,10 +1,35 @@
 import { expect, test } from "bun:test"
-import { type TextareaRenderable } from "@opentui/core"
+import { TextareaRenderable } from "@opentui/core"
+import { createTestRenderer } from "@opentui/core/testing"
+import { markdownEditorOffsets } from "../src/ui/markdown-editor-offsets"
 import { testRender } from "@opentui/solid"
 import { createSignal } from "solid-js"
 import { MarkdownTextarea } from "../src/ui/components/markdown-textarea"
 import { KeybindingsProvider } from "../src/ui/keybindings"
 import { ThemeProvider } from "../src/ui/theme"
+
+test("editor offsets measure linear grapheme input with native tabs, controls and Unicode widths", async () => {
+  const view = await createTestRenderer({ width: 80, height: 5 })
+  const editor = new TextareaRenderable(view.renderer, {})
+  editor.editBuffer.setTabWidth(7)
+  try {
+    const unit = "é界👩‍💻\t\r\u0001 **bold** "
+    const text = unit.repeat(2_000) + "\nlast\r\n"
+    let measured = 0
+    const offsets = markdownEditorOffsets(text, (value) => {
+      measured += value.length
+      return editor.editBuffer.measureText(value)
+    })
+    expect(measured).toBeLessThanOrEqual(unit.length + 4)
+    const end = unit.length * 2_000
+    expect(offsets.starts[end]).toBe(editor.editBuffer.measureText(text.slice(0, end)))
+    expect(offsets.starts[end + 1]).toBe(offsets.starts[end]!)
+    const emoji = unit.indexOf("👩")
+    expect(offsets.starts[emoji + 2]).toBe(offsets.starts[emoji]!)
+    expect(offsets.ends[emoji + 2]).toBe(offsets.ends[emoji + "👩‍💻".length]!)
+    expect(offsets.starts[text.length]).toBe(editor.editBuffer.measureText(text.replaceAll("\n", "")))
+  } finally { editor.destroy(); view.renderer.destroy() }
+})
 
 test("Markdown source is colored by the real parser without changing text, cursor, selection or history", async () => {
   const source = "é界😀\t**bold** [link](https://x) `code`\n# Heading\n```\nblock\n```\nend"

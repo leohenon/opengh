@@ -4,7 +4,8 @@ import { join } from "node:path"
 import { configDirectory } from "./paths"
 import { cleanupDraftTemporaryFiles } from "./draft-cleanup"
 import { createGitHubReviews, validateReviewDraft } from "./github/reviews"
-import { githubTransport, GitHubApiError, GitHubRequestNotSentError, type GitHubTransport } from "./github/transport"
+import { githubTransport, GitHubApiError, GitHubRequestNotSentError, type GitHubTransport, type RequestOptions } from "./github/transport"
+import { createRequestBudget, MAX_AUTOMATIC_PAGES, RequestBudgetLimitError } from "./github/request-budget"
 import type { InlineCommentInput, PostedInlineComment, ReviewDraft } from "./review-types"
 
 export type InlineCommentScope = Pick<InlineCommentInput, "accountId" | "repository" | "number">
@@ -143,50 +144,60 @@ const busy = new Set<string>()
 export function createInlineComments(options: InlineCommentsOptions = {}) {
   const transport = options.transport ?? githubTransport, storage = options.storage ?? createInlineCommentStorage()
   const api = createGitHubReviews(transport)
-  async function comments(input: InlineCommentInput): Promise<RemoteComment[]> {
+  async function comments(input: InlineCommentInput, options: RequestOptions): Promise<RemoteComment[]> {
     const result: RemoteComment[] = []
-    for (let page = 1; page <= 100; page++) {
-      const values = await transport.json<RemoteComment[]>(`repos/${input.repository}/pulls/${input.number}/comments?per_page=100&page=${page}`)
+    for (let page = 1; page <= MAX_AUTOMATIC_PAGES; page++) {
+      options.signal?.throwIfAborted()
+      options.budget?.signal.throwIfAborted()
+      const values = await transport.json<RemoteComment[]>(`repos/${input.repository}/pulls/${input.number}/comments?per_page=100&page=${page}`, options)
       if (!Array.isArray(values) || values.length > 100 || values.some(c => !c || !Number.isSafeInteger(c.id) || c.id <= 0))
         throw new Error("GitHub returned an invalid inline comment listing.")
+      options.budget?.consumeItems(values.length)
       result.push(...values)
       if (values.length < 100) return result
     }
-    throw new Error("Too many inline comments to verify safely; check GitHub.")
+    throw new RequestBudgetLimitError("Too many inline comments to verify safely")
   }
-  async function reconcile(attempt: InlineCommentAttempt): Promise<PostedInlineComment | undefined> {
+  async function reconcile(attempt: InlineCommentAttempt, options: RequestOptions): Promise<PostedInlineComment | undefined> {
     let found: PostedInlineComment | undefined
-    try { found = (await comments(attempt.input)).filter(c => !attempt.commentIds.includes(c.id)).map(c => confirmed(attempt.input, c, true)).find(Boolean) }
+    try { found = (await comments(attempt.input, options)).filter(c => !attempt.commentIds.includes(c.id)).map(c => confirmed(attempt.input, c, true)).find(Boolean) }
     catch (error) { throw uncertain(false, attempt.failure, error instanceof Error ? error.message : String(error)) }
     if (found) await storage.remove(attempt).catch(() => {})
     return found
   }
-  return { async post(raw: InlineCommentInput, options?: { retryUnconfirmed?: boolean }): Promise<PostedInlineComment> {
+  return { async post(raw: InlineCommentInput, options?: RequestOptions & { retryUnconfirmed?: boolean }): Promise<PostedInlineComment> {
     const input = cleanInput(raw), scope = key(input)
     if (busy.has(scope)) throw new Error("An inline comment is already being posted for this pull request.")
     busy.add(scope)
+    const owned = options?.budget ? undefined : createRequestBudget(options?.signal)
+    const reads = { ...options, budget: options?.budget ?? owned }
+    // Confirmation after dispatch must survive view cancellation and gets its own bounded scope.
+    const confirm = async (attempt: InlineCommentAttempt) => {
+      const budget = createRequestBudget()
+      try { return await reconcile(attempt, { budget }) } finally { budget.dispose() }
+    }
     try {
-      const account = await transport.json<{ id: number }>("user")
+      const account = await transport.json<{ id: number }>("user", reads)
       if (account?.id !== input.accountId) throw new Error("GitHub account changed; no comment was sent.")
       const stored = await storage.load(input)
       let retrying: InlineCommentAttempt | undefined
       if (stored !== undefined) {
         const attempt = parseAttempt(stored, input)
         if (fingerprint(attempt.input) !== fingerprint(input)) throw new Error("Inline comment storage returned a different attempt.")
-        const found = await reconcile(attempt)
+        const found = await reconcile(attempt, reads)
         if (found) return found
         if (!options?.retryUnconfirmed) throw uncertain(true, attempt.failure)
         retrying = attempt
       }
       if (!transport.mutate) throw new GitHubRequestNotSentError("GitHub comment writes are unavailable.")
-      await api.validateAnchors(draft(input))
-      const baseline = await comments(input)
+      await api.validateAnchors(draft(input), reads)
+      const baseline = await comments(input, reads)
       if (retrying) {
         // The first request may have appeared while preflight was running.
         const found = baseline.filter(c => !retrying!.commentIds.includes(c.id)).map(c => confirmed(input, c, true)).find(Boolean)
         if (found) { await storage.remove(retrying).catch(() => {}); return found }
       }
-      const eligibility = await api.eligibility(input.repository, input.number)
+      const eligibility = await api.eligibility(input.repository, input.number, reads)
       if (eligibility.accountId !== input.accountId) throw new Error("GitHub account changed; no comment was sent.")
       if (eligibility.headSha !== input.headSha || eligibility.baseSha !== input.baseSha) throw new Error("Pull request head or base changed; inspect the latest diff before commenting.")
       if (!eligibility.canInlineComment) throw new Error("Inline comment permission could not be verified.")
@@ -196,19 +207,27 @@ export function createInlineComments(options: InlineCommentsOptions = {}) {
       let response: unknown
       const a = input.anchor
       try {
+        // Local publication may outlast preflight. Cancellation is still known
+        // unsent here; after dispatch, let the write and bounded confirmation
+        // finish independently of the view rather than guessing its outcome.
+        try { reads.signal?.throwIfAborted(); reads.budget?.signal.throwIfAborted() }
+        catch (error) { throw new GitHubRequestNotSentError(error instanceof Error ? error.message : "Comment preflight was cancelled.") }
         response = await transport.mutate(`repos/${input.repository}/pulls/${input.number}/comments`, "POST", {
           body: input.body, commit_id: input.headSha, path: a.path, line: a.line, side: a.side,
           ...(a.startLine === undefined ? {} : { start_line: a.startLine, start_side: a.startSide }),
         })
       } catch (error) {
         if (error instanceof GitHubRequestNotSentError || (error instanceof GitHubApiError && error.status !== undefined && [400, 401, 403, 404, 409, 422, 429].includes(error.status))) {
-          await storage.remove(attempt).catch(() => {})
+          // An unsent retry says nothing about the original uncertain write.
+          // Restore its receipt rather than clearing the only durable warning.
+          if (retrying && error instanceof GitHubRequestNotSentError) await storage.update(attempt, retrying).catch(() => {})
+          else await storage.remove(attempt).catch(() => {})
           throw error
         }
         const next = { ...attempt, failure: error instanceof Error ? error.message : String(error) }
         try { await storage.update(attempt, next); attempt = next }
         catch { attempt = next }
-        const found = await reconcile(attempt)
+        const found = await confirm(attempt)
         if (found) return found
         throw uncertain(true, attempt.failure)
       }
@@ -217,13 +236,13 @@ export function createInlineComments(options: InlineCommentsOptions = {}) {
         const next = { ...attempt, failure: "GitHub returned an invalid comment response after POST." }
         try { await storage.update(attempt, next); attempt = next }
         catch { attempt = next }
-        const found = await reconcile(attempt)
+        const found = await confirm(attempt)
         if (found) return found
         throw uncertain(true, attempt.failure)
       }
       // The public write succeeded even when local cleanup fails; retain the marker for reconciliation.
       await storage.remove(attempt).catch(() => {})
       return result
-    } finally { busy.delete(scope) }
+    } finally { owned?.dispose(); busy.delete(scope) }
   } }
 }

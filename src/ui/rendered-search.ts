@@ -112,6 +112,30 @@ export function createRenderedSearch(root: Renderable, options: RenderedSearchOp
   let activeId: string | undefined
   let disposed = false
   let generation = 0
+  let cachedResults: RenderedSearchMatch[] | undefined
+  let cachedQuery = ""
+  let cachedColors = ""
+  let paintedColors = ""
+  const colorKey = () => [options.matchBackground, options.activeBackground, options.matchForeground, options.activeForeground]
+    .map((color) => color ? Array.from(color.buffer).join(",") : "").join(";")
+  let cachedGeometry = -1
+  let cachedLayout: number | undefined = -1
+  let paintedGeometry = -1
+  let paintedLayout: number | undefined = -1
+  // Pinned Core exposes topology/paint and completed-layout revisions. Text
+  // writes can precede a layout revision, so also check the canonical chunk
+  // identities. Idle polls do neither tree walks nor text/range reindexing.
+  const scene = root.ctx.nativeScene
+  let cachedInputs: { node: TextBufferRenderable | TextTableRenderable; content: unknown; measurement?: string }[] = []
+  const input = (node: TextBufferRenderable | TextTableRenderable) => node instanceof TextTableRenderable ? node.content : node.renderedChunks
+  const rangeCache = new WeakMap<TextChunk[], { query: string; matches: SearchRange[] }>()
+  const cachedRanges = (chunks: TextChunk[], value: string) => {
+    const cached = rangeCache.get(chunks)
+    if (cached?.query === value) return cached.matches
+    const matches = ranges(chunks, value)
+    rangeCache.set(chunks, { query: value, matches })
+    return matches
+  }
   const texts = new Map<TextBufferRenderable, {
     previous: TextBufferRenderable["textDecorator"]
     installed: TextBufferRenderable["textDecorator"]
@@ -181,7 +205,7 @@ export function createRenderedSearch(root: Renderable, options: RenderedSearchOp
   const matchId = (segment: string, range: SearchRange) => `${segment}:${range.start}:${range.end}`
 
   function decorate(chunks: TextChunk[], segment: string) {
-    const found = ranges(chunks, query)
+    const found = cachedRanges(chunks, query)
     if (!found.length) return chunks
     const map = mapping(segment, chunks)
     // Search ranges are ordered and disjoint. Expanded ranges may share a
@@ -363,6 +387,9 @@ export function createRenderedSearch(root: Renderable, options: RenderedSearchOp
     activeId = undefined
     paint([])
     offsets.clear()
+    cachedResults = undefined
+    cachedInputs = []
+    paintedGeometry = -1
   }
 
   return {
@@ -379,6 +406,9 @@ export function createRenderedSearch(root: Renderable, options: RenderedSearchOp
     },
     search(value: string): RenderedSearchMatch[] {
       if (disposed) return []
+      if (!options.exclude && cachedResults && cachedColors === colorKey() && cachedQuery === value && cachedGeometry === scene.currentGeometryRevision && cachedLayout === scene.observedLayoutRevision
+        && cachedInputs.every(({ node, content, measurement }) => !node.isDestroyed && input(node) === content
+          && (!(node instanceof TextBufferRenderable) || node.textMeasurementKey === measurement))) return cachedResults
       if (query !== value) generation++
       query = value
       const current = segments()
@@ -387,8 +417,8 @@ export function createRenderedSearch(root: Renderable, options: RenderedSearchOp
       for (const key of offsets.keys()) if (!keys.has(key)) offsets.delete(key)
       const version = generation
       const origin = primaryScroll()?.content.y ?? root.y
-      return current.flatMap((segment) => {
-        const matches = ranges(segment.chunks, query)
+      const found = current.flatMap((segment) => {
+        const matches = cachedRanges(segment.chunks, query)
         if (!matches.length) return []
         const geometry = segment.geometry()
         const map = geometry && columns(segment, geometry)
@@ -398,11 +428,24 @@ export function createRenderedSearch(root: Renderable, options: RenderedSearchOp
           reveal: () => reveal(segment, range, version),
         }))
       })
+      cachedColors = colorKey()
+      cachedQuery = value
+      cachedGeometry = scene.currentGeometryRevision
+      cachedLayout = scene.observedLayoutRevision
+      cachedResults = found
+      cachedInputs = [...new Set(current.map((segment) => segment.owner))].map((node) => ({
+        node, content: input(node), measurement: node instanceof TextBufferRenderable ? node.textMeasurementKey : undefined,
+      }))
+      return found
     },
     highlight(id?: string) {
       if (disposed) return
+      if (!options.exclude && activeId === id && paintedColors === colorKey() && paintedGeometry === scene.currentGeometryRevision && paintedLayout === scene.observedLayoutRevision) return
       activeId = id
       paint(segments())
+      paintedColors = colorKey()
+      paintedGeometry = scene.currentGeometryRevision
+      paintedLayout = scene.observedLayoutRevision
     },
     clear,
     snapshot() {
