@@ -4,16 +4,18 @@ import { createEffect, createSignal, onCleanup, splitProps, type ComponentProps 
 import { KeyTextarea } from "../keybindings"
 import { useTheme } from "../theme"
 import { markdownEditorOffsets } from "../markdown-editor-offsets"
+import { createMentionAutocomplete } from "../mention-autocomplete"
 
 // Reserved for this wrapper; never clear highlights belonging to the caller.
 const highlightRef = 0x4d44
 
 export function MarkdownTextarea(props: ComponentProps<typeof KeyTextarea>) {
-  const [local, rest] = splitProps(props, ["ref", "onContentChange", "syntaxStyle"])
+  const [local, rest] = splitProps(props, ["ref", "onContentChange", "syntaxStyle", "onCursorChange", "onKeyDown", "onPaste", "onMouseDown"])
   const renderer = useRenderer()
   const { colors, theme } = useTheme()
   const sourceStyle = SyntaxStyle.create(renderer.nativeScene)
   const [editor, setEditor] = createSignal<TextareaRenderable>()
+  const mentions = createMentionAutocomplete({ editor, enabled: () => props.focused !== false && props.visible !== false })
   let timer: ReturnType<typeof setTimeout> | undefined
   let generation = 0
   let disposed = false
@@ -114,11 +116,26 @@ export function MarkdownTextarea(props: ComponentProps<typeof KeyTextarea>) {
     void renderer.idle().catch(() => {}).finally(() => sourceStyle.destroy())
   })
 
-  return <KeyTextarea {...rest} ref={(value) => {
+  return <><KeyTextarea {...rest} ref={(value) => {
     setEditor(value)
     if (typeof local.ref === "function") local.ref(value)
   }} onContentChange={(event) => {
     schedule()
+    mentions.refresh()
     local.onContentChange?.(event)
-  }} />
+  }} onCursorChange={event => {
+    mentions.refresh()
+    local.onCursorChange?.(event)
+  }} onKeyDown={event => {
+    local.onKeyDown?.(event)
+    if (!event.defaultPrevented) mentions.onKeyDown(event)
+  }} onPaste={event => {
+    const target = editor()
+    if (target) local.onPaste?.call(target, event)
+    if (!event.defaultPrevented) mentions.suppress()
+  }} onMouseDown={event => {
+    mentions.dismiss()
+    const target = editor()
+    if (target) local.onMouseDown?.call(target, event)
+  }} />{mentions.overlay}</>
 }

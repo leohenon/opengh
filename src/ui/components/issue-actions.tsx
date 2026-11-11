@@ -1,6 +1,6 @@
 import { TextAttributes, type ScrollBoxRenderable, type TextareaRenderable } from "@opentui/core"
 import { usePaste, useRenderer, useTerminalDimensions } from "@opentui/solid"
-import { createEffect, createMemo, createSignal, For, Index, onCleanup, Show, untrack } from "solid-js"
+import { createEffect, createMemo, createSignal, For, Index, onCleanup, onMount, Show, untrack } from "solid-js"
 import type { IssueActionKind, IssueActionParent, IssueCloseReason } from "../../models"
 import type { IssueActionState } from "../../repository-state"
 import { createReactiveMarkdownStyle } from "../markdown-style"
@@ -14,6 +14,7 @@ import { KeyInput, replaceEditorText, useKeyActions, useKeybindings } from "../k
 import { Action } from "./action"
 import { mouseClick, mouseHover } from "../mouse"
 import { scrollRowIntoView } from "../scroll-selection"
+import { READING_WIDTH } from "../detail-layout"
 
 export function IssueActionsMenu(props: {
   number: number
@@ -114,6 +115,8 @@ export function IssueActionDialog(props: {
   number: number
   kind: IssueActionKind
   parent?: IssueActionParent
+  confirmOnly?: boolean
+  submissionAllowed?: boolean
   state: IssueActionState
   showScrollbar: boolean
   showStatusBarHints?: boolean
@@ -140,7 +143,7 @@ export function IssueActionDialog(props: {
   const [editorOpened, setEditorOpened] = createSignal(!startsWithReason)
   const [reasonChoice, setReasonChoice] = createSignal(props.state.reason)
   const closeReasons: readonly IssueCloseReason[] = ["completed", "not_planned"]
-  createEffect(() => props.onEditorActiveChange?.(stage() === "edit" && props.kind !== "duplicate"))
+  createEffect(() => props.onEditorActiveChange?.(stage() === "edit" && props.kind !== "duplicate" && !props.confirmOnly))
   onCleanup(() => props.onEditorActiveChange?.(false))
   const [body, setBody] = createSignal(props.state.body)
   const [localExpanded, setLocalExpanded] = createSignal(false)
@@ -156,8 +159,9 @@ export function IssueActionDialog(props: {
   onCleanup(() => { disposed = true })
   const [preview, setPreview] = createSignal(false)
   const [cursor, setCursor] = createSignal({ line: 0, visualColumn: 0 })
-  const [confirmSubmit, setConfirmSubmit] = createSignal(false)
+  const [confirmSubmit, setConfirmSubmit] = createSignal(!!props.confirmOnly)
   let writer: TextareaRenderable | undefined
+  onMount(() => { if (props.kind === "comment" && props.expanded) writer?.gotoBufferEnd() })
   let duplicateInput: TextareaRenderable | undefined
   let previewScroll: ScrollBoxRenderable | undefined
   const bindScrollbar = createScrollbarVisibility(() => props.showScrollbar)
@@ -174,7 +178,7 @@ export function IssueActionDialog(props: {
   const duplicateError = () => !(props.state.duplicateTarget ?? "").trim() ? ""
     : duplicateNumber() === undefined ? "Enter an issue number such as #123."
     : duplicateNumber() === props.number ? "An issue cannot be a duplicate of itself." : ""
-  const canSubmit = () => stage() === "edit" && !pending() && !externalEditing() && (props.kind === "duplicate"
+  const canSubmit = () => props.submissionAllowed !== false && stage() === "edit" && !pending() && !externalEditing() && (props.kind === "duplicate"
     ? duplicateNumber() !== undefined && duplicateNumber() !== props.number
     : Boolean(retry()) || props.kind !== "comment" || Boolean(body().trim()))
   const action = () => retry() ?? props.kind
@@ -185,7 +189,8 @@ export function IssueActionDialog(props: {
   const requestSubmit = () => { if (canSubmit()) setConfirmSubmit(true) }
   const requestClose = () => {
     if (pending() || externalEditing()) return
-    if (confirmSubmit()) setConfirmSubmit(false)
+    if (props.confirmOnly) props.onClose()
+    else if (confirmSubmit()) setConfirmSubmit(false)
     else if (hasCloseReason() && !retry() && stage() === "edit") {
       setReasonChoice(props.state.reason)
       setStage("reason")
@@ -193,7 +198,8 @@ export function IssueActionDialog(props: {
   }
   const confirm = () => {
     if (!canSubmit()) return
-    setConfirmSubmit(false)
+    // Confirmation-only dialogs stay visible until their owner accepts submission.
+    if (!props.confirmOnly) setConfirmSubmit(false)
     props.onSubmit()
   }
   const discard = () => {
@@ -251,7 +257,7 @@ export function IssueActionDialog(props: {
     : retry() ? keys.hints(["dialog.submit", "retry"], ["dialog.discard", "discard"], ["dialog.close", "back"])
     : props.kind === "duplicate" ? keys.hints([["dialog.confirm", "dialog.submit"], "review"], ["dialog.discard", "discard"], ["dialog.close", "back"])
     : keys.hints(
-      ["dialog.submit", "submit"],
+      ...(props.submissionAllowed === false ? [] : [["dialog.submit", props.kind === "comment" ? "post" : "submit"] as const]),
       ["dialog.togglePreview", previewing() ? "write" : "preview"],
       ["dialog.toggleExpanded", expanded() ? "restore" : "expand"],
       ["dialog.externalEditor", "editor"],
@@ -336,14 +342,15 @@ export function IssueActionDialog(props: {
           </box>
         </Popup>
       </Show>
-      <Show when={editorOpened()}>
+      <Show when={editorOpened() && !props.confirmOnly}>
       <Popup visible={stage() === "edit"} fullscreen={expanded()} reserveStatusBar={props.showStatusBarHints}
         width={props.kind === "duplicate" ? 56 : props.kind === "close" && props.parent === "pull" ? 64 : 86}
         height={props.kind === "duplicate" ? props.state.operation.status === "error" ? 11 : 8 : props.kind === "close" && props.parent === "pull" ? 11 : 27}
         placement="center" zIndex={250}
         onClose={requestClose}
       >
-        <box flexGrow={1} minHeight={0} paddingX={2} paddingBottom={1} flexDirection="column">
+        <box width="100%" maxWidth={props.kind === "comment" && expanded() ? READING_WIDTH + 4 : undefined} alignSelf="center"
+          flexGrow={1} minHeight={0} paddingX={2} paddingBottom={1} flexDirection="column">
           <box height={1} flexShrink={0} flexDirection="row" justifyContent="space-between">
             <text flexGrow={1} minWidth={0} wrapMode="none" fg={colors.text} attributes={TextAttributes.BOLD}>{title()}</text>
             <text fg={colors.muted}>{previewing() ? "Preview" : ""}</text>
@@ -408,7 +415,7 @@ export function IssueActionDialog(props: {
             <text flexShrink={0} fg={colors.red}>{props.state.operation.status === "error" ? props.state.operation.message : ""}</text>
           </Show>
           <box height={1} flexShrink={0} flexDirection="row" gap={2} marginTop={1}>
-            <Action id="issue-action-submit" disabled={!canSubmit() || confirmSubmit()} onActivate={requestSubmit}>{retry() ? "Retry" : "Submit"}</Action>
+            <Action id="issue-action-submit" disabled={!canSubmit() || confirmSubmit()} onActivate={requestSubmit}>{retry() ? "Retry" : props.kind === "comment" ? "Post" : "Submit"}</Action>
             <Show when={props.kind !== "duplicate" && !previewing() && !retry()}>
               <text flexGrow={1} minWidth={0} />
               <text fg={colors.muted}>Ln {cursor().line + 1}, Col {cursor().visualColumn + 1}</text>

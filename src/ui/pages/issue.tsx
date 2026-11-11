@@ -7,6 +7,7 @@ import type { IssueDetail, IssueReference, IssueSummary } from "../../models"
 import type { IssueDetailState, ResourceState } from "../../repository-state"
 import { Reactions, messageReactionMouse, type ReactionControls } from "../components/reactions"
 import { DetailActivity } from "../components/detail-activity"
+import { ActivityCommentComposer, focusActivityComment, type ActivityComment } from "../components/activity-comment-composer"
 import { MetadataField, MetadataSummary } from "../components/detail-metadata"
 import { GitHubMarkdown } from "../components/github-markdown"
 import type { GitHubMarkdownContext } from "../github-markdown"
@@ -116,6 +117,7 @@ export function IssueScreen(props: {
   detail: IssueDetailState
   revealActivity?: number
   timelineCollapsed?: boolean
+  comment?: ActivityComment
   interactive: boolean
   showScrollbar: boolean
   defaultBranch?: string
@@ -178,6 +180,7 @@ export function IssueScreen(props: {
       <scrollbox
         focusable={false}
         onMouseScroll={(event) => event.stopPropagation()}
+        onMouseDown={event => { if (props.interactive) focusActivityComment(event, "issue-comment", props.comment) }}
         id="issue-detail-scroll"
         ref={(value) => { scroll = value; bindScrollbar(value) }}
         flexGrow={1}
@@ -246,6 +249,10 @@ export function IssueScreen(props: {
                       <box width="100%" minWidth={0} flexShrink={0} marginTop={1}>
                         <IssueDates issue={current()} compact />
                       </box>
+                    </Show>
+                    <Show when={props.comment}>
+                      {comment => <ActivityCommentComposer comment={comment()} idPrefix="issue-comment" interactive={props.interactive}
+                        repositoryUrl={markdownContext().repositoryUrl} sourceUrl={markdownContext().sourceUrl} defaultBranch={props.defaultBranch} scroll={() => scroll} />}
                     </Show>
                   </box>
                 </box>

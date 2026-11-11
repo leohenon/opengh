@@ -6,6 +6,7 @@ import { defaultConfig, type DetailLayout } from "../../config"
 import type { PullRequestDetail, PullRequestSummary, PullContext, IssueTimelineEvent, IssueReference } from "../../models"
 import type { PullDetailState, ResourceState } from "../../repository-state"
 import { DetailActivity } from "../components/detail-activity"
+import { ActivityCommentComposer, focusActivityComment, type ActivityComment } from "../components/activity-comment-composer"
 import { TimelineEntry } from "../components/timeline-entry"
 import { MetadataField, MetadataSummary } from "../components/detail-metadata"
 import { GitHubMarkdown } from "../components/github-markdown"
@@ -89,6 +90,7 @@ export function PullScreen(props: {
   detail: PullDetailState
   revealActivity?: number
   timelineCollapsed?: boolean
+  comment?: ActivityComment
   interactive: boolean
   showScrollbar: boolean
   defaultBranch?: string
@@ -152,6 +154,7 @@ export function PullScreen(props: {
       <scrollbox
         focusable={false}
         onMouseScroll={(event) => event.stopPropagation()}
+        onMouseDown={event => { if (props.interactive) focusActivityComment(event, "pull-comment", props.comment) }}
         id="pull-detail-scroll"
         ref={(value) => { scroll = value; bindScrollbar(value) }}
         flexGrow={1}
@@ -238,6 +241,10 @@ export function PullScreen(props: {
                     </Show>
                   </Show>
                 </DetailActivity>
+                <Show when={props.comment}>
+                  {comment => <ActivityCommentComposer comment={comment()} idPrefix="pull-comment" interactive={props.interactive}
+                    repositoryUrl={markdownContext().repositoryUrl} sourceUrl={markdownContext().sourceUrl} defaultBranch={props.defaultBranch} scroll={() => scroll} />}
+                </Show>
               </box>
               <Show when={wide()}>
                 <box id="pull-detail-sidebar" width={32} flexShrink={0} minWidth={0} backgroundColor={surface()} paddingX={2} paddingY={1}>

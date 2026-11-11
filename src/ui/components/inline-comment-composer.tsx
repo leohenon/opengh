@@ -1,5 +1,5 @@
-import { parseColor, RGBA, type ScrollBoxRenderable, type TextareaRenderable } from "@opentui/core"
-import { createEffect, createMemo, createSignal, on, onMount, Show } from "solid-js"
+import type { ScrollBoxRenderable, TextareaRenderable } from "@opentui/core"
+import { createEffect, createSignal, on, onMount, Show } from "solid-js"
 import { replaceEditorText, useKeyActions, useKeybindings } from "../keybindings"
 import { createMarkdownComposer } from "../markdown-composer"
 import { createReactiveMarkdownStyle } from "../markdown-style"
@@ -14,12 +14,17 @@ const MAX_EDITOR_ROWS = 12
 /** opengh's markdown editor as a review card under the commented line. */
 export function InlineCommentComposer(props: {
   title: string
+  idPrefix?: string
+  disabled?: boolean
+  canPost?: boolean
+  onHintChange?(hint: string | undefined): void
   /** Seeds the editor once; later changes belong to the editor. */
   body: string
   width: number
   marginLeft: number
   active: boolean
   repositoryUrl?: string
+  sourceUrl?: string
   headSha?: string
   /** Preview navigation scrolls the diff, which contains the rendered comment. */
   scroll(): ScrollBoxRenderable | undefined
@@ -32,18 +37,13 @@ export function InlineCommentComposer(props: {
 }) {
   const { colors, theme } = useTheme()
   const keys = useKeybindings()
-  // Shortcut reminders sit between muted text and the card, quieter than the actions they label.
-  const hintColor = createMemo(() => {
-    const text = parseColor(colors.muted), panel = parseColor(colors.panel)
-    return RGBA.fromValues(text.r * 0.55 + panel.r * 0.45, text.g * 0.55 + panel.g * 0.45, text.b * 0.55 + panel.b * 0.45)
-  })
-  const keyLabel = (action: "dialog.submit" | "dialog.close") => keys.key(action) ? <span style={{ fg: hintColor() }}>{`${keys.key(action)} `}</span> : ""
+  const id = () => props.idPrefix ?? "inline-comment"
   const markdownStyle = createReactiveMarkdownStyle(colors, theme)
   const [body, setBody] = createSignal(props.body)
   const [rows, setRows] = createSignal(1)
   const [error, setError] = createSignal<string>()
   let editor: TextareaRenderable | undefined
-  const composer = createMarkdownComposer({}, { editor: () => editor, scroll: props.scroll, blocked: () => false, onError: setError })
+  const composer = createMarkdownComposer({}, { editor: () => editor, scroll: props.scroll, blocked: () => !!props.disabled, onError: setError })
   const measure = () => {
     if (!editor || editor.isDestroyed) return
     const next = Math.max(1, Math.min(MAX_EDITOR_ROWS, editor.editorView.getTotalVirtualLineCount()))
@@ -53,28 +53,33 @@ export function InlineCommentComposer(props: {
   }
   const save = () => {
     const text = editor?.plainText ?? body()
-    if (text.trim()) props.onSave(text)
+    if (!props.disabled && props.canPost !== false && text.trim()) props.onSave(text)
   }
-  const clear = () => { if (editor && !editor.isDestroyed) replaceEditorText(editor, "") }
+  const clear = () => { if (!props.disabled && editor && !editor.isDestroyed) replaceEditorText(editor, "") }
+  const cancel = () => { if (!props.disabled) props.onCancel() }
+  createEffect(() => props.onHintChange?.(props.active && !props.disabled ? keys.hints(
+    ...(props.canPost === false ? [] : [["dialog.submit", "post"] as const]), ["dialog.togglePreview", composer.preview() ? "write" : "preview"],
+    ["dialog.toggleExpanded", "expand"], ["dialog.externalEditor", "editor"], ["dialog.discard", "clear"], ["dialog.close", "keep draft"],
+  ) : undefined))
   onMount(() => { editor?.gotoBufferEnd(); measure() }) // Reopened drafts continue where they left off.
   createEffect(on(composer.preview, (preview) => { if (preview) props.onGrow?.() }, { defer: true }))
   // Text goes to the focused composer, never to diff or application shortcuts.
   useKeyActions({
     ...composer.actions,
     "dialog.toggleExpanded": () => props.onExpand(),
-    "dialog.close": () => props.onCancel(),
+    "dialog.close": cancel,
     "dialog.submit": save,
     "dialog.discard": clear,
-  }, { when: () => props.active, priority: 50, modal: true })
+  }, { when: () => props.active && !props.disabled, priority: 50, modal: true })
   return (
     // While inactive, e.g. posting, a click must not focus the editor natively; the diff focuses it when allowed.
-    <box id="inline-comment-composer-card" width={props.width} marginLeft={props.marginLeft} flexShrink={0} flexDirection="column"
+    <box id={`${id()}-composer-card`} width={props.width} marginLeft={props.marginLeft} flexShrink={0} flexDirection="column"
       onMouseDown={(event) => { if (!props.active) event.preventDefault() }}
       border borderStyle="rounded" borderColor={props.active ? colors.blue : colors.border}
       title={` ${props.title}${composer.preview() ? " · preview" : ""} `} titleColor={colors.muted}
       paddingLeft={1} paddingRight={1} backgroundColor={colors.panel}>
       {/* Kept mounted while previewing: hiding the native editor preserves cursor and undo. */}
-      <MarkdownTextarea id="inline-comment-editor" ref={(value) => { editor = value }}
+      <MarkdownTextarea id={`${id()}-editor`} ref={(value) => { editor = value }}
         initialValue={props.body} visible={!composer.preview()} focused={props.active && !composer.preview() && !composer.externalEditing()}
         width="100%" height={rows()} flexShrink={0} wrapMode="word" placeholder="Write a comment…" placeholderColor={colors.muted}
         textColor={colors.text} focusedTextColor={colors.text} backgroundColor={colors.panel} focusedBackgroundColor={colors.panel}
@@ -89,14 +94,14 @@ export function InlineCommentComposer(props: {
       <Show when={composer.preview()}>
         <Show when={body().trim()} fallback={<text height={1} flexShrink={0} fg={colors.muted}>Nothing to preview.</text>}>
           <GitHubMarkdown content={body()} syntaxStyle={markdownStyle()} backgroundColor={colors.panel} preserveImages codePanels
-            context={props.repositoryUrl ? { repositoryUrl: props.repositoryUrl, ref: props.headSha } : undefined} />
+            context={props.repositoryUrl ? { repositoryUrl: props.repositoryUrl, ref: props.headSha, sourceUrl: props.sourceUrl } : undefined} />
         </Show>
       </Show>
       <Show when={error()}><text flexShrink={0} wrapMode="word" fg={colors.red}>{error()}</text></Show>
       <box height={1} flexShrink={0} flexDirection="row" justifyContent="flex-end">
-        <Action id="inline-comment-post" disabled={!body().trim()} onActivate={save}>{keyLabel("dialog.submit")}Post</Action>
-        <text fg={hintColor()} selectable={false}> · </text>
-        <Action id="inline-comment-cancel" fg={colors.text} onActivate={props.onCancel}>{keyLabel("dialog.close")}Cancel</Action>
+        <Action id={`${id()}-post`} disabled={props.disabled || props.canPost === false || !body().trim()} onActivate={save}>Post</Action>
+        <text fg={colors.muted} selectable={false}> · </text>
+        <Action id={`${id()}-cancel`} fg={colors.text} disabled={props.disabled} onActivate={cancel}>Cancel</Action>
       </box>
     </box>
   )

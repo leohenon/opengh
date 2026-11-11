@@ -1884,3 +1884,58 @@ describe("reaction mutations", () => {
     expect(posts).toBe(1)
   })
 })
+
+describe("mentionable user search", () => {
+  test("normalizes queries, reuses bounded results and invalidates them on refresh", async () => {
+    const queries: string[] = []
+    let revision = 0
+    const session = createRepositorySession(loaders({ mentionableUsers: async (_repo, query, options) => {
+      expect(options?.signal).toBeDefined()
+      expect(options?.budget).toBeDefined()
+      queries.push(query)
+      return [`member${revision}`]
+    } }))
+    await session.load("owner/repo")
+    expect(await session.searchMentionableUsers!("Al")).toEqual(["member0"])
+    expect(await session.searchMentionableUsers!("al")).toEqual(["member0"])
+    expect(queries).toEqual(["al"])
+    revision++
+    await session.refresh()
+    expect(await session.searchMentionableUsers!("al")).toEqual(["member1"])
+    for (let i = 0; i < 41; i++) await session.searchMentionableUsers!(`prefix${i}`)
+    const before = queries.length
+    await session.searchMentionableUsers!("prefix0")
+    expect(queries.length).toBe(before + 1)
+    await expect(session.searchMentionableUsers!("@invalid")).rejects.toThrow("query")
+  })
+
+  test("aborted and replaced-repository results cannot populate the cache", async () => {
+    const results: ReturnType<typeof deferred<string[]>>[] = []
+    const signals: AbortSignal[] = []
+    const session = createRepositorySession(loaders({ mentionableUsers: async (_repo, _query, options) => {
+      signals.push(options!.signal!)
+      const result = deferred<string[]>()
+      results.push(result)
+      return result.promise
+    } }))
+    await session.load("owner/repo")
+    const controller = new AbortController()
+    const first = session.searchMentionableUsers!("a", controller.signal)
+    controller.abort()
+    expect(signals[0]!.aborted).toBe(true)
+    results[0]!.resolve(["stale"])
+    await expect(first).rejects.toThrow()
+    const replacement = session.searchMentionableUsers!("a")
+    expect(results).toHaveLength(2)
+    await session.load("owner/other")
+    expect(signals[1]!.aborted).toBe(true)
+    results[1]!.resolve(["old-repository-user"])
+    await expect(replacement).rejects.toThrow()
+    const latest = session.searchMentionableUsers!("a")
+    expect(results).toHaveLength(3)
+    results[2]!.resolve(["new-repository-user"])
+    expect(await latest).toEqual(["new-repository-user"])
+    expect(await session.searchMentionableUsers!("a")).toEqual(["new-repository-user"])
+    expect(results).toHaveLength(3)
+  })
+})

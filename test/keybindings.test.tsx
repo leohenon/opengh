@@ -347,7 +347,7 @@ test("issue draft controls and confirmation hints follow remaps without leaking 
   expect(state().body).toBe("qrs?,")
   view.mockInput.pressKey("s", { ctrl: true })
   expect(submitted).toBe(0)
-  expect(hint).toContain("f2 submit")
+  expect(hint).toContain("f2 post")
   view.mockInput.pressKey("F5")
   await Bun.sleep(30)
   await view.flush()

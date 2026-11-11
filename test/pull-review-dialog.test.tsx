@@ -125,7 +125,7 @@ test("inline editor keeps its native buffer through preview and Ctrl+S invokes s
     expect(saved).toBe("")
     await clickControl(view, "inline-comment-confirm")
     expect(saved).toBe("jk")
-    expect(view.captureCharFrame()).toContain("Submit")
+    expect((view.renderer.root.findDescendantById("review-editor-save") as TextRenderable).plainText).toBe("Post")
     expect(view.captureCharFrame()).not.toContain("Add to review")
   } finally { view.renderer.destroy() }
 })

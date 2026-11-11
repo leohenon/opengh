@@ -76,7 +76,9 @@ test("Hunk's [+] opens opengh's markdown editor as a full-width card that owns t
     expect(card().width).toBe(Math.min(100, anchor.width - 4))
     expect(frame()).toContain("╭─ Comment ─")
     expect(frame()).toContain("Write a comment…")
-    expect(frame()).toContain("ctrl+s Post · esc Cancel")
+    expect(frame()).toContain("Post · Cancel")
+    expect(frame()).not.toContain("ctrl+s Post")
+    expect(frame()).not.toContain("esc Cancel")
 
     // Printable diff and application shortcuts are text while the composer is focused.
     await setup.mockInput.typeText("two words tvwzfo")

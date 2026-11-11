@@ -79,7 +79,7 @@ test("issue action overlays isolate input and confirm comments, closing, reopeni
     showStatusBarHints: false,
     showScrollbars: false,
   });
-  const hint = "ctrl+s submit · ctrl+p preview · ctrl+o expand · ctrl+g editor · ctrl+d clear · esc keep draft";
+  const hint = "ctrl+s post · ctrl+p preview · ctrl+o restore · ctrl+g editor · ctrl+d clear · esc keep draft";
   const [detail, setDetail] = createSignal<IssueDetailState>({
     number,
     resource: { status: "ready", value: issueDetailFixture },
@@ -188,6 +188,8 @@ test("issue action overlays isolate input and confirm comments, closing, reopeni
     await settle();
     view.mockInput.pressKey("c");
     await settle();
+    view.mockInput.pressKey("o", { ctrl: true });
+    await settle();
     await view.mockInput.typeText("**Draft** qrs?h1l,");
     view.mockInput.pressEnter();
     await settle();
@@ -207,22 +209,24 @@ test("issue action overlays isolate input and confirm comments, closing, reopeni
     await view.mockMouse.moveTo(submit.x - 1, submit.y);
     await view.flush();
     expect(submit.bg).toEqual(idleBackground);
-    expect(view.captureCharFrame()).not.toContain("ctrl+s submit");
+    expect(view.captureCharFrame()).not.toContain("ctrl+s post");
     expect(view.captureCharFrame()).not.toContain(hint);
     setConfig((current) => ({ ...current, showStatusBarHints: true }));
     await settle();
     expect(statusLine()).toBe(hint);
-    expect(statusLine()).toContain("ctrl+s submit");
+    expect(statusLine()).toContain("ctrl+s post");
     expect(view.captureCharFrame()).not.toContain("ctrl+enter");
     expect(view.captureCharFrame().split(hint)).toHaveLength(2);
     expect(submitted).toEqual([]);
     expect(quit).toBe(0);
     expect(refresh).toBe(0);
-    await view.mockMouse.click(0, 0); await view.flush();
+    view.mockInput.pressEscape(); await view.flush();
     await settle();
     expect(view.renderer.root.findDescendantById("issue-action-submit")).toBeUndefined();
     expect(action().body).toBe("**Draft** qrs?h1l,\n");
     view.mockInput.pressKey("c");
+    await settle();
+    view.mockInput.pressKey("o", { ctrl: true });
     await settle();
     expect(view.captureCharFrame()).toContain("**Draft** qrs?h1l,");
     view.mockInput.pressKey("d", { ctrl: true });
@@ -408,8 +412,10 @@ test("issue action overlays isolate input and confirm comments, closing, reopeni
     expect(view.captureCharFrame()).toContain("Issue marked as duplicate");
     view.mockInput.pressKey("c");
     await settle();
+    view.mockInput.pressKey("o", { ctrl: true });
+    await settle();
     expect(view.captureCharFrame()).not.toContain("Add comment");
-    expect(view.captureCharFrame()).toContain("ctrl+s submit");
+    expect(view.captureCharFrame()).toContain("ctrl+s post");
     await view.mockInput.typeText("Temporary text");
     view.mockInput.pressKey("d", { ctrl: true });
     await settle();
@@ -557,6 +563,7 @@ test("issue shortcuts and hints hide actions without viewer permission", async (
     await settle();
     expect(selected).toEqual(["comment"]);
     view.mockInput.pressEscape();
+    await settle();
     setPermissions({ comment: false, close: true, reopen: false, duplicate: false, assignees: false });
     await settle();
     expect(view.captureCharFrame()).not.toContain("c comment");
@@ -702,7 +709,7 @@ test("comment editor preserves its cursor indicator and draft across expansion a
   try {
     await view.flush();
     const writer = view.renderer.root.findDescendantById("issue-comment-writer") as TextareaRenderable;
-    expect(hint()).toStartWith("ctrl+s submit · ctrl+p preview · ctrl+o expand");
+    expect(hint()).toStartWith("ctrl+s post · ctrl+p preview · ctrl+o expand");
     expect(hint()).not.toContain("ctrl+l");
     expect(view.renderer.root.findDescendantById("issue-comment-lines")).toBeUndefined();
     expect(view.renderer.root.findDescendantById("issue-action-line-numbers")).toBeUndefined();
@@ -712,13 +719,13 @@ test("comment editor preserves its cursor indicator and draft across expansion a
     await view.flush();
     expect(writer.width).toBeGreaterThan(compactWidth);
     const expandedFrame = view.captureCharFrame();
-    expect(expandedFrame.split("ctrl+s submit")).toHaveLength(2);
+    expect(expandedFrame.split("ctrl+s post")).toHaveLength(2);
     expect(expandedFrame.split("\n")[31]).toContain("ctrl+p preview");
     const hintedHeight = writer.height;
     setShowHints(false);
     await view.flush();
     expect(writer.height).toBe(hintedHeight + 1);
-    expect(view.captureCharFrame()).not.toContain("ctrl+s submit");
+    expect(view.captureCharFrame()).not.toContain("ctrl+s post");
     setShowHints(true);
     await view.flush();
     expect(writer.height).toBe(hintedHeight);

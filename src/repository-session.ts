@@ -37,6 +37,7 @@ import {
   addGitHubReaction,
 } from "./github/client"
 import { GitHubApiError, type RequestOptions } from "./github/transport"
+import { loadGitHubMentionableUsers } from "./github/mentionable-users"
 import type { IssueCommentConfirmation, IssueCommentDraft } from "./github/issue-comments"
 import { createRequestBudget, MAX_AUTOMATIC_PAGES, RequestBudgetLimitError } from "./github/request-budget"
 import { normalizeRepository } from "./repository-name"
@@ -118,6 +119,7 @@ export type RepositoryLoaders = {
   updateIssueState?(repository: Repo, number: number, state: ListState, reason?: IssueCloseReason): Promise<IssueDetail>
   setIssueAssignees?(repository: Repo, number: number, assignees: string[]): Promise<IssueDetail>
   assignableUsers?(repository: RepositoryTarget, page?: number, options?: RequestOptions): Promise<Page<string>>
+  mentionableUsers?(repository: RepositoryTarget, query: string, options?: RequestOptions): Promise<string[]>
   markIssueDuplicate?(repository: Repo, number: number, canonicalNumber: number): Promise<IssueDetail>
   issueTimeline?(repository: RepositoryTarget, number: number, options?: RequestOptions): Promise<IssueTimeline>
   issues(repository: RepositoryTarget, state: ListState, page?: number, options?: RequestOptions): Promise<Page<IssueSummary>>
@@ -168,6 +170,7 @@ export type RepositorySession = {
   clearIssue(): void
   assignableUsers?: Accessor<ResourceState<Paginated<string>> | undefined>
   loadAssignableUsers?(): Promise<void>
+  searchMentionableUsers?(query: string, signal?: AbortSignal): Promise<readonly string[]>
   issueAction(number: number, parent?: IssueActionParent): IssueActionState
   prepareIssueAction(number: number, kind: IssueActionKind, parent?: IssueActionParent): void
   updateIssueDraft(number: number, draft: Partial<Pick<IssueActionState, "body" | "reason" | "duplicateTarget" | "selectedAssignees">>, parent?: IssueActionParent): void
@@ -208,6 +211,7 @@ const defaultLoaders: RepositoryLoaders = {
   pullMergeMessage: loadGitHubPullMergeMessage,
   setIssueAssignees: setGitHubIssueAssignees,
   assignableUsers: loadGitHubAssignableUsers,
+  mentionableUsers: loadGitHubMentionableUsers,
   markIssueDuplicate: markGitHubIssueDuplicate,
   issueTimeline: loadGitHubIssueTimeline,
   issues: loadGitHubIssues,
@@ -520,11 +524,13 @@ export function createRepositorySession(
   let issueReferencesGeneration = 0
   let commitGeneration = 0
   let repositoryGeneration = 0
+  const mentionUserCache = new Map<string, readonly string[]>()
   let repositoryAbort = new AbortController()
   let branchReadAbort = new AbortController()
   const repositoryReads = (): RequestOptions => ({ signal: repositoryAbort.signal })
   const branchReads = (): RequestOptions => ({ signal: AbortSignal.any([repositoryAbort.signal, branchReadAbort.signal]) })
   const resetRepositoryReads = () => {
+    mentionUserCache.clear()
     repositoryAbort.abort()
     repositoryAbort = new AbortController()
     branchReadAbort.abort()
@@ -1588,6 +1594,29 @@ export function createRepositorySession(
     }
   }
 
+  const searchMentionableUsers = async (query: string, callerSignal?: AbortSignal): Promise<readonly string[]> => {
+    if (!/^[a-z\d-]{0,39}$/i.test(query)) throw new TypeError("Invalid username query.")
+    const current = state()
+    if (current.status !== "ready") throw new Error("Open a repository before searching users.")
+    const signal = AbortSignal.any([repositoryAbort.signal, ...(callerSignal ? [callerSignal] : [])])
+    signal.throwIfAborted()
+    const normalized = query.toLowerCase()
+    const key = `${current.data.repo.id}:${normalized}`
+    const cached = mentionUserCache.get(key)
+    if (cached) return cached
+    if (!loaders.mentionableUsers) throw new Error("User suggestions are unavailable.")
+    const scope = repositoryScope
+    const items = await withRequestBudget({ signal }, options => loaders.mentionableUsers!(current.data.repo, normalized, options))
+    signal.throwIfAborted()
+    const latest = state()
+    if (scope !== repositoryScope || latest.status !== "ready" || latest.data.repo.id !== current.data.repo.id)
+      throw new DOMException("Repository changed.", "AbortError")
+    const result = Object.freeze([...items])
+    mentionUserCache.set(key, result)
+    if (mentionUserCache.size > 40) mentionUserCache.delete(mentionUserCache.keys().next().value!)
+    return result
+  }
+
   const issueAction = (number: number, parent: IssueActionParent = "issue") => issueActions()[issueKey(state().repository, number, parent)] ?? emptyIssueAction
   const updateAction = (key: string, update: (action: IssueActionState) => IssueActionState, confirmed = false) => {
     setIssueActions((actions) => {
@@ -2387,6 +2416,7 @@ export function createRepositorySession(
       return next
     })
     const branch = current.data.currentBranch
+    mentionUserCache.clear()
     setState({ ...current, operations: { ...current.operations, refresh: loading() } })
     try {
       const repo = await loaders.metadata(repository, repositoryReads())
@@ -2813,6 +2843,7 @@ export function createRepositorySession(
     clearIssue,
     assignableUsers,
     loadAssignableUsers,
+    searchMentionableUsers,
     issueAction,
     prepareIssueAction,
     updateIssueDraft,

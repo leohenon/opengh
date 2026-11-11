@@ -392,7 +392,7 @@ test("mixed references render chronologically and the references menu includes i
   const frame = view.captureCharFrame()
   expect(frame).toContain("referenced this in commit aaaaaaa")
   expect(frame).toContain("referenced this in issue other/repo#8")
-  expect(frame).toContain("2 references")
+  expect(frame).not.toContain("2 references")
   expect(frame.indexOf("Commit reference title")).toBeLessThan(frame.indexOf("Comment between the references."))
   expect(frame.indexOf("Comment between the references.")).toBeLessThan(frame.indexOf("Related issue title"))
   expect(frame).not.toContain("Referenced PRs")

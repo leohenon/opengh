@@ -290,7 +290,6 @@ export function DetailActivity(props: {
         {props.commentCount ? ` · ${props.commentCount} ${props.commentCount === 1 ? "comment" : "comments"}` : ""}
         {comments().value?.items.length && (comments().value!.hasMore || comments().value!.items.length !== props.commentCount)
           ? ` · ${comments().value!.items.length} loaded` : ""}
-        {references().value?.length ? ` · ${references().value!.length} ${references().value!.length === 1 ? "reference" : "references"}` : ""}
         {reviewCount() ? ` · ${reviewCount()} ${reviewCount() === 1 ? "review" : "reviews"}` : ""}
       </text>
       <For each={[...entries().keys()]}>

@@ -146,6 +146,20 @@ export function replaceEditorText(editor: TextareaRenderable, text: string) {
   else replace()
 }
 
+// Completion is one undoable edit, including its selection and final cursor.
+export function replaceEditorRange(editor: TextareaRenderable, start: number, end: number, text: string) {
+  const binding = editorHistories.get(editor)
+  const replace = () => editor.runMutation(() => {
+    editor.clearSelection()
+    editor.setSelection(start, end)
+    editor.insertText(text)
+    editor.clearSelection()
+    binding?.publish()
+  })
+  if (binding) binding.history.record(undefined, replace)
+  else replace()
+}
+
 function useEditorHandlers(keys: Keybindings, multiline: boolean) {
   let editor: TextareaRenderable
   let history: ReturnType<typeof createEditorHistory>

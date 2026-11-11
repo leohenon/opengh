@@ -1,5 +1,5 @@
 import { TextAttributes, type ScrollBoxRenderable, type TextareaRenderable } from "@opentui/core"
-import { createEffect, createMemo, createSignal, For, onCleanup, Show, untrack } from "solid-js"
+import { createEffect, createMemo, createSignal, For, onCleanup, onMount, Show, untrack } from "solid-js"
 import type { PullReviewSession, ReviewAnchor, ReviewEvent } from "../../review-types"
 import { replaceEditorText, useKeyActions, useKeybindings } from "../keybindings"
 import { createMarkdownComposer, type ComposerPresentation } from "../markdown-composer"
@@ -12,6 +12,7 @@ import { reviewAnchorLabel } from "../review-lines"
 import { Action } from "./action"
 import { GitHubMarkdown } from "./github-markdown"
 import { Popup } from "./popup"
+import { READING_WIDTH } from "../detail-layout"
 
 export type ReviewCommentDialogProps = ComposerPresentation & {
   anchor: ReviewAnchor
@@ -47,6 +48,7 @@ function ReviewEditor(props: ComposerPresentation & {
   const [error, setError] = createSignal<string>()
   const [confirming, setConfirming] = createSignal(false)
   let writer: TextareaRenderable | undefined
+  onMount(() => writer?.gotoBufferEnd())
   let scroll: ScrollBoxRenderable | undefined
   const composer = createMarkdownComposer(props, {
     editor: () => writer, scroll: () => scroll, blocked: () => confirming(), onError: setError,
@@ -86,7 +88,7 @@ function ReviewEditor(props: ComposerPresentation & {
     ...composer.actions,
   }, { when: () => !blocked(), priority: 160, modal: true })
   return <><Popup fullscreen={composer.expanded()} reserveStatusBar={props.showStatusBarHints} width={86} height={27} placement="center" zIndex={300} onClose={close}>
-    <box flexGrow={1} minHeight={0} paddingX={2} paddingBottom={1} flexDirection="column">
+    <box width="100%" maxWidth={READING_WIDTH + 4} alignSelf="center" flexGrow={1} minHeight={0} paddingX={2} paddingBottom={1} flexDirection="column">
       <box height={1} flexShrink={0} flexDirection="row" justifyContent="space-between">
         <text flexGrow={1} minWidth={0} wrapMode="none" fg={colors.text} attributes={TextAttributes.BOLD}>{props.title}</text>
         <text fg={colors.muted}>{composer.preview() ? "Preview" : ""}</text>
@@ -133,7 +135,7 @@ export function ReviewCommentDialog(props: ReviewCommentDialogProps) {
   return <ReviewEditor title={reviewAnchorLabel(props.anchor)}
     body={props.body ?? ""} repositoryUrl={props.repositoryUrl} headSha={props.headSha} showScrollbar={props.showScrollbar}
     expanded={props.expanded} onExpandedChange={props.onExpandedChange} showStatusBarHints={props.showStatusBarHints}
-    saveLabel="Submit" onChange={props.onChange} onSave={props.onSave} onClose={props.onClose} onHintChange={props.onHintChange} />
+    saveLabel="Post" onChange={props.onChange} onSave={props.onSave} onClose={props.onClose} onHintChange={props.onHintChange} />
 }
 
 export type PullReviewDialogProps = ComposerPresentation & {
