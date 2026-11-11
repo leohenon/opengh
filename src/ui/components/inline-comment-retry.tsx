@@ -2,6 +2,7 @@ import { TextAttributes, type ScrollBoxRenderable } from "@opentui/core"
 import { createEffect, onCleanup } from "solid-js"
 import type { InlineCommentInput } from "../../review-types"
 import { useKeyActions, useKeybindings } from "../keybindings"
+import { reviewAnchorLabel } from "../review-lines"
 import { useTheme } from "../theme"
 import { Action } from "./action"
 import { Popup } from "./popup"
@@ -34,6 +35,28 @@ export function InlineCommentRetryDialog(props: {
       <box height={1} flexShrink={0} marginTop={1}>
         <Action id="inline-comment-retry-confirm" onActivate={props.onConfirm}>Retry posting</Action>
       </box>
+    </box>
+  </Popup>
+}
+
+// Inline comments publish immediately, so the inline composer confirms like the full editor.
+export function InlineCommentConfirmDialog(props: {
+  input: InlineCommentInput
+  onConfirm(): void
+  onClose(): void
+  onHintChange(hint: string | undefined): void
+}) {
+  const { colors } = useTheme()
+  const keys = useKeybindings()
+  createEffect(() => props.onHintChange(keys.hints(["dialog.confirm", "confirm"], ["dialog.close", "back"])))
+  onCleanup(() => props.onHintChange(undefined))
+  useKeyActions({ "dialog.confirm": props.onConfirm, "dialog.close": props.onClose }, { priority: 180, modal: true })
+  return <Popup width={64} height={7} placement="center" zIndex={350} onClose={props.onClose}>
+    <box flexGrow={1} minHeight={0} paddingX={2} paddingBottom={1} flexDirection="column">
+      <text height={1} flexShrink={0} fg={colors.text} attributes={TextAttributes.BOLD}>Post inline comment?</text>
+      <text maxHeight={3} flexShrink={0} wrapMode="word" fg={colors.text}>{reviewAnchorLabel(props.input.anchor)}</text>
+      <box flexGrow={1} minHeight={0} />
+      <Action id="inline-comment-confirm" onActivate={props.onConfirm}>Confirm</Action>
     </box>
   </Popup>
 }

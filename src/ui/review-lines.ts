@@ -61,3 +61,6 @@ export function extendReviewRange(start: ReviewLocation | undefined, end: Review
   return { hunk: end.hunk, anchor: { path: end.anchor.path, side: end.anchor.side, line: high,
     ...(low < high ? { startLine: low, startSide: end.anchor.side } : {}) } }
 }
+
+export const reviewAnchorLabel = (anchor: ReviewAnchor) =>
+  `${anchor.path}:${anchor.startLine ? `${anchor.startLine}–` : ""}${anchor.line} (${anchor.side})`

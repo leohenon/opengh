@@ -8,6 +8,7 @@ import { createReactiveMarkdownStyle } from "../markdown-style"
 import { mouseClick, mouseHover } from "../mouse"
 import { createScrollbarVisibility } from "../scrollbar-visibility"
 import { useTheme } from "../theme"
+import { reviewAnchorLabel } from "../review-lines"
 import { Action } from "./action"
 import { GitHubMarkdown } from "./github-markdown"
 import { Popup } from "./popup"
@@ -129,7 +130,7 @@ function ReviewEditor(props: ComposerPresentation & {
 }
 
 export function ReviewCommentDialog(props: ReviewCommentDialogProps) {
-  return <ReviewEditor title={`${props.anchor.path}:${props.anchor.startLine ? `${props.anchor.startLine}–` : ""}${props.anchor.line} (${props.anchor.side})`}
+  return <ReviewEditor title={reviewAnchorLabel(props.anchor)}
     body={props.body ?? ""} repositoryUrl={props.repositoryUrl} headSha={props.headSha} showScrollbar={props.showScrollbar}
     expanded={props.expanded} onExpandedChange={props.onExpandedChange} showStatusBarHints={props.showStatusBarHints}
     saveLabel="Submit" onChange={props.onChange} onSave={props.onSave} onClose={props.onClose} onHintChange={props.onHintChange} />

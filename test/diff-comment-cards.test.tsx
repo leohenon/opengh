@@ -9,7 +9,7 @@ import { IconProvider } from "../src/ui/icon-style"
 import { nerdIcons, unicodeIcons } from "../src/ui/icons"
 import { DiffScreen } from "../src/ui/pages/diff"
 import { parseDiff } from "../src/ui/diff-model"
-import { reviewRows } from "../src/ui/review-lines"
+import { reviewRows, reviewSplitBoundary } from "../src/ui/review-lines"
 import { isSourceRowY } from "../src/ui/diff-comment-cards"
 import type { ContextMenuItem } from "../src/ui/components/context-menu"
 import { App } from "../src/ui/app"
@@ -56,11 +56,10 @@ test("posted threads expand real Hunk rows, survive highlighting/layout changes,
     const next = setup.renderer.root.findDescendantById(rows.find((row) => row.right?.line === 3)!.id)!
     const card = setup.renderer.root.findDescendantById("diff-comment-card:thread")!
     expect(card.parent).toBe(row)
-    expect(card.height).toBe(5) // Two author/body pairs and a subtle reply divider.
-    if (layout === "split") {
-      expect(card.x).toBeGreaterThan(row.x + row.width / 2)
-      expect(card.width).toBeLessThanOrEqual(Math.ceil(row.width / 2))
-    }
+    expect(card.height).toBe(7) // Two author/body pairs, a subtle reply divider and the rounded border.
+    // Full width in either layout: inserted rows leave the other split side blank anyway.
+    expect(card.x).toBe(row.x + 4)
+    expect(card.width).toBe(Math.min(100, row.width - 4))
     expect(card.y).toBeGreaterThan(row.y)
     expect(next.y).toBeGreaterThanOrEqual(card.y + card.height)
     expect(isSourceRowY(row, row.y)).toBe(true)
@@ -70,13 +69,12 @@ test("posted threads expand real Hunk rows, survive highlighting/layout changes,
     expect(frame.match(/Posted discussion body/g)).toHaveLength(1)
     expect(frame.indexOf("Posted discussion body")).toBeGreaterThan(frame.indexOf('const changed'))
     expect(frame.indexOf("Posted discussion body")).toBeLessThan(frame.indexOf('const after'))
-    expect(frame).toContain("@alice · resolved")
+    expect(frame).toContain("╭─ resolved ─")
     expect(frame).toContain(iconStyle() === "unicode" ? unicodeIcons.comment : nerdIcons.comment)
-    expect(frame).not.toContain("╭")
     expect(frame).toContain("(4m ago)")
     expect(frame).toContain("@bob")
-    expect(frame).toContain("Unplaced review comments")
-    expect(frame).toContain("Outdated review comments")
+    expect(frame).toContain("╭─ Unplaced · message.ts:2 · resolved ─")
+    expect(frame).toContain("╭─ Outdated · message.ts:2 · resolved ─")
     expect(setup.renderer.root.findDescendantById("diff-comment-card:unknown")!.y).toBeGreaterThan(next.y)
     return { row, card }
   }
@@ -193,13 +191,13 @@ test("z collapses diff threads from either pane, retains summaries across files/
       expect(setup.renderer.root.findDescendantById(`diff-comment-card:${id}:body:0`)).toBeUndefined()
       expect(setup.renderer.root.findDescendantById(`diff-comment-card:${id}:header:1`)).toBeUndefined()
     }
-    expect(card("thread").height).toBe(1)
+    expect(card("thread").height).toBe(3)
     expect(card("thread").parent?.id).toBe(rowId("split"))
     let frame = setup.captureCharFrame()
-    expect(frame).toContain("@alice · 2 comments · resolved")
-    expect(frame).toContain("resolved · outdated")
-    expect(frame).toContain("Unplaced review comments")
-    expect(frame).toContain("Outdated review comments")
+    expect(frame).toContain("╭─ 2 comments · resolved ─")
+    expect(frame).toContain("@alice")
+    expect(frame).toContain("Unplaced · message.ts:2 · 2 comments · resolved")
+    expect(frame).toContain("Outdated · message.ts:2 · 2 comments · resolved")
     expect(frame).toContain("const changed")
     expect(frame).not.toContain("Posted discussion body")
     expect(frame).not.toContain("@bob")
@@ -211,12 +209,12 @@ test("z collapses diff threads from either pane, retains summaries across files/
     await settle()
     expect(setup.captureCharFrame()).toContain("z expand")
     await key("j")
-    expect(card("other").height).toBe(1)
-    expect(setup.captureCharFrame()).toContain("@alice · 1 comment")
+    expect(card("other").height).toBe(3)
+    expect(setup.captureCharFrame()).toContain("╭─ 1 comment ─")
     expect(setup.captureCharFrame()).not.toContain("Other file discussion")
     setup.mockInput.pressTab()
     await key("t")
-    expect(card("other").height).toBe(1)
+    expect(card("other").height).toBe(3)
     await key("z")
     expect(setup.captureCharFrame()).toContain("Other file discussion")
     expect(setup.captureCharFrame()).toContain("z collapse")
@@ -229,7 +227,7 @@ test("z collapses diff threads from either pane, retains summaries across files/
     setConfig({ ...config(), keybindings: { "diff.toggleComments": ["f2"] } })
     await key("z")
     expect(setup.captureCharFrame()).toContain("f2 expand")
-    expect(card("thread").height).toBe(1)
+    expect(card("thread").height).toBe(3)
     await key(KeyCodes.F2)
     frame = setup.captureCharFrame()
     expect(frame).toContain("Posted discussion body")
@@ -237,3 +235,37 @@ test("z collapses diff threads from either pane, retains summaries across files/
     expect(frame).toContain("f2 collapse")
   } finally { setup.renderer.destroy(); await setup.renderer.closed }
 }, 10000)
+
+test("wide split sides hold their own cards and composer, aligned like full-width cards elsewhere", async () => {
+  const setup = await createTestRenderer({ width: 200, height: 36 })
+  initializeHunk(setup.renderer)
+  await render(() => <DiffScreen target={{ kind: "pull", number: 1 }} threads={[thread, { ...thread, id: "left", diffSide: "LEFT" }]}
+    resource={{ status: "ready", value: { kind: "patch", patch } }} interactive showScrollbar={false} onLoadFiles={() => {}}
+    draft={{ anchor: { path: "message.ts", side: "RIGHT", line: 3 }, body: "" }}
+    review={{ headSha: "head", comments: [], onComment: () => {}, onOpenReview: () => {} }} />, setup.renderer)
+  const settle = async () => { await Bun.sleep(40); await setup.flush(); await setup.renderer.idle(); await setup.flush() }
+  const file = parseDiff({ kind: "patch", patch }).files[0]!.body!
+  const card = (id: string) => setup.renderer.root.findDescendantById(id)!
+  const assertBoxes = (layout: "split" | "unified", docked: boolean) => {
+    const row = setup.renderer.root.findDescendantById(reviewRows(file, layout)[0]!.id)!
+    const boundary = reviewSplitBoundary(row.width)
+    const full = { x: row.x + 4, width: Math.min(100, row.width - 4) }
+    const right = docked ? { x: row.x + boundary + 4, width: Math.min(100, row.width - boundary - 4) } : full
+    const left = docked ? { x: row.x + 4, width: Math.min(100, boundary - 5) } : full
+    for (const [id, expected] of [["diff-comment-card:thread", right], ["diff-comment-card:left", left], ["inline-comment-composer-card", right]] as const)
+      expect({ id, x: card(id).x, width: card(id).width }).toEqual({ id, ...expected })
+  }
+  try {
+    await settle()
+    assertBoxes("split", true)
+    const row = setup.renderer.root.findDescendantById(reviewRows(file, "split")[0]!.id)!
+    await setup.mockMouse.click(row.x + 5, row.y) // Return keys from the composer to the diff.
+    setup.mockInput.pressKey("t")
+    await settle()
+    assertBoxes("unified", false)
+    setup.mockInput.pressKey("t")
+    setup.resize(140, 36)
+    await settle()
+    assertBoxes("split", false) // Narrower sides would wrap comments heavily.
+  } finally { setup.renderer.destroy(); await setup.renderer.closed }
+})

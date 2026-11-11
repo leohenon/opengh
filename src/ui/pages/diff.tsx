@@ -1,10 +1,13 @@
 import { BoxRenderable, MouseButton, RGBA, type MouseEvent, type Renderable, type ScrollBoxRenderable } from "@opentui/core"
 import { insert, useKeyboard, useRenderer, useTerminalDimensions } from "@opentui/solid"
 import { useKeyActions } from "../keybindings"
-import { getHunkDiffSearchCells, HUNK_DIFF_THEME_NAMES, type HunkDiffBodyProps, type HunkDiffSourceHighlight, type HunkDiffThemeName } from "hunkdiff/opentui"
+import {
+  getHunkDiffSearchCells, HUNK_DIFF_THEME_NAMES, type HunkDiffBodyProps, type HunkDiffNoteTarget,
+  type HunkDiffSourceHighlight, type HunkDiffThemeName,
+} from "hunkdiff/opentui"
 import { createEffect, createMemo, createRoot, createSignal, For, getOwner, on, onCleanup, onMount, Show, untrack, type JSX } from "solid-js"
 import type { DiffContent, DiffTarget, PullReviewThread } from "../../models"
-import { createDiffCommentCards, isCommentCard, isSourceRowY } from "../diff-comment-cards"
+import { createDiffCommentCards, isCommentCard, isSourceRowY, noteBox } from "../diff-comment-cards"
 import type { ResourceState } from "../../repository-state"
 import { SelectableList } from "../components/selectable-list"
 import { mouseClick, mouseContextMenu, mouseHover, type MousePosition } from "../mouse"
@@ -16,6 +19,7 @@ import { useStatusPrompt } from "../status-prompt"
 import { useTheme } from "../theme"
 import { useIcons } from "../icon-style"
 import { GitHubMarkdown } from "../components/github-markdown"
+import { InlineCommentComposer } from "../components/inline-comment-composer"
 import { createReactiveMarkdownStyle } from "../markdown-style"
 import type { DraftReviewComment, ReviewAnchor } from "../../review-types"
 import { extendReviewRange, reviewHit, reviewRows, reviewSplitBoundary, type ReviewLocation } from "../review-lines"
@@ -43,6 +47,7 @@ const lightThemeAliases: Partial<Record<string, HunkDiffThemeName>> = {
   "one-dark": "one-light", opengh: "github-light-default", rosepine: "rose-pine-dawn", solarized: "solarized-light",
 }
 const TAB_WIDTH = 4
+const COMPOSER_ID = "diff-comment-composer"
 
 export type DiffFocus = "files" | "diff"
 
@@ -61,6 +66,12 @@ export function DiffScreen(props: {
   onMovePage?: (delta: number) => void
   onFocusChange?: (focus: DiffFocus) => void
   onCommentsCollapsedChange?: (collapsed: boolean) => void
+  onDraftFocusChange?: (focused: boolean) => void
+  /** Commenting is allowed, even while a post or review reload briefly withholds review. */
+  commentable?: boolean
+  /** The open inline comment. It stays mounted while review is briefly withheld; its text seeds the composer. */
+  draft?: { anchor: ReviewAnchor; body: string }
+  onDraftInput?: (body: string) => void
   onContextMenu?: (position: MousePosition, items: ContextMenuItem[]) => void
   threads?: readonly PullReviewThread[]
   repositoryUrl?: string
@@ -70,6 +81,9 @@ export function DiffScreen(props: {
     onComment(anchor: ReviewAnchor): void
     onOpenReview(): void
     jump?: ReviewAnchor & { id: number }
+    onDraftSave?(body: string): void
+    onDraftCancel?(): void
+    onDraftExpand?(): void
   }
 }) {
   const renderer = useRenderer()
@@ -147,8 +161,22 @@ export function DiffScreen(props: {
   const rowMap = createMemo(() => new Map(rows().map((row) => [row.id, row])))
   const [location, setLocation] = createSignal<ReviewLocation>()
   const [markers, setMarkers] = createSignal<{ id: string; x: number; y: number }[]>([])
-  createEffect(on(() => [props.review?.headSha, selected()] as const, () => setLocation(undefined)))
+  // Key effects to values: the app rebuilds review whenever a draft opens or closes.
+  const reviewedHead = createMemo(() => { const value = content(); return value?.kind === "patch" ? value.headSha : undefined })
+  const reviewJump = createMemo(() => props.review?.jump)
+  createEffect(on(() => [reviewedHead(), selected()] as const, () => setLocation(undefined)))
   const pendingMouse = mouseClick(() => props.review?.onOpenReview(), () => interactive() && !!props.review)
+  // The inline composer is a review card under its line; the app owns its text, confirmation and posting.
+  const draftKey = createMemo(() => { const draft = props.draft; return draft && JSON.stringify(draft.anchor) })
+  const [draftFocused, setDraftFocused] = createSignal(false)
+  const draftRow = createMemo(() => {
+    const draft = props.draft
+    if (!draft || draft.anchor.path !== selected()?.path) return
+    return rows().find((row) => (draft.anchor.side === "LEFT" ? row.left : row.right)?.line === draft.anchor.line)
+  })
+  // Editing waits while review is withheld, e.g. while this comment posts.
+  const draftActive = () => !!draftRow() && !!props.review && interactive() && showBody() && focus() === "diff" && draftFocused()
+  createEffect(() => props.onDraftFocusChange?.(draftActive()))
   const maxOffset = createMemo(() => {
     const metadata = renderFile()?.metadata
     let longest = 0
@@ -231,20 +259,71 @@ export function DiffScreen(props: {
       cards.render(container, rows(), selected()?.path, props.threads ?? [], colors, currentLayout(), width(), icons().comment, commentsCollapsed())
     }
   }
-  const committed = () => { refreshCards(); revealPending(); refreshMarkers() }
+  // Like posted cards, the composer lives in Hunk's row. It keeps its editor across React and card
+  // re-renders: detached before React may replace that row, it is re-appended after every commit.
+  let composer: { holder: BoxRenderable; dispose: () => void } | undefined
+  const placeComposer = () => {
+    const holder = composer?.holder
+    if (!holder || holder.isDestroyed || disposed) return
+    const row = draftRow()
+    const anchor = row && host()?.findDescendantById(row.id)
+    if (anchor && holder.parent === anchor && anchor.getChildren().at(-1) === holder) return
+    holder.parent?.remove(holder)
+    anchor?.add(holder)
+  }
+  const closeComposer = () => {
+    if (!composer) return
+    composer.dispose()
+    composer.holder.parent?.remove(composer.holder)
+    composer.holder.destroyRecursively()
+    composer = undefined
+  }
+  const revealComposer = () => void renderer.idle().then(() => {
+    const holder = composer?.holder
+    if (disposed || !scroll || !holder?.parent) return
+    const hidden = holder.y + holder.height - (scroll.viewport.y + scroll.viewport.height)
+    if (hidden > 0) scroll.scrollBy(Math.min(hidden, holder.y - scroll.viewport.y))
+  }).catch(() => {})
+  // A new anchor takes the keyboard; the same draft returning, e.g. from the full editor, keeps its focus.
+  let lastDraftKey: string | undefined
+  createEffect(on(draftKey, (key) => {
+    closeComposer()
+    if (key !== undefined && key !== lastDraftKey) setDraftFocused(true)
+    if (key !== undefined) lastDraftKey = key
+    const draft = untrack(() => props.draft)
+    if (!key || !draft) return
+    const holder = new BoxRenderable(renderer, { id: COMPOSER_ID, width: "100%", flexDirection: "column", flexShrink: 0 })
+    const box = () => noteBox(width(), currentLayout(), draft.anchor.side)
+    const dispose = createRoot((dispose) => {
+      insert(holder, () => <InlineCommentComposer body={draft.body} title="Comment"
+        width={box().width} marginLeft={box().marginLeft} active={draftActive()} scroll={() => scroll}
+        repositoryUrl={props.repositoryUrl} headSha={props.review?.headSha}
+        onInput={(body) => props.onDraftInput?.(body)} onSave={(body) => props.review?.onDraftSave?.(body)}
+        onCancel={() => props.review?.onDraftCancel?.()} onExpand={() => props.review?.onDraftExpand?.()} onGrow={revealComposer} />)
+      return dispose
+    }, owner)
+    composer = { holder, dispose }
+    placeComposer()
+    revealComposer()
+  }))
+  const committed = () => { refreshCards(); placeComposer(); revealPending(); refreshMarkers() }
 
   const [sourceHighlights, setSourceHighlights] = createSignal<Record<string, HunkDiffSourceHighlight[]>>()
   // Reuse these exact props for indexing and rendering: Hunk owns sanitization,
   // tab expansion, split geometry and wrapping, rather than a parallel source map.
+  // Hunk's [+] reserves a column when wrapping, so search geometry must know about it too.
+  const reviewable = createMemo(() => !!props.review || !!props.commentable)
   const sourceProps = (): HunkDiffBodyProps => ({
     file: renderFile(), width: width(), theme: theme(),
     canonicalLayout: currentLayout(), tabWidth: TAB_WIDTH,
     wrapLines: wrap(), horizontalOffset: offset(), selectedHunkIndex: hunk(),
     highlight: true, showLineNumbers: true, showHunkHeaders: true,
+    onAddNote: reviewable() ? addNote : undefined, addNoteActive: interactive() && !!props.review,
   })
   const sourceCells = createMemo(() => getHunkDiffSearchCells({
     file: renderFile(), width: width(), theme: theme(), canonicalLayout: currentLayout(),
     tabWidth: TAB_WIDTH, wrapLines: wrap(), showLineNumbers: true, showHunkHeaders: true,
+    onAddNote: reviewable() ? addNote : undefined,
   }).map((cell) => ({ ...cell, graphemes: searchGraphemes.segment(cell.text) })))
   const commentSearch = new Map<Renderable, ReturnType<typeof createRenderedSearch>>()
   const syncCommentSearch = () => {
@@ -424,6 +503,7 @@ export function DiffScreen(props: {
     untrack(() => {
       if (structure !== previousCardStructure) {
         cards.clear()
+        composer?.holder.parent?.remove(composer.holder)
         cardsDirty = true
         previousCardStructure = structure
       }
@@ -434,7 +514,7 @@ export function DiffScreen(props: {
     })
   })
 
-  createEffect(on(() => props.review?.jump, (anchor) => {
+  createEffect(on(reviewJump, (anchor) => {
     if (!anchor || !props.review) return
     const file = parsed().files.find((file) => file.path === anchor.path)
     if (!file?.body || file.message) return
@@ -468,6 +548,7 @@ export function DiffScreen(props: {
     scroll?.viewport.off("resize", measure)
     // Release our additions before React releases its portal and Solid removes the host.
     cards.clear()
+    closeComposer()
     pane?.dispose()
     const container = host()
     if (container && !renderer.isDestroyed && !container.isDestroyed) {
@@ -492,7 +573,7 @@ export function DiffScreen(props: {
     bodyMouse.onMouseDrag()
     callback(scroll)
   }
-  const focusFiles = () => { setFilterOpen(false); setSidebarHidden(false); setFocus("files") }
+  const focusFiles = () => { setFilterOpen(false); setDraftFocused(false); setSidebarHidden(false); setFocus("files") }
   const clearFilter = () => { setFileFilter(""); focusFiles() }
   // Like a `/` search draft: Enter/Tab accept and keep the filter, Escape clears it.
   useKeyActions({
@@ -509,6 +590,29 @@ export function DiffScreen(props: {
   const toggleLayout = () => setLayout(currentLayout() === "split" ? "unified" : "split")
   const toggleWrap = () => setWrapOverride(!wrap())
   let contextLocation: ReviewLocation | undefined
+  // A line inside the selected range comments on the whole range.
+  const rangeAt = (hit: ReviewLocation) => {
+    const range = location()
+    return range && range.hunk === hit.hunk && range.anchor.path === hit.anchor.path && range.anchor.side === hit.anchor.side
+      && hit.anchor.line >= (range.anchor.startLine ?? range.anchor.line) && hit.anchor.line <= range.anchor.line ? range : hit
+  }
+  const startDraft = (anchor: ReviewAnchor) => {
+    if (!props.review) return
+    setFocus("diff")
+    setDraftFocused(true)
+    props.review.onComment(anchor)
+  }
+  // Hunk's [+] acts on any release. Only a left click (press without drag) adds a note, and that
+  // release must not also reselect the line under the button.
+  let notePress = false
+  function addNote(target: HunkDiffNoteTarget) {
+    const file = selected()
+    if (!interactive() || !file || !press) return
+    notePress = true
+    const hit = rangeAt({ hunk: target.hunkIndex, anchor: { path: file.path, side: target.side === "old" ? "LEFT" : "RIGHT", line: target.line } })
+    setLocation(hit)
+    startDraft(hit.anchor)
+  }
   const externalItems = (): ContextMenuItem[] => [
     { label: "Open diff on GitHub", run: () => props.onOpenGitHub?.() },
     { label: "Open diff in external viewer", run: () => props.onOpenExternal?.() },
@@ -516,7 +620,7 @@ export function DiffScreen(props: {
   const contextMouse = mouseContextMenu((position) => props.onContextMenu?.(position, [
     ...externalItems(),
     ...(props.review && contextLocation ? [{ label: "Add review comment…", run: () => {
-      if (props.review && contextLocation) props.review.onComment(contextLocation.anchor)
+      if (contextLocation) startDraft(contextLocation.anchor)
     } }] : []),
     { label: "Change layout", run: toggleLayout, get disabled() { return !renderFile() } },
     { label: "Toggle files", run: toggleSidebar },
@@ -557,11 +661,13 @@ export function DiffScreen(props: {
   const bodyMouse = {
     ...bodyHover.handlers,
     onMouseDown(event: MouseEvent) {
+      notePress = false
       press = interactive() && event.button === MouseButton.LEFT ? { x: event.x, y: event.y, file: selected() } : undefined
     },
     onMouseUp(event: MouseEvent) {
       const start = press
       press = undefined
+      if (notePress) { notePress = false; return }
       if (!interactive() || !start || start.file !== selected() || start.x !== event.x || start.y !== event.y) return
       const index = clickedHunk(event.target, event.y)
       if (index !== undefined) setHunk(index)
@@ -570,6 +676,14 @@ export function DiffScreen(props: {
     },
     onMouseDrag() { press = undefined; bodyHover.handlers.onMouseDrag() },
     onMouseScroll() { press = undefined; bodyHover.handlers.onMouseScroll() },
+  }
+  // Clicking source rows returns keys to the diff; clicking the composer resumes typing.
+  const draftClick = (target: Renderable | null) => {
+    const container = host()
+    for (let node = target; node; node = node.parent) {
+      if (node.id === COMPOSER_ID) return true
+      if (node === container) return false
+    }
   }
   const focusBody = (event: MouseEvent) => {
     if (event.button !== MouseButton.LEFT || !interactive()) return
@@ -655,11 +769,7 @@ export function DiffScreen(props: {
         if (!props.onContextMenu) return
         if (event.button === MouseButton.RIGHT) {
           const hit = clickedLocation(event)
-          const selectedRange = location()
-          contextLocation = hit && selectedRange && selectedRange.hunk === hit.hunk
-            && selectedRange.anchor.path === hit.anchor.path && selectedRange.anchor.side === hit.anchor.side
-            && hit.anchor.line >= (selectedRange.anchor.startLine ?? selectedRange.anchor.line) && hit.anchor.line <= selectedRange.anchor.line
-            ? selectedRange : hit
+          contextLocation = hit && rangeAt(hit)
           setLocation(contextLocation)
           if (contextLocation) setHunk(contextLocation.hunk)
         }
@@ -725,6 +835,8 @@ export function DiffScreen(props: {
             }
             bodyMouse.onMouseDown(event)
             focusBody(event)
+            const inDraft = draftClick(event.target)
+            if (interactive() && inDraft !== undefined) setDraftFocused(inDraft)
           }}
           onMouseUp={(event) => { if (event.button === MouseButton.LEFT) bodyMouse.onMouseUp(event) }}
           border={["left"]} borderColor={focus() === "diff" ? colors.blue : colors.border}

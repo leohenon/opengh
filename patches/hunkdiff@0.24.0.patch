@@ -1,7 +1,8 @@
 diff --git a/dist/npm/main.js b/dist/npm/main.js
+index f8d2de24b583ec07e18a23c03a826de1d0d65f19..f93f750ed8be7f38d431cb82fbef625f525d26b8 100644
 --- a/dist/npm/main.js
 +++ b/dist/npm/main.js
-@@ -161,7 +161,12 @@
+@@ -161,7 +161,12 @@ var require_quote = __commonJS(function(exports, module) {
    var LINE_TERMINATORS = /[\n\r\u2028\u2029]/;
    var GLOB_SHELL_SPECIAL = /[\s#!"$&'():;<=>@\\^`|]/g;
    module.exports = function quote(xs) {
@@ -14,7 +15,7 @@ diff --git a/dist/npm/main.js b/dist/npm/main.js
        if (s === "") {
          return "''";
        }
-@@ -185,6 +190,7 @@
+@@ -185,6 +190,7 @@ var require_quote = __commonJS(function(exports, module) {
            if (LINE_TERMINATORS.test(s.comment)) {
              throw new TypeError("`comment` must not contain line terminators");
            }
@@ -23,7 +24,7 @@ diff --git a/dist/npm/main.js b/dist/npm/main.js
          }
          throw new TypeError("unrecognized object token shape");
 diff --git a/dist/npm/opentui/index.d.ts b/dist/npm/opentui/index.d.ts
-index 9386c3054441f6de21bf4de75e67f31ee639761f..9247b1a52eb2bbd65afd754c92db64f1e409c957 100644
+index 9386c3054441f6de21bf4de75e67f31ee639761f..36f0aa7a2ac9fce0b3a3db7aa9bcefbf75da6387 100644
 --- a/dist/npm/opentui/index.d.ts
 +++ b/dist/npm/opentui/index.d.ts
 @@ -7,3 +7,10 @@ export { HunkFileNav } from "./HunkFileNav.js";
@@ -34,11 +35,11 @@ index 9386c3054441f6de21bf4de75e67f31ee639761f..9247b1a52eb2bbd65afd754c92db64f1
 +/** Configure the missing npm worker entry before mounting any highlighted diffs. */
 +export declare function configureHunkHighlightWorker(url: URL): void;
 +
-+export type { HunkDiffSearchCell, HunkDiffSourceHighlight } from "./types.js";
++export type { HunkDiffNoteTarget, HunkDiffSearchCell, HunkDiffSourceHighlight } from "./types.js";
 +/** Computes geometry using Hunk's own sanitization, tab expansion and wrap planner. */
 +export declare function getHunkDiffSearchCells(props: import("./types.js").HunkDiffBodyProps): import("./types.js").HunkDiffSearchCell[];
 diff --git a/dist/npm/opentui/index.js b/dist/npm/opentui/index.js
-index c7a61edb43329abf69be1813b88a154cb231dc63..1e4beb3a55a1c54753030efece112674d1d32059 100644
+index c7a61edb43329abf69be1813b88a154cb231dc63..cb6052b1989de23cb7743ca8c03a3a7ff7a84673 100644
 --- a/dist/npm/opentui/index.js
 +++ b/dist/npm/opentui/index.js
 @@ -1614,8 +1614,12 @@ function resolveTheme(requested, themeMode, customThemes = []) {
@@ -55,7 +56,8 @@ index c7a61edb43329abf69be1813b88a154cb231dc63..1e4beb3a55a1c54753030efece112674
  }
  function supportsHighlightWorkerOffload({
    execPath = process.execPath,
-@@ -7727,5 +7731,88 @@ function toInternalDiffFiles(files) {
+@@ -7726,6 +7730,92 @@ function toInternalDiffFiles(files) {
+ 
  // packages/hunk/src/opentui/HunkDiffBody.tsx
  import { jsxDEV as jsxDEV5 } from "@opentui/react/jsx-dev-runtime";
 +// Public source-cell search adapter. Uses the same sanitized spans and wrap planner
@@ -82,7 +84,7 @@ index c7a61edb43329abf69be1813b88a154cb231dc63..1e4beb3a55a1c54753030efece112674
 +  for (const entry of planned) {
 +    if (!isPlannedCodeReviewRow(entry)) continue;
 +    const geometry = planCodeRowLayout(entry, { width: props.width, lineNumberDigits: String(findMaxLineNumber(file)).length,
-+      showLineNumbers: props.showLineNumbers ?? true, wrapLines: props.wrapLines ?? false });
++      showLineNumbers: props.showLineNumbers ?? true, wrapLines: props.wrapLines ?? false, reserveAddNoteColumn: Boolean(props.onAddNote) });
 +    for (const [side, cell, cellGeometry, key] of hunkSourceCells(entry, geometry)) {
 +      const id = `${reviewRowId(entry.key)}:${key}`;
 +      if (cell.kind === "empty" || seen.has(id) || cellGeometry.contentWidth <= 0) continue;
@@ -141,29 +143,119 @@ index c7a61edb43329abf69be1813b88a154cb231dc63..1e4beb3a55a1c54753030efece112674
 +  return row === entry.row ? entry : { ...entry, row };
 +}
 +
++// Public inline review affordance: Hunk DiffSectionBody's hover [+] row button.
++var HUNK_ADD_NOTE_IDLE_HIDE_DELAY_MS = 2000;
++
  function HunkDiffBody({
    file,
    layout = "split",
-@@ -7739,7 +7826,8 @@ function HunkDiffBody({
+@@ -7739,7 +7829,10 @@ function HunkDiffBody({
    wrapLines = false,
    horizontalOffset = 0,
    highlight = true,
 -  selectedHunkIndex = 0
 +  selectedHunkIndex = 0,
-+  sourceHighlights
++  sourceHighlights,
++  onAddNote,
++  addNoteActive = true
  }) {
    const resolvedLayout = canonicalLayout ?? normalizeHunkDiffLayout(layout);
    const resolvedTheme = resolveTheme(theme, null);
-@@ -7802,7 +7890,7 @@ function HunkDiffBody({
+@@ -7757,6 +7850,62 @@ function HunkDiffBody({
+     hunkGap
+   }) : [], [hunkGap, internalFile, rows, showHunkHeaders]);
+   const lineNumberDigits = useMemo(() => String(internalFile ? findMaxLineNumber(internalFile) : 1).length, [internalFile]);
++  // Highlighted rows are new objects; build them once per search, not on every hover render.
++  const displayRows = useMemo(() => new Map(plannedRows.map((plannedRow) => [plannedRow, withHunkSourceHighlights(plannedRow, sourceHighlights)])), [plannedRows, sourceHighlights]);
++  // Hunk DiffSectionBody's hover affordance: show [+] on the hovered source row, hide when idle.
++  const canAddNote = Boolean(onAddNote);
++  // Inactive hides the [+] but keeps its column, so wrapped rows never reflow.
++  const showAddNote = canAddNote && addNoteActive;
++  const showAddNoteRef = useRef(showAddNote);
++  showAddNoteRef.current = showAddNote;
++  const onAddNoteRef = useRef(onAddNote);
++  onAddNoteRef.current = onAddNote;
++  const [hoveredRowKey, setHoveredRowKey] = useState(null);
++  const hoverTimeoutRef = useRef(null);
++  const hover = useMemo(() => {
++    const cancel = () => {
++      if (hoverTimeoutRef.current) {
++        clearTimeout(hoverTimeoutRef.current);
++        hoverTimeoutRef.current = null;
++      }
++    };
++    return {
++      cancel,
++      clear: () => {
++        cancel();
++        setHoveredRowKey(null);
++      },
++      activate: (rowKey) => {
++        cancel();
++        setHoveredRowKey(rowKey);
++        hoverTimeoutRef.current = setTimeout(() => {
++          hoverTimeoutRef.current = null;
++          setHoveredRowKey((current) => current === rowKey ? null : current);
++        }, HUNK_ADD_NOTE_IDLE_HIDE_DELAY_MS);
++      }
++    };
++  }, []);
++  useEffect(() => hover.cancel, [hover]);
++  useEffect(() => {
++    if (!showAddNote) {
++      hover.clear();
++    }
++  }, [showAddNote, hover]);
++  const addNoteRowKeys = useMemo(() => new Set(plannedRows.flatMap((plannedRow) => plannedRow.kind === "diff-row" && isPlannedCodeReviewRow(plannedRow) && resolveCodeRowNoteTarget(plannedRow.row) ? [plannedRow.row.key] : [])), [plannedRows]);
++  const handleHoverRow = useMemo(() => canAddNote ? (rowKey) => {
++    if (showAddNoteRef.current && addNoteRowKeys.has(rowKey)) {
++      hover.activate(rowKey);
++    } else {
++      hover.clear();
++    }
++  } : undefined, [addNoteRowKeys, canAddNote, hover]);
++  const startNote = useMemo(() => canAddNote ? (hunkIndex, target) => {
++    if (!target || !showAddNoteRef.current) {
++      return;
++    }
++    hover.clear();
++    onAddNoteRef.current?.({ hunkIndex, side: target.side, line: target.line });
++  } : undefined, [canAddNote, hover]);
+   if (!internalFile) {
+     return /* @__PURE__ */ jsxDEV5("box", {
+       style: { width: "100%", paddingLeft: 1, paddingRight: 1 },
+@@ -7792,7 +7941,8 @@ function HunkDiffBody({
+             width: "100%",
+             height: plannedRow.height,
+             backgroundColor: resolvedTheme.panel
+-          }
++          },
++          onMouseOver: hover.clear
+         }, plannedRow.key, false, undefined, this);
+       }
+       if (plannedRow.kind !== "diff-row") {
+@@ -7802,7 +7952,7 @@ function HunkDiffBody({
          id: reviewRowId(plannedRow.key),
          style: { width: "100%", flexDirection: "column" },
          children: /* @__PURE__ */ jsxDEV5(DiffRowView, {
 -          plannedRow,
-+          plannedRow: withHunkSourceHighlights(plannedRow, sourceHighlights),
++          plannedRow: displayRows.get(plannedRow) ?? plannedRow,
            width,
            lineNumberDigits,
            showLineNumbers,
-@@ -8310,6 +8398,8 @@ function HunkReviewStream({
+@@ -7810,7 +7960,10 @@ function HunkDiffBody({
+           wrapLines,
+           codeHorizontalOffset: horizontalOffset,
+           theme: resolvedTheme,
+-          selected: plannedRow.row.hunkIndex === selectedHunkIndex
++          selected: plannedRow.row.hunkIndex === selectedHunkIndex,
++          showAddNoteBadge: showAddNote && hoveredRowKey === plannedRow.row.key && addNoteRowKeys.has(plannedRow.row.key),
++          onHoverRow: handleHoverRow,
++          onStartUserNoteAtHunk: startNote
+         }, undefined, false, undefined, this)
+       }, plannedRow.key, false, undefined, this);
+     })
+@@ -8310,6 +8463,8 @@ function HunkReviewStream({
    }, undefined, false, undefined, this);
  }
  export {
@@ -173,19 +265,24 @@ index c7a61edb43329abf69be1813b88a154cb231dc63..1e4beb3a55a1c54753030efece112674
    HunkDiffBody,
    HunkDiffFileHeader,
 diff --git a/dist/npm/opentui/types.d.ts b/dist/npm/opentui/types.d.ts
-index 1e5261ed1b4765decf0aa5841489393945a09337..4d64f7bf01e70b736c6ea5ca37f0c7d2e8f799a9 100644
+index 1e5261ed1b4765decf0aa5841489393945a09337..af6ff02fd570bcf2113b3be14de2467eb37276b9 100644
 --- a/dist/npm/opentui/types.d.ts
 +++ b/dist/npm/opentui/types.d.ts
-@@ -49,6 +49,8 @@ export interface HunkDiffBodyProps {
+@@ -49,7 +49,13 @@ export interface HunkDiffBodyProps {
      horizontalOffset?: number;
      highlight?: boolean;
      selectedHunkIndex?: number;
 +    /** UTF-16 ranges in sanitized, tab-expanded source cells, before wrapping/panning. */
 +    sourceHighlights?: Record<string, HunkDiffSourceHighlight[]>;
      hunkGap?: number;
++    /** Shows Hunk's hover [+] button on source rows. Reserves its column when wrapping. */
++    onAddNote?: (target: HunkDiffNoteTarget) => void;
++    /** False hides and disables the [+] while keeping its column. Defaults to true. */
++    addNoteActive?: boolean;
  }
  /** Public props for the reusable OpenTUI diff convenience component. */
-@@ -90,3 +92,23 @@ export interface HunkFileNavProps {
+ export interface HunkDiffViewProps extends Omit<HunkDiffBodyProps, "file"> {
+@@ -90,3 +96,30 @@ export interface HunkFileNavProps {
      theme?: HunkDiffThemeName;
      onSelectFile?: (fileId: string) => void;
  }
@@ -208,4 +305,11 @@ index 1e5261ed1b4765decf0aa5841489393945a09337..4d64f7bf01e70b736c6ea5ca37f0c7d2
 +    end: number;
 +    fg: string;
 +    bg: string;
++}
++
++/** A diff source line accepted by Hunk's add-note affordance. */
++export interface HunkDiffNoteTarget {
++    hunkIndex: number;
++    side: "old" | "new";
++    line: number;
 +}

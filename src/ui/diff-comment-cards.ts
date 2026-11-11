@@ -7,6 +7,22 @@ import { reviewSplitBoundary, type ReviewRow } from "./review-lines"
 const prefix = "diff-comment-card:"
 export const isCommentCard = (node: Renderable) => node.id.startsWith(prefix)
 
+// Review cards sit under their line, indented to its code. A wide split side holds the card for
+// its own line; narrower sides would wrap comments heavily, so there cards span the diff.
+const NOTE_INDENT = 4
+const NOTE_MAX_WIDTH = 100
+const DOCK_MIN_SIDE = 70
+export function noteBox(width: number, layout: "split" | "unified", side?: "LEFT" | "RIGHT") {
+  const boundary = reviewSplitBoundary(width)
+  // The left side stops a column short of the right side's rail.
+  const sideWidth = side === "RIGHT" ? width - boundary : boundary - 1
+  const docked = layout === "split" && side !== undefined && sideWidth >= DOCK_MIN_SIDE
+  const start = docked && side === "RIGHT" ? boundary : 0
+  const available = docked ? sideWidth : width
+  const boxWidth = Math.max(1, Math.min(NOTE_MAX_WIDTH, available - NOTE_INDENT))
+  return { width: boxWidth, marginLeft: start + Math.max(0, Math.min(NOTE_INDENT, available - boxWidth)) }
+}
+
 /** Expanded review-row wrappers include cards; only their first, Hunk-owned child is source. */
 export function isSourceRowY(row: Renderable, y: number) {
   const code = row.getChildren().find((child) => !isCommentCard(child))
@@ -37,25 +53,18 @@ export function createDiffCommentCards(renderer: RenderContext, renderBody: (con
         const row = !thread.isOutdated && thread.diffSide && thread.line != null
           ? rows.find((row) => (thread.diffSide === "LEFT" ? row.left : row.right)?.line === thread.line) : undefined
         const anchor = row && host.findDescendantById(row.id)
-        const split = !!anchor && layout === "split"
-        const boundary = reviewSplitBoundary(width)
-        const start = split ? thread.diffSide === "RIGHT" ? boundary + 1 : 1 : 0
-        const paneWidth = split && thread.diffSide === "LEFT" ? boundary - 1 : width - start
+        const line = thread.line ?? thread.originalLine
+        // Cards away from their line say where they belong.
+        const location = anchor ? "" : `${thread.isOutdated ? "Outdated" : "Unplaced"} · ${thread.path}${line ? `:${line}` : ""}`
+        const count = `${thread.comments.length} ${thread.comments.length === 1 ? "comment" : "comments"}`
+        const title = [location, collapsed ? count : "", thread.isResolved ? "resolved" : ""].filter(Boolean).join(" · ")
         const card = new BoxRenderable(renderer, {
-          id: `${prefix}${thread.id}`, width: Math.max(1, Math.min(80, paneWidth - 2)),
-          marginLeft: start + 1, marginTop: 1, marginBottom: 1, flexDirection: "column", flexShrink: 0,
-          paddingLeft: 2, paddingRight: 2,
-          backgroundColor: colors.panel,
+          id: `${prefix}${thread.id}`, ...noteBox(width, layout, anchor ? thread.diffSide : undefined), flexDirection: "column", flexShrink: 0,
+          border: true, borderStyle: "rounded", borderColor: colors.border, title: title ? ` ${title} ` : undefined, titleColor: colors.muted,
+          paddingLeft: 1, paddingRight: 1, backgroundColor: colors.panel,
         })
         const disposeBodies: (() => void)[] = []
         owned.push({ card, disposeBodies })
-        const text = (id: string, content: string, fg: TextOptions["fg"], attributes = TextAttributes.NONE) => card.add(new TextRenderable(renderer, {
-          id: `${prefix}${thread.id}:${id}`, content, fg, attributes, width: "100%", flexShrink: 0, wrapMode: "word",
-        }))
-        const line = thread.line ?? thread.originalLine
-        const status = [collapsed ? `${thread.comments.length} ${thread.comments.length === 1 ? "comment" : "comments"}` : "",
-          thread.isResolved ? "resolved" : "", thread.isOutdated ? "outdated" : ""].filter(Boolean)
-        if (!anchor) text("unplaced", `${thread.isOutdated ? "Outdated" : "Unplaced"} review comments · ${thread.path}${line ? `:${line}` : ""}`, colors.muted)
         const comments = collapsed ? thread.comments.slice(0, 1) : thread.comments
         for (const [index, comment] of comments.entries()) {
           if (index > 0) card.add(new BoxRenderable(renderer, {
@@ -69,10 +78,6 @@ export function createDiffCommentCards(renderer: RenderContext, renderBody: (con
             id: `${prefix}${thread.id}:author:${index}`,
             content: `${iconPrefix(commentIcon)}@${comment.author}`,
             fg: colors.blue, attributes: TextAttributes.BOLD, height: 1, minWidth: 0, flexShrink: 1, wrapMode: "none", truncate: true,
-          }))
-          if (index === 0 && status.length) header.add(new TextRenderable(renderer, {
-            id: `${prefix}${thread.id}:status`, content: `· ${status.join(" · ")}`,
-            fg: colors.muted, height: 1, minWidth: 0, flexShrink: collapsed ? 1 : 0, wrapMode: "none", truncate: collapsed,
           }))
           if (!collapsed && Number.isFinite(Date.parse(comment.createdAt))) header.add(new TextRenderable(renderer, {
             id: `${prefix}${thread.id}:time:${index}`, content: `(${relativeTime(comment.createdAt)})`,

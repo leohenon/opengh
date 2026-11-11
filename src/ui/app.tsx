@@ -1,7 +1,7 @@
 import type { ScrollBoxRenderable } from "@opentui/core"
 import type { RepositoryScope } from "../repository-session"
 import { useRenderer, useTerminalDimensions } from "@opentui/solid"
-import { batch, createEffect, createMemo, createSignal, For, on, onCleanup, onMount, Show } from "solid-js"
+import { batch, createEffect, createMemo, createSignal, For, on, onCleanup, onMount, Show, untrack } from "solid-js"
 import { openExternalDiff } from "../external-actions"
 import { defaultConfig, type Config } from "../config"
 import type { HintEntry } from "../keybindings"
@@ -31,9 +31,9 @@ import { Header } from "./components/header"
 import { ContextMenu, type ContextMenuItem } from "./components/context-menu"
 import { mouseContextMenu, type MousePosition } from "./mouse"
 import { IssueReferencesPicker } from "./components/issue-references-picker"
-import type { InlineCommentInput, PostedInlineComment, PullReviewSession, ReviewAnchor } from "../review-types"
+import type { InlineCommentInput, PostedInlineComment, PullReviewSession, ReviewAnchor, ReviewEligibility } from "../review-types"
 import { InlineCommentUncertainError } from "../inline-comments"
-import { InlineCommentRetryDialog } from "./components/inline-comment-retry"
+import { InlineCommentConfirmDialog, InlineCommentRetryDialog } from "./components/inline-comment-retry"
 import { PullReviewDialog, ReviewCommentDialog } from "./components/pull-review-dialog"
 import { IssueActionDialog, IssueActionsMenu } from "./components/issue-actions"
 import { IssueAssigneesPicker } from "./components/issue-assignees-picker"
@@ -68,7 +68,7 @@ import { SearchProvider } from "./search-context"
 import { StatusPromptBar, StatusPromptProvider } from "./status-prompt"
 import { SearchSurface } from "./components/search-surface"
 
-type Overlay = "context-menu" | "reactions" | "help" | "branch-picker" | "settings" | "issue-references" | "issue-actions" | "issue-action" | "pull-merge" | "pull-draft" | "pull-review" | "review-comment" | "inline-retry" | "command" | "switch-repo"
+type Overlay = "context-menu" | "reactions" | "help" | "branch-picker" | "settings" | "issue-references" | "issue-actions" | "issue-action" | "pull-merge" | "pull-draft" | "pull-review" | "review-comment" | "inline-confirm" | "inline-retry" | "command" | "switch-repo"
 type ToastState = { id: number; title: string; message: string; duration?: number; tone?: "error" | "success" | "info" }
 
 export type AppProps = {
@@ -222,6 +222,10 @@ function AppContent(props: AppProps) {
   const [inlineContext, setInlineContext] = createSignal<Omit<InlineCommentInput, "body">>()
   // Contexts are built in a stable order below, including the exact diff and anchor.
   const inlineDrafts = new Map<string, string>()
+  // The inline composer for inlineContext stays open until posted or cancelled.
+  const [inlineDraftOpen, setInlineDraftOpen] = createSignal(false)
+  const [inlineDraftFocused, setInlineDraftFocused] = createSignal<Partial<Record<Page, boolean>>>({})
+  const [inlineConfirm, setInlineConfirm] = createSignal<InlineCommentInput>()
   const [postingInline, setPostingInline] = createSignal<InlineCommentInput>()
   const [inlineRetry, setInlineRetry] = createSignal<InlineCommentInput>()
   const [postedInlineThreads, setPostedInlineThreads] = createSignal<Array<{ repository: string; number: number; headSha: string; thread: PullReviewThread }>>([])
@@ -508,25 +512,80 @@ function AppContent(props: AppProps) {
       && item.headSha === value.headSha && !item.thread.comments.some(comment => urls.has(comment.url))).map(item => item.thread)
     return [...remote, ...posted]
   }
-  const reviewForDiff = (target: DiffTarget) => {
+  // Reopening reviews clears eligibility while loading. Holding the last answer, which is checked
+  // against the PR below, keeps an open draft and the [+] column still; errors drop it.
+  const reviewEligibility = createMemo<ReviewEligibility | undefined>((previous) => {
+    const state = props.reviews?.state()
+    return state?.eligibility ?? (state?.status === "loading" ? previous : undefined)
+  })
+  // Eligibility for the loaded diff, ignoring brief posts and reloads, keeps the [+] column
+  // and an open draft stable. Posting additionally needs review, which waits for both.
+  const commentableDiff = (target: DiffTarget) => {
     if (target.kind !== "pull" || !props.reviews || !props.onPostInlineComment) return undefined
-    const state = props.reviews.state()
-    const eligible = state.eligibility
-    const resource = resourceForDiff(target)
-    const value = resource.value
-    if (!eligible || !(eligible.canInlineComment ?? eligible.canComment) || state.status === "loading" || state.status === "submitting" || postingInline()
+    const eligible = reviewEligibility()
+    const value = resourceForDiff(target).value
+    if (!eligible || !(eligible.canInlineComment ?? eligible.canComment)
       || eligible.repository.toLowerCase() !== data().repo.nameWithOwner.toLowerCase() || eligible.number !== target.number
-      || resource.status !== "ready" || value?.kind !== "patch" || !value.headSha
-      || value.headSha !== eligible.headSha || !value.baseSha || value.baseSha !== eligible.baseSha) return undefined
+      || value?.kind !== "patch" || !value.headSha || value.headSha !== eligible.headSha
+      || !value.baseSha || value.baseSha !== eligible.baseSha) return undefined
+    return { eligible, headSha: value.headSha, baseSha: value.baseSha }
+  }
+  // Hidden while the full editor has it; closing that editor by any route returns it inline.
+  const draftForDiff = (target: DiffTarget) => {
+    const commentable = commentableDiff(target)
+    const context = inlineContext()
+    if (target.kind !== "pull" || !commentable || !inlineDraftOpen() || overlay() === "review-comment" || !context || context.accountId !== commentable.eligible.accountId
+      || context.repository !== data().repo.nameWithOwner || context.number !== target.number
+      || context.headSha !== commentable.headSha || context.baseSha !== commentable.baseSha) return undefined
+    return { anchor: context.anchor, body: inlineDrafts.get(JSON.stringify(context)) ?? "" }
+  }
+  // A refreshed diff of a new PR revision invalidates an open draft's anchor. Say so, and carry its
+  // text to the same line of the new revision if it is reopened there; closed drafts stay per revision.
+  let carriedDraft: { anchor: string; body: string } | undefined
+  const anchorKey = (context: Omit<InlineCommentInput, "body">) =>
+    JSON.stringify([context.accountId, context.repository, context.number, context.anchor])
+  createEffect(() => {
+    const context = inlineContext()
+    if (!inlineDraftOpen() || !context || context.repository !== data().repo.nameWithOwner) return
+    const value = resourceForDiff({ kind: "pull", number: context.number }).value
+    if (value?.kind !== "patch" || !value.headSha || value.headSha === context.headSha && value.baseSha === context.baseSha) return
+    untrack(() => {
+      setInlineDraftOpen(false)
+      const body = inlineDrafts.get(JSON.stringify(context))
+      if (!body?.trim()) return
+      carriedDraft = { anchor: anchorKey(context), body }
+      setToast({ id: ++toastId, title: "Pull request updated", message: "Your comment draft was kept. Reopen it on its line to continue.", tone: "info" })
+    })
+  })
+  const reviewForDiff = (target: DiffTarget) => {
+    const commentable = commentableDiff(target)
+    const status = props.reviews?.state().status
+    if (target.kind !== "pull" || !commentable || resourceForDiff(target).status !== "ready"
+      || status === "loading" || status === "submitting" || postingInline()) return undefined
+    const { eligible, headSha, baseSha } = commentable
     return {
-      headSha: value.headSha, comments: [], jump: reviewJump(),
+      headSha, comments: [], jump: reviewJump(),
       onComment: (anchor: ReviewAnchor) => {
         const context = { accountId: eligible.accountId, repository: data().repo.nameWithOwner, number: target.number,
-          headSha: value.headSha!, baseSha: value.baseSha!, anchor: { path: anchor.path, line: anchor.line, side: anchor.side,
+          headSha, baseSha, anchor: { path: anchor.path, line: anchor.line, side: anchor.side,
             ...(anchor.startLine === undefined ? {} : { startLine: anchor.startLine, startSide: anchor.startSide }) } }
-        setInlineContext(context)
-        setOverlay("review-comment")
+        if (carriedDraft?.anchor === anchorKey(context)) {
+          const key = JSON.stringify(context)
+          if (!inlineDrafts.get(key)?.trim()) inlineDrafts.set(key, carriedDraft.body)
+          carriedDraft = undefined
+        }
+        batch(() => { setInlineContext(context); setInlineDraftOpen(true) })
       },
+      onDraftSave: (body: string) => {
+        const context = inlineContext()
+        if (!context || !body.trim()) return
+        inlineDrafts.set(JSON.stringify(context), body)
+        setInlineConfirm({ ...context, body })
+        setOverlay("inline-confirm")
+      },
+      onDraftCancel: () => setInlineDraftOpen(false),
+      // The full editor adds preview, expansion and the external editor; closing it returns here.
+      onDraftExpand: () => { if (inlineContext()) setOverlay("review-comment") },
       onOpenReview: () => { void openReview(target.number) },
     }
   }
@@ -543,6 +602,7 @@ function AppContent(props: AppProps) {
     try {
       const posted = await props.onPostInlineComment(input, retryUnconfirmed ? { retryUnconfirmed: true } : undefined)
       inlineDrafts.delete(draftKey)
+      if (inlineContext() === context) setInlineDraftOpen(false)
       if (disposed || renderer.isDestroyed || data().repo.nameWithOwner !== context.repository) return
       const now = new Date().toISOString()
       const thread: PullReviewThread = { kind: "review-thread", id: `posted-${posted.id}`, path: posted.path,
@@ -1024,7 +1084,7 @@ function AppContent(props: AppProps) {
   createEffect(() => {
     if (visibleTabs().some((tab) => tab.page === page())) return
     setNavigation((state) => navigate(back(state), "overview"))
-    if (overlay() === "issue-references" || overlay() === "issue-actions" || overlay() === "issue-action" || overlay() === "pull-merge" || overlay() === "pull-draft" || overlay() === "pull-review" || overlay() === "review-comment" || overlay() === "inline-retry") { setInlineRetry(); setOverlay(); setIssueAction(); setMergeTarget(); setDraftTarget() }
+    if (overlay() === "issue-references" || overlay() === "issue-actions" || overlay() === "issue-action" || overlay() === "pull-merge" || overlay() === "pull-draft" || overlay() === "pull-review" || overlay() === "review-comment" || overlay() === "inline-confirm" || overlay() === "inline-retry") { setInlineRetry(); setInlineConfirm(); setOverlay(); setIssueAction(); setMergeTarget(); setDraftTarget() }
   })
 
   createEffect(() => {
@@ -1297,7 +1357,7 @@ function AppContent(props: AppProps) {
     const picker: HintEntry[] = [["picker.accept", "open"], close]
     if (overlay() === "context-menu") return undefined
     if (overlay() === "reactions") return hint(["navigation.activate", "add"], close)
-    if (overlay() === "issue-action" || overlay() === "pull-merge" || overlay() === "pull-draft" || overlay() === "pull-review" || overlay() === "review-comment" || overlay() === "inline-retry") return issueActionHint()
+    if (overlay() === "issue-action" || overlay() === "pull-merge" || overlay() === "pull-draft" || overlay() === "pull-review" || overlay() === "review-comment" || overlay() === "inline-confirm" || overlay() === "inline-retry") return issueActionHint()
     if (overlay() === "issue-actions") return hint(open, close)
     if (overlay() === "help") return hint(close)
     if (overlay() === "settings") return settingsHint()
@@ -1318,6 +1378,8 @@ function AppContent(props: AppProps) {
     const more = (available: boolean | undefined): HintEntry[] => available ? [["navigation.activate", "load more"]] : []
     const list = (hasItems: boolean): HintEntry[] => hasItems ? [open] : []
     if (diffTarget()) {
+      if (inlineDraftFocused()[page()]) return hint(["dialog.submit", "post"], ["dialog.togglePreview", "preview"],
+        ["dialog.toggleExpanded", "expand"], ["dialog.externalEditor", "editor"], ["dialog.discard", "clear"], ["dialog.close", "cancel"])
       const files = diffFocus()[page()] === "files"
       const failed = resource?.status === "error"
       const recovery: HintEntry[] = failed ? [...retry, ["navigation.activate", "file list"]]
@@ -1788,7 +1850,9 @@ function AppContent(props: AppProps) {
           {(target) => <box id={`diff-view-${owner}`} visible={page() === owner} flexGrow={1} minHeight={0} flexDirection="column">
             <DiffScreen target={target} resource={resourceForDiff(target)} active={page() === owner}
               defaultLayout={configuredDiffLayout()} defaultWrap={config().diffWrap}
-              review={reviewForDiff(target)} threads={threadsForDiff(target)} repositoryUrl={data().repo.url}
+              review={reviewForDiff(target)} commentable={!!commentableDiff(target)} draft={draftForDiff(target)}
+              onDraftInput={(body) => { const context = inlineContext(); if (context) inlineDrafts.set(JSON.stringify(context), body) }}
+              threads={threadsForDiff(target)} repositoryUrl={data().repo.url}
               interactive={page() === owner && overlay() === undefined}
               onMovePage={movePage}
               onOpenGitHub={() => openCurrentDiffGitHub(target)}
@@ -1801,6 +1865,7 @@ function AppContent(props: AppProps) {
                 )
               }
               onFocusChange={(focus) => setDiffFocus((current) => ({ ...current, [owner]: focus }))}
+              onDraftFocusChange={(focused) => setInlineDraftFocused((current) => ({ ...current, [owner]: focused }))}
               onCommentsCollapsedChange={(collapsed) => setDiffCommentsCollapsed((current) => ({ ...current, [owner]: collapsed }))}
               showScrollbar={config().showScrollbars} onLoadFiles={() => void props.onLoadDiff?.(target, true)} />
           </box>}
@@ -1901,6 +1966,16 @@ function AppContent(props: AppProps) {
               setInlineRetry()
               void submitInlineComment(input.body, true)
             } else { setInlineRetry(); setOverlay() }
+          }} />}
+      </Show>
+      <Show when={overlay() === "inline-confirm" ? inlineConfirm() : undefined} keyed>
+        {(input) => <InlineCommentConfirmDialog input={input} onHintChange={setIssueActionHint}
+          onClose={() => { setInlineConfirm(); setOverlay() }}
+          onConfirm={() => {
+            setInlineConfirm()
+            setOverlay()
+            const context = inlineContext()
+            if (context && JSON.stringify({ ...context, body: input.body }) === JSON.stringify(input)) void submitInlineComment(input.body)
           }} />}
       </Show>
       <Show when={overlay() === "review-comment" ? inlineContext() : undefined} keyed>

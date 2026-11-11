@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test"
-import { TextBufferRenderable, type Renderable, type TextareaRenderable } from "@opentui/core"
+import { TextBufferRenderable, type Renderable, type TextareaRenderable, type TextRenderable } from "@opentui/core"
 import { createTestRenderer } from "@opentui/core/testing"
 import { render } from "@opentui/solid"
 import { createSignal } from "solid-js"
@@ -10,12 +10,12 @@ import { InlineCommentUncertainError } from "../src/inline-comments"
 import { App } from "../src/ui/app"
 import { initializeHunk } from "../src/ui/hunk-host"
 import { parseDiff } from "../src/ui/diff-model"
-import { reviewRows, reviewSplitBoundary } from "../src/ui/review-lines"
+import { reviewRows } from "../src/ui/review-lines"
 import { clickControl } from "./fixtures/mouse"
 import { githubDataFixture, repositoryOperationsFixture, pullContextFixture } from "./fixtures/github-data"
 import { patchFixture } from "./fixtures/diff"
 
-test("draft PR inline comments publish immediately and independently of the overall review", async () => {
+test("draft PR inline comments open from Hunk's [+] in opengh's editor and publish immediately, independently of the overall review", async () => {
   const number = githubDataFixture.pulls.open.value!.items[0]!.number
   const repository = githubDataFixture.repo.nameWithOwner
   const headSha = "a".repeat(40), baseSha = "b".repeat(40)
@@ -79,22 +79,57 @@ test("draft PR inline comments publish immediately and independently of the over
     setup.mockInput.pressKey("D"); await settle()
     expect(setup.captureCharFrame()).toContain("Existing GitHub comment")
     const file = parseDiff({ kind: "patch", patch }).files[0]!.body!
-    const openInline = async (index = 0, side: "LEFT" | "RIGHT" = "RIGHT") => {
-      const row = setup.renderer.root.findDescendantById(reviewRows(file, "split")[index]!.id)!
-      expect(row).toBeDefined()
-      await setup.mockMouse.click(row.x + (side === "RIGHT" ? reviewSplitBoundary(row.width) : 0) + 5, row.y, 2); await settle()
-      await clickControl(setup, "context-menu-row-0"); await settle()
+    const composer = () => setup.renderer.root.findDescendantById("inline-comment-editor") as TextareaRenderable | undefined
+    const editorBody = () => composer()?.plainText
+    const sourceRow = (index: number) => setup.renderer.root.findDescendantById(reviewRows(file, "split")[index]!.id)!
+    const clickMenuItem = async (label: string) => {
+      for (let index = 0; ; index++) {
+        const row = setup.renderer.root.findDescendantById(`context-menu-row-${index}`)
+        expect(row).toBeDefined()
+        if ((row!.getChildren()[0] as TextRenderable).plainText === label) { await clickControl(setup, row!.id); await settle(); return }
+      }
     }
-    const editorBody = () => (setup.renderer.root.findDescendantById("review-editor-body") as TextareaRenderable).plainText
+    // Hunk's hover [+] comments on the new side; the context menu reaches either side.
+    const openInline = async (index = 0, side: "LEFT" | "RIGHT" = "RIGHT") => {
+      const row = sourceRow(index)
+      expect(row).toBeDefined()
+      if (side === "RIGHT") {
+        await setup.mockMouse.moveTo(row.x + 5, row.y); await settle()
+        await setup.mockMouse.click(row.x + row.width - 2, row.y); await settle()
+      } else {
+        await setup.mockMouse.click(row.x + 5, row.y, 2); await settle()
+        await clickMenuItem("Add review comment…")
+      }
+      expect(composer()?.focused).toBe(true)
+    }
     const closeInline = async () => { setup.mockInput.pressEscape(); await settle() }
+    const post = async () => { setup.mockInput.pressKey("s", { ctrl: true }); await settle() }
     await openInline()
+    expect(setup.captureCharFrame()).toContain("╭─ Comment ─")
+    expect(setup.captureCharFrame()).toContain("ctrl+s post · ctrl+p preview · ctrl+o expand")
     await setup.mockInput.typeText("Please explain this change.")
+    // Reloading reviews keeps the same editor, and cancelling the confirmation returns to it.
+    const instance = composer()
+    const ready = state()
+    setState({ status: "loading" }); await settle()
+    expect(composer()).toBe(instance)
+    setState(ready); await settle()
+    expect(composer()).toBe(instance)
+    expect(composer()?.focused).toBe(true)
+    await post()
+    expect(setup.captureCharFrame()).toContain("Post inline comment?")
+    setup.mockInput.pressEscape(); await settle()
+    expect(composer()).toBe(instance)
+    expect(composer()?.focused).toBe(true)
+    expect(inlinePosts).toHaveLength(0)
     await closeInline()
+    expect(composer()).toBeUndefined()
     await openInline(1)
     expect(editorBody()).toBe("")
     await setup.mockInput.typeText("Keep the second line draft")
-    await setup.mockMouse.click(0, 0); await settle() // Backdrop dismissal also preserves text.
-    expect(setup.renderer.root.findDescendantById("review-editor-body")).toBeUndefined()
+    await setup.mockMouse.click(sourceRow(0).x + 5, sourceRow(0).y); await settle() // Clicking source keeps the draft.
+    expect(composer()?.focused).toBe(false)
+    expect(editorBody()).toBe("Keep the second line draft")
     await openInline(0, "LEFT")
     expect(editorBody()).toBe("")
     await closeInline()
@@ -111,7 +146,7 @@ test("draft PR inline comments publish immediately and independently of the over
     setRevision({ headSha, baseSha }); await settle()
     await openInline()
     expect(editorBody()).toBe("Please explain this change.")
-    await clickControl(setup, "review-editor-save"); await settle()
+    await post()
     expect(inlinePosts).toHaveLength(0)
     expect(setup.captureCharFrame()).toContain("Post inline comment?")
     await clickControl(setup, "inline-comment-confirm"); await settle()
@@ -127,10 +162,12 @@ test("draft PR inline comments publish immediately and independently of the over
     expect(retryOptions).toEqual([undefined, { retryUnconfirmed: true }])
     await Bun.sleep(220); await setup.flush()
     expect(setup.captureCharFrame()).toContain("Posting comment")
+    expect(composer()?.focused).toBe(false) // The draft stays visible but cannot post twice while in flight.
     inlineFinished.resolve({ id: 123, path: "example.ts", line: 1, side: "RIGHT", body: inlinePosts[0]!.body, url: "https://github.com/example/comment" })
     await settle()
     expect(setup.captureCharFrame()).toContain("Inline comment posted")
     expect(setup.captureCharFrame()).toContain("Please explain this change.")
+    expect(composer()).toBeUndefined()
     setThreads([remoteThread, { ...remoteThread, id: "new-server-thread", comments: [{ ...remoteThread.comments[0]!, id: "new-server-comment",
       body: "Please explain this change.", url: "https://github.com/example/comment" }] }])
     await settle()
@@ -148,9 +185,10 @@ test("draft PR inline comments publish immediately and independently of the over
     await openInline()
     expect(editorBody()).toBe("") // Successful posting clears only the submitted context.
     await setup.mockInput.typeText("Retain after failure")
-    await clickControl(setup, "review-editor-save"); await settle()
+    await post()
     await clickControl(setup, "inline-comment-confirm"); await settle()
     expect(inlinePosts).toHaveLength(3)
+    expect(editorBody()).toBe("Retain after failure") // A failed post reopens its text.
     await openInline()
     expect(editorBody()).toBe("Retain after failure")
     setup.mockInput.pressKey("d", { ctrl: true }); await settle()
@@ -160,7 +198,27 @@ test("draft PR inline comments publish immediately and independently of the over
     await closeInline()
     await openInline(1)
     expect(editorBody()).toBe("Keep the second line draft")
+    // The full editor keeps preview and the external editor; closing it returns inline.
+    setup.mockInput.pressKey("o", { ctrl: true }); await settle()
+    const fullEditor = () => setup.renderer.root.findDescendantById("review-editor-body") as TextareaRenderable | undefined
+    expect(fullEditor()?.plainText).toBe("Keep the second line draft")
+    expect(composer()).toBeUndefined()
+    setup.mockInput.pressKey("d", { ctrl: true })
+    await setup.mockInput.typeText("Expanded draft"); await settle()
+    setup.mockInput.pressEscape(); await settle()
+    expect(fullEditor()).toBeUndefined()
+    expect(editorBody()).toBe("Expanded draft")
+    expect(composer()?.focused).toBe(true)
+    // A new PR revision closes an open draft with notice; reopening its line there carries the text.
+    const newHead = "e".repeat(40)
+    setRevision({ headSha: newHead, baseSha }); await settle()
+    expect(composer()).toBeUndefined()
+    expect(setup.captureCharFrame()).toContain("Pull request updated")
+    setState(s => ({ ...s, eligibility: { ...eligibility, headSha: newHead } })); await settle()
+    await openInline(1)
+    expect(editorBody()).toBe("Expanded draft")
     await closeInline()
+    setState(s => ({ ...s, eligibility })); setRevision({ headSha, baseSha }); await settle()
     const beforeRefresh = diffLoads
     setup.mockInput.pressKey("r"); await settle()
     expect(diffLoads).toBe(beforeRefresh + 1)
