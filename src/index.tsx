@@ -6,9 +6,11 @@ import { stopGitHubProcesses } from "./github/process"
 import { stopClipboardProcesses } from "./clipboard"
 import { stopCommandProcesses } from "./command-actions"
 import { saveRepositoryTabs } from "./repository-tabs"
+import { createResumeWriter, loadResume, saveResume } from "./resume"
 import { saveConfig } from "./config"
 import { rememberRepository } from "./github/repository"
 import { launchUsage, parseLaunchArguments, type LaunchOptions } from "./launch-target"
+import { version } from "../package.json"
 
 const pendingSaves = new Set<Promise<void>>()
 
@@ -31,6 +33,10 @@ try {
   console.error(`opengh: ${error instanceof Error ? error.message : "Invalid arguments"}\nRun opengh --help for usage.`)
   process.exit(1)
 }
+if (launch.version) {
+  console.log(`opengh ${version}`)
+  process.exit(0)
+}
 if (launch.help) {
   console.log(launchUsage)
   process.exit(0)
@@ -49,6 +55,9 @@ if (launch.inline) {
   process.exit(process.exitCode ?? 0)
 }
 
+const resumeLocation = launch.resume ? await loadResume() : undefined
+const resumeWriter = createResumeWriter(saveResume)
+
 const renderer = await createCliRenderer({
   targetFps: 30,
   exitOnCtrlC: false,
@@ -58,6 +67,7 @@ const renderer = await createCliRenderer({
     // Host cleanup can finish before native teardown and terminal output settle.
     void Promise.allSettled([
       renderer.closed,
+      resumeWriter.flush(),
       stopGitHubProcesses(),
       stopClipboardProcesses(),
       stopCommandProcesses(),
@@ -74,6 +84,8 @@ try {
       initialPage={launch.initialPage}
       initialDetail={launch.initialDetail}
       standalone={launch.standalone}
+      resumeLocation={resumeLocation}
+      onNavigationChange={resumeWriter.remember}
       cwd={cwd}
       services={{
         saveConfig: (config) => trackSave(saveConfig(config)),

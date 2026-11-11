@@ -8,6 +8,8 @@ describe("launch arguments", () => {
       [["."], { repositoryArgument: "." }],
       [["--standalone"], { standalone: true }],
       [["--inline"], { inline: true }],
+      [["--resume"], { resume: true }],
+      [["--resume", "--standalone"], { resume: true, standalone: true }],
       [["#234", "--inline"], { inline: true, repositoryArgument: ".", initialDetail: { kind: "number", number: 234 } }],
       [["owner/repo", "--inline", "--pr=456"], { inline: true, repositoryArgument: "owner/repo", initialDetail: { kind: "pull", number: 456 } }],
       [["--inline", "--standalone", "https://github.com/owner/repo/issues"], { standalone: true, inline: true, repositoryArgument: "owner/repo", initialPage: "issues" }],
@@ -36,6 +38,8 @@ describe("launch arguments", () => {
       [["owner/repo", "--", "123"], { repositoryArgument: "owner/repo", initialDetail: { kind: "number", number: 123 } }],
       [["--help"], { help: true }],
       [["-h"], { help: true }],
+      [["--version"], { version: true }],
+      [["-v"], { version: true }],
     ]
     for (const [args, expected] of cases) expect(parseLaunchArguments(args)).toEqual(expected)
   })
@@ -49,7 +53,10 @@ describe("launch arguments", () => {
       ["--inline", "--height=0"], ["--inline", "--height=-1"], ["--inline", "--height=1.5"],
       ["--inline", "--height=Infinity"], ["--inline", "--height=9007199254740992"], ["--inline=false"],
       ["--standalone=false"], ["--standalone", "--", "--standalone"],
+      ["--resume=false"], ["--resume", "owner/repo"], ["--resume", "--inline"],
+      ["--resume", "123"], ["--resume", "--pr", "123"],
       ["--issue", "-1"], ["--pr=1.5"], ["--unknown"], ["--", "--help"],
+      ["--version=false"], ["--", "--version"],
       ["--commit", "abcd", "--commit", "abcd"], ["--issue", "123", "--pr", "456"],
       ["owner/repo", "123", "--pr", "456"], ["123", "456"],
       ["https://example.com/owner/repo/issues/123"],

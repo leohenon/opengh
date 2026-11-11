@@ -1,10 +1,15 @@
 import { createTestReviewSession } from "./fixtures/reviews"
 import { afterEach, describe, expect, test } from "bun:test"
-import { testRender } from "@opentui/solid"
+import { render, testRender } from "@opentui/solid"
+import { createTestRenderer } from "@opentui/core/testing"
+import { initializeHunk } from "../src/ui/hunk-host"
+import { resumeLocation, type ResumeLocation } from "../src/resume"
+import type { DiffTarget } from "../src/models"
+import { patchFixture } from "./fixtures/diff"
 import { CodeRenderable, type Renderable } from "@opentui/core"
 import { createSignal } from "solid-js"
 import { defaultConfig, type Config } from "../src/config"
-import type { CommitDetailState, IssueDetailState, PullDetailState, RepositoryState } from "../src/repository-state"
+import type { CommitDetailState, DiffState, IssueDetailState, PullDetailState, RepositoryState } from "../src/repository-state"
 import { parseLaunchArguments } from "../src/launch-target"
 import { Root } from "../src/root"
 import { createRepositorySession } from "../src/repository-session"
@@ -907,4 +912,134 @@ test("mouse hyperlinks resolve entities and preserve Back across repositories an
   expect(view.captureCharFrame()).toContain("Repository unavailable")
   await back()
   expect(view.captureCharFrame()).toContain("Source issue")
+})
+
+test.each(["issue", "diff"] as const)("resumes the saved repository and %s without directory discovery, then reports navigation", async (kind) => {
+  const repository = "owner/previous"
+  const [state, setState] = createSignal<RepositoryState>({ status: "loading", repository })
+  const [issue, setIssue] = createSignal<IssueDetailState>()
+  const [diffs, setDiffs] = createSignal<Partial<Record<DiffTarget["kind"], DiffState>>>({})
+  const locations: ResumeLocation[] = []
+  const loaded: unknown[] = []
+  const loadedPulls: number[] = []
+  const reviewOpens: { repository: string; number: number }[] = []
+  const saved = resumeLocation(repository, kind === "issue"
+    ? { page: "issues", details: { issues: { kind: "issue", number: 42 } } }
+    : { page: "pulls", diffs: { pulls: { kind: "pull", number: 42 } } })
+  const view = await createTestRenderer({ width: 120, height: 32 })
+  initializeHunk(view.renderer)
+  await render(() => <Root cwd="/different/repository" resumeLocation={saved} onNavigationChange={(location) => locations.push(location)}
+    services={{ createPullReviewSession: () => ({ ...createTestReviewSession(),
+        open: async (repository, number) => { reviewOpens.push({ repository, number }) },
+      }),
+      resolveRepository: async () => { throw new Error("Resume must not discover the current directory") },
+      resolveLocalRepository: async () => undefined, loadRecentRepositories: async () => [], rememberRepository: async () => {},
+      loadRepositoryTabs: async () => ({ [repository]: "actions" }), saveRepositoryTabs: async () => {},
+      loadConfig: async () => ({ ...defaultConfig }),
+      createRepositorySession: () => ({ ...readySession(), state, issueDetail: issue, diffs,
+        load: async (name) => { loaded.push(name); setState({ status: "ready", repository: name,
+          data: { ...githubDataFixture, repo: { ...githubDataFixture.repo, nameWithOwner: name } }, operations: repositoryOperationsFixture }) },
+        loadIssue: async (number) => { loaded.push(number); setIssue({ number,
+          resource: { status: "ready", value: { ...issueDetailFixture, number, title: "Resumed issue" } },
+          comments: { status: "ready", value: { items: [], page: 1, hasMore: false } }, references: { status: "ready", value: [] } }) },
+        loadPull: async (number) => { loadedPulls.push(number) },
+        loadDiff: async (target) => { loaded.push(target); setDiffs({ [target.kind]: { target,
+          resource: { status: "ready", value: { kind: "patch", patch: patchFixture } } } }) },
+        clearDiff: () => setDiffs({}),
+      }),
+    }} />, view.renderer)
+  const settle = async () => { await Bun.sleep(0); await view.flush(); await view.renderer.idle(); await view.flush() }
+  try {
+    await settle()
+    expect(view.captureCharFrame()).toContain(kind === "issue" ? "Resumed issue" : "newValue")
+    expect(loaded).toEqual([repository, kind === "issue" ? 42 : { kind: "pull", number: 42 }])
+    expect(loadedPulls).toEqual(kind === "diff" ? [42] : [])
+    expect(reviewOpens).toEqual(kind === "diff" ? [{ repository, number: 42 }] : [])
+    expect(locations.at(-1)).toEqual(saved)
+    const count = locations.length
+    view.mockInput.pressKey("?")
+    await settle()
+    expect(locations).toHaveLength(count)
+    view.mockInput.pressEscape()
+    await Bun.sleep(30)
+    await settle()
+    view.mockInput.pressEscape()
+    await Bun.sleep(30)
+    await settle()
+    expect(locations.at(-1)).toEqual(resumeLocation(repository, { page: kind === "issue" ? "issues" : "pulls" }))
+    view.mockInput.pressKey("2")
+    await settle()
+    expect(locations.at(-1)).toEqual(resumeLocation(repository, { page: "commits" }))
+  } finally { view.renderer.destroy(); await view.renderer.closed }
+})
+
+test.each([false, true])("async resume failures fall back only while the restored page is active (navigated away: %s)", async (navigatedAway) => {
+  const [issue, setIssue] = createSignal<IssueDetailState>()
+  const locations: ResumeLocation[] = []
+  const failure = deferred<void>()
+  const view = await testRender(() => <Root cwd="/unused"
+    resumeLocation={resumeLocation("cli/cli", { page: "issues", details: { issues: { kind: "issue", number: 42 } } })}
+    onNavigationChange={(location) => locations.push(location)}
+    services={{ createPullReviewSession: createTestReviewSession,
+      resolveLocalRepository: async () => undefined, loadRecentRepositories: async () => [], rememberRepository: async () => {},
+      loadRepositoryTabs: async () => ({}), saveRepositoryTabs: async () => {}, loadConfig: async () => ({ ...defaultConfig }),
+      createRepositorySession: () => ({ ...readySession(), issueDetail: issue,
+        loadIssue: async (number) => {
+          await failure.promise
+          const resource = { status: "error", phase: "load", message: "Not Found (HTTP 404)" } as const
+          setIssue({ number, resource, comments: resource, references: resource })
+        },
+      }),
+    }} />, { width: 120, height: 32 })
+  try {
+    await Bun.sleep(0)
+    await view.flush()
+    expect(view.captureCharFrame()).toContain("Issue #42")
+    if (navigatedAway) {
+      view.mockInput.pressKey("2")
+      await view.flush()
+    }
+    failure.resolve()
+    await Bun.sleep(0)
+    await view.flush()
+    if (navigatedAway) expect(view.captureCharFrame()).not.toContain("Could not resume page")
+    else {
+      expect(view.captureCharFrame()).toContain("About")
+      expect(view.captureCharFrame()).toContain("Could not resume page")
+      expect(view.captureCharFrame()).toContain("Not Found")
+    }
+    expect(locations.at(-1)).toMatchObject({ repository: "cli/cli", state: { page: navigatedAway ? "commits" : "overview" } })
+    expect(locations.at(-1)!.state.details).toBeUndefined()
+    expect(locations.at(-1)!.state.diffs).toBeUndefined()
+  } finally { view.renderer.destroy(); await view.renderer.closed }
+})
+
+test("resume keeps the selected overview document through async discovery and falls back only when missing", async () => {
+  const documents = githubDataFixture.documents.value!
+  const selected = documents[3]!
+  const ready = { status: "ready", repository: "cli/cli", data: githubDataFixture, operations: repositoryOperationsFixture } as const
+  const [state, setState] = createSignal<RepositoryState>({ ...ready,
+    data: { ...ready.data, documents: { status: "loading", phase: "load" } },
+  })
+  let location: ResumeLocation | undefined
+  const view = await testRender(() => <Root cwd="/unused"
+    resumeLocation={resumeLocation("cli/cli", { page: "overview", document: selected.id })}
+    onNavigationChange={(next) => { location = next }}
+    services={{ createPullReviewSession: createTestReviewSession,
+      resolveLocalRepository: async () => undefined, loadRecentRepositories: async () => [], rememberRepository: async () => {},
+      loadRepositoryTabs: async () => ({}), saveRepositoryTabs: async () => {}, loadConfig: async () => ({ ...defaultConfig }),
+      createRepositorySession: () => ({ ...readySession(), state }),
+    }} />, { width: 120, height: 32 })
+  const settle = async () => { await Bun.sleep(0); await view.flush(); await view.renderer.idle(); await view.flush() }
+  try {
+    await settle()
+    expect(location?.state.document).toBe(selected.id)
+    setState(ready)
+    await settle()
+    expect(location?.state.document).toBe(selected.id)
+    expect(view.captureCharFrame()).toContain("Copyright OpenTUI contributors.")
+    setState({ ...ready, data: { ...ready.data, documents: { status: "ready", value: documents.filter((document) => document.id !== selected.id) } } })
+    await settle()
+    expect(location?.state.document).toBe(documents[0]!.id)
+  } finally { view.renderer.destroy(); await view.renderer.closed }
 })

@@ -2,6 +2,7 @@ import { useRenderer } from "@opentui/solid"
 import { createEffect, createMemo, createSignal, Match, onCleanup, onMount, Show, Switch } from "solid-js"
 import type { DetailTarget, InitialNavigation, NavigationState, Page } from "./navigation"
 import type { LaunchDetail } from "./launch-target"
+import { resumeLocation, type ResumeLocation } from "./resume"
 import { loadRepositoryTabs, saveRepositoryTabs, type RepositoryTabs } from "./repository-tabs"
 import { defaultConfig, loadConfig, saveConfig, type Config } from "./config"
 import { copyToHostClipboard } from "./clipboard"
@@ -77,10 +78,13 @@ export function Root(props: {
   initialPage?: Page
   initialDetail?: LaunchDetail
   standalone?: boolean
+  resumeLocation?: ResumeLocation
+  onNavigationChange?: (location: ResumeLocation) => void
   cwd: string
   services?: Partial<RootServices>
 }) {
   const services = { ...defaultServices, ...props.services }
+  const savedResume = props.resumeLocation
   const renderer = useRenderer()
   const [standalone, setStandalone] = createSignal(props.standalone ?? false)
   const [view, setView] = createSignal<View>("resolving")
@@ -286,7 +290,8 @@ export function Root(props: {
   onMount(() => {
     void refreshLocalRepository().catch(() => setLocalRepository(undefined))
     void Promise.all([
-      services.resolveRepository(props.repositoryArgument, props.cwd).catch((error) => {
+      (savedResume ? Promise.resolve(savedResume.repository)
+        : services.resolveRepository(props.repositoryArgument, props.cwd)).catch((error) => {
         if (!renderer.isDestroyed) setPickerError(error instanceof Error ? error.message : "Could not resolve GitHub repository")
         return undefined
       }),
@@ -302,6 +307,11 @@ export function Root(props: {
       setRecent(repositories)
       setConfig(loadedConfig)
       setRepositoryTabs(savedTabs)
+      if (savedResume) {
+        pendingState = savedResume
+        open(savedResume.repository, undefined, true)
+        return
+      }
       if (resolved) return resolveLaunch({ repository: resolved, detail: props.initialDetail, page: props.initialPage })
       if (!pickerError()) {
         if (props.repositoryArgument === ".") setPickerError(props.initialDetail
@@ -384,6 +394,8 @@ export function Root(props: {
               onOpenFullApp={() => setStandalone(false)}
               onEnsureResources={(scope) => { void session.ensure?.(scope) }}
               initialState={restored?.state}
+              resume={!!restored && restored === savedResume}
+              onNavigationChange={(state) => props.onNavigationChange?.(resumeLocation(repositoryName, state))}
               repositoryEntry={restored?.entry}
               onReturnToRepository={repositoryReturns().length ? () => { returnToRepository() } : undefined}
               onOpenLocation={followRepository}

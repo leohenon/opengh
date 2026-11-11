@@ -2,6 +2,7 @@ import { expect, test } from "bun:test"
 import { mkdtemp, mkdir, realpath, rm, symlink, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join, relative, resolve } from "node:path"
+import { version } from "../package.json"
 
 test("CLI follows install symlinks without loading checkout-controlled Bun configuration", async () => {
   const directory = await realpath(await mkdtemp(join(tmpdir(), "opengh-cli-")))
@@ -39,6 +40,13 @@ test("CLI follows install symlinks without loading checkout-controlled Bun confi
     expect(help.stdout).toContain("Usage:")
     expect(help.stdout).toContain("--commit")
     expect(help.stderr).toBe("")
+
+    for (const flag of ["--version", "-v"]) {
+      const result = await run([flag])
+      expect(result.code).toBe(0)
+      expect(result.stdout).toBe(`opengh ${version}\n`)
+      expect(result.stderr).toBe("")
+    }
 
     const invalid = await run(["https://example.com/owner/repo/issues/123"])
     expect(invalid.code).toBe(1)

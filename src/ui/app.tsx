@@ -87,6 +87,8 @@ export type AppProps = {
   initialPage?: Page
   initialNavigation?: InitialNavigation
   initialState?: NavigationState
+  resume?: boolean
+  onNavigationChange?: (state: NavigationState) => void
   repositoryEntry?: NavigationState
   onReturnToRepository?: () => void
   onOpenLocation?: (repository: string, initial: InitialNavigation, origin: NavigationState, entry?: NavigationState) => void
@@ -184,6 +186,7 @@ function AppContent(props: AppProps) {
   if (initialNavigation?.diff) startingState = openDiff(startingState, initialNavigation.diff)
   const repositoryEntry = props.repositoryEntry ?? startingState
   const [navigation, setNavigation] = createSignal<NavigationState>(startingState)
+  createEffect(on(navigation, (state) => props.onNavigationChange?.(state)))
   onMount(() => {
     if (initialNavigation || props.initialState) props.onPageChange?.(navigation().page)
     for (const [owner, detail] of Object.entries(startingState.details ?? {})) {
@@ -194,7 +197,9 @@ function AppContent(props: AppProps) {
       if (detail.kind === "run") void props.onLoadRun?.(detail.id)
     }
     for (const [owner, target] of Object.entries(startingState.diffs ?? {})) {
-      if (!standalone() || owner === startingState.page) void props.onLoadDiff?.(target)
+      if (standalone() && owner !== startingState.page) continue
+      if (owner === startingState.page) loadDiff(target)
+      else void props.onLoadDiff?.(target)
     }
   })
   const [issueState, setIssueState] = createSignal<ListState>("open")
@@ -270,8 +275,7 @@ function AppContent(props: AppProps) {
     return matches && loaded ? loaded.resource : { status: "loading", phase: "load" }
   }
   const diffResource = createMemo(() => resourceForDiff(diffTarget()))
-  const viewDiff = (target: DiffTarget) => {
-    setNavigation((state) => openDiff(state, target))
+  const loadDiff = (target: DiffTarget) => {
     void props.onLoadDiff?.(target)
     if (target.kind === "pull" && (props.pullDetail?.number !== target.number || props.pullDetail.context.status === "error"))
       void props.onLoadPull?.(target.number)
@@ -279,6 +283,10 @@ function AppContent(props: AppProps) {
       void props.reviews.open(data().repo.nameWithOwner, target.number).catch((error) => {
         if (!disposed && !renderer.isDestroyed) setToast({ id: ++toastId, title: "Review unavailable", message: String(error) })
       })
+  }
+  const viewDiff = (target: DiffTarget) => {
+    setNavigation((state) => openDiff(state, target))
+    loadDiff(target)
   }
   const openCommit = (sha: string) => {
     setNavigation((state) => openDetail(state, { kind: "commit", sha }))
@@ -801,6 +809,27 @@ function AppContent(props: AppProps) {
     if (page() === "actions") return data().runs
     return undefined
   }
+  let resuming = props.resume === true && startingState.page !== "overview"
+  createEffect(() => {
+    if (!resuming) return
+    const current = navigation()
+    if (current.page !== startingState.page
+      || current.details?.[current.page] !== startingState.details?.[startingState.page]
+      || current.diffs?.[current.page] !== startingState.diffs?.[startingState.page]) {
+      resuming = false
+      return
+    }
+    const resource = diffTarget() ? diffResource()
+      : activeRunId() ? runDetail().resource
+      : activeCommitSha() ? commitResource()
+      : activePullNumber() ? pullResource()
+      : activeIssueNumber() ? issueDetail().resource : activeResource()
+    if (!resource || resource.status === "loading") return
+    resuming = false
+    if (resource.status !== "error") return
+    setNavigation({ page: "overview" })
+    setToast({ id: ++toastId, title: "Could not resume page", message: resource.message })
+  })
   const retryTarget = (): RepositoryResource | undefined => {
     if (page() === "overview") {
       const document = currentOverviewDocument()
@@ -997,6 +1026,7 @@ function AppContent(props: AppProps) {
   })
 
   createEffect(() => {
+    if (data().documents.status !== "ready") return
     if (!overviewDocuments().some((document) => document.id === overviewDocument())) {
       setOverviewDocument(overviewDocuments()[0]?.id)
       overviewScroll?.scrollTo(0)

@@ -9,11 +9,14 @@ export type LaunchOptions = {
   initialDetail?: LaunchDetail
   standalone?: boolean
   inline?: boolean
+  resume?: boolean
   help?: boolean
+  version?: boolean
 }
 
 export const launchUsage = `Usage:
   opengh                              Open the repository picker
+  opengh --resume                     Restore the last repository and page
   opengh <owner/repo|.>                Open a repository
   opengh <github-url>                  Open a repository, page, or detail
   opengh [owner/repo|.] <number|hash>   Open an issue, PR, or commit
@@ -37,9 +40,11 @@ URL query strings and anchors are ignored (no comment or line jumping).
 Quote URLs containing shell metacharacters and identifiers such as '#123'.
 
 Options:
+  --resume                            Restore the last interactive page (no repository or target)
   --standalone                        Hide global navigation; Ctrl+O opens the full app
   --inline                            Print the complete page to stdout and exit
   -h, --help                          Show this help
+  -v, --version                       Show version
 `
 
 function positiveNumber(value: string): number {
@@ -100,13 +105,16 @@ export function parseLaunchArguments(args: readonly string[]): LaunchOptions {
   let explicitDetail: LaunchDetail | undefined
   let standalone = false
   let inlineMode = false
+  let resume = false
   let options = true
   for (let index = 0; index < args.length; index++) {
     const argument = args[index]!
     if (options && argument === "--") { options = false; continue }
     if (options && (argument === "--help" || argument === "-h")) return { help: true }
+    if (options && (argument === "--version" || argument === "-v")) return { version: true }
     if (options && argument === "--standalone") { standalone = true; continue }
     if (options && argument === "--inline") { inlineMode = true; continue }
+    if (options && argument === "--resume") { resume = true; continue }
     if (!options || !argument.startsWith("-")) { positional.push(argument.trim()); continue }
     const [option, inline] = argument.split(/=(.*)/s)
     if (!["--commit", "--issue", "--pr"].includes(option!))
@@ -117,9 +125,12 @@ export function parseLaunchArguments(args: readonly string[]): LaunchOptions {
     explicitDetail = option === "--commit" ? { kind: "commit", sha: commitHash(value) }
       : { kind: option === "--pr" ? "pull" : "issue", number: positiveNumber(value) }
   }
+  if (resume && (positional.length || explicitDetail || inlineMode))
+    throw new Error("--resume cannot be combined with a repository, target, or --inline.")
   const mode: LaunchOptions = {
     ...(standalone ? { standalone: true } : {}),
     ...(inlineMode ? { inline: true } : {}),
+    ...(resume ? { resume: true } : {}),
   }
   if (positional.length > 2) throw new Error("Expected at most a repository and one target.")
   if (!positional.length) return explicitDetail ? { ...mode, repositoryArgument: ".", initialDetail: explicitDetail } : mode
