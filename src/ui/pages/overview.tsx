@@ -110,17 +110,21 @@ export function OverviewScreen(props: {
   // Leave the label empty during the first load so it fills in instead of being replaced.
   const currentLabel = () => (document() ? documentLabel(document()!) : undefined)
     ?? (props.documents.status === "loading" && props.documents.value === undefined ? "" : "Documentation")
-  const markdownContext = () => {
+  // Refresh replaces metadata/resource objects even when the document is unchanged.
+  // Only semantic Markdown inputs should invalidate its rendered blocks.
+  const markdownContext = createMemo(() => {
     const source = document()
     return source ? {
       repositoryUrl: new URL(`/${source.repository}`, repo().url).href.replace(/\/$/, ""),
       ref: source.ref,
       path: source.path,
     } : undefined
-  }
-  const plainDocument = () => /(?:^|\/)(?:licen[sc]e|copying|unlicense)(?:$|[._-])/i.test(document()?.path ?? "")
-    && !/\.(?:md|markdown|mdown|mkd)$/i.test(document()?.path ?? "")
+  }, undefined, { equals: (previous, next) => previous?.repositoryUrl === next?.repositoryUrl
+    && previous?.ref === next?.ref && previous?.path === next?.path })
+  const plainDocument = createMemo(() => /(?:^|\/)(?:licen[sc]e|copying|unlicense)(?:$|[._-])/i.test(document()?.path ?? "")
+    && !/\.(?:md|markdown|mdown|mkd)$/i.test(document()?.path ?? ""))
   const documentResource = createMemo<ResourceState<string>>(() => document()?.resource ?? { status: "loading", phase: "load" })
+  const documentContent = createMemo(() => documentResource().value ?? "")
   // One view spans the document list and the selected document, so the spinner never remounts between them.
   const viewResource = createMemo<ResourceState<unknown>>(() => props.documents.value === undefined ? props.documents
     : document() ? documentResource() : { status: "ready", value: null })
@@ -246,7 +250,7 @@ export function OverviewScreen(props: {
                 <box width="100%" paddingX={2} flexShrink={0} alignItems={centered() ? "center" : "stretch"}>
                   <box width="100%" maxWidth={detailContentWidth(props.detailLayout)} minWidth={0} flexShrink={0} flexDirection="column">
                     <GitHubMarkdown
-                      content={documentResource().value ?? ""}
+                      content={documentContent()}
                       anchorRef={(resolve) => { setResolveAnchor(() => resolve) }}
                       syntaxStyle={markdownStyle()}
                       context={markdownContext()}

@@ -1,7 +1,17 @@
 import { describe, expect, test } from "bun:test"
-import { parseLaunchArguments, type LaunchOptions } from "../src/launch-target"
+import { launchUsage, parseLaunchArguments, type LaunchOptions } from "../src/launch-target"
 
 describe("launch arguments", () => {
+  test("aligns help descriptions across usage and options", () => {
+    const rows = launchUsage.split("\n").filter((line) => line.startsWith("  opengh") || line.startsWith("  -"))
+    expect(rows).toHaveLength(13)
+    for (const row of rows) {
+      const columns = /^  (\S.*?)( {2,})(\S.*)$/.exec(row)
+      expect(columns).not.toBeNull()
+      expect(2 + columns![1]!.length + columns![2]!.length).toBe(42)
+    }
+  })
+
   test("preserves repository launch and parses URLs, bare identifiers, and explicit targets", () => {
     const cases: [string[], LaunchOptions][] = [
       [[], {}],

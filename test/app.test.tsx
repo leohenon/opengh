@@ -631,6 +631,20 @@ describe("opengh TUI", () => {
     await view.flush();
     expect(statusLine()).toBe("tab documents · s sidebar · r refresh · o GitHub · y copy URL · / search · ? help");
 
+    setOperations((value) => ({ ...value, refresh: { status: "loading" } }));
+    await view.flush();
+    expect(statusLine()).toBe("");
+    await Bun.sleep(230);
+    await view.flush();
+    expect(statusLine()).toContain("Refreshing");
+    expect(statusLine()).not.toContain("sidebar");
+    expect(statusLine()).not.toContain("help");
+    expect(statusLine()).not.toContain(" · ");
+    expect(config().showStatusBarHints).toBe(true);
+    setOperations(repositoryOperationsFixture);
+    await view.flush();
+    expect(statusLine()).toBe("tab documents · s sidebar · r refresh · o GitHub · y copy URL · / search · ? help");
+
     view.mockInput.pressKey("?");
     await view.flush();
     expect(statusLine()).toBe("esc close");

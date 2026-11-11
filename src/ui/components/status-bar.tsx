@@ -52,7 +52,8 @@ export function StatusBar(props: { kind?: StatusKind; detail?: string; error?: s
   const { colors } = useTheme()
   const dimensions = useTerminalDimensions()
   const hint = () => {
-    const message = props.error ? `× ${props.error}` : loadingMessage()
+    if (!props.error && loadingMessage()) return ""
+    const message = props.error ? `× ${props.error}` : undefined
     const available = dimensions().width - 4 - (message ? Bun.stringWidth(message) + 5 : 0)
     return fitStatusHints(props.hint, available)
   }

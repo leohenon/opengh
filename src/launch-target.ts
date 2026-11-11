@@ -15,14 +15,14 @@ export type LaunchOptions = {
 }
 
 export const launchUsage = `Usage:
-  opengh                              Open the repository picker
-  opengh --resume                     Restore the last repository and page
-  opengh <owner/repo|.>                Open a repository
-  opengh <github-url>                  Open a repository, page, or detail
-  opengh [owner/repo|.] <number|hash>   Open an issue, PR, or commit
-  opengh [owner/repo|.] --commit <hash>
-  opengh [owner/repo|.] --issue <number>
-  opengh [owner/repo|.] --pr <number>
+  opengh                                  Open the repository picker
+  opengh --resume                         Restore the last repository and page
+  opengh <owner/repo|.>                   Open a repository
+  opengh <github-url>                     Open a repository, page, or detail
+  opengh [owner/repo|.] <number|hash>     Open an issue, PR, or commit
+  opengh [owner/repo|.] --commit <hash>   Open a commit
+  opengh [owner/repo|.] --issue <number>  Open an issue
+  opengh [owner/repo|.] --pr <number>     Open a pull request
 
 Without an explicit repository, identifiers use the current directory's GitHub repository.
 Numbers automatically resolve to an issue or PR; use --commit for a digits-only hash.
@@ -40,11 +40,11 @@ URL query strings and anchors are ignored (no comment or line jumping).
 Quote URLs containing shell metacharacters and identifiers such as '#123'.
 
 Options:
-  --resume                            Restore the last interactive page (no repository or target)
-  --standalone                        Hide global navigation; Ctrl+O opens the full app
-  --inline                            Print the complete page to stdout and exit
-  -h, --help                          Show this help
-  -v, --version                       Show version
+  --resume                                Restore the last interactive page (no repository or target)
+  --standalone                            Hide global navigation; Ctrl+O opens the full app
+  --inline                                Print the complete page to stdout and exit
+  -h, --help                              Show this help
+  -v, --version                           Show version
 `
 
 function positiveNumber(value: string): number {

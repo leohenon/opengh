@@ -1,10 +1,11 @@
 import { expect, test } from "bun:test"
-import { CodeRenderable, RGBA, TextAttributes, type Renderable } from "@opentui/core"
+import { CodeRenderable, RGBA, TextAttributes, type Renderable, type ScrollBoxRenderable } from "@opentui/core"
 import type { GitHubMarkdownContext } from "../src/ui/github-markdown"
 import type { MarkdownAnchorResolver } from "../src/ui/markdown-anchors"
 import { testRender } from "@opentui/solid"
 import { createSignal } from "solid-js"
 import type { DetailLayout, MarkdownStyle } from "../src/config"
+import type { RepositoryDocumentState, ResourceState } from "../src/repository-state"
 import { githubDataFixture, repositoryDocumentsFixture } from "./fixtures/github-data"
 import { OverviewScreen, type AboutSidebar } from "../src/ui/pages/overview"
 import { GitHubMarkdown } from "../src/ui/components/github-markdown"
@@ -311,6 +312,96 @@ Inline code: \`\\~20\`
   }
 }, 15_000)
 
+
+test("overview refresh preserves unchanged Markdown blocks and scroll position", async () => {
+  const content = "# Stable README\n\n```ts\nconst example = true\n```\n\n" + "Overview prose.\n\n".repeat(40)
+  const initial: RepositoryDocumentState[] = [
+    { ...repositoryDocumentsFixture[0]!, resource: { status: "ready", value: content } },
+    repositoryDocumentsFixture[1]!,
+  ]
+  const [repo, setRepo] = createSignal(githubDataFixture.repo)
+  const [documents, setDocuments] = createSignal<ResourceState<RepositoryDocumentState[]>>({ status: "ready", value: initial })
+  let scroll: ScrollBoxRenderable | undefined
+  const view = await testRender(() => <ThemeProvider name="github"><OverviewScreen
+    repo={repo()} documents={documents()} aboutSidebar="hide" showScrollbar={false}
+    scrollRef={(value) => { scroll = value }}
+  /></ThemeProvider>, { width: 120, height: 25 })
+  try {
+    await settle(view)
+    scroll!.scrollTo(5)
+    await view.flush()
+    const blocks = codeBlocks(view.renderer.root)
+    const frame = view.captureCharFrame()
+    const scrollTop = scroll!.scrollTop
+    expect(blocks.length).toBeGreaterThan(0)
+    expect(scrollTop).toBeGreaterThan(0)
+    const checkStable = async () => {
+      await settle(view)
+      expect(blocks.every((block) => !block.isDestroyed)).toBe(true)
+      const current = codeBlocks(view.renderer.root)
+      expect(current.length).toBe(blocks.length)
+      expect(current.every((block, index) => block === blocks[index])).toBe(true)
+      expect(scroll!.scrollTop).toBe(scrollTop)
+      expect(view.captureCharFrame()).toBe(frame)
+    }
+
+    setRepo((current) => ({ ...current, stars: current.stars + 1 }))
+    await checkStable()
+    setDocuments({ status: "loading", phase: "load", value: initial })
+    await checkStable()
+    const loading = initial.map((document) => ({ ...document,
+      resource: { status: "loading" as const, phase: "load" as const, value: document.resource.value },
+    }))
+    setDocuments({ status: "ready", value: loading })
+    await checkStable()
+    setDocuments({ status: "ready", value: [loading[0]!, { ...initial[1]!, resource: { status: "ready", value: "Updated secondary document" } }] })
+    await checkStable()
+    setDocuments({ status: "ready", value: initial.map((document) => ({ ...document, resource: { ...document.resource } })) })
+    await checkStable()
+
+    setDocuments({ status: "ready", value: [{ ...initial[0]!, resource: { status: "ready", value: "# Updated README\n\n```ts\nconst updated = true\n```" } }] })
+    scroll!.scrollTo(0)
+    await settle(view)
+    expect(view.captureCharFrame()).toContain("Updated README")
+    expect(codeBlocks(view.renderer.root).some((block) => block.content.includes("const updated = true"))).toBe(true)
+    expect(codeBlocks(view.renderer.root).some((block) => block.content.includes("const example = true"))).toBe(false)
+  } finally { view.renderer.destroy() }
+})
+
+test("overview still updates relative links and plain-text mode when the document source changes", async () => {
+  const [document, setDocument] = createSignal<RepositoryDocumentState>({
+    ...repositoryDocumentsFixture[0]!, resource: { status: "ready", value: "[Guide](guide.md)" },
+  })
+  const view = await testRender(() => <ThemeProvider name="github"><OverviewScreen
+    repo={githubDataFixture.repo} documents={{ status: "ready", value: [document()] }}
+    aboutSidebar="hide" showScrollbar={false} scrollRef={() => {}}
+  /></ThemeProvider>, { width: 120, height: 15 })
+  const links = () => {
+    const urls = new Set<string>()
+    for (let y = 0; y < 15; y++) for (let x = 0; x < 120; x++) {
+      const url = view.renderer.getLinkAt(x, y)
+      if (url) urls.add(url)
+    }
+    return [...urls]
+  }
+  try {
+    await settle(view)
+    expect(links()).toContain("https://github.com/anomalyco/opentui/blob/main/guide.md")
+    setDocument((current) => ({ ...current, ref: "dev" }))
+    await settle(view)
+    expect(links()).toContain("https://github.com/anomalyco/opentui/blob/dev/guide.md")
+    setDocument((current) => ({ ...current, path: "docs/README.md" }))
+    await settle(view)
+    expect(links()).toContain("https://github.com/anomalyco/opentui/blob/dev/docs/guide.md")
+    setDocument((current) => ({ ...current, repository: "another/repo" }))
+    await settle(view)
+    expect(links()).toContain("https://github.com/another/repo/blob/dev/docs/guide.md")
+    setDocument((current) => ({ ...current, path: "LICENSE" }))
+    await settle(view)
+    expect(view.captureCharFrame()).toContain("[Guide](guide.md)")
+    expect(codeBlocks(view.renderer.root)).toHaveLength(0)
+  } finally { view.renderer.destroy() }
+})
 
 test("overview layout centers documents or uses available width independently of the About sidebar", async () => {
   const [layout, setLayout] = createSignal<DetailLayout>("centered")

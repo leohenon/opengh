@@ -12,7 +12,10 @@
     "dev": "bun --watch src/index.tsx",
     "start": "bun src/index.tsx",
     "test": "bun test",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "site:build": "bun site/build.ts",
+    "site:dev": "bun run site:build && bun site/serve.ts",
+    "site:check": "tsc -p site/tsconfig.json && bun run site:build && bun site/check.ts"
   },
   "dependencies": {
     "@opentui/core": "0.6.6",
