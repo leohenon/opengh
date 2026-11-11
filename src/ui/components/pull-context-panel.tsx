@@ -74,7 +74,7 @@ const checkOrder: Record<PullCheck["state"], number> = {
   failure: 0, pending: 1, cancelled: 2, unknown: 3, success: 4, neutral: 5, skipped: 6,
 }
 
-export function PullReadinessPanel(props: { context: PullContext; expectedHeadSha?: string; backgroundColor?: string }) {
+export function PullReadinessPanel(props: { context: PullContext; expectedHeadSha?: string; backgroundColor?: string; collapsed?: boolean }) {
   const { colors } = useTheme()
   const icons = useIcons()
   const readiness = () => props.context.readiness
@@ -106,11 +106,12 @@ export function PullReadinessPanel(props: { context: PullContext; expectedHeadSh
       : check.state === "skipped" ? workflow.skipped : check.state === "unknown" ? workflow.attention : workflow.neutral
   }
   return (
-    <TimelineEntry icon={statusIcon()} color={statusColor()} nodeOffset={2}>
-      <box id="pull-merge-readiness" width="100%" minWidth={0} flexShrink={0} paddingX={2} paddingY={1} backgroundColor={props.backgroundColor} flexDirection="column">
-        <text width="100%" flexShrink={0} fg={statusColor()}>
+    <TimelineEntry icon={statusIcon()} color={statusColor()} nodeOffset={props.collapsed ? 1 : 2}>
+      <box id="pull-merge-readiness" width="100%" minWidth={0} flexShrink={0} paddingX={2} paddingY={props.collapsed ? 0 : 1} backgroundColor={props.backgroundColor} flexDirection="column">
+        <text width="100%" flexShrink={0} fg={statusColor()} height={props.collapsed ? 1 : undefined} wrapMode={props.collapsed ? "none" : "word"} truncate={props.collapsed}>
           <b>{readinessLabels[status().status]}</b><span style={{ fg: colors.muted }}> · Current status</span>
         </text>
+        <Show when={!props.collapsed}>
         <For each={status().reasons}>
           {(reason) => <text width="100%" flexShrink={0} fg={colors.muted}>{reason}</text>}
         </For>
@@ -145,6 +146,7 @@ export function PullReadinessPanel(props: { context: PullContext; expectedHeadSh
             </box>
           )}
         </For>
+        </Show>
       </box>
     </TimelineEntry>
   )

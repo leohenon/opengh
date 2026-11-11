@@ -226,15 +226,15 @@ export function PullScreen(props: {
                 >
                   <Show when={current().state === "open" && props.detail.context.status !== "error"}>
                     <Show when={props.detail.context.value && props.detail.context.status === "ready"} fallback={(
-                      <TimelineEntry icon={props.detail.context.status === "loading" ? icons().workflow.clock : icons().workflow.attention} color={colors.muted} nodeOffset={2}>
-                        <box width="100%" minWidth={0} flexShrink={0} backgroundColor={surface()} paddingX={2} paddingY={1}>
-                          <text width="100%" flexShrink={0} fg={colors.muted}>
+                      <TimelineEntry icon={props.detail.context.status === "loading" ? icons().workflow.clock : icons().workflow.attention} color={colors.muted} nodeOffset={props.timelineCollapsed ? 1 : 2}>
+                        <box width="100%" minWidth={0} flexShrink={0} backgroundColor={surface()} paddingX={2} paddingY={props.timelineCollapsed ? 0 : 1}>
+                          <text width="100%" flexShrink={0} fg={colors.muted} height={props.timelineCollapsed ? 1 : undefined} wrapMode={props.timelineCollapsed ? "none" : "word"} truncate={props.timelineCollapsed}>
                             {props.detail.context.status === "loading" ? "Loading merge readiness…" : "Merge readiness unavailable."}
                           </text>
                         </box>
                       </TimelineEntry>
                     )}>
-                      <PullReadinessPanel context={props.detail.context.value!} expectedHeadSha={current().headSha} backgroundColor={surface()} />
+                      <PullReadinessPanel context={props.detail.context.value!} expectedHeadSha={current().headSha} backgroundColor={surface()} collapsed={props.timelineCollapsed} />
                     </Show>
                   </Show>
                 </DetailActivity>

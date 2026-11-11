@@ -25,7 +25,10 @@ test("one timeline toggle hides bodies, keeps headers and descriptions, and carr
     commits: { status: "ready", value: [githubDataFixture.commits.value!.items[0]!] },
     events: [{ kind: "review", event: "reviewed", id: "review-1", reviewId: 1, actor: "reviewer", state: "approved",
       body: "Review body to collapse.", authorAssociation: "MEMBER", createdAt: date, url: `${githubDataFixture.repo.url}/pull/${summary.number}#review-1` }],
-    context: { status: "ready", value: { ...pullContextFixture, threads: [{ kind: "review-thread", id: "thread-1", path: "src/example.ts",
+    context: { status: "ready", value: { ...pullContextFixture,
+      readiness: { ...pullContextFixture.readiness, isDraft: false, mergeable: "MERGEABLE", mergeStateStatus: "UNSTABLE", reviewDecision: "APPROVED",
+        checks: [{ id: "ci", name: "Readiness check to collapse", state: "failure", required: true }] },
+      threads: [{ kind: "review-thread", id: "thread-1", path: "src/example.ts",
       line: 42, isResolved: true, isOutdated: false, createdAt: date,
       comments: [{ id: "thread-comment-1", author: "reviewer", authorAssociation: "MEMBER", body: "Thread body to collapse.",
         createdAt: date, updatedAt: date, url: `${githubDataFixture.repo.url}/pull/${summary.number}#discussion-1`, diffHunk: "@@ -1 +1 @@\n-oldCode\n+newCode" }] }] } },
@@ -64,13 +67,18 @@ test("one timeline toggle hides bodies, keeps headers and descriptions, and carr
     expect(frame).toContain("Review thread · src/example.ts:42 · 1 comment")
     expect(frame).toContain("Resolved")
     expect(frame).toContain("1 commit")
-    for (const text of ["Thanks for the clear reproduction.", "Review body to collapse.", "Thread body to collapse.", "newCode", "fix: avoid duplicate key events"])
+    expect(frame).toContain("Merge blocked · Current status")
+    expect(view.renderer.root.findDescendantById("pull-merge-readiness")!.height).toBe(1)
+    for (const text of ["Thanks for the clear reproduction.", "Review body to collapse.", "Thread body to collapse.", "newCode", "fix: avoid duplicate key events",
+      "Fix failed required checks.", "Reviews: Approved", "Branch: No conflicts", "Required checks:", "Readiness check to collapse"])
       expect(frame).not.toContain(text)
     view.mockInput.pressKey("z")
     await settle()
     frame = view.captureCharFrame()
-    for (const text of ["Thanks for the clear reproduction.", "Review body to collapse.", "Thread body to collapse.", "newCode", "fix: avoid duplicate key events"])
+    for (const text of ["Thanks for the clear reproduction.", "Review body to collapse.", "Thread body to collapse.", "newCode", "fix: avoid duplicate key events",
+      "Merge blocked · Current status", "Fix failed required checks.", "Reviews: Approved", "Branch: No conflicts", "Required checks:", "Readiness check to collapse"])
       expect(frame).toContain(text)
+    expect(view.renderer.root.findDescendantById("pull-merge-readiness")!.height).toBeGreaterThan(1)
     expect(frame).toContain("z collapse")
     view.mockInput.pressKey("3")
     await settle()
@@ -80,14 +88,14 @@ test("one timeline toggle hides bodies, keeps headers and descriptions, and carr
     await settle()
     expect(view.captureCharFrame()).toContain("React")
     expect(view.captureCharFrame()).toContain("Collapse")
-    await clickControl(view, "context-menu-row-2")
+    await clickControl(view, "context-menu-row-3")
     await settle()
     expect(view.captureCharFrame()).not.toContain("Thanks for the clear reproduction.")
     expect(view.captureCharFrame()).toContain("z expand")
     await view.mockMouse.click(1, 10, 2)
     await settle()
     expect(view.captureCharFrame()).toContain("Expand")
-    await clickControl(view, "context-menu-row-2")
+    await clickControl(view, "context-menu-row-3")
     await settle()
     expect(view.captureCharFrame()).toContain("Thanks for the clear reproduction.")
     expect(view.captureCharFrame()).toContain("z collapse")

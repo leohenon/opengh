@@ -86,10 +86,11 @@ test("review requires feedback and explicit confirmation; blockers prevent submi
 test("inline editor keeps its native buffer through preview and Ctrl+S invokes submission", async () => {
   let draft = ""
   let saved = ""
+  let hint = ""
   let rejectSave = true
   const view = await testRender(() => <ReviewCommentDialog anchor={{ path: "src/a.ts", line: 4, side: "RIGHT" }}
     repositoryUrl="https://github.com/a/b" headSha={"a".repeat(40)} showScrollbar={false}
-    onChange={body => { draft = body }} onSave={body => { if (rejectSave) throw new Error("Draft could not be saved"); saved = body }} onClose={() => {}} onHintChange={() => {}} />, { width: 80, height: 24 })
+    onChange={body => { draft = body }} onSave={body => { if (rejectSave) throw new Error("Draft could not be saved"); saved = body }} onClose={() => {}} onHintChange={value => { hint = value ?? "" }} />, { width: 80, height: 24 })
   try {
     await view.flush()
     const editor = view.renderer.root.findDescendantById("review-editor-body")
@@ -97,6 +98,8 @@ test("inline editor keeps its native buffer through preview and Ctrl+S invokes s
     view.mockInput.pressKey("p", { ctrl: true }); await view.flush()
     expect(view.renderer.root.findDescendantById("review-editor-body")).toBe(editor)
     expect((editor as import("@opentui/core").TextareaRenderable).plainText).toBe("jk")
+    expect(hint).toStartWith("ctrl+s post ·")
+    expect(hint).not.toContain("post comment")
     await Bun.sleep(40); await view.flush()
     expect(view.captureCharFrame()).toContain("jk")
     view.mockInput.pressKey("p", { ctrl: true }); await view.flush()

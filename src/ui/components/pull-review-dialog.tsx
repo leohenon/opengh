@@ -74,7 +74,7 @@ function ReviewEditor(props: ComposerPresentation & {
   }
   createEffect(() => props.onHintChange(confirming()
     ? keys.hints(["dialog.confirm", "confirm"], ["dialog.close", "back"])
-    : keys.hints(...(props.allowEmpty || body().trim() ? [["dialog.submit", "post comment"] as const] : []), ["dialog.togglePreview", composer.preview() ? "write" : "preview"],
+    : keys.hints(...(props.allowEmpty || body().trim() ? [["dialog.submit", "post"] as const] : []), ["dialog.togglePreview", composer.preview() ? "write" : "preview"],
       ["dialog.toggleExpanded", composer.expanded() ? "restore" : "expand"], ["dialog.externalEditor", "editor"],
       ["dialog.discard", "clear"], ["dialog.close", "back"])))
   onCleanup(() => props.onHintChange(undefined))
