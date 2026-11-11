@@ -1,18 +1,21 @@
 import { TextAttributes, type ScrollBoxRenderable } from "@opentui/core";
 import { useTerminalDimensions } from "@opentui/solid";
 import { createMemo, For, type JSX } from "solid-js";
-import type { KeyAction } from "../../keybindings";
+import { parseKey, type KeyAction } from "../../keybindings";
 import { useKeyActions, useKeybindings } from "../keybindings";
 import type { Page } from "../../navigation";
 import { useTheme } from "../theme";
 import { Popup } from "./popup";
 
 type ShortcutEntry = { actions: KeyAction[]; description: string };
+// Paging keys everyone expects (PgUp/PgDn, Space) only add noise next to the letter bindings.
+const obviousKey = (key: string) => ["pageup", "pagedown", "space"].includes(parseKey(key).name);
 const entry = (action: KeyAction | KeyAction[], description: string): ShortcutEntry => ({ actions: typeof action === "string" ? [action] : action, description });
 
 const navigationShortcuts: ShortcutEntry[] = [
   entry(["navigation.up", "navigation.down"], "move / scroll"),
   entry(["navigation.halfPageUp", "navigation.halfPageDown"], "half-page up / down"),
+  entry(["navigation.pageUp", "navigation.pageDown"], "page up / down"),
   entry(["navigation.first", "navigation.last"], "jump to top / bottom"),
 ];
 const searchShortcuts: ShortcutEntry[] = [
@@ -174,7 +177,7 @@ export function Help(props: {
       entry(["diff.panLeft", "diff.panRight"], "diff: horizontal pan"),
       entry(["diff.previousHunk", "diff.nextHunk"], "previous / next hunk"),
       entry("diff.toggleFiles", "toggle sidebar; hide → diff focus"),
-      entry("diff.filterFiles", "filter file paths; Enter/Tab accept, Esc clear/cancel"),
+      entry("diff.filterFiles", "filter file paths in the status bar; Esc clears"),
       entry("diff.toggleLayout", "toggle split / unified"),
       entry("diff.toggleWrap", "toggle line wrapping"),
       entry("diff.toggleComments", "collapse / expand review comments"),
@@ -194,7 +197,7 @@ export function Help(props: {
       ...appShortcuts,
     ];
     return entries.flatMap(({ actions, description }) => {
-      const label = [...new Set(actions.map((action) => keys.key(action, true)).filter(Boolean))].join(" / ");
+      const label = [...new Set(actions.map((action) => keys.key(action, true, obviousKey)).filter(Boolean))].join(" / ");
       return label ? [{ keys: label, description }] : [];
     });
   });

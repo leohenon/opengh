@@ -629,7 +629,7 @@ describe("opengh TUI", () => {
     expect(statusLine()).toBe("");
     setConfig({ ...defaultConfig, showStatusBarHints: true, hideDocumentsTab: false, compactHeader: false, iconStyle: "unicode" });
     await view.flush();
-    expect(statusLine()).toBe("tab documents · b sidebar · r refresh · o GitHub · y copy URL · / search · ? help");
+    expect(statusLine()).toBe("tab documents · s sidebar · r refresh · o GitHub · y copy URL · / search · ? help");
 
     view.mockInput.pressKey("?");
     await view.flush();
@@ -638,7 +638,7 @@ describe("opengh TUI", () => {
     await Bun.sleep(30);
     view.mockInput.pressKey(",");
     await view.flush();
-    expect(statusLine()).toBe("enter open · ↑/↓ select · ←/→ change · / search · esc close");
+    expect(statusLine()).toBe("enter open · / search · esc close");
     for (let i = 0; i < 9; i++) view.mockInput.pressArrow("down");
     view.mockInput.pressEnter();
     await view.flush();
@@ -2045,7 +2045,7 @@ describe("opengh TUI", () => {
     expect(view.captureCharFrame()).toContain("‹ README ›");
   });
 
-  test("b shows or hides the About sidebar over the width-based default", async () => {
+  test("s shows or hides the About sidebar over the width-based default", async () => {
     const view = await testRender(
       () => <App data={githubDataFixture} operations={repositoryOperationsFixture} />,
       { width: 76, height: 24 },
@@ -2053,13 +2053,13 @@ describe("opengh TUI", () => {
     active.push(view);
     await view.flush();
     expect(view.captureCharFrame()).not.toContain("About");
-    view.mockInput.pressKey("b");
+    view.mockInput.pressKey("s");
     await view.flush();
     expect(view.captureCharFrame()).toContain("About");
 
     // An explicit choice no longer follows the terminal width.
     view.resize(120, 24);
-    view.mockInput.pressKey("b");
+    view.mockInput.pressKey("s");
     await view.flush();
     expect(view.captureCharFrame()).not.toContain("About");
   });

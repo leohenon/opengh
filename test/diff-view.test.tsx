@@ -1,40 +1,50 @@
 import { expect, test } from "bun:test"
 import { createTestRenderer } from "@opentui/core/testing"
-import type { BoxRenderable, ScrollBoxRenderable } from "@opentui/core"
+import { RGBA, type BoxRenderable, type ScrollBoxRenderable } from "@opentui/core"
 import { render } from "@opentui/solid"
 import { createSignal } from "solid-js"
 import type { DiffContent, DiffTarget } from "../src/models"
 import type { CommitDetailState, DiffState, PullDetailState, ResourceState } from "../src/repository-state"
 import { App } from "../src/ui/app"
 import { defaultConfig } from "../src/config"
+import { appColors, resolveTheme } from "../src/theme"
 import { SelectionClipboard } from "../src/ui/components/selection-clipboard"
 import { initializeHunk } from "../src/ui/hunk-host"
 import { DiffScreen } from "../src/ui/pages/diff"
+import { StatusPromptBar, StatusPromptProvider } from "../src/ui/status-prompt"
 import { commitDetailFixture, githubDataFixture, pullContextFixture, repositoryOperationsFixture } from "./fixtures/github-data"
 import { patchFixture } from "./fixtures/diff"
 import { parseDiff } from "../src/ui/diff-model"
 import { clickControl } from "./fixtures/mouse"
 
-test("f filters complete current and previous paths live, accepts, clears and cancels without toggling files", async () => {
+test("F filters complete current and previous paths live, accepts, clears and cancels without toggling files", async () => {
   const setup = await createTestRenderer({ width: 100, height: 20 })
   initializeHunk(setup.renderer)
   const files = [
     { path: "src/very-long-directory/alpha.ts", additions: 0, deletions: 0, status: "modified" as const },
     { path: "src/beta.ts", previousPath: "legacy/OLD-name.ts", additions: 0, deletions: 0, status: "renamed" as const },
   ]
-  await render(() => <box width="100%" height="100%"><DiffScreen target={{ kind: "commit", sha: "abc" }}
-    resource={{ status: "ready", value: { kind: "files", files, truncated: false } }} interactive showScrollbar={false} onLoadFiles={() => {}} /></box>, setup.renderer)
+  await render(() => <StatusPromptProvider><box width="100%" height="100%" flexDirection="column">
+    <DiffScreen target={{ kind: "commit", sha: "abc" }}
+      resource={{ status: "ready", value: { kind: "files", files, truncated: false } }} interactive showScrollbar={false} onLoadFiles={() => {}} />
+    <StatusPromptBar fallback={<text id="status-bar" height={1}>status</text>} />
+  </box></StatusPromptProvider>, setup.renderer)
   const settle = async () => { await setup.flush(); await setup.renderer.idle(); await setup.flush() }
   const pane = () => setup.renderer.root.findDescendantById("diff-files-pane")!
   const input = () => setup.renderer.root.findDescendantById("diff-file-filter")
   const escape = async () => { setup.mockInput.pressEscape(); await Bun.sleep(30); await settle() }
   try {
     await settle()
-    setup.mockInput.pressKey("f")
+    expect(setup.captureCharFrame()).toContain("status")
+    setup.mockInput.pressKey("F")
     await settle()
-    expect(pane().visible).toBe(true) // f must not hide an already visible sidebar.
+    expect(pane().visible).toBe(true) // F must not hide an already visible sidebar.
     expect(input()?.focused).toBe(true)
-    expect(input()!.y).toBe(pane().y + pane().height - 2) // Filter and hints sit below the file list.
+    // Like `/` search, the prompt replaces the status bar row instead of living in the sidebar.
+    expect(input()!.y).toBe(19)
+    expect(setup.renderer.root.findDescendantById("status-bar")).toBeUndefined()
+    expect(setup.captureCharFrame()).toContain("filter:")
+    expect(setup.captureCharFrame()).not.toMatch(/accept|cancel/)
     await setup.mockInput.typeText("ALPHA.ts") // The matching suffix is truncated in the sidebar.
     await settle()
     expect(setup.captureCharFrame()).toContain("Files (1/2)")
@@ -42,38 +52,61 @@ test("f filters complete current and previous paths live, accepts, clears and ca
     setup.mockInput.pressEnter()
     await settle()
     expect(input()).toBeUndefined()
+    expect(setup.renderer.root.findDescendantById("status-bar")).toBeDefined() // Accepting returns the status bar.
     expect(setup.captureCharFrame()).toContain("Files (1/2)")
-    setup.mockInput.pressKey("b")
+    setup.mockInput.pressKey("s")
     expect(pane().visible).toBe(false)
-    setup.mockInput.pressKey("f")
+    setup.mockInput.pressKey("F")
     await settle()
     expect(pane().visible).toBe(true)
     expect(input()?.focused).toBe(true)
-    await escape() // Hunk's first Escape clears the filter, staying in the prompt.
-    expect(input()?.focused).toBe(true)
+    expect(setup.captureCharFrame()).toContain("filter: ALPHA.ts") // Reopening edits the retained filter.
+    expect(setup.captureCharFrame()).toContain("Files (1/2)")
+    await escape() // Escape while editing clears the filter and closes the prompt.
+    expect(input()).toBeUndefined()
+    expect(pane().visible).toBe(true)
     expect(setup.captureCharFrame()).toContain("Files (2)")
+    // Matches are painted with the search colors, like `/` search; matching stays case-insensitive.
+    setup.mockInput.pressKey("F")
+    await settle()
+    await setup.mockInput.typeText("BETA")
+    await settle()
+    const match = appColors(resolveTheme(defaultConfig.theme)).searchMatchBg
+    const painted = () => setup.captureSpans().lines.slice(pane().y, pane().y + pane().height).flatMap((line) => line.spans)
+      .filter((span) => span.bg.equals(RGBA.fromHex(match))).map((span) => span.text)
+    expect(painted()).toEqual(["beta"])
+    setup.mockInput.pressEnter() // Enter keeps the filter and its highlights, like a retained search.
+    await settle()
+    expect(input()).toBeUndefined()
+    expect(setup.captureCharFrame()).toContain("Files (1/2)")
+    expect(painted()).toEqual(["beta"])
+    await escape() // Escape on a retained filter clears it instead of leaving the diff.
+    expect(pane().visible).toBe(true)
+    expect(setup.captureCharFrame()).toContain("Files (2)")
+    expect(painted()).toEqual([])
+    setup.mockInput.pressKey("F")
+    await settle()
     await setup.mockInput.typeText("  OLD-name  ")
     await settle()
     expect(setup.captureCharFrame()).toContain("Files (1/2)")
     expect(setup.captureCharFrame()).toContain("src/beta.ts")
-    setup.mockInput.pressTab() // Accept to navigation, retaining the query.
+    setup.mockInput.pressTab() // Tab also accepts to navigation, retaining the query.
     await settle()
     expect(input()).toBeUndefined()
-    setup.mockInput.pressKey("f")
-    await settle()
+    expect(setup.captureCharFrame()).toContain("Files (1/2)")
     await escape()
+    setup.mockInput.pressKey("F")
+    await settle()
     await setup.mockInput.typeText("no-such-file")
     await settle()
     expect(setup.captureCharFrame()).toContain("No matching files.")
     expect(setup.captureCharFrame()).toContain("Files (0/2)")
     await escape()
-    await escape() // Empty Escape cancels only the prompt, not the diff.
     expect(input()).toBeUndefined()
-    expect(pane().visible).toBe(true)
     expect(setup.captureCharFrame()).toContain("Files (2)")
     setup.resize(48, 20)
-    setup.mockInput.pressKey("b")
-    setup.mockInput.pressKey("f")
+    setup.mockInput.pressKey("s")
+    setup.mockInput.pressKey("F")
     await settle()
     expect(pane().visible).toBe(true)
     expect(input()?.focused).toBe(true)
@@ -213,7 +246,7 @@ test("mouse diff gestures select hunks in place, isolate pane wheels, pan, wrap,
     await settle()
     expect(body().scrollTop).toBe(top)
     setInteractive(true)
-    setup.mockInput.pressKey("b")
+    setup.mockInput.pressKey("s")
     expect(files().visible).toBe(false)
     setup.resize(48, 26)
     await settle()
@@ -294,19 +327,19 @@ test("hunk navigation follows native layout and metadata-only selection removes 
     const focusedSelection = selectionBackground()
     const bodyWidth = () => setup.renderer.root.findDescendantById("embedded-diff-host")!.width
     const withSidebar = bodyWidth()
-    setup.mockInput.pressKey("b")
+    setup.mockInput.pressKey("s")
     await settle()
     expect(setup.captureCharFrame()).not.toContain("Files (2)")
     expectFocus("diff")
     expect(bodyWidth()).toBeGreaterThan(withSidebar)
-    setup.mockInput.pressKey("f")
+    setup.mockInput.pressKey("F")
     await settle()
     expectFocus("files")
     expect(bodyWidth()).toBe(withSidebar)
     setup.mockInput.pressEscape() // Leave the file filter before toggling the sidebar.
     await Bun.sleep(30)
     await settle()
-    setup.mockInput.pressKey("b")
+    setup.mockInput.pressKey("s")
     setup.mockInput.pressTab() // Tab restores the hidden list as well.
     await settle()
     expectFocus("files")
@@ -393,24 +426,23 @@ test("numbered tabs retain independent diff viewers, geometry and scroll until E
     setup.mockInput.pressKey("2")
     setup.mockInput.pressKey("D")
     await settle()
-    setup.mockInput.pressKey("f")
+    setup.mockInput.pressKey("F")
     await settle()
-    setup.mockInput.pressKey("s")
+    setup.mockInput.pressKey("S")
     await settle()
     expect(setup.captureCharFrame()).not.toContain("Switch repository")
-    expect(setup.captureCharFrame()).toContain("Files (2/2)") // s is filter input, not a global shortcut.
-    setup.mockInput.pressEscape()
-    await Bun.sleep(30)
-    setup.mockInput.pressEscape()
+    expect(setup.captureCharFrame()).toContain("Files (2/2)") // S is filter input, not a global shortcut.
+    setup.mockInput.pressEscape() // One Escape clears the filter and closes the prompt; the diff stays open.
     await Bun.sleep(30)
     await settle()
-    setup.mockInput.pressKey("s")
+    expect(setup.captureCharFrame()).toContain("Files (2)")
+    setup.mockInput.pressKey("S")
     await settle()
     expect(setup.captureCharFrame()).toContain("Switch repository")
     setup.mockInput.pressEscape()
     await Bun.sleep(30)
     await settle()
-    expect(setup.captureCharFrame()).toContain("←/→ tabs")
+    expect(setup.captureCharFrame()).toContain("focus diff")
     setup.mockInput.pressArrow("right")
     await settle()
     expect(setup.captureCharFrame()).toContain("Open (61)")
@@ -424,7 +456,7 @@ test("numbered tabs retain independent diff viewers, geometry and scroll until E
     setup.mockInput.pressArrow("right")
     await settle()
     expect(setup.captureCharFrame()).toContain("Files (2)")
-    expect(setup.captureCharFrame()).toContain("←/→ tabs")
+    expect(setup.captureCharFrame()).toContain("focus diff")
     setup.mockInput.pressKey("j") // Select the second changed file.
     setup.mockInput.pressEnter()
     await settle()
@@ -568,11 +600,11 @@ test("D embeds diffs from commit and PR lists/details without losing their origi
     expect(requested.at(-1)).toEqual({ kind: "commit", sha: secondCommit.sha })
     expect(setup.captureCharFrame()).toContain("newValue")
     expect(setup.captureCharFrame()).toContain("example.ts")
-    expect(setup.captureCharFrame()).toContain("←/→ tabs")
+    expect(setup.captureCharFrame()).toContain("focus diff")
     input.pressTab() // Focus code while keeping the sidebar open.
     await settle()
     expect(setup.captureCharFrame()).toContain("Files (1)")
-    expect(setup.captureCharFrame()).toContain("←/→ pan")
+    expect(setup.captureCharFrame()).toContain("focus files")
     const unpanned = setup.captureCharFrame()
     input.pressArrow("right")
     await settle()

@@ -65,6 +65,7 @@ import { HyperlinkProvider, HyperlinkSurface } from "./hyperlinks"
 import { resolveLinkTarget } from "../link-target"
 import type { MarkdownAnchorRequest } from "./markdown-anchors"
 import { SearchProvider } from "./search-context"
+import { StatusPromptBar, StatusPromptProvider } from "./status-prompt"
 import { SearchSurface } from "./components/search-surface"
 
 type Overlay = "context-menu" | "reactions" | "help" | "branch-picker" | "settings" | "issue-references" | "issue-actions" | "issue-action" | "pull-merge" | "pull-draft" | "pull-review" | "review-comment" | "inline-retry" | "command" | "switch-repo"
@@ -1284,7 +1285,6 @@ function AppContent(props: AppProps) {
   const shortcutHint = () => {
     if (!config().showStatusBarHints) return undefined
     const hint = (...entries: HintEntry[]) => keys.hints(...entries)
-    const select: HintEntry = [["navigation.up", "navigation.down"], "select"]
     const open: HintEntry = ["navigation.activate", "open"]
     const back: HintEntry = ["navigation.back", "back"]
     const github: HintEntry = ["item.open", "GitHub"]
@@ -1293,42 +1293,40 @@ function AppContent(props: AppProps) {
     const timeline: HintEntry = ["detail.toggleTimeline", timelineCollapsed() ? "expand" : "collapse"]
     const help: HintEntry = ["global.help", "help"]
     const close: HintEntry = ["dialog.close", "close"]
-    const picker: HintEntry[] = [["picker.accept", "open"], [["picker.up", "picker.down"], "select"], close]
+    const picker: HintEntry[] = [["picker.accept", "open"], close]
     if (overlay() === "context-menu") return undefined
-    if (overlay() === "reactions") return hint(["navigation.activate", "add"], select, close)
+    if (overlay() === "reactions") return hint(["navigation.activate", "add"], close)
     if (overlay() === "issue-action" || overlay() === "pull-merge" || overlay() === "pull-draft" || overlay() === "pull-review" || overlay() === "review-comment" || overlay() === "inline-retry") return issueActionHint()
-    if (overlay() === "issue-actions") return hint(open, select, close)
+    if (overlay() === "issue-actions") return hint(open, close)
     if (overlay() === "help") return hint(close)
     if (overlay() === "settings") return settingsHint()
     if (overlay() === "command") return commandHint()
     if (overlay() === "branch-picker" || overlay() === "switch-repo") return hint(...picker)
-    if (overlay() === "issue-references") return hint(open, select, ["references.switchTab", "switch tabs"], copy, close)
+    if (overlay() === "issue-references") return hint(open, ["references.switchTab", "switch tabs"], copy, close)
     // Arrays are priority lists, identical at every terminal width. The footer
     // fits whole hints without hiding recovery/primary actions behind copy/open.
     const common: HintEntry[] = [...(standalone() ? [["global.openFullApp", "full app"] as const] : []), ["search.start", "search"], ...(props.onSwitchRepository ? [["global.switchRepository", "switch repo"] as const] : []), help]
     const resource = activeResource()
     if (resource?.status === "loading" && resource.value === undefined) {
       const detail = diffTarget() || activeRunId() || activeCommitSha() || activeIssueNumber() || activePullNumber()
-      const tabs: HintEntry = [["navigation.previousTab", "navigation.nextTab"], "tabs"]
-      return hint(...(detail ? [back] : []), ...(!diffTarget() && !standalone() ? [tabs] : []), ...common)
+      return hint(...(detail ? [back] : []), ...common)
     }
     const canRefresh = operations().refresh.status !== "loading" && resource?.status !== "loading"
     const retry: HintEntry[] = canRefresh && resource?.status === "error" ? [["view.refresh", "retry"]] : []
     const refresh: HintEntry[] = canRefresh && resource?.status !== "error" ? [["view.refresh", "refresh"]] : []
     const more = (available: boolean | undefined): HintEntry[] => available ? [["navigation.activate", "load more"]] : []
-    const list = (hasItems: boolean): HintEntry[] => hasItems ? [open, select] : []
+    const list = (hasItems: boolean): HintEntry[] => hasItems ? [open] : []
     if (diffTarget()) {
       const files = diffFocus()[page()] === "files"
-      const horizontal: HintEntry = [files ? ["navigation.previousTab", "navigation.nextTab"] : ["diff.panLeft", "diff.panRight"], files ? "tabs" : "pan"]
       const failed = resource?.status === "error"
       const recovery: HintEntry[] = failed ? [...retry, ["navigation.activate", "file list"]]
         : canRefresh && diffResource().value?.kind === "files" ? [["view.refresh", "retry full diff"]] : []
       const comments: HintEntry[] = threadsForDiff(diffTarget()!).length
         ? [["diff.toggleComments", diffCommentsCollapsed()[page()] ? "expand" : "collapse"]] : []
-      return hint(back, ...recovery, ["diff.focus", `focus ${files ? "diff" : "files"}`], horizontal,
+      return hint(back, ...recovery, ["diff.focus", `focus ${files ? "diff" : "files"}`],
         [["diff.previousHunk", "diff.nextHunk"], "hunks"],
         ...(failed ? [] : [["diff.toggleLayout", "layout"], ["diff.toggleWrap", "wrap"]] as const),
-        ["diff.toggleFiles", "toggle files"], ["diff.filterFiles", "filter files"], [["navigation.up", "navigation.down"], files ? "files" : "scroll"],
+        ["diff.toggleFiles", "toggle files"], ["diff.filterFiles", "filter files"],
         ...comments, ["diff.openViewer", "viewer"], ...refresh, github, ...common)
     }
     if (activeRunId()) return hint(back, ...retry,
@@ -1590,10 +1588,11 @@ function AppContent(props: AppProps) {
     <MotionProvider reduced={config().reducedMotion}>
     <MarkdownProvider style={config().markdownStyle}>
     <box width={dimensions().width} height={dimensions().height} flexDirection="column" backgroundColor={colors.canvas}>
+      <StatusPromptProvider>
       <SearchProvider enabled={overlay() === undefined || overlay() === "settings"} scope={overlay() === "settings" ? "settings" : undefined}
-        footer={<StatusBar kind={status()} detail={statusDetail()} error={statusError()}
+        footer={<StatusPromptBar fallback={<StatusBar kind={status()} detail={statusDetail()} error={statusError()}
           hint={statusError() ? keys.hint("view.refresh", "retry") : shortcutHint()}
-          zIndex={overlay() && (config().showStatusBarHints || ((status() || statusError()) && !fullscreenEditorOpen())) ? 350 : 0} />}
+          zIndex={overlay() && (config().showStatusBarHints || ((status() || statusError()) && !fullscreenEditorOpen())) ? 350 : 0} />} />}
         identity={JSON.stringify([
         data().repo.nameWithOwner, page(), navigation().details?.[page()], diffTarget(),
         page() === "commits" ? data().currentBranch : page() === "issues" ? issueState() : page() === "pulls" ? pullState()
@@ -1995,6 +1994,7 @@ function AppContent(props: AppProps) {
         />
       </Show>
       </SearchProvider>
+      </StatusPromptProvider>
     </box>
     </MarkdownProvider>
     </MotionProvider>

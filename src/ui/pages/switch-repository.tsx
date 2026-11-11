@@ -85,7 +85,7 @@ export function SwitchRepositoryScreen(props: {
       </SearchablePicker>
       <Show when={props.renderStatusBar !== false && props.showStatusBarHints}>
         <box position="absolute" left={0} bottom={0} width="100%" height={1} zIndex={101}>
-          <StatusBar hint={keys.hints(["picker.accept", "open"], [["picker.up", "picker.down"], "select"], ["dialog.close", "close"])} />
+          <StatusBar hint={keys.hints(["picker.accept", "open"], ["dialog.close", "close"])} />
         </box>
       </Show>
     </>

@@ -123,7 +123,7 @@ describe("application root", () => {
     const settle = async () => { await Bun.sleep(0); await view.flush() }
     await settle()
     expect(view.captureCharFrame()).toContain("Metadata unavailable")
-    view.mockInput.pressKey("s")
+    view.mockInput.pressKey("S")
     await settle()
     view.mockInput.pressEscape()
     await Bun.sleep(30)
@@ -140,7 +140,7 @@ describe("application root", () => {
     expect(view.captureCharFrame()).toContain("retain focused child")
 
     for (const repository of ["owner/other", "CLI/CLI"]) {
-      view.mockInput.pressKey("s")
+      view.mockInput.pressKey("S")
       await settle()
       await view.mockInput.typeText(repository)
       view.mockInput.pressEnter()
@@ -180,7 +180,7 @@ describe("application root", () => {
     expect(view.captureCharFrame()).toContain("f6 retry")
     expect(loads).toBe(0)
 
-    view.mockInput.pressKey("s")
+    view.mockInput.pressKey("S")
     await settle()
     view.mockInput.pressEscape()
     await Bun.sleep(30)
@@ -193,7 +193,7 @@ describe("application root", () => {
       expect(lookups).toBe(2)
       expect(pulls).toEqual([9999])
     } else {
-      view.mockInput.pressKey("s")
+      view.mockInput.pressKey("S")
       await settle()
       await view.mockInput.typeText("cli/cli")
       view.mockInput.pressEnter()
@@ -430,7 +430,7 @@ test("always remembers a main tab per repository and restores it on direct open"
   }} />, { width: 120, height: 32 })
   const settle = async () => { await Bun.sleep(0); await view.flush() }
   const switchTo = async (repository: string) => {
-    view.mockInput.pressKey("s")
+    view.mockInput.pressKey("S")
     await settle()
     await view.mockInput.typeText(repository)
     view.mockInput.pressEnter()

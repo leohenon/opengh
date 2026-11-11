@@ -326,7 +326,7 @@ test("issue action overlays isolate input and confirm comments, closing, reopeni
     view.mockInput.pressKey("a");
     await settle();
     expect(view.captureCharFrame()).toContain("Close issue");
-    expect(statusLine()).toBe("enter open · ↑/↓ select · esc close");
+    expect(statusLine()).toBe("enter open · esc close");
     expect(view.captureCharFrame()).toContain("Mark as duplicate");
     await view.mockMouse.click(0, 0);
     await settle();

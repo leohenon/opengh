@@ -75,11 +75,11 @@ describe("repository launcher", () => {
     active.push(view)
     await view.flush()
     const lines = view.captureCharFrame().trimEnd().split("\n")
-    expect(lines.at(-1)).toContain("r retry · s switch repository · q quit")
+    expect(lines.at(-1)).toContain("r retry · S switch repository · q quit")
     expect(lines.slice(0, -1).join("\n")).not.toContain("s switch repository")
     expect(view.renderer.root.findDescendantById("repository-switch")).toBeUndefined()
     expect(view.renderer.root.findDescendantById("repository-back")).toBeUndefined()
-    view.mockInput.pressKey("s")
+    view.mockInput.pressKey("S")
     expect(backs).toBe(1)
   })
 

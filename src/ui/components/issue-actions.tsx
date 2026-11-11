@@ -247,7 +247,7 @@ export function IssueActionDialog(props: {
 
   createEffect(() => props.onHintChange(pending() ? "Saving…"
     : confirmSubmit() ? keys.hints(["dialog.confirm", "confirm"], ["dialog.close", "back"])
-    : stage() === "reason" ? keys.hints(["navigation.activate", "select"], [["navigation.up", "navigation.down"], "choose"], ["dialog.close", "close"])
+    : stage() === "reason" ? keys.hints(["navigation.activate", "select"], ["dialog.close", "close"])
     : retry() ? keys.hints(["dialog.submit", "retry"], ["dialog.discard", "discard"], ["dialog.close", "back"])
     : props.kind === "duplicate" ? keys.hints([["dialog.confirm", "dialog.submit"], "review"], ["dialog.discard", "discard"], ["dialog.close", "back"])
     : keys.hints(

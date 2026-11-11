@@ -36,7 +36,7 @@ export function CommandDialog(props: {
   const requestClose = () => { if (!running()) props.onClose() }
   const hint = () => phase() === "Preview"
     ? keys.hints(["dialog.confirm", "confirm"], ...(props.action.destination !== undefined && !editing() ? [["command.editPath", "edit path"] as const] : []), ["dialog.close", "close"])
-    : keys.hints([running() ? "global.interrupt" : "dialog.close", running() ? "cancel" : "close"], ["command.copyOutput", "copy output"], [["navigation.up", "navigation.down"], "scroll"])
+    : keys.hints([running() ? "global.interrupt" : "dialog.close", running() ? "cancel" : "close"], ["command.copyOutput", "copy output"])
   createEffect(() => props.onHintChange?.(hint()))
   onCleanup(() => props.onHintChange?.(undefined))
   const preview = () => {

@@ -1,8 +1,8 @@
 import { BoxRenderable, MouseButton, RGBA, type MouseEvent, type Renderable, type ScrollBoxRenderable } from "@opentui/core"
 import { insert, useKeyboard, useRenderer, useTerminalDimensions } from "@opentui/solid"
-import { KeyInput, useKeyActions, useKeybindings } from "../keybindings"
+import { useKeyActions } from "../keybindings"
 import { getHunkDiffSearchCells, HUNK_DIFF_THEME_NAMES, type HunkDiffBodyProps, type HunkDiffSourceHighlight, type HunkDiffThemeName } from "hunkdiff/opentui"
-import { createEffect, createMemo, createRoot, createSignal, For, getOwner, on, onCleanup, onMount, Show, untrack } from "solid-js"
+import { createEffect, createMemo, createRoot, createSignal, For, getOwner, on, onCleanup, onMount, Show, untrack, type JSX } from "solid-js"
 import type { DiffContent, DiffTarget, PullReviewThread } from "../../models"
 import { createDiffCommentCards, isCommentCard, isSourceRowY } from "../diff-comment-cards"
 import type { ResourceState } from "../../repository-state"
@@ -12,6 +12,7 @@ import type { ContextMenuItem } from "../components/context-menu"
 import { parseDiff, type DiffFile } from "../diff-model"
 import { mountHunk } from "../hunk-host"
 import { createScrollbarVisibility } from "../scrollbar-visibility"
+import { useStatusPrompt } from "../status-prompt"
 import { useTheme } from "../theme"
 import { useIcons } from "../icon-style"
 import { GitHubMarkdown } from "../components/github-markdown"
@@ -86,13 +87,39 @@ export function DiffScreen(props: {
   const [focus, setFocus] = createSignal<DiffFocus>(dimensions().width < 80 ? "diff" : "files")
   createEffect(() => props.onFocusChange?.(focus()))
   const [sidebarHidden, setSidebarHidden] = createSignal(false)
-  const keys = useKeybindings()
   const [fileFilter, setFileFilter] = createSignal("")
   const [filterOpen, setFilterOpen] = createSignal(false)
   // Match Hunk's live path filter, not rendered-text search (which truncates paths).
+  const filterQuery = () => fileFilter().trim().toLowerCase()
   const filteredFiles = createMemo(() => {
-    const query = fileFilter().trim().toLowerCase()
+    const query = filterQuery()
     return parsed().files.filter((file) => !query || [file.path, file.previousPath].filter(Boolean).join(" ").toLowerCase().includes(query))
+  })
+  // Like `/` search, matches stay painted with the search colors while a filter is active
+  // (a lowercase query keeps searchRanges case-insensitive).
+  const highlightPath = (path: string) => {
+    const ranges = searchRanges(path, filterQuery())
+    if (!ranges.length) return path
+    const parts: (string | JSX.Element)[] = []
+    let cursor = 0
+    for (const range of ranges) {
+      if (range.start > cursor) parts.push(path.slice(cursor, range.start))
+      parts.push(<span style={{ fg: colors.searchMatchFg, bg: colors.searchMatchBg }}>{path.slice(range.start, range.end)}</span>)
+      cursor = range.end
+    }
+    if (cursor < path.length) parts.push(path.slice(cursor))
+    return parts
+  }
+  // Like Hunk, the filter is a status-bar prompt: visible only while editing; the
+  // sidebar header count shows a retained filter afterwards.
+  const statusPrompt = useStatusPrompt()
+  createEffect(() => {
+    if (!filterOpen() || !interactive() || !statusPrompt) return
+    onCleanup(statusPrompt.open({
+      id: "diff-file-filter", prefix: "filter:", placeholder: "type to filter files",
+      value: fileFilter, onInput: setFileFilter,
+      detail: () => fileFilter().trim() ? `${filteredFiles().length}/${parsed().files.length}` : "",
+    }))
   })
   const [layout, setLayout] = createSignal<"split" | "unified">()
   const [wrap, setWrap] = createSignal(false)
@@ -462,8 +489,10 @@ export function DiffScreen(props: {
     callback(scroll)
   }
   const focusFiles = () => { setFilterOpen(false); setSidebarHidden(false); setFocus("files") }
+  const clearFilter = () => { setFileFilter(""); focusFiles() }
+  // Like a `/` search draft: Enter/Tab accept and keep the filter, Escape clears it.
   useKeyActions({
-    "dialog.close": () => { if (fileFilter()) setFileFilter(""); else focusFiles() },
+    "dialog.close": clearFilter,
     "input.submit": focusFiles,
     "diff.focus": focusFiles,
   }, { when: () => interactive() && filterOpen(), priority: 50, modal: true })
@@ -557,7 +586,7 @@ export function DiffScreen(props: {
       pan(sign * Math.max(1, Math.round((event.scroll?.delta ?? 1) * 4)))
     }
   }
-  createEffect(() => { if (!interactive()) { bodyMouse.onMouseDrag(); contextMouse.onMouseDrag() } })
+  createEffect(() => { if (!interactive()) { setFilterOpen(false); bodyMouse.onMouseDrag(); contextMouse.onMouseDrag() } })
   useKeyboard(() => {
     contextMouse.onMouseDrag()
     bodyMouse.onMouseDrag()
@@ -572,7 +601,10 @@ export function DiffScreen(props: {
     "item.open": () => props.onOpenGitHub ? props.onOpenGitHub() : false,
     "diff.openViewer": () => props.onOpenExternal?.(),
     "diff.toggleFiles": toggleSidebar,
+    // Reopening edits the retained filter, like `/` reopening its retained query.
     "diff.filterFiles": () => { focusFiles(); setFilterOpen(true) },
+    // A retained filter clears on Escape before Escape means back, like a retained search.
+    "navigation.back": () => { if (!fileFilter()) return false; setFileFilter("") },
     "navigation.activate": () => {
       if (!error()) return false
       props.onLoadFiles()
@@ -677,17 +709,8 @@ export function DiffScreen(props: {
             onSelect={(file) => setPath(file.path)}
             onActivate={(file) => { setPath(file.path); setFocus("diff") }}
           >
-            {(file) => <text height={1} flexGrow={1} minWidth={0} wrapMode="none" truncate fg={colors.text}>{file().path}</text>}
+            {(file) => <text height={1} flexGrow={1} minWidth={0} wrapMode="none" truncate fg={colors.text}>{highlightPath(file().path)}</text>}
           </SelectableList>
-          <Show when={filterOpen()} fallback={<Show when={fileFilter()}><text height={1} wrapMode="none" truncate fg={colors.muted}>filter: {fileFilter()}</text></Show>}>
-            <box height={1} flexShrink={0} flexDirection="row">
-              <text fg={colors.blue}>filter: </text>
-              <KeyInput id="diff-file-filter" flexGrow={1} minWidth={0} value={fileFilter()}
-                focused={interactive() && filterOpen()} placeholder="type to filter files"
-                onInput={setFileFilter} textColor={colors.text} cursorColor={colors.blue} />
-            </box>
-            <text height={1} wrapMode="none" truncate fg={colors.muted}>{keys.hints(["input.submit", "accept"], ["dialog.close", fileFilter() ? "clear" : "cancel"])}</text>
-          </Show>
         </box>
         <box id="diff-content-pane" visible={showBody()}
           {...bodyMouse}

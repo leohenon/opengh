@@ -8,13 +8,13 @@ export const keybindingDefinitions = {
   "global.help": binding(["?"], "Help"),
   "global.openFullApp": binding(["ctrl+o"], "Open full app from standalone mode"),
   "global.settings": binding([","], "Settings"),
-  "global.switchRepository": binding(["s"], "Switch repository"),
+  "global.switchRepository": binding(["S"], "Switch repository"),
   "navigation.up": binding(["up", "k"], "Move / scroll up"),
   "navigation.down": binding(["down", "j"], "Move / scroll down"),
   "navigation.halfPageUp": binding(["u"], "Half-page up"),
   "navigation.halfPageDown": binding(["d"], "Half-page down"),
-  "navigation.pageUp": binding(["pageup"], "Page up"),
-  "navigation.pageDown": binding(["pagedown"], "Page down"),
+  "navigation.pageUp": binding(["pageup", "b", "shift+space"], "Page up"),
+  "navigation.pageDown": binding(["pagedown", "f", "space"], "Page down"),
   "navigation.first": binding(["g"], "First item / top"),
   "navigation.last": binding(["G"], "Last item / bottom"),
   "navigation.previousTab": binding(["left", "h"], "Previous tab"),
@@ -35,7 +35,7 @@ export const keybindingDefinitions = {
   "view.refresh": binding(["r"], "Refresh / retry"),
   "overview.nextDocument": binding(["tab"], "Next document"),
   "overview.previousDocument": binding(["shift+tab"], "Previous document"),
-  "overview.toggleSidebar": binding(["b"], "Show / hide About sidebar"),
+  "overview.toggleSidebar": binding(["s"], "Show / hide About sidebar"),
   "commits.chooseBranch": binding(["tab", "shift+tab"], "Choose branch"),
   "work.toggleState": binding(["tab", "shift+tab"], "Toggle open / closed"),
   "issue.comment": binding(["c"], "Add comment"),
@@ -44,8 +44,8 @@ export const keybindingDefinitions = {
   "detail.toggleTimeline": binding(["z"], "Collapse / expand timeline"),
   "diff.openViewer": binding(["v"], "Open diff in external viewer"),
   "diff.focus": binding(["tab", "shift+tab"], "Focus files / diff"),
-  "diff.toggleFiles": binding(["b"], "Toggle file sidebar"),
-  "diff.filterFiles": binding(["f"], "Filter files"),
+  "diff.toggleFiles": binding(["s"], "Toggle file sidebar"),
+  "diff.filterFiles": binding(["F"], "Filter files"),
   "diff.previousHunk": binding(["["], "Previous hunk"),
   "diff.nextHunk": binding(["]"], "Next hunk"),
   "diff.toggleLayout": binding(["t"], "Toggle split / unified"),
@@ -261,9 +261,11 @@ export function formatKey(key: string) {
   return [...modifiers.filter((modifier) => parsed[modifier]), keyLabels[parsed.name] ?? parsed.name].join("+")
 }
 
-export function formatBinding(bindings: ResolvedKeybindings, action: KeyAction, all = false) {
+export function formatBinding(bindings: ResolvedKeybindings, action: KeyAction, all = false, exclude?: (key: string) => boolean) {
   const keys = bindings[action]
-  return (all ? keys : keys.slice(0, 1)).map(formatKey).join("/")
+  // Callers may hide self-evident keys (e.g. PgUp) from labels, but never leave an action unlabeled.
+  const shown = exclude ? keys.filter((key) => !exclude(key)) : keys
+  return (all ? shown.length ? shown : keys : keys.slice(0, 1)).map(formatKey).join("/")
 }
 
 export type HintEntry = readonly [KeyAction | readonly KeyAction[], string]

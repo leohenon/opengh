@@ -70,12 +70,15 @@ describe("keybindings", () => {
 
   test("diff file filtering is distinct from sidebar toggling and repository switching", () => {
     const bindings = resolveKeybindings()
-    expect(bindings["diff.toggleFiles"]).toEqual(["b"])
-    expect(bindings["diff.filterFiles"]).toEqual(["f"])
-    expect(bindings["global.switchRepository"]).toEqual(["s"])
+    expect(bindings["diff.toggleFiles"]).toEqual(["s"])
+    expect(bindings["diff.filterFiles"]).toEqual(["F"])
+    expect(bindings["global.switchRepository"]).toEqual(["S"])
+    expect(bindings["navigation.pageDown"]).toEqual(["pagedown", "f", "space"])
+    expect(bindings["navigation.pageUp"]).toEqual(["pageup", "b", "shift+space"])
     for (const scope of ["diffFiles", "diffBody"] as const) expect(keybindingContexts[scope]).toContain("diff.filterFiles")
-    expect(() => normalizeKeybindings({ "diff.filterFiles": ["b"] })).toThrow("diff.toggleFiles")
-    expect(() => normalizeKeybindings({ "diff.filterFiles": ["s"] })).toThrow("global.switchRepository")
+    expect(() => normalizeKeybindings({ "diff.filterFiles": ["s"] })).toThrow("diff.toggleFiles")
+    expect(() => normalizeKeybindings({ "diff.filterFiles": ["S"] })).toThrow("global.switchRepository")
+    expect(() => normalizeKeybindings({ "diff.filterFiles": ["f"] })).toThrow("navigation.pageDown")
   })
 
   test("search defaults distinguish n/N, support remapping/disabling, and conflict only in browsing scopes", () => {

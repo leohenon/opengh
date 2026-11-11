@@ -206,7 +206,7 @@ test("row context menus use the clicked subject, preserve left clicks, and rejec
     await view.flush()
     view.mockInput.pressKey("2")
     await view.flush()
-    expect(view.captureCharFrame()).toContain("↑/↓ select")
+    expect(view.captureCharFrame()).toContain("enter open")
     const commit = githubDataFixture.commits.value!.items[1]!
     const { x, y } = point(commit.message)
     await view.mockMouse.drag(x, y, x + 3, y, 2)
@@ -215,7 +215,7 @@ test("row context menus use the clicked subject, preserve left clicks, and rejec
     expect(commits).toBe(0)
     expect(view.captureCharFrame()).toContain("View diff")
     expect(view.captureCharFrame().split("\n").at(-2)?.trim()).toBe("")
-    expect(view.captureCharFrame()).not.toContain("↑/↓ select")
+    expect(view.captureCharFrame()).not.toContain("enter open")
     expect(view.captureCharFrame()).not.toContain("enter choose")
     expect(view.captureCharFrame()).not.toContain("esc close")
     for (const key of ["j", "o", "y"]) view.mockInput.pressKey(key)

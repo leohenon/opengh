@@ -3,6 +3,7 @@ import { createTestRenderer } from "@opentui/core/testing"
 import { render } from "@opentui/solid"
 import { initializeHunk } from "../src/ui/hunk-host"
 import { DiffScreen } from "../src/ui/pages/diff"
+import { StatusPromptBar, StatusPromptProvider } from "../src/ui/status-prompt"
 import { parseDiff } from "../src/ui/diff-model"
 import { reviewRows, reviewSplitBoundary } from "../src/ui/review-lines"
 import type { ContextMenuItem } from "../src/ui/components/context-menu"
@@ -30,10 +31,13 @@ test("diff viewer and GitHub keys work in both context menus without review; e i
   const calls: unknown[][] = []
   let github = 0
   let menu: ContextMenuItem[] = []
-  await render(() => <DiffScreen target={{ kind: "commit", sha: "abc" }}
-    resource={{ status: "ready", value: { kind: "patch", patch } }} interactive showScrollbar={false} onLoadFiles={() => {}}
-    onOpenGitHub={() => { github++ }} onOpenExternal={(...args) => { calls.push(args) }}
-    onContextMenu={(_, items) => { menu = items }} />, setup.renderer)
+  await render(() => <StatusPromptProvider><box width="100%" height="100%" flexDirection="column">
+    <DiffScreen target={{ kind: "commit", sha: "abc" }}
+      resource={{ status: "ready", value: { kind: "patch", patch } }} interactive showScrollbar={false} onLoadFiles={() => {}}
+      onOpenGitHub={() => { github++ }} onOpenExternal={(...args) => { calls.push(args) }}
+      onContextMenu={(_, items) => { menu = items }} />
+    <StatusPromptBar fallback={<box height={1} />} />
+  </box></StatusPromptProvider>, setup.renderer)
   const settle = async () => { await setup.flush(); await setup.renderer.idle(); await setup.flush() }
   try {
     await settle()
@@ -62,7 +66,7 @@ test("diff viewer and GitHub keys work in both context menus without review; e i
     menu.find(item => item.label === "Open diff in external viewer")!.run()
     expect(calls).toEqual([[], [], []])
     const before = calls.length
-    setup.mockInput.pressKey("f")
+    setup.mockInput.pressKey("F")
     await settle()
     setup.mockInput.pressKey("e"); setup.mockInput.pressKey("v"); setup.mockInput.pressKey("o")
     await settle()
@@ -88,14 +92,17 @@ test("hiding the file sidebar from its menu releases filter keyboard ownership",
   initializeHunk(setup.renderer)
   const calls: unknown[][] = []
   let menu: ContextMenuItem[] = []
-  await render(() => <DiffScreen target={{ kind: "commit", sha: "abc" }}
-    resource={{ status: "ready", value: { kind: "patch", patch } }} interactive showScrollbar={false} onLoadFiles={() => {}}
-    onOpenExternal={(...args) => { calls.push(args) }}
-    onContextMenu={(_, items) => { menu = items }} />, setup.renderer)
+  await render(() => <StatusPromptProvider><box width="100%" height="100%" flexDirection="column">
+    <DiffScreen target={{ kind: "commit", sha: "abc" }}
+      resource={{ status: "ready", value: { kind: "patch", patch } }} interactive showScrollbar={false} onLoadFiles={() => {}}
+      onOpenExternal={(...args) => { calls.push(args) }}
+      onContextMenu={(_, items) => { menu = items }} />
+    <StatusPromptBar fallback={<box height={1} />} />
+  </box></StatusPromptProvider>, setup.renderer)
   const settle = async () => { await setup.flush(); await setup.renderer.idle(); await setup.flush() }
   try {
     await settle()
-    setup.mockInput.pressKey("f")
+    setup.mockInput.pressKey("F")
     await settle()
     const body = setup.renderer.root.findDescendantById("diff-content-pane")!
     await setup.mockMouse.click(body.x + 5, body.y + 1, 2)

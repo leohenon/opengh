@@ -2,6 +2,7 @@ import { createContext, createEffect, createMemo, createSignal, onCleanup, Show,
 import { useKeyActions } from "./keybindings"
 import { SearchBar } from "./components/search-bar"
 import { wrapSearchIndex } from "./search"
+import { useStatusPrompt } from "./status-prompt"
 
 export type SearchResult = { id: string; reveal(): void; position?: number }
 export type SearchTarget = {
@@ -37,6 +38,8 @@ export function SearchProvider(props: { identity: string; enabled: boolean; scop
   const [session, setSession] = createSignal<Session>({ query: "" })
   const [results, setResults] = createSignal<SearchResult[]>([])
   const [truncated, setTruncated] = createSignal(false)
+  // An open status prompt (e.g. the diff file filter) owns the footer row while editing.
+  const statusPrompt = useStatusPrompt()
   const sessions = new Map<string, Session>()
   let owner: SearchTarget | undefined
   let identity = ""
@@ -147,7 +150,7 @@ export function SearchProvider(props: { identity: string; enabled: boolean; scop
     return () => { target.clear(); setTargets((targets) => targets.filter((entry) => entry !== target)) }
   } }}>
     {props.children}
-    <Show when={props.enabled && (!!draft() || !!session().query)} fallback={props.footer}>
+    <Show when={props.enabled && !statusPrompt?.prompt() && (!!draft() || !!session().query)} fallback={props.footer}>
       <SearchBar query={query()} editing={!!draft()} current={currentIndex() + 1} total={results().length} truncated={truncated()}
         zIndex={props.scope === undefined ? 0 : 350}
         onInput={(query) => { setDraft((draft) => draft && { ...draft, query }); refresh(true) }} />

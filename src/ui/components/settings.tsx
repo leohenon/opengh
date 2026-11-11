@@ -63,8 +63,8 @@ export function Settings(props: {
   const popupHeight = () => settingOrder.length * rowHeight() + 11 + (sectionOrder.length - 1) * 3
   const split = () => dimensions().width >= 110
   createEffect(() => props.onHintChange?.(busy() ? "Updating settings…" : screen() === "themes"
-    ? keys.hints(["picker.accept", "confirm"], [["picker.up", "picker.down"], "select"], ["dialog.close", "back"])
-    : keys.hints(["navigation.activate", selected() === "theme" ? "open" : "change"], [["navigation.up", "navigation.down"], "select"], [["settings.previousValue", "settings.nextValue"], "change"], ["search.start", "search"], ...(!split() ? [[["navigation.pageUp", "navigation.pageDown"], "description"] as const] : []), ["dialog.close", "close"])))
+    ? keys.hints(["picker.accept", "confirm"], ["dialog.close", "back"])
+    : keys.hints(["navigation.activate", selected() === "theme" ? "open" : "change"], ["search.start", "search"], ...(!split() ? [[["navigation.pageUp", "navigation.pageDown"], "description"] as const] : []), ["dialog.close", "close"])))
   onCleanup(() => props.onHintChange?.(undefined))
   const revealSetting = () => {
     if (selected() === settingOrder[0]) settingsScroll?.scrollTo(0)

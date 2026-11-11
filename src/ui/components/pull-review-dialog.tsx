@@ -250,7 +250,7 @@ export function PullReviewDialog(props: PullReviewDialogProps) {
   createEffect(() => props.onHintChange(busy() ? "Saving…" : confirmation()
     ? keys.hints(["dialog.confirm", "confirm"], ["dialog.close", "back"])
     : stage() === "choose" ? keys.hints(
-      ...(available().length ? [["navigation.activate", "select"], [["navigation.up", "navigation.down"], "choose"]] as const : []),
+      ...(available().length ? [["navigation.activate", "select"]] as const : []),
       ["dialog.close", "close"])
     : keys.hints(
       ...(canSubmit() || canUseHead() || canClearLegacy() ? [["dialog.submit", canSubmit() ? "submit review" : canUseHead() ? "use current commit" : "review old comments"] as const] : []),

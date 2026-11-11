@@ -91,7 +91,7 @@ export function IssueAssigneesPicker(props: {
     ? keys.hints(["dialog.confirm", "confirm"], ["dialog.close", "back"]) : keys.hints(
       ["dialog.submit", "save"],
       ...(filtered()[currentRow()] || !loading() ? [["picker.accept", filtered()[currentRow()] ? "toggle" : props.users?.status === "error" ? "retry users" : "load users"] as const] : []),
-      [["picker.up", "picker.down"], "navigate"], ["dialog.close", "cancel"])))
+      ["dialog.close", "cancel"])))
   onCleanup(() => props.onHintChange(undefined))
   usePaste((event) => {
     if (blocked()) { event.preventDefault(); event.stopPropagation() }

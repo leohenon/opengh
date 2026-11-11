@@ -20,7 +20,7 @@ function createKeybindings(overrides: () => KeybindingOverrides | undefined) {
   return {
     bindings,
     matches,
-    key: (action: KeyAction, all = false) => formatBinding(bindings(), action, all),
+    key: (action: KeyAction, all = false, exclude?: (key: string) => boolean) => formatBinding(bindings(), action, all, exclude),
     hint: (action: KeyAction, label: string) => formatHints(bindings(), [[action, label]]),
     hints: (...entries: HintEntry[]) => formatHints(bindings(), entries),
     register(handlers: KeyHandlers, options: KeyHandlerOptions) {
