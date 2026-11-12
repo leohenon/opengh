@@ -82,6 +82,8 @@ async function build(name: string) {
     compile: {
       target: `bun-${name}` as Bun.Build.CompileTarget,
       outfile: join(directory, "opengh"),
+      // An offline build, such as Nix's, supplies the Bun to embed instead of letting it be downloaded.
+      ...(process.env.OPENGH_BUN_EXECUTABLE ? { executablePath: process.env.OPENGH_BUN_EXECUTABLE } : {}),
       // opengh runs inside untrusted checkouts: never load their bunfig.toml preloads or .env files.
       autoloadBunfig: false,
       autoloadDotenv: false,
@@ -98,6 +100,10 @@ async function build(name: string) {
   await writeFile(join(dist, `${archive}.sha256`), `${digest}  ${archive}\n`)
   console.log(`${name}: dist/opengh-${name}/opengh, dist/${archive}`)
 }
+
+// The compiling Bun becomes the executable's runtime. `bun run` uses the Bun on PATH, whatever started it.
+const pinned = manifest.packageManager.replace("bun@", "")
+if (Bun.version !== pinned) console.warn(`warning: building with Bun ${Bun.version}; releases use Bun ${pinned} (package.json).`)
 
 const requested = process.argv.slice(2)
 const names = requested.includes("--all") ? Object.keys(targets) : requested.length ? requested : [`${process.platform}-${process.arch}`]

@@ -38,3 +38,20 @@ jobs:
           cat dist/*.tar.gz.sha256 > dist/SHA256SUMS
           OPENGH_DOWNLOAD_BASE_URL="file://$PWD/dist" OPENGH_INSTALL_DIR="$RUNNER_TEMP/bin" sh install.sh
           bun run smoke "$RUNNER_TEMP/bin/opengh"
+
+  nix:
+    name: Nix (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-15]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: cachix/install-nix-action@3dc140bfc76c49fbd4dd958429132e3746bcb086 # v31.11.5
+        with:
+          extra_nix_config: accept-flake-config = true
+      # Dependencies install offline from nix/bun.lock.nix, so this also fails when that file is stale.
+      - run: nix build -L
+      - run: ./result/bin/opengh --version
