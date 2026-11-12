@@ -2,16 +2,19 @@ import { expect, spyOn, test } from "bun:test"
 import type { TextareaRenderable, TextRenderable } from "@opentui/core"
 import { testRender } from "@opentui/solid"
 import { createSignal } from "solid-js"
-import type { PullReviewSession, ReviewSessionState } from "../src/review-types"
+import type { GitHubTransport } from "../src/github/transport"
+import { createPullReviewSession, type ReviewDraftStorage } from "../src/pull-review-session"
+import type { PullReviewSession, ReviewDraft, ReviewSessionState } from "../src/review-types"
 import { InlineCommentRetryDialog } from "../src/ui/components/inline-comment-retry"
 import { PullReviewDialog, ReviewCommentDialog } from "../src/ui/components/pull-review-dialog"
 import { KeybindingsProvider } from "../src/ui/keybindings"
 import { clickControl } from "./fixtures/mouse"
+import { waitForText } from "./fixtures/wait"
 
 function sessionFixture() {
   const [state, setState] = createSignal<ReviewSessionState>({
     status: "ready",
-    eligibility: { accountId: 1, login: "reviewer", repository: "a/b", number: 42, headSha: "a".repeat(40), url: "https://github.com/a/b/pull/42", canComment: true, canApprove: false, canRequestChanges: true },
+    eligibility: { accountId: 1, login: "reviewer", repositoryId: 71, repository: "a/b", number: 42, headSha: "a".repeat(40), url: "https://github.com/a/b/pull/42", canComment: true, canApprove: false, canRequestChanges: true },
     draft: { accountId: 1, repository: "a/b", number: 42, headSha: "a".repeat(40), body: "", event: "COMMENT", comments: [] },
   })
   let discarded = 0
@@ -23,6 +26,67 @@ function sessionFixture() {
   }
   return { session, setState, discarded: () => discarded }
 }
+
+test("clearing a draft written for a different repository discards it instead of emptying its text", async () => {
+  const fixture = sessionFixture()
+  fixture.setState(s => ({ ...s, draft: { ...s.draft!, repositoryId: 70, body: "For the repository that used this name" },
+    message: "This draft was written for a different repository that previously used this name. It was not changed; clear it to start a new review." }))
+  const view = await testRender(() => <PullReviewDialog session={fixture.session} repositoryUrl="https://github.com/a/b" showScrollbar={false}
+    onSubmit={() => {}} onClose={() => {}} onOpenGitHub={() => {}} onJump={() => {}} onHintChange={() => {}} />, { width: 80, height: 24 })
+  try {
+    await view.flush()
+    view.mockInput.pressEnter(); await view.flush()
+    expect(view.captureCharFrame()).toContain("clear it to start a new review")
+    view.mockInput.pressKey("d", { ctrl: true }); await view.flush()
+    // The stored draft, not just its text, is removed; the session then supplies a blank one for this repository.
+    expect(fixture.discarded()).toBe(1)
+    expect(fixture.session.state().draft?.body).toBe("For the repository that used this name")
+  } finally { view.renderer.destroy() }
+})
+
+test("a real session replaces a cleared foreign draft with a blank one for the current repository", async () => {
+  const sha = "a".repeat(40)
+  let repositoryId = 71
+  const stored = new Map<string, ReviewDraft>()
+  const key = (d: { accountId: number; repository: string; number: number }) => `${d.accountId}/${d.repository}/${d.number}`
+  const storage: ReviewDraftStorage = { async load(scope) { return structuredClone(stored.get(key(scope))) },
+    async save(draft) { stored.set(key(draft), structuredClone(draft)) }, async remove(draft) { stored.delete(key(draft)) } }
+  const transport: GitHubTransport = {
+    async json<T>(path: string): Promise<T> {
+      if (path === "user") return { id: 1, login: "reviewer" } as T
+      if (path === "repos/a/b") return { id: repositoryId, archived: false, private: true, permissions: { pull: true } } as T
+      if (path === "repos/a/b/pulls/42") return { head: { sha }, base: { sha: "c".repeat(40) }, state: "open", draft: false, locked: false, user: { id: 2 } } as T
+      if (path.includes("/reviews?")) return [] as T
+      throw new Error(`Unexpected path ${path}`)
+    },
+    async text() { return "" },
+  }
+  const session = createPullReviewSession({ storage, transport })
+  await session.open("a/b", 42)
+  session.setBody("For the repository that used this name")
+  await session.flush()
+  repositoryId = 72 // The same name now belongs to another repository.
+  const reopened = createPullReviewSession({ storage, transport })
+  await reopened.open("a/b", 42)
+  expect(reopened.state().draft).toMatchObject({ repositoryId: 71, body: "For the repository that used this name" })
+  const view = await testRender(() => <PullReviewDialog session={reopened} repositoryUrl="https://github.com/a/b" showScrollbar={false}
+    onSubmit={() => {}} onClose={() => {}} onOpenGitHub={() => {}} onJump={() => {}} onHintChange={() => {}} />, { width: 80, height: 24 })
+  try {
+    await view.flush()
+    view.mockInput.pressEnter(); await view.flush()
+    expect(view.captureCharFrame()).toContain("For the repository that used this name")
+    view.mockInput.pressKey("d", { ctrl: true })
+    await Bun.sleep(20); await view.flush()
+    expect(reopened.state()).toMatchObject({ status: "ready", draft: { repositoryId: 72, body: "" } })
+    expect(reopened.state().message).toBeUndefined()
+    expect(stored.size).toBe(0)
+    expect(view.captureCharFrame()).not.toContain("For the repository that used this name")
+    // The dialog is usable again: new text belongs to the current repository.
+    await view.mockInput.typeText("New review")
+    await view.flush()
+    expect(reopened.state().draft).toMatchObject({ repositoryId: 72, body: "New review" })
+  } finally { view.renderer.destroy() }
+})
 
 test("review requires feedback and explicit confirmation; blockers prevent submission and Escape preserves draft", async () => {
   const fixture = sessionFixture()
@@ -100,8 +164,7 @@ test("inline editor keeps its native buffer through preview and Ctrl+S invokes s
     expect((editor as import("@opentui/core").TextareaRenderable).plainText).toBe("jk")
     expect(hint).toStartWith("ctrl+s post ·")
     expect(hint).not.toContain("post comment")
-    await Bun.sleep(40); await view.flush()
-    expect(view.captureCharFrame()).toContain("jk")
+    await waitForText(view, "jk")
     view.mockInput.pressKey("p", { ctrl: true }); await view.flush()
     view.mockInput.pressKey("d", { ctrl: true }); await view.flush()
     expect((editor as TextareaRenderable).plainText).toBe("")
@@ -133,7 +196,7 @@ test("inline editor keeps its native buffer through preview and Ctrl+S invokes s
 test("legacy inline drafts are preserved until explicit removal; approval may be empty", async () => {
   const [state, setState] = createSignal<ReviewSessionState>({
     status: "ready",
-    eligibility: { accountId: 1, login: "reviewer", repository: "a/b", number: 42, headSha: "a".repeat(40), baseSha: "b".repeat(40), url: "https://github.com/a/b/pull/42", canComment: true, canApprove: true, canRequestChanges: true },
+    eligibility: { accountId: 1, login: "reviewer", repositoryId: 71, repository: "a/b", number: 42, headSha: "a".repeat(40), baseSha: "b".repeat(40), url: "https://github.com/a/b/pull/42", canComment: true, canApprove: true, canRequestChanges: true },
     draft: { accountId: 1, repository: "a/b", number: 42, headSha: "a".repeat(40), baseSha: "b".repeat(40), body: "Keep my review body", event: "REQUEST_CHANGES", comments: [{ id: "1", path: "a.ts", line: 1, side: "RIGHT", body: "Please fix" }] },
   })
   const session: PullReviewSession = { state, open: async () => {}, setBody: body => setState(s => ({ ...s, draft: { ...s.draft!, body } })), setEvent: () => {}, addComment: () => {}, updateComment: () => {}, removeComment: id => setState(s => ({ ...s, draft: { ...s.draft!, comments: s.draft!.comments.filter(comment => comment.id !== id) } })), discard: async () => {}, useCurrentHead: () => {}, submit: async () => true, flush: async () => {} }
@@ -228,7 +291,7 @@ test("review menu shows disabled choices, skips them, and preserves text between
 
 test("uncertain inline retries keep the duplicate warning visible above long comment text", async () => {
   let retries = 0
-  const view = await testRender(() => <InlineCommentRetryDialog input={{ accountId: 1, repository: "a/b", number: 42,
+  const view = await testRender(() => <InlineCommentRetryDialog input={{ accountId: 1, repositoryId: 71, repository: "a/b", number: 42,
     headSha: "a".repeat(40), baseSha: "b".repeat(40), anchor: { path: "a.ts", line: 1, side: "RIGHT" },
     body: Array.from({ length: 100 }, (_, index) => `line ${index}`).join("\n") }}
     onConfirm={() => retries++} onClose={() => {}} onOpenGitHub={() => {}} onHintChange={() => {}} />, { width: 80, height: 24 })

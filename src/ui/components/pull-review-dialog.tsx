@@ -227,8 +227,14 @@ export function PullReviewDialog(props: PullReviewDialogProps) {
     else if (stage() === "edit") setStage("choose")
     else props.onClose()
   }
+  // Written for another repository that used this name: it can never be submitted here.
+  const foreign = () => draft()?.repositoryId !== undefined && !!eligibility() && draft()!.repositoryId !== eligibility()!.repositoryId
   const clearBody = () => {
     if (stage() !== "edit" || !draft() || locked() || confirmation()) return
+    // Clearing a foreign draft removes it, inline comments included; the editor then shows the new blank draft.
+    if (foreign()) return void props.session.discard().then(() => {
+      if (writer && !writer.isDestroyed) replaceEditorText(writer, props.session.state().draft?.body ?? "")
+    })
     try {
       if (writer && !writer.isDestroyed) replaceEditorText(writer, "")
       props.session.setBody("")

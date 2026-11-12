@@ -191,6 +191,25 @@ describe("pull request conversation comments", () => {
     expect(calls).toBe(0)
   })
 
+  test("a failed PR reload cannot post with previously loaded permissions and retains the draft", async () => {
+    let failReload = false
+    let calls = 0
+    const session = await setup({
+      pull: async () => { if (failReload) throw new Error("Access revoked"); return pull() },
+      createIssueComment: async () => { calls++; return comment },
+    })
+    failReload = true
+    await session.loadPull(421)
+    expect(session.pullDetail()?.resource).toMatchObject({ status: "error", value: { permissions: { comment: true } } })
+    await expect(session.submitIssueAction(421, "comment", "pull")).rejects.toThrow("Reload the pull request successfully")
+    expect(calls).toBe(0)
+    expect(session.issueAction(421, "pull")).toMatchObject({ body: comment.body, operation: { status: "idle" } })
+    failReload = false
+    await session.loadPull(421)
+    expect(await session.submitIssueAction(421, "comment", "pull")).toEqual({ comment })
+    expect(calls).toBe(1)
+  })
+
   test("rejects duplicate pull actions before mutation and isolates issue and repository drafts", async () => {
     const session = await setup()
     session.updateIssueDraft(421, { body: "issue draft" })

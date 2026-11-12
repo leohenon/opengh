@@ -9,9 +9,12 @@ import { createRequestBudget, MAX_AUTOMATIC_PAGES, RequestBudgetLimitError } fro
 import type { InlineCommentInput, PostedInlineComment, ReviewDraft } from "./review-types"
 
 export type InlineCommentScope = Pick<InlineCommentInput, "accountId" | "repository" | "number">
-export type InlineCommentAttempt = { input: InlineCommentInput; commentIds: number[]; failure?: string }
+// The marker file is named by a fingerprint of this identity, so the repository ID is stored beside it:
+// attempts written by earlier builds have none and must still be found.
+type AttemptInput = Omit<InlineCommentInput, "repositoryId">
+export type InlineCommentAttempt = { input: AttemptInput; repositoryId?: number; commentIds: number[]; failure?: string }
 export type InlineCommentStorage = {
-  load(input: InlineCommentInput): Promise<unknown | undefined>
+  load(input: AttemptInput): Promise<unknown | undefined>
   save(attempt: InlineCommentAttempt): Promise<void>
   remove(attempt: InlineCommentAttempt): Promise<void>
   update(previous: InlineCommentAttempt, next: InlineCommentAttempt): Promise<void>
@@ -27,11 +30,11 @@ export class InlineCommentUncertainError extends Error {
 }
 const uncertain = (retryAllowed = false, failure?: string, lookupFailure?: string) => new InlineCommentUncertainError(
   `Comment may already exist. ${retryAllowed ? "No matching comment was found on GitHub. You may explicitly retry, but this does not prove the first request failed." : "GitHub could not be checked completely; retry is blocked."}${failure ? ` Original failure: ${failure}` : " The earlier failure was not recorded."}${lookupFailure ? ` Lookup failed: ${lookupFailure}` : ""}`, retryAllowed)
-const fingerprint = (input: InlineCommentInput) => createHash("sha256").update(JSON.stringify(cleanInput(input))).digest("hex")
-function draft(input: InlineCommentInput): ReviewDraft {
+const fingerprint = (input: AttemptInput) => createHash("sha256").update(JSON.stringify(cleanInput(input))).digest("hex")
+function draft(input: AttemptInput): ReviewDraft {
   return { ...input, event: "COMMENT", body: "", comments: [{ ...input.anchor, id: "inline", body: input.body }] }
 }
-function cleanInput(input: InlineCommentInput): InlineCommentInput {
+function cleanInput(input: AttemptInput): AttemptInput {
   if (!input || typeof input !== "object" || !input.anchor || typeof input.baseSha !== "string" || !/^[a-f0-9]{40,64}$/i.test(input.baseSha)) throw new Error("Invalid inline comment input.")
   validateReviewDraft(draft(input), true)
   const a = input.anchor
@@ -44,14 +47,15 @@ function parseAttempt(value: unknown, scope: InlineCommentScope): InlineCommentA
   const a = value as InlineCommentAttempt
   const input = cleanInput(a.input)
   if (key(input) !== key(scope) || !Array.isArray(a.commentIds) || a.commentIds.length > 10_000
-    || a.commentIds.some(id => !Number.isSafeInteger(id) || id <= 0)) throw new Error("Invalid inline comment attempt; it was not overwritten. Check GitHub.")
+    || a.commentIds.some(id => !Number.isSafeInteger(id) || id <= 0)
+    || (a.repositoryId !== undefined && (!Number.isSafeInteger(a.repositoryId) || a.repositoryId <= 0))) throw new Error("Invalid inline comment attempt; it was not overwritten. Check GitHub.")
   if (a.failure !== undefined && typeof a.failure !== "string") throw new Error("Invalid inline comment failure; marker was not overwritten.")
-  return { input, commentIds: [...a.commentIds], ...(a.failure === undefined ? {} : { failure: a.failure }) }
+  return { input, ...(a.repositoryId === undefined ? {} : { repositoryId: a.repositoryId }), commentIds: [...a.commentIds], ...(a.failure === undefined ? {} : { failure: a.failure }) }
 }
 const storageQueues = new Map<string, Promise<unknown>>()
 export function createInlineCommentStorage(directory = join(configDirectory(), "inline-comment-attempts")): InlineCommentStorage {
   cleanupDraftTemporaryFiles(directory)
-  const pathFor = (input: InlineCommentInput) => join(directory, `${fingerprint(input)}.json`)
+  const pathFor = (input: AttemptInput) => join(directory, `${fingerprint(input)}.json`)
   // Serialize local file operations without a durable lock that could survive a crash.
   function locked<T>(run: () => Promise<T>): Promise<T> {
     const next = (storageQueues.get(directory) ?? Promise.resolve()).catch(() => {}).then(async () => {
@@ -129,7 +133,7 @@ export function createInlineCommentStorage(directory = join(configDirectory(), "
 }
 type RemoteComment = { id: number; user?: { id: number }; body: string; commit_id: string; path: string; line: number | null;
   original_line?: number; side: string; start_line?: number | null; original_start_line?: number | null; start_side?: string | null }
-function confirmed(input: InlineCommentInput, value: unknown, reconcile = false): PostedInlineComment | undefined {
+function confirmed(input: AttemptInput, value: unknown, reconcile = false): PostedInlineComment | undefined {
   if (!value || typeof value !== "object") return
   const c = value as RemoteComment, a = input.anchor
   const outdated = reconcile && c.line === null
@@ -144,7 +148,7 @@ const busy = new Set<string>()
 export function createInlineComments(options: InlineCommentsOptions = {}) {
   const transport = options.transport ?? githubTransport, storage = options.storage ?? createInlineCommentStorage()
   const api = createGitHubReviews(transport)
-  async function comments(input: InlineCommentInput, options: RequestOptions): Promise<RemoteComment[]> {
+  async function comments(input: AttemptInput, options: RequestOptions): Promise<RemoteComment[]> {
     const result: RemoteComment[] = []
     for (let page = 1; page <= MAX_AUTOMATIC_PAGES; page++) {
       options.signal?.throwIfAborted()
@@ -166,7 +170,8 @@ export function createInlineComments(options: InlineCommentsOptions = {}) {
     return found
   }
   return { async post(raw: InlineCommentInput, options?: RequestOptions & { retryUnconfirmed?: boolean }): Promise<PostedInlineComment> {
-    const input = cleanInput(raw), scope = key(input)
+    const input = cleanInput(raw), scope = key(input), repositoryId = raw.repositoryId
+    if (!Number.isSafeInteger(repositoryId) || repositoryId <= 0) throw new Error("Invalid inline comment input.")
     if (busy.has(scope)) throw new Error("An inline comment is already being posted for this pull request.")
     busy.add(scope)
     const owned = options?.budget ? undefined : createRequestBudget(options?.signal)
@@ -184,6 +189,8 @@ export function createInlineComments(options: InlineCommentsOptions = {}) {
       if (stored !== undefined) {
         const attempt = parseAttempt(stored, input)
         if (fingerprint(attempt.input) !== fingerprint(input)) throw new Error("Inline comment storage returned a different attempt.")
+        // An attempt for another repository is never reconciled here: a match could confirm and delete its marker.
+        if (attempt.repositoryId !== undefined && attempt.repositoryId !== repositoryId) throw new Error("Repository changed; no comment was sent.")
         const found = await reconcile(attempt, reads)
         if (found) return found
         if (!options?.retryUnconfirmed) throw uncertain(true, attempt.failure)
@@ -199,9 +206,10 @@ export function createInlineComments(options: InlineCommentsOptions = {}) {
       }
       const eligibility = await api.eligibility(input.repository, input.number, reads)
       if (eligibility.accountId !== input.accountId) throw new Error("GitHub account changed; no comment was sent.")
+      if (eligibility.repositoryId !== repositoryId) throw new Error("Repository changed; no comment was sent.")
       if (eligibility.headSha !== input.headSha || eligibility.baseSha !== input.baseSha) throw new Error("Pull request head or base changed; inspect the latest diff before commenting.")
       if (!eligibility.canInlineComment) throw new Error("Inline comment permission could not be verified.")
-      let attempt: InlineCommentAttempt = { input, commentIds: baseline.map(c => c.id) }
+      let attempt: InlineCommentAttempt = { input, repositoryId, commentIds: baseline.map(c => c.id) }
       if (retrying) await storage.update(retrying, attempt)
       else await storage.save(attempt)
       let response: unknown

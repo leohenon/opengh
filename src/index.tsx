@@ -77,7 +77,9 @@ const renderer = await createCliRenderer({
 })
 
 try {
-  initializeHunk(renderer)
+  // Resolved from the entry module: this path is the same from source and inside a compiled
+  // executable, where scripts/build.ts embeds the worker as a second entry point.
+  initializeHunk(renderer, new URL("./ui/workers/hunk-highlight.js", import.meta.url))
   await render(() => (
     <Root
       repositoryArgument={launch.repositoryArgument}

@@ -1,0 +1,73 @@
+name: Release
+
+# Push a tag named v<version>, matching "version" in package.json, to publish executables.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    uses: ./.github/workflows/ci.yml
+
+  build:
+    name: Build (${{ matrix.targets }})
+    needs: test
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: macos-15, targets: darwin-arm64 }
+          - { os: macos-15-intel, targets: darwin-x64 }
+          - { os: ubuntu-24.04, targets: linux-x64, musl: linux-x64-musl }
+          - { os: ubuntu-24.04-arm, targets: linux-arm64, musl: linux-arm64-musl }
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version-file: package.json
+      - name: Check the tag matches package.json
+        run: test "v$(bun -p 'require("./package.json").version')" = "$GITHUB_REF_NAME"
+      # The musl executables are cross-compiled, which needs their native OpenTUI packages.
+      - run: bun install --frozen-lockfile --os='*' --cpu='*'
+      - run: bun run build ${{ matrix.targets }} ${{ matrix.musl }}
+      - name: Smoke test
+        run: bun run smoke dist/opengh-${{ matrix.targets }}/opengh
+      - name: Smoke test (musl, on Alpine)
+        if: matrix.musl
+        run: |
+          docker run --rm -v "$PWD:/work" -w /work "oven/bun:$(bun --version)-alpine" \
+            bun scripts/smoke.ts dist/opengh-${{ matrix.musl }}/opengh
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: opengh-${{ matrix.targets }}
+          path: |
+            dist/*.tar.gz
+            dist/*.tar.gz.sha256
+          if-no-files-found: error
+
+  publish:
+    name: Publish GitHub release
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Create the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cd dist
+          cat *.tar.gz.sha256 > SHA256SUMS
+          sha256sum --check SHA256SUMS
+          gh release create "$GITHUB_REF_NAME" *.tar.gz SHA256SUMS \
+            --repo "$GITHUB_REPOSITORY" --title "$GITHUB_REF_NAME" --generate-notes --verify-tag

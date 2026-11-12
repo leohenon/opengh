@@ -165,7 +165,7 @@ test("active run details poll every five seconds, pause off-tab, and stop on com
   }
 })
 
-test("automatic retries deduplicate retained run errors until success or a manual retry", async () => {
+test("retained run errors stay in the status bar without toasts across automatic retries, until success or a manual retry", async () => {
   const notices: (() => void)[] = []
   const timeout = globalThis.setTimeout
   const start = spyOn(globalThis, "setTimeout").mockImplementation(((...args: Parameters<typeof setTimeout>) => {
@@ -177,7 +177,9 @@ test("automatic retries deduplicate retained run errors until success or a manua
   const jobs = { items: [workflowJobFixture], page: 1, hasMore: false }
   const [detail, setDetail] = createSignal<RunDetailState>()
   let failure: "resource" | "jobs" | undefined
+  let loads = 0
   const refresh = async (id: number) => {
+    loads++
     const previousJobs = detail()?.jobs ?? { status: "ready" as const, value: jobs }
     setDetail({ id, resource: { status: "loading", phase: "load", value },
       jobs: { status: "loading", phase: "load", value: jobs } })
@@ -202,31 +204,36 @@ test("automatic retries deduplicate retained run errors until success or a manua
     await view.flush()
     view.mockInput.pressEnter()
     await view.flush()
-    for (const part of ["resource", "jobs"] as const) {
-      const before = notices.length
+    // Detail errors live in the status bar, not in toasts, so a retained error is shown exactly once.
+    const errors = () => view.captureCharFrame().split("\n").filter((line) => line.includes("unavailable")).map((line) => line.trim())
+    for (const [part, message] of [["resource", "Run unavailable"], ["jobs", "Jobs unavailable"]] as const) {
+      const shown = [`× ${message} · r retry`]
       failure = part
       await refresh(9812)
       await view.flush()
-      expect(notices).toHaveLength(before + 1)
-      notices.at(-1)!()
-      await view.flush()
+      expect(errors()).toEqual(shown)
       await refresh(9812)
       await view.flush()
-      expect(notices).toHaveLength(before + 1)
+      expect(errors()).toEqual(shown)
+      const before = loads
       view.mockInput.pressKey("r")
       await view.flush()
-      expect(notices).toHaveLength(before + 2)
+      expect(loads).toBe(before + 1)
+      expect(errors()).toEqual(shown)
       failure = undefined
       await refresh(9812)
       await view.flush()
+      expect(errors()).toEqual([])
       failure = part
       await refresh(9812)
       await view.flush()
-      expect(notices).toHaveLength(before + 3)
+      expect(errors()).toEqual(shown)
       failure = undefined
       await refresh(9812)
       await view.flush()
+      expect(errors()).toEqual([])
     }
+    expect(notices).toHaveLength(0)
   } finally {
     view.renderer.destroy()
     start.mockRestore()

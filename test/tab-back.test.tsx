@@ -2,7 +2,7 @@ import { expect, test } from "bun:test"
 import { render, testRender } from "@opentui/solid"
 import { createTestRenderer } from "@opentui/core/testing"
 import type { TextRenderable } from "@opentui/core"
-import type { DiffState } from "../src/repository-state"
+import type { CommitDetailState, DiffState, IssueDetailState, PullDetailState, RunDetailState } from "../src/repository-state"
 import { initializeHunk } from "../src/ui/hunk-host"
 import { patchFixture } from "./fixtures/diff"
 import { createSignal } from "solid-js"
@@ -25,13 +25,24 @@ test("clicking the current tab backs out of each detail while other tabs and key
   const [compact, setCompact] = createSignal(false)
   const closed = { commit: 0, issue: 0, pull: 0, run: 0 }
   const loaded = { commit: 0, issue: 0, pull: 0, run: 0 }
+  // Like the session, each loader fills its detail slot: the app loads a retained detail again only when its slot is empty.
+  const loading = { status: "loading", phase: "load" } as const
+  const [commit, setCommit] = createSignal<CommitDetailState>()
+  const [issue, setIssue] = createSignal<IssueDetailState>()
+  const [pull, setPull] = createSignal<PullDetailState>()
+  const [run, setRun] = createSignal<RunDetailState>()
   const view = await testRender(() => <App data={githubDataFixture} operations={repositoryOperationsFixture}
     config={{ ...defaultConfig, compactHeader: compact() }}
-    onLoadCommit={async () => { loaded.commit++ }} onCloseCommit={() => { closed.commit++ }}
-    onLoadIssue={async () => { loaded.issue++ }} onCloseIssue={() => { closed.issue++ }}
-    onLoadPull={async () => { loaded.pull++ }} onClosePull={() => { closed.pull++ }}
-    onLoadRun={async () => { loaded.run++ }} onCloseRun={() => { closed.run++ }}
-  />, { width: 140, height: 28 })
+    commitDetail={commit()} issueDetail={issue()} pullDetail={pull()} runDetail={run()}
+    onLoadCommit={async (sha) => { loaded.commit++; setCommit({ sha, resource: loading }) }}
+    onCloseCommit={() => { closed.commit++; setCommit() }}
+    onLoadIssue={async (number) => { loaded.issue++; setIssue({ number, resource: loading, comments: loading, references: loading }) }}
+    onCloseIssue={() => { closed.issue++; setIssue() }}
+    onLoadPull={async (number) => { loaded.pull++; setPull({ number, resource: loading, comments: loading, references: loading, commits: loading, context: loading }) }}
+    onClosePull={() => { closed.pull++; setPull() }}
+    onLoadRun={async (id) => { loaded.run++; setRun({ id, resource: loading, jobs: loading }) }}
+    onCloseRun={() => { closed.run++; setRun() }}
+  />, { width: 200, height: 28 }) // Wide enough that centered Help leaves every tab label on its backdrop.
   const cases = [
     { key: "2", label: "2 Commits", kind: "commit", scroll: "commit-detail-scroll", compact: false },
     { key: "3", label: "3 Issues", kind: "issue", scroll: "issue-detail-scroll", compact: true },

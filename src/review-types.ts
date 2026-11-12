@@ -10,6 +10,8 @@ export type DraftReviewComment = ReviewAnchor & { id: string; body: string }
 export type ReviewEligibility = {
   accountId: number
   login: string
+  // Immutable; the owner/name below can be reused by a different repository.
+  repositoryId: number
   repository: string
   number: number
   headSha: string
@@ -24,6 +26,8 @@ export type ReviewEligibility = {
 }
 export type ReviewDraft = {
   accountId: number
+  // Optional only because drafts persisted by earlier builds lack it.
+  repositoryId?: number
   repository: string
   number: number
   headSha: string
@@ -43,6 +47,7 @@ export type ReviewSessionState = {
 }
 export type InlineCommentInput = {
   accountId: number
+  repositoryId: number
   repository: string
   number: number
   headSha: string

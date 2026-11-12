@@ -26,7 +26,7 @@ test("review reconciliation shares its request ceiling across candidate comment 
 })
 
 test("inline reconciliation limits retain uncertain markers and block retries", async () => {
-  const input: InlineCommentInput = { accountId: 1, repository: "owner/repo", number: 2, headSha: "a".repeat(40), baseSha: "b".repeat(40), body: "hello", anchor: { path: "file", line: 1, side: "RIGHT" } }
+  const input: InlineCommentInput = { accountId: 1, repositoryId: 7, repository: "owner/repo", number: 2, headSha: "a".repeat(40), baseSha: "b".repeat(40), body: "hello", anchor: { path: "file", line: 1, side: "RIGHT" } }
   let removed = false
   let writes = 0
   let calls = 0

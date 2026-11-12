@@ -1007,6 +1007,36 @@ test("workflow details map nullable fields and fetch jobs for the selected attem
   expect(jobs.items[0]).toMatchObject({ id: 7, runner: "", conclusion: "", steps: [{ number: 1, conclusion: "" }] })
 })
 
+test("workflow run pages map nullable fields and report further pages from the total count", async () => {
+  const run = (id: number, conclusion: string | null = "success") => ({
+    id, name: "CI", display_title: `Build ${id}`, status: "completed", conclusion, created_at: "2026-04-14T09:02:00Z" })
+  const client = createGitHubClient(transport({
+    "repos/owner/repo/actions/runs?per_page=30&page=1": { total_count: 31, workflow_runs: [run(1), run(2, null)] },
+    "repos/owner/repo/actions/runs?per_page=30&page=2": { total_count: 31, workflow_runs: [run(31)] },
+    "repos/owner/empty/actions/runs?per_page=30&page=1": { total_count: 0, workflow_runs: [] },
+  }))
+  expect(await client.runs("owner/repo")).toEqual({ hasMore: true, items: [
+    { id: 1, name: "CI", title: "Build 1", status: "completed", conclusion: "success", createdAt: "2026-04-14T09:02:00Z" },
+    { id: 2, name: "CI", title: "Build 2", status: "completed", conclusion: "", createdAt: "2026-04-14T09:02:00Z" },
+  ] })
+  expect(await client.runs("owner/repo", 2)).toMatchObject({ hasMore: false, items: [{ id: 31 }] })
+  expect(await client.runs("owner/empty")).toEqual({ items: [], hasMore: false })
+})
+
+test("a malformed workflow runs response fails instead of becoming an empty page", async () => {
+  const path = "repos/owner/repo/actions/runs?per_page=30&page=1"
+  const run = { id: 1, name: "CI", display_title: "Build", status: "completed", conclusion: null, created_at: "2026-04-14T09:02:00Z" }
+  for (const response of [
+    null, {}, [], { message: "Unexpected" },
+    { total_count: 1 }, { total_count: 1, workflow_runs: null }, { total_count: 1, workflow_runs: {} }, { total_count: 1, workflow_runs: "none" },
+    { workflow_runs: [run] }, { total_count: null, workflow_runs: [run] }, { total_count: "1", workflow_runs: [run] },
+    { total_count: -1, workflow_runs: [run] }, { total_count: 1.5, workflow_runs: [run] }, { total_count: Number.MAX_SAFE_INTEGER + 1, workflow_runs: [run] },
+  ]) {
+    await expect(createGitHubClient(transport({ [path]: response })).runs("owner/repo"))
+      .rejects.toThrow("GitHub returned an invalid workflow runs response.")
+  }
+})
+
 test("timeline propagates inherited options, bounds raw pages and preserves cancellation during enrichment", async () => {
   const budget = createRequestBudget()
   let calls = 0

@@ -20,12 +20,12 @@ describe("repository launcher", () => {
     })
     active.push(view)
     await view.flush()
-    expect(view.captureCharFrame()).toContain("◉ opengh")
-    expect(view.captureCharFrame()).not.toContain("Loading cli/cli…")
+    // The loading screen is only the delayed message: no brand, and animated dots replace the ellipsis.
+    expect(view.captureCharFrame().trim()).toBe("")
     await Bun.sleep(210)
     await view.flush()
     const frame = view.captureCharFrame()
-    expect(frame).toContain("Loading cli/cli…")
+    expect(frame.trim()).toMatch(/^Loading cli\/cli\.{1,3}$/)
     expect(frame).not.toContain("anomalyco/opentui")
   })
 

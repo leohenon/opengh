@@ -35,7 +35,7 @@ test("draft PR inline comments open from Hunk's [+] in opengh's editor and publi
     state,
     open: async (repo, n) => {
       expect([repo, n]).toEqual([repository, number])
-      setState(s => ({ status: "ready", eligibility: { accountId: 1, login: "reviewer", repository, number, headSha, baseSha,
+      setState(s => ({ status: "ready", eligibility: { accountId: 1, login: "reviewer", repositoryId: 71, repository, number, headSha, baseSha,
         url: `${githubDataFixture.repo.url}/pull/${number}`, canComment: true, canInlineComment: true, canApprove: false, canRequestChanges: false,
         reason: "Approval and request changes require a non-draft pull request." },
         draft: s.draft ?? { accountId: 1, repository, number, headSha, baseSha, event: "COMMENT", body: "", comments: [] } }))
@@ -181,7 +181,7 @@ test("draft PR inline comments open from Hunk's [+] in opengh's editor and publi
     expect(inlinePosts).toHaveLength(0)
     expect(setup.captureCharFrame()).toContain("Post inline comment?")
     await clickControl(setup, "inline-comment-confirm"); await settle()
-    expect(inlinePosts).toEqual([{ accountId: 1, repository, number, headSha, baseSha,
+    expect(inlinePosts).toEqual([{ accountId: 1, repositoryId: 71, repository, number, headSha, baseSha,
       anchor: { path: "example.ts", line: 1, side: "RIGHT" }, body: "Please explain this change." }])
     expect(reviews.state().draft?.comments).toEqual([])
     expect(submissions).toBe(0)

@@ -597,7 +597,7 @@ function AppContent(props: AppProps) {
     return {
       headSha, comments: [], jump: reviewJump(),
       onComment: (anchor: ReviewAnchor) => {
-        const context = { accountId: eligible.accountId, repository: data().repo.nameWithOwner, number: target.number,
+        const context = { accountId: eligible.accountId, repositoryId: eligible.repositoryId, repository: data().repo.nameWithOwner, number: target.number,
           headSha, baseSha, anchor: { path: anchor.path, line: anchor.line, side: anchor.side,
             ...(anchor.startLine === undefined ? {} : { startLine: anchor.startLine, startSide: anchor.startSide }) } }
         if (carriedDraft?.anchor === anchorKey(context)) {

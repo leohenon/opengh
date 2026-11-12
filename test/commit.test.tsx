@@ -106,7 +106,9 @@ test("commit tabs retain detail state and Escape restores the list after resizin
   view.resize(40, 22)
   view.mockInput.pressKey("g")
   await view.flush()
-  expect(view.captureCharFrame()).toContain("esc back · D diff · o GitHub")
+  // The narrow footer keeps whole hints in priority order; refresh now precedes GitHub and copy.
+  expect(view.captureCharFrame()).toContain("esc back · D diff · r refresh")
+  expect(view.captureCharFrame()).not.toContain("o Git")
   expect(view.captureCharFrame()).not.toContain("y cop")
   expect(view.captureCharFrame()).toContain("Commit 18")
   view.resize(120, 28)
@@ -203,7 +205,7 @@ test("overview, commit, and PR shortcuts open GitHub and copy the active URL or 
 
   view.mockInput.pressKey("2")
   await view.flush()
-  expect(view.captureCharFrame()).toContain("enter open · D diff · o GitHub · y copy SHA")
+  expect(view.captureCharFrame()).toContain("enter open · tab branch · D diff · r refresh · o GitHub · y copy SHA")
   expect(view.captureCharFrame()).toContain("? help")
   view.mockInput.pressKey("j")
   view.mockInput.pressKey("y")
@@ -244,7 +246,9 @@ test("overview, commit, and PR shortcuts open GitHub and copy the active URL or 
   await Bun.sleep(210)
   await view.flush()
   expect(view.captureCharFrame()).toContain("Loading")
-  expect(view.captureCharFrame()).toContain("o GitHub · y copy SHA")
+  // Only hints usable without a loaded commit stay visible during the first load.
+  expect(view.captureCharFrame()).toContain("esc back · / search · ? help")
+  expect(view.captureCharFrame()).not.toContain("o GitHub")
   setDetail({ sha, resource: { status: "error", phase: "load", message: "Commit unavailable" } })
   await view.flush()
   expect(view.captureCharFrame()).toContain("Commit unavailable")

@@ -1,4 +1,5 @@
 import { describe, expect, spyOn, test } from "bun:test"
+import { createHash } from "node:crypto"
 import { mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -10,11 +11,11 @@ import type { ReviewDraft } from "../src/review-types"
 const sha = "a".repeat(40)
 const baseSha = "c".repeat(40)
 function fixture() {
-  const data = { draft: false, archived: false, state: "open", accountId: 7, head: sha, base: baseSha as string | undefined, author: 8, private: true, pull: true, collaborator: false, triage: false, locked: false, push: false, collaboratorChecks: 0, reviews: [] as any[], comments: [] as any[], posts: [] as any[], failPost: false, recordPost: true }
+  const data = { repositoryId: 71 as unknown, draft: false, archived: false, state: "open", accountId: 7, head: sha, base: baseSha as string | undefined, author: 8, private: true, pull: true, collaborator: false, triage: false, locked: false, push: false, collaboratorChecks: 0, reviews: [] as any[], comments: [] as any[], posts: [] as any[], failPost: false, recordPost: true }
   const transport: GitHubTransport = {
     async json<T>(path: string): Promise<T> {
       if (path === "user") return { id: data.accountId, login: "viewer" } as T
-      if (path === "repos/o/r") return { archived: data.archived, private: data.private, permissions: { pull: data.pull, triage: data.triage, push: data.push } } as T
+      if (path === "repos/o/r") return { id: data.repositoryId, archived: data.archived, private: data.private, permissions: { pull: data.pull, triage: data.triage, push: data.push } } as T
       if (path === "repos/o/r/pulls/1") return { head: { sha: data.head }, ...(data.base === undefined ? {} : { base: { sha: data.base } }), state: data.state, draft: data.draft, locked: data.locked, user: { id: data.author } } as T
       if (path.includes("/files?")) return [{ filename: "a.ts", patch: "@@ -1,2 +1,2 @@\n old\n-new\n+new" }] as T
       if (path.includes("/comments?")) return data.comments as T
@@ -499,6 +500,139 @@ describe("pull reviews", () => {
     expect(data.posts).toHaveLength(0)
     await session.open("o/r", 1)
     expect(session.state().draft?.body).toBe("Account seven")
+  })
+  test("a same-name replacement repository never receives a preserved draft", async () => {
+    const { data, transport } = fixture(), storage = memory()
+    const session = createPullReviewSession({ transport, storage })
+    await session.open("o/r", 1)
+    session.setBody("For the original repository")
+    await session.flush()
+    const stored = await storage.load(draft())
+    expect(stored).toEqual({ ...draft(), repositoryId: 71, body: "For the original repository" })
+    data.repositoryId = 72 // Same name, account, PR number, head and base: only the immutable ID differs.
+    expect(await session.submit()).toBe(false)
+    expect(data.posts).toHaveLength(0)
+    expect(session.state().message).toBe("Repository changed; draft preserved. Reopen the pull request.")
+    expect(session.state().draft).toEqual(stored as ReviewDraft)
+    expect(await storage.load(draft())).toEqual(stored)
+    // Acknowledging the current head must not rebind the draft to the replacement repository.
+    expect(() => session.useCurrentHead()).toThrow("different repository")
+    expect(await session.submit()).toBe(false)
+    const reopened = createPullReviewSession({ transport, storage })
+    await reopened.open("o/r", 1)
+    expect(reopened.state()).toMatchObject({ status: "ready", uncertain: false, eligibility: { repositoryId: 72 }, draft: stored as ReviewDraft })
+    expect(reopened.state().message).toBe("This draft was written for a different repository that previously used this name. It was not changed; clear it to start a new review.")
+    expect(await storage.load(draft())).toEqual(stored)
+    expect(await reopened.submit()).toBe(false)
+    expect(data.posts).toHaveLength(0)
+    expect(await storage.load(draft())).toEqual(stored)
+    // Only an explicit discard releases the name: the next review belongs to the replacement repository.
+    await reopened.discard()
+    expect(await storage.load(draft())).toBeUndefined()
+    expect(reopened.state().draft).toMatchObject({ body: "", repositoryId: 72 })
+    reopened.setBody("For the replacement repository")
+    expect(await reopened.submit()).toBe(true)
+    expect(data.posts.map(post => post.body.body)).toEqual(["For the replacement repository"])
+  })
+  test("a replacement repository neither reconciles nor deletes a pending submission marker", async () => {
+    const { data, transport } = fixture(), storage = memory()
+    const session = createPullReviewSession({ transport, storage })
+    await session.open("o/r", 1)
+    session.setBody("Sent to the original repository")
+    data.failPost = true; data.recordPost = false
+    expect(await session.submit()).toBe(false)
+    const marked = await storage.load(draft()) as ReviewDraft
+    expect(marked).toMatchObject({ repositoryId: 71, submission: { reviewIds: [] } })
+    // The replacement holds an identical review, which reconciliation would confirm before deleting the draft.
+    data.repositoryId = 72
+    data.reviews.push({ id: 100, user: { id: 7 }, state: "COMMENTED", body: marked.body, commit_id: sha, submitted_at: new Date().toISOString() })
+    expect(await session.submit()).toBe(false)
+    expect(session.state()).toMatchObject({ uncertain: true, draft: marked, message: "Repository changed; draft preserved. Reopen the pull request." })
+    expect(await storage.load(draft())).toEqual(marked)
+    const reopened = createPullReviewSession({ transport, storage })
+    await reopened.open("o/r", 1)
+    expect(reopened.state()).toMatchObject({ status: "ready", uncertain: true, draft: marked })
+    expect(reopened.state().message).toContain("different repository")
+    expect(await storage.load(draft())).toEqual(marked)
+    expect(await reopened.submit()).toBe(false)
+    expect(await storage.load(draft())).toEqual(marked)
+    expect(data.posts).toHaveLength(1)
+    data.repositoryId = 71
+    expect(await reopened.submit()).toBe(true)
+    expect(await storage.load(draft())).toBeUndefined()
+    expect(data.posts).toHaveLength(1)
+  })
+  test("a legacy draft without a repository ID is bound once and can then be submitted", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "opengh-review-legacy-"))
+    try {
+      const { data, transport } = fixture(), storage = createReviewDraftStorage(directory)
+      const legacy = { ...draft(), body: "Written by an earlier build" }
+      const path = join(directory, `${createHash("sha256").update("7/o/r/1").digest("hex")}.json`)
+      await writeFile(path, JSON.stringify(legacy))
+      const session = createPullReviewSession({ transport, storage })
+      await session.open("o/r", 1)
+      expect(session.state()).toMatchObject({ status: "ready", uncertain: false, draft: { ...legacy, repositoryId: 71 } })
+      expect(session.state().message).toBeUndefined()
+      await session.flush()
+      expect(JSON.parse(await readFile(path, "utf8"))).toEqual({ ...legacy, repositoryId: 71 })
+      // Once bound, a later replacement repository cannot adopt the draft again.
+      data.repositoryId = 72
+      const replaced = createPullReviewSession({ transport, storage })
+      await replaced.open("o/r", 1)
+      expect(replaced.state().message).toContain("different repository")
+      expect(await replaced.submit()).toBe(false)
+      expect(JSON.parse(await readFile(path, "utf8"))).toEqual({ ...legacy, repositoryId: 71 })
+      data.repositoryId = 71
+      expect(await session.submit()).toBe(true)
+      expect(data.posts.map(post => post.body.body)).toEqual([legacy.body])
+      expect(await readdir(directory)).toEqual([])
+    } finally { await rm(directory, { recursive: true, force: true }) }
+  })
+  test("a legacy pending submission without a repository ID is left unbound and still reconciles", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "opengh-review-legacy-marker-"))
+    try {
+      const { data, transport } = fixture(), storage = createReviewDraftStorage(directory)
+      const legacy = { ...draft(), body: "Sent by an earlier build" }
+      const marked = { ...legacy, submission: { startedAt: new Date().toISOString(), reviewIds: [] } }
+      await storage.save(legacy)
+      await storage.save(marked)
+      const session = createPullReviewSession({ transport, storage })
+      await session.open("o/r", 1)
+      expect(session.state()).toMatchObject({ uncertain: true, draft: marked })
+      expect(session.state().draft?.repositoryId).toBeUndefined()
+      expect(await storage.load(legacy)).toEqual(marked)
+      data.reviews.push({ id: 100, user: { id: 7 }, state: "COMMENTED", body: legacy.body, commit_id: sha, submitted_at: new Date().toISOString() })
+      expect(await session.submit()).toBe(true)
+      expect(data.posts).toHaveLength(0)
+      expect(await readdir(directory)).toEqual([])
+    } finally { await rm(directory, { recursive: true, force: true }) }
+  })
+  test("an unverifiable repository ID blocks eligibility, and stored drafts persist only a valid one", async () => {
+    const { data, transport } = fixture()
+    const session = createPullReviewSession({ transport, storage: memory() })
+    await session.open("o/r", 1)
+    session.setBody("Review")
+    for (const id of [undefined, null, "71", 0, -1, 1.5, Number.MAX_SAFE_INTEGER + 1]) {
+      data.repositoryId = id
+      await expect(createGitHubReviews(transport).eligibility("o/r", 1)).rejects.toThrow("Cannot verify the repository.")
+      expect(await session.submit()).toBe(false)
+      expect(data.posts).toHaveLength(0)
+    }
+    data.repositoryId = 71
+    expect(await createGitHubReviews(transport).eligibility("o/r", 1)).toMatchObject({ repositoryId: 71 })
+    const directory = await mkdtemp(join(tmpdir(), "opengh-review-repository-id-"))
+    try {
+      const storage = createReviewDraftStorage(directory), value = { ...draft(), repositoryId: 71 }
+      await storage.save({ ...value, token: "not persisted" } as ReviewDraft)
+      expect(await storage.load(value)).toEqual(value)
+      const path = join(directory, (await readdir(directory))[0]!)
+      expect(path).toEndWith(`${createHash("sha256").update("7/o/r/1").digest("hex")}.json`) // The storage scope is unchanged.
+      for (const repositoryId of [0, -1, 1.5, "71", null]) {
+        await expect(storage.save({ ...value, repositoryId } as ReviewDraft)).rejects.toThrow("Invalid review draft")
+        await writeFile(path, JSON.stringify({ ...value, repositoryId }))
+        await expect(storage.load(value)).rejects.toThrow("Cannot read review draft")
+      }
+    } finally { await rm(directory, { recursive: true, force: true }) }
   })
   test("failed persistence blocks POST and unreadable drafts cannot be replaced by editing", async () => {
     const { data, transport } = fixture()

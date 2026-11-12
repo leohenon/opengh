@@ -28,6 +28,7 @@ function parsedDraft(value: unknown, scope: ReviewDraftScope): ReviewDraft {
     ...(draft.baseSha === undefined ? {} : { baseSha: draft.baseSha }),
     body: draft.body, event: draft.event, comments: draft.comments.map(c => ({ id: c.id, path: c.path, line: c.line, side: c.side,
       ...(c.startLine === undefined ? {} : { startLine: c.startLine, startSide: c.startSide }), body: c.body })),
+    ...(draft.repositoryId === undefined ? {} : { repositoryId: draft.repositoryId }),
     ...(draft.submission ? { submission: { startedAt: draft.submission.startedAt, reviewIds: [...draft.submission.reviewIds] } } : {}) }
 }
 // Shared per-path serialization also covers multiple session/storage instances.
@@ -153,9 +154,12 @@ export function createReviewDraftStorage(directory = join(configDirectory(), "re
   }
 }
 const uncertainMessage = "Submission may already exist. Check GitHub; automatic retry is blocked until the exact submitted review can be confirmed."
+// The owner/name can be reused by another repository with the same pull request number and commits.
+const repositoryMismatch = "This draft was written for a different repository that previously used this name. It was not changed; clear it to start a new review."
+const repositoryChanged = "Repository changed; draft preserved. Reopen the pull request."
 const message = (error: unknown) => error instanceof Error ? error.message : String(error)
 const blank = (e: ReviewEligibility): ReviewDraft => ({ accountId: e.accountId, repository: e.repository, number: e.number,
-  headSha: e.headSha, baseSha: e.baseSha, body: "", event: "COMMENT", comments: [] })
+  headSha: e.headSha, baseSha: e.baseSha, body: "", event: "COMMENT", comments: [], repositoryId: e.repositoryId })
 
 export function createPullReviewSession(options: PullReviewSessionOptions = {}): PullReviewSession {
   const api = createGitHubReviews(options.transport)
@@ -250,8 +254,16 @@ export function createPullReviewSession(options: PullReviewSessionOptions = {}):
     try {
       const eligibility = await api.eligibility(repository, number, requestOptions)
       const loaded = await storage.load(eligibility)
-      const draft = loaded === undefined ? blank(eligibility) : parsedDraft(loaded, eligibility)
+      let draft = loaded === undefined ? blank(eligibility) : parsedDraft(loaded, eligibility)
       if (token !== generation) return
+      if (draft.repositoryId !== undefined && draft.repositoryId !== eligibility.repositoryId) {
+        // Leave the stored draft and any submission marker untouched; reconciling here could confirm and delete it.
+        setState({ status: "ready", eligibility, draft, uncertain: Boolean(draft.submission), message: draft.submission
+          ? "This review was submitted to a different repository that previously used this name. It was not changed or checked here; check GitHub." : repositoryMismatch })
+        return
+      }
+      // One-time legacy binding: earlier builds stored no repository ID (a pending submission stays exactly as stored).
+      if (draft.repositoryId === undefined && !draft.submission) schedule(draft = { ...draft, repositoryId: eligibility.repositoryId })
       setState({ status: "ready", eligibility, draft, uncertain: Boolean(draft.submission),
         message: draft.submission ? uncertainMessage : draft.headSha !== eligibility.headSha ? "Pull request head changed; draft preserved. Inspect the new diff before using the current head."
           : draft.comments.length && (!draft.baseSha || draft.baseSha !== eligibility.baseSha) ? "Pull request base changed or is unknown; inline draft preserved. Inspect the latest diff and recreate inline comments." : eligibility.reason })
@@ -288,6 +300,7 @@ export function createPullReviewSession(options: PullReviewSessionOptions = {}):
       if (draft.comments.length) throw new Error("Remove inline comments before explicitly using a changed head; anchors are never relocated.")
       const e = state().eligibility
       if (!e || e.accountId !== draft.accountId) throw new Error("Reopen this pull request with the draft's account first.")
+      if (e.repositoryId !== draft.repositoryId) throw new Error(repositoryMismatch)
       return { ...draft, headSha: e.headSha, baseSha: e.baseSha }
     }),
     async discard() {
@@ -313,6 +326,8 @@ export function createPullReviewSession(options: PullReviewSessionOptions = {}):
       try {
         await flush()
         if (draft.submission) {
+          // Never confirm, and then delete, a submission against a repository other than the one it was sent to.
+          if (draft.repositoryId !== undefined && (await api.eligibility(draft.repository, draft.number, requestOptions)).repositoryId !== draft.repositoryId) throw new Error(repositoryChanged)
           if (await confirm(draft, token, requestOptions)) return true
           throw new Error(uncertainMessage)
         }
@@ -323,6 +338,7 @@ export function createPullReviewSession(options: PullReviewSessionOptions = {}):
         if (token !== generation) return false
         setState(s => ({ ...s, eligibility }))
         if (eligibility.accountId !== draft.accountId) throw new Error("GitHub account changed; draft preserved for its original account. Reopen the pull request.")
+        if (eligibility.repositoryId !== draft.repositoryId) throw new Error(repositoryChanged)
         if (eligibility.headSha !== draft.headSha) throw new Error("Pull request head changed; draft preserved. Inspect the latest diff before explicitly using the current head.")
         if (draft.comments.length && (!draft.baseSha || draft.baseSha !== eligibility.baseSha)) throw new Error("Pull request base changed or is unknown; inline draft preserved. Inspect the latest diff and recreate inline comments.")
         if (eligibility.pendingReviewUrl || !(draft.event === "COMMENT" ? eligibility.canComment : draft.event === "APPROVE" ? eligibility.canApprove : eligibility.canRequestChanges)) throw new Error(eligibility.reason ?? "Review permission could not be verified.")

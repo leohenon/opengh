@@ -124,7 +124,7 @@ export type RepositoryLoaders = {
   issueTimeline?(repository: RepositoryTarget, number: number, options?: RequestOptions): Promise<IssueTimeline>
   issues(repository: RepositoryTarget, state: ListState, page?: number, options?: RequestOptions): Promise<Page<IssueSummary>>
   hasIssues?(repository: RepositoryTarget, state: ListState, options?: RequestOptions): Promise<boolean>
-  pull?(repository: RepositoryTarget, number: number, options?: RequestOptions): Promise<PullRequestDetail>
+  pull(repository: RepositoryTarget, number: number, options?: RequestOptions): Promise<PullRequestDetail>
   pullCommits(repository: RepositoryTarget, number: number, options?: RequestOptions): Promise<CommitSummary[]>
   pullContext(repository: RepositoryTarget, number: number, options?: RequestOptions): Promise<PullContext>
   pulls(repository: RepositoryTarget, state: ListState, page?: number, options?: RequestOptions): Promise<Page<PullRequestSummary>>
@@ -504,6 +504,7 @@ export function createRepositorySession(
   const issueKey = (repository: string, number: number, parent: IssueActionParent = "issue") => `${cacheRepositoryKey(repository)}#${number}${parent === "pull" ? ":pull" : ""}`
   const postedComments = new Map<string, IssueComment[]>()
   const issueWriteRevision = new Map<string, number>()
+  const issueActionRevision = new Map<string, number>()
   const pullActionRevision = new Map<string, number>()
   const confirmIssueWrite = (key: string) => {
     issueWriteRevision.set(key, (issueWriteRevision.get(key) ?? 0) + 1)
@@ -1287,11 +1288,11 @@ export function createRepositorySession(
       const key = issueKey(repository, number, "pull")
       let writeRevision = issueWriteRevision.get(key)
       let actionRevision = pullActionRevision.get(key)
-      let loaded = await (loaders.pull ?? loadGitHubPull)(current.data.repo, number, requestOptions)
+      let loaded = await loaders.pull(current.data.repo, number, requestOptions)
       if (request !== pullGeneration || draftGeneration !== pullDraftGeneration) return
       while (actionRevision !== pullActionRevision.get(key)) {
         actionRevision = pullActionRevision.get(key)
-        loaded = await (loaders.pull ?? loadGitHubPull)(current.data.repo, number, requestOptions)
+        loaded = await loaders.pull(current.data.repo, number, requestOptions)
         if (request !== pullGeneration || draftGeneration !== pullDraftGeneration) return
       }
       // Retain confirmed comment metadata without discarding fresh permissions or PR state.
@@ -1303,7 +1304,7 @@ export function createRepositorySession(
           break
         }
         writeRevision = issueWriteRevision.get(key)
-        loaded = await (loaders.pull ?? loadGitHubPull)(current.data.repo, number, requestOptions)
+        loaded = await loaders.pull(current.data.repo, number, requestOptions)
         if (request !== pullGeneration) return
       }
       if (value?.nodeId && loaded.nodeId && value.nodeId !== loaded.nodeId) resetReactionOwner("pull")
@@ -1486,14 +1487,27 @@ export function createRepositorySession(
     setIssueDetail({ number, resource: loadingResource(value), comments: loadingResource(comments), references: loadingResource(references), events })
     try {
       const key = issueKey(repository, number)
-      let revision = issueWriteRevision.get(key)
+      let writeRevision = issueWriteRevision.get(key)
+      let actionRevision = issueActionRevision.get(key)
       let issue = await loaders.issue(current.data.repo, number, requestOptions)
       if (request !== issueGeneration) return
-      // A confirmed write must not be overwritten by an earlier read response.
-      while (revision !== issueWriteRevision.get(key)) {
+      // A confirmed state change is GitHub's own response to the write; an earlier read must not replace it.
+      while (actionRevision !== issueActionRevision.get(key)) {
         const confirmed = issueDetail()?.resource.value
         if (confirmed) { issue = confirmed; break }
-        revision = issueWriteRevision.get(key)
+        actionRevision = issueActionRevision.get(key)
+        issue = await loaders.issue(current.data.repo, number, requestOptions)
+        if (request !== issueGeneration) return
+      }
+      // Retain confirmed comment metadata without discarding fresh title, lock state or permissions.
+      while (writeRevision !== issueWriteRevision.get(key)) {
+        const confirmed = issueDetail()?.resource.value
+        if (confirmed) {
+          issue = { ...issue, commentCount: Math.max(issue.commentCount, confirmed.commentCount),
+            updatedAt: Date.parse(issue.updatedAt) >= Date.parse(confirmed.updatedAt) ? issue.updatedAt : confirmed.updatedAt }
+          break
+        }
+        writeRevision = issueWriteRevision.get(key)
         issue = await loaders.issue(current.data.repo, number, requestOptions)
         if (request !== issueGeneration) return
       }
@@ -1809,6 +1823,7 @@ export function createRepositorySession(
 
   const reconcileIssueState = (repository: string, number: number, updated: IssueDetail, scope: number, reactionRead: number, key: string) => {
     confirmIssueWrite(key)
+    issueActionRevision.set(key, (issueActionRevision.get(key) ?? 0) + 1)
     const stillHere = () => scope === repositoryScope && state().repository === repository
     if (!stillHere()) {
       revalidateReturnedOverview(key, "issues")
@@ -1860,8 +1875,9 @@ export function createRepositorySession(
     const current = state()
     const detail = pullDetail()
     const pull = detail?.resource.value
-    if (current.status !== "ready" || detail?.number !== number || !pull || detail.resource.status === "loading")
-      throw new Error("Wait for the pull request to load before commenting.")
+    if (current.status !== "ready" || detail?.number !== number || !pull || detail.resource.status !== "ready")
+      throw new Error(detail?.number === number && detail.resource.status === "error"
+        ? "Reload the pull request successfully before commenting." : "Wait for the pull request to load before commenting.")
     const repository = current.repository
     const key = issueKey(repository, number, "pull")
     const action = issueActions()[key] ?? emptyIssueAction
@@ -1974,7 +1990,7 @@ export function createRepositorySession(
         // Refresh capabilities, but never replace a confirmed stage with an eventually-consistent read.
         void (async () => {
           try {
-            const fresh = await withRequestBudget({ signal: pullAbort.signal }, (options) => (loaders.pull ?? loadGitHubPull)(current.data.repo, number, options))
+            const fresh = await withRequestBudget({ signal: pullAbort.signal }, (options) => loaders.pull(current.data.repo, number, options))
             if (scope !== repositoryScope || request !== pullGeneration || generation !== pullDraftGeneration
               || revision !== pullActionRevision.get(key) || fresh.number !== number || fresh.nodeId !== loaded.nodeId
               || fresh.draft !== draft || fresh.state !== loaded.state || fresh.merged !== loaded.merged
@@ -2244,7 +2260,7 @@ export function createRepositorySession(
             .sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt))
           return {
             ...latest,
-            resource: latest.resource.value ? { status: "ready", value: {
+            resource: latest.resource.value ? { ...latest.resource, value: {
               ...latest.resource.value, commentCount: Math.max(latest.resource.value.commentCount, commentCount ?? (recovered ? items.length : issue.commentCount + 1)),
               updatedAt: Date.parse(latest.resource.value.updatedAt) >= Date.parse(comment.createdAt) ? latest.resource.value.updatedAt : comment.createdAt,
             } } : latest.resource,

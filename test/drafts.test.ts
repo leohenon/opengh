@@ -30,6 +30,7 @@ test("drafts survive restarts, isolate subjects/actions, retain failures, and du
     issue: async (_repository, number) => ({ ...issueDetailFixture, number, commentCount: 0 }),
     issueComments: async () => ({ items: [], hasMore: false }), issueReferences: async () => [],
     issues: async () => ({ items: [], hasMore: false }), pulls: async () => ({ items: [], hasMore: false }),
+    pull: async () => { throw new Error("No pull request loader was injected.") },
     pullCommits: async () => [], pullContext: async () => pullContextFixture,
     runs: async () => ({ items: [], hasMore: false }),
     createIssueComment: async (_repository, _number, body) => {

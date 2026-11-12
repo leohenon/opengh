@@ -13,6 +13,8 @@
     "start": "bun src/index.tsx",
     "test": "bun test",
     "typecheck": "tsc --noEmit",
+    "build": "bun scripts/build.ts",
+    "smoke": "bun scripts/smoke.ts",
     "site:build": "bun site/build.ts",
     "site:dev": "bun run site:build && bun site/serve.ts",
     "site:check": "tsc -p site/tsconfig.json && bun run site:build && bun site/check.ts"

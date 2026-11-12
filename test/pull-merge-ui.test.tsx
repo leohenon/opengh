@@ -119,9 +119,9 @@ test("merge UI hides unauthorized actions, explains blockers, confirms methods a
     expect(calls).toEqual([[summary.number, "squash", "b".repeat(40), { headline: "GitHub default title", body: "GitHub default description" }]])
     expect(view.renderer.root.findDescendantById("merge-confirm")).toBeUndefined()
     await Bun.sleep(220); await view.flush()
-    expect(view.captureCharFrame()).toContain("Merging PR…")
+    expect(view.captureCharFrame()).toMatch(/Merging PR[. ]{3}/) // Animated dots replace the ellipsis.
     pending.resolve({ ...pull(), merged: true, state: "closed" }); await settle()
     expect(view.captureCharFrame()).toContain("PR merged")
-    expect(view.captureCharFrame()).not.toContain("Merging PR…")
+    expect(view.captureCharFrame()).not.toContain("Merging PR")
   } finally { view.renderer.destroy() }
 })

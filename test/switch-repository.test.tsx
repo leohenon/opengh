@@ -79,6 +79,7 @@ test("repository switch popup isolates input, preserves cancelled navigation, an
     issueReferences: async () => [],
     issues: async (_repository, state) => ({ items: githubDataFixture.issues[state].value!.items, hasMore: false }),
     pulls: async (_repository, state) => ({ items: githubDataFixture.pulls[state].value!.items, hasMore: false }),
+    pull: async () => { throw new Error("No pull request loader was injected.") },
     pullCommits: async () => githubDataFixture.commits.value!.items,
     pullContext: async () => pullContextFixture,
     runs: async () => ({ items: githubDataFixture.runs.value!.items, hasMore: false }),
@@ -94,6 +95,7 @@ test("repository switch popup isolates input, preserves cancelled navigation, an
     saveConfig: async () => { saves++ },
     createRepositorySession: () => createRepositorySession(loaders),
     openGitHub: async () => { browser++ },
+    copyToHostClipboard: async () => true, // The default pipes clicked text into the developer's real clipboard.
     runCommand: () => ({ cancel: () => finishCommand({ exitCode: 143, cancelled: true }), result: new Promise<CommandResult>((resolve) => { finishCommand = resolve }) }),
   }} />, { width: 120, height: 32, exitOnCtrlC: false })
   const settle = async () => { await Bun.sleep(0); await view.flush() }
@@ -272,4 +274,4 @@ test("repository switch popup isolates input, preserves cancelled navigation, an
     await settle()
     expect(view.captureCharFrame()).toContain("nord")
   } finally { view.renderer.destroy() }
-})
+}, 15_000) // About 100 rendered interactions: 2.8s idle and over 4s on a busy machine, too close to the 5s default.

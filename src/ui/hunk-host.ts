@@ -13,12 +13,14 @@ const bridges = new WeakMap<CliRenderer, Bridge>()
 /** Bootstrap before Solid attaches ANY root children. React owns only portals thereafter.
  * OpenTUI's root.render creates a reconciler container each time, so call it exactly once.
  * Keep this boundary pinned/tested with OpenTUI 0.6.6 and Hunk 0.24.0.
+ * The default worker URL is only valid when this module runs from source. A compiled
+ * executable bundles every module into its entry, so the entry passes the URL instead.
  */
-export function initializeHunk(renderer: CliRenderer) {
+export function initializeHunk(renderer: CliRenderer, highlightWorker = new URL("./workers/hunk-highlight.js", import.meta.url)) {
   if (bridges.has(renderer)) return
   if (renderer.isDestroyed || renderer.root.getChildren().length)
     throw new Error("Hunk must be initialized before the Solid application mounts")
-  configureHunkHighlightWorker(new URL("./workers/hunk-highlight.js", import.meta.url))
+  configureHunkHighlightWorker(highlightWorker)
   let panes: Pane[] = []
   let nextId = 0
   const listeners = new Set<() => void>()

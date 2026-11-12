@@ -58,7 +58,7 @@ test("PR stage actions are permission gated, confirm, report progress and toggle
     await clickControl(view, "pull-draft-confirm")
     expect(view.renderer.root.findDescendantById("pull-draft-confirm")).toBeUndefined()
     await Bun.sleep(220); await view.flush()
-    expect(view.captureCharFrame()).toContain("Marking PR as draft…")
+    expect(view.captureCharFrame()).toMatch(/Marking PR as draft[. ]{3}/) // Animated dots replace the ellipsis.
     finish(); await settle()
     await menu()
     expect(view.renderer.root.findDescendantById("issue-menu-draft")).toBeUndefined()

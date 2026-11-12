@@ -38,6 +38,7 @@ function loaders(overrides: Partial<RepositoryLoaders> = {}): RepositoryLoaders 
     issueReferences: async () => [],
     issues: async (_repository, state) => ({ items: structuredClone(githubDataFixture.issues[state].value!.items), hasMore: false }),
     pulls: async (_repository, state) => ({ items: structuredClone(githubDataFixture.pulls[state].value!.items), hasMore: false }),
+    pull: async () => { throw new Error("No pull request loader was injected.") },
     pullCommits: async () => structuredClone(githubDataFixture.commits.value!.items),
     pullContext: async () => structuredClone(pullContextFixture),
     runs: async () => ({ items: structuredClone(githubDataFixture.runs.value!.items), hasMore: false }),
@@ -52,6 +53,12 @@ function ready(session: ReturnType<typeof createRepositorySession>) {
 }
 
 describe("repository session", () => {
+  test("an injected loader set must supply its own pull request loader", () => {
+    // @ts-expect-error Omitting it must fail to compile; it can never fall back to the live GitHub client.
+    const incomplete: RepositoryLoaders = { ...loaders(), pull: undefined }
+    expect(incomplete.pull).toBeUndefined()
+  })
+
   test("document budget exhaustion settles queued documents and leaves recovery available", async () => {
     for (const recovery of ["retry", "refresh", "branch"] as const) {
       let fail = false
@@ -833,6 +840,89 @@ describe("repository session", () => {
     await session.loadMoreIssueComments()
     expect(session.issueDetail()?.comments.value?.items.filter((comment) => comment.id === posted.id)).toHaveLength(1)
     expect(session.issueDetail()?.comments.value?.hasMore).toBe(false)
+  })
+
+  test("an issue metadata read started during posting cannot undo confirmed comment metadata", async () => {
+    const number = issueDetailFixture.number
+    const posted = { ...issueCommentsFixture[0]!, id: 9010, body: "Overlapping comment", createdAt: "2026-07-01T00:00:00Z" }
+    const write = deferred<IssueComment>()
+    const header = deferred<IssueDetail>()
+    let refreshing = false
+    const session = createRepositorySession(loaders({
+      issue: async () => refreshing ? header.promise : structuredClone(issueDetailFixture),
+      createIssueComment: async () => write.promise,
+    }))
+    await session.load("owner/repo")
+    await session.loadIssue(number)
+    session.updateIssueDraft(number, { body: posted.body })
+    const posting = session.submitIssueAction(number, "comment")
+    refreshing = true
+    const reloading = session.loadIssue(number)
+    write.resolve(posted)
+    await posting
+    header.resolve(structuredClone(issueDetailFixture))
+    await reloading
+    expect(session.issueDetail()?.resource.value).toMatchObject({ commentCount: issueDetailFixture.commentCount + 1, updatedAt: posted.createdAt })
+    expect(session.issueDetail()?.comments.value?.items.filter((item) => item.id === posted.id)).toHaveLength(1)
+  })
+
+  test("an overlapping issue comment confirmation preserves refreshed lock, permissions, state and title", async () => {
+    const number = issueDetailFixture.number
+    const posted = { ...issueCommentsFixture[0]!, id: 9011, body: "Overlapping comment", createdAt: "2026-07-01T00:00:00Z" }
+    for (const permission of [false, undefined]) {
+      const write = deferred<IssueComment>()
+      const header = deferred<IssueDetail>()
+      let refreshing = false
+      let writes = 0
+      const session = createRepositorySession(loaders({
+        issue: async () => refreshing ? header.promise : structuredClone(issueDetailFixture),
+        createIssueComment: async () => { writes++; return write.promise },
+      }))
+      await session.load("owner/repo")
+      await session.loadIssue(number)
+      session.updateIssueDraft(number, { body: posted.body })
+      const posting = session.submitIssueAction(number, "comment")
+      refreshing = true
+      const refresh = session.loadIssue(number)
+      write.resolve(posted)
+      await posting
+      // A confirmed comment must not promote the in-flight reload to a usable resource.
+      expect(session.issueDetail()?.resource.status).toBe("loading")
+      expect(session.issueDetail()?.resource.value?.commentCount).toBe(issueDetailFixture.commentCount + 1)
+      session.updateIssueDraft(number, { body: "Wait for refreshed permission" })
+      await expect(session.submitIssueAction(number, "comment")).rejects.toThrow("Reload the issue successfully")
+      header.resolve({ ...structuredClone(issueDetailFixture), state: "closed", title: "Fresh server title", locked: true,
+        permissions: permission === undefined ? undefined : { ...issueDetailFixture.permissions!, comment: permission } })
+      await refresh
+      expect(session.issueDetail()?.resource).toMatchObject({ status: "ready", value: {
+        state: "closed", title: "Fresh server title", locked: true, commentCount: issueDetailFixture.commentCount + 1, updatedAt: posted.createdAt } })
+      expect(session.issueDetail()?.resource.value?.permissions?.comment).toBe(permission)
+      session.updateIssueDraft(number, { body: "Do not post with stale permission" })
+      await expect(session.submitIssueAction(number, "comment")).rejects.toThrow("permission")
+      expect(writes).toBe(1)
+    }
+  })
+
+  test("an overlapping stale issue read cannot undo a confirmed state write", async () => {
+    const number = issueDetailFixture.number
+    const write = deferred<IssueDetail>()
+    const read = deferred<IssueDetail>()
+    let reads = 0
+    const session = createRepositorySession(loaders({
+      issue: async () => ++reads === 1 ? structuredClone(issueDetailFixture) : read.promise,
+      updateIssueState: async () => write.promise,
+    }))
+    await session.load("owner/repo")
+    await session.loadIssue(number)
+    const writing = session.submitIssueAction(number, "close")
+    const refreshing = session.loadIssue(number)
+    write.resolve({ ...issueDetailFixture, state: "closed", stateReason: "completed", title: "Title returned by the write" })
+    await writing
+    read.resolve(structuredClone(issueDetailFixture))
+    await refreshing
+    // The read that began before the write is discarded in favour of GitHub's response to the write.
+    expect(session.issueDetail()?.resource).toMatchObject({ status: "ready", value: { state: "closed", title: "Title returned by the write" } })
+    expect(reads).toBe(2)
   })
 
   test("a failed issue reload cannot reuse previously loaded write permissions", async () => {

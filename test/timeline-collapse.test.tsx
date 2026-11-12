@@ -4,6 +4,7 @@ import { defaultConfig } from "../src/config"
 import type { IssueDetailState, PullDetailState } from "../src/repository-state"
 import { App } from "../src/ui/app"
 import { githubDataFixture, issueCommentsFixture, issueDetailFixture, issuePullReferenceFixture, pullContextFixture, repositoryOperationsFixture } from "./fixtures/github-data"
+import { waitForText } from "./fixtures/wait"
 import { clickControl } from "./fixtures/mouse"
 
 test("one timeline toggle hides bodies, keeps headers and descriptions, and carries across issues and PRs", async () => {
@@ -41,7 +42,7 @@ test("one timeline toggle hides bodies, keeps headers and descriptions, and carr
   const settle = async () => { await view.flush(); await Bun.sleep(60); await view.flush() }
   try {
     await settle()
-    expect(view.captureCharFrame()).toContain("Thanks for the clear reproduction.")
+    await waitForText(view, "Thanks for the clear reproduction.")
     expect(view.captureCharFrame()).toContain("z collapse")
     view.mockInput.pressKey("z")
     await settle()
@@ -62,6 +63,7 @@ test("one timeline toggle hides bodies, keeps headers and descriptions, and carr
     view.mockInput.pressKey("4")
     view.mockInput.pressEnter()
     await settle()
+    await waitForText(view, "PR description remains visible.")
     frame = view.captureCharFrame()
     expect(frame).toContain("PR description remains visible.")
     expect(frame).not.toContain("1 reference")
@@ -76,15 +78,15 @@ test("one timeline toggle hides bodies, keeps headers and descriptions, and carr
       expect(frame).not.toContain(text)
     view.mockInput.pressKey("z")
     await settle()
-    frame = view.captureCharFrame()
     for (const text of ["Thanks for the clear reproduction.", "Review body to collapse.", "Thread body to collapse.", "newCode", "fix: avoid duplicate key events",
       "Merge blocked · Current status", "Fix failed required checks.", "Reviews: Approved", "Branch: No conflicts", "Required checks:", "Readiness check to collapse"])
-      expect(frame).toContain(text)
+      await waitForText(view, text)
+    frame = view.captureCharFrame()
     expect(view.renderer.root.findDescendantById("pull-merge-readiness")!.height).toBeGreaterThan(1)
     expect(frame).toContain("z collapse")
     view.mockInput.pressKey("3")
     await settle()
-    expect(view.captureCharFrame()).toContain("Thanks for the clear reproduction.")
+    await waitForText(view, "Thanks for the clear reproduction.")
     const description = view.renderer.root.findDescendantById("issue-detail-description")!
     await view.mockMouse.click(description.x + 1, description.y + 1, 2)
     await settle()
@@ -99,7 +101,7 @@ test("one timeline toggle hides bodies, keeps headers and descriptions, and carr
     expect(view.captureCharFrame()).toContain("Expand")
     await clickControl(view, "context-menu-row-3")
     await settle()
-    expect(view.captureCharFrame()).toContain("Thanks for the clear reproduction.")
+    await waitForText(view, "Thanks for the clear reproduction.")
     expect(view.captureCharFrame()).toContain("z collapse")
   } finally { view.renderer.destroy() }
 })

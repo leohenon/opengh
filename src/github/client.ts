@@ -1202,8 +1202,13 @@ export function createGitHubClient(transport: GitHubTransport, commentStorage?: 
     const response = await transport.json<WorkflowRunsResponse>(
       `${repositoryPath(repository)}/actions/runs?per_page=${PAGE_SIZE}&page=${page}`, options,
     )
-    options?.budget?.consumeItems(response.workflow_runs?.length ?? 0)
-    const items = (response.workflow_runs ?? []).map((item) => ({
+    // A malformed body is a failed read, not a repository without workflow runs.
+    const list = response?.workflow_runs
+    const total = response?.total_count
+    if (!Array.isArray(list) || typeof total !== "number" || !Number.isSafeInteger(total) || total < 0)
+      throw new Error("GitHub returned an invalid workflow runs response.")
+    options?.budget?.consumeItems(list.length)
+    const items = list.map((item) => ({
       id: item.id,
       name: item.name,
       title: item.display_title,
@@ -1211,7 +1216,7 @@ export function createGitHubClient(transport: GitHubTransport, commentStorage?: 
       conclusion: item.conclusion ?? "",
       createdAt: item.created_at,
     }))
-    return { items, hasMore: page * PAGE_SIZE < (response.total_count ?? items.length) }
+    return { items, hasMore: page * PAGE_SIZE < total }
   }
 
   const run = async (repository: RepositoryReference, id: number, options?: RequestOptions): Promise<WorkflowRunDetail> => {

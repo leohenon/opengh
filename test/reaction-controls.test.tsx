@@ -8,6 +8,8 @@ import { createRepositorySession, type RepositoryLoaders } from "../src/reposito
 import { initializeHunk } from "../src/ui/hunk-host"
 import { Root } from "../src/root"
 import { clickControl } from "./fixtures/mouse"
+import { createTestReviewSession } from "./fixtures/reviews"
+import { waitForText } from "./fixtures/wait"
 import { commitDetailFixture, githubDataFixture, issueCommentsFixture, issueDetailFixture, pullContextFixture } from "./fixtures/github-data"
 
 async function setup(overrides: Partial<RepositoryLoaders> = {}, launcher = false) {
@@ -35,6 +37,8 @@ async function setup(overrides: Partial<RepositoryLoaders> = {}, launcher = fals
   await render(() => <Root cwd="/fixture" services={{
     resolveRepository: async () => launcher ? undefined : "anomalyco/opentui", resolveLocalRepository: async () => undefined,
     loadRecentRepositories: async () => ["anomalyco/opentui", "owner/other"], rememberRepository: async () => {},
+    // Defaults would restore the developer's saved tabs from disk and ask the real gh for the viewer.
+    loadRepositoryTabs: async () => ({}), saveRepositoryTabs: async () => {}, createPullReviewSession: createTestReviewSession,
     copyToHostClipboard: async (value) => { copied.push(value); return true },
     loadConfig: async () => ({ ...defaultConfig, showScrollbars: false }), createRepositorySession: () => session,
   }} />, view.renderer)
@@ -50,7 +54,7 @@ async function escape(view: Awaited<ReturnType<typeof testRender>>) {
   await settle(view)
 }
 async function messageGesture(view: Awaited<ReturnType<typeof testRender>>, text: string, right = false, single = false) {
-  await view.flush()
+  await waitForText(view, text)
   const rows = view.captureCharFrame().split("\n")
   const y = rows.findIndex((row) => row.includes(text))
   expect(y).toBeGreaterThanOrEqual(0)

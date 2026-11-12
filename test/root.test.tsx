@@ -441,11 +441,13 @@ test("always remembers a main tab per repository and restores it on direct open"
     expect(view.captureCharFrame()).toContain("ScrollBox loses focus") // Restored Issues, not Overview.
     view.mockInput.pressKey("2")
     await settle()
+    // Navigation saves are debounced. Checked straight after one navigation: the slower
+    // repository switches below can outlast the debounce on a busy machine.
+    expect(writes).toBe(0)
     await switchTo("owner/other")
     expect(view.captureCharFrame()).toContain("retain focused child") // Independent saved PR tab.
     await switchTo("CLI/CLI")
     expect(view.captureCharFrame()).toContain("cad92f4") // Restored Commits, case-insensitively.
-    expect(writes).toBe(0) // Navigation saves are debounced.
     await Bun.sleep(280)
     expect(writes).toBe(1)
     // Changing away and back during an in-flight save must leave the newer update pending.
@@ -563,7 +565,7 @@ test.each([false, true])("quit drains late review edits after delayed tab saves 
     transport: {
       async json<T>(path: string): Promise<T> {
         if (path === "user") return { id: 1, login: "viewer" } as T
-        if (path === "repos/cli/cli") return { private: true, permissions: { pull: true } } as T
+        if (path === "repos/cli/cli") return { id: 71, private: true, permissions: { pull: true } } as T
         if (path === "repos/cli/cli/pulls/42") return { head: { sha: "a".repeat(40) }, base: { sha: "b".repeat(40) }, state: "open", user: { id: 2 } } as T
         if (path.includes("/reviews?")) return [] as T
         throw new Error(`Unexpected request: ${path}`)

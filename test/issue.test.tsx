@@ -6,6 +6,7 @@ import type { IssueDetail, IssueReference } from "../src/models"
 import type { DetailTarget } from "../src/navigation"
 import { App } from "../src/ui/app"
 import { commitDetailFixture, githubDataFixture, issueDetailFixture, issueCommentsFixture, issuePullReferenceFixture, repositoryOperationsFixture } from "./fixtures/github-data"
+import { waitForText } from "./fixtures/wait"
 
 const active: Array<{ renderer: { destroy(): void; isDestroyed: boolean } }> = []
 afterEach(() => {
@@ -140,9 +141,9 @@ test("permission recovery guidance remains visible with readable issue content a
   />, { width: 100, height: 32 })
   active.push(view)
   await settle(view)
+  await waitForText(view, "Readable issue description.")
   expect(view.captureCharFrame()).toContain("Issue actions unavailable:")
   expect(view.captureCharFrame()).toContain("Restart opengh")
-  expect(view.captureCharFrame()).toContain("Readable issue description.")
   setIssue((current) => ({ ...current, permissions: issueDetailFixture.permissions, permissionsError: undefined }))
   await view.flush()
   expect(view.captureCharFrame()).not.toContain("Issue actions unavailable:")

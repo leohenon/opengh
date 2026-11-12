@@ -20,6 +20,7 @@ export function validateReviewAnchor(anchor: ReviewAnchor): void {
 export function validateReviewDraft(draft: ReviewDraft, submitting = false): void {
   endpoint(draft.repository, draft.number)
   if (!Number.isSafeInteger(draft.accountId) || draft.accountId <= 0 || !/^[a-f0-9]{40,64}$/i.test(draft.headSha)
+    || (draft.repositoryId !== undefined && (!Number.isSafeInteger(draft.repositoryId) || draft.repositoryId <= 0))
     || (draft.baseSha !== undefined && (typeof draft.baseSha !== "string" || !/^[a-f0-9]{40,64}$/i.test(draft.baseSha)))
     || typeof draft.body !== "string" || draft.body.length > MAX_BODY || !["COMMENT", "APPROVE", "REQUEST_CHANGES"].includes(draft.event)
     || !Array.isArray(draft.comments) || draft.comments.length > 100) throw new Error("Invalid review draft or review exceeds limits (65,536 characters / 100 comments).")
@@ -65,9 +66,10 @@ export function createGitHubReviews(transport: GitHubTransport = githubTransport
     if (!Number.isSafeInteger(account?.id) || account.id <= 0 || typeof account.login !== "string" || !account.login.trim()) throw new Error("Cannot verify the current GitHub account.")
     const [pull, repo, reviews] = await Promise.all([
       transport.json<{ head: { sha: string }; base?: { sha: string }; state: string; draft: boolean; locked: boolean; user: { id: number }; html_url: string }>(path, options),
-      transport.json<{ archived: boolean; private?: boolean; permissions?: { pull?: boolean; triage?: boolean; push?: boolean; maintain?: boolean; admin?: boolean } }>(`repos/${repository}`, options), list(repository, number, options),
+      transport.json<{ id: number; archived: boolean; private?: boolean; permissions?: { pull?: boolean; triage?: boolean; push?: boolean; maintain?: boolean; admin?: boolean } }>(`repos/${repository}`, options), list(repository, number, options),
     ])
     options.budget?.consumeItems(3)
+    if (!Number.isSafeInteger(repo?.id) || repo.id <= 0) throw new Error("Cannot verify the repository.")
     if (!/^[a-f0-9]{40,64}$/i.test(pull?.head?.sha) || !Number.isSafeInteger(pull?.user?.id)) throw new Error("Cannot verify pull request head or author.")
     if (pull.base !== undefined && (typeof pull.base?.sha !== "string" || !/^[a-f0-9]{40,64}$/i.test(pull.base.sha))) throw new Error("Cannot verify pull request base.")
     // Public repositories can restrict approvals to explicitly granted READ or
@@ -94,7 +96,7 @@ export function createGitHubReviews(transport: GitHubTransport = githubTransport
     const canInlineComment = active && access && unlocked
     const canComment = canInlineComment && !pending
     const canApprove = canComment && pull.draft === false && explicitAccess && pull.user.id !== account.id
-    return { accountId: account.id, login: account.login, repository, number, headSha: pull.head.sha, baseSha: pull.base?.sha,
+    return { accountId: account.id, login: account.login, repositoryId: repo.id, repository, number, headSha: pull.head.sha, baseSha: pull.base?.sha,
       url: `https://github.com/${repository}/pull/${number}`, canComment, canInlineComment, canApprove, canRequestChanges: canApprove,
       pendingReviewUrl: pending ? `https://github.com/${repository}/pull/${number}/files#pending-review` : undefined,
       reason: pending ? "An existing pending GitHub review must be finished on GitHub first." : !active ? "Reviews require an open pull request in an unarchived repository."
