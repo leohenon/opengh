@@ -1,6 +1,7 @@
 name: Release
 
-# Push a tag named v<version>, matching "version" in package.json, to publish executables.
+# Started by `bun run release <version>`, which pushes the tag v<version> with the release notes as its message.
+# Everything is built and checked first; "latest" moves only after the irreversible step, npm, has succeeded.
 on:
   push:
     tags: ["v*"]
@@ -8,8 +9,17 @@ on:
 permissions:
   contents: read
 
+# Serialize releases and retries across all versions, not just runs for the same tag.
+# Queue order is not version order, so each channel also refuses to move backwards.
+concurrency:
+  group: release-publication
+  cancel-in-progress: false
+  queue: max
+
 jobs:
   test:
+    name: Release CI
+    # Run CI on the release tag, independently of cancellable main-branch runs.
     uses: ./.github/workflows/ci.yml
 
   build:
@@ -55,8 +65,8 @@ jobs:
             dist/*.tar.gz.sha256
           if-no-files-found: error
 
-  publish:
-    name: Publish GitHub release
+  draft:
+    name: Stage the GitHub release
     needs: build
     runs-on: ubuntu-24.04
     timeout-minutes: 10
@@ -64,26 +74,50 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Read the release notes from the tag
+        run: |
+          # The checkout's tag points straight at the commit; fetch the annotated tag that carries the notes.
+          git fetch --quiet --force --depth=1 origin "+refs/tags/$GITHUB_REF_NAME:refs/tags/$GITHUB_REF_NAME"
+          if [ "$(git cat-file -t "refs/tags/$GITHUB_REF_NAME")" != tag ]; then
+            echo "::error::$GITHUB_REF_NAME carries no release notes. Create releases with: bun run release <version>"
+            exit 1
+          fi
+          # Copy the raw tag body: for-each-ref adds a newline and would change the saved notes.
+          git cat-file tag "refs/tags/$GITHUB_REF_NAME" | {
+            while IFS= read -r line; do
+              if [ -z "$line" ]; then break; fi
+            done
+            cat
+          } > "$RUNNER_TEMP/notes.md"
+          grep -q '[^[:space:]]' "$RUNNER_TEMP/notes.md"
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           path: dist
           merge-multiple: true
-      - name: Create the release
+      - name: Stage the release as a draft
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           cd dist
           cat *.tar.gz.sha256 > SHA256SUMS
           sha256sum --check SHA256SUMS
-          # A pre-release must not become what releases/latest, and so install.sh, serves.
-          prerelease=
-          case "$GITHUB_REF_NAME" in *-*) prerelease=--prerelease ;; esac
-          gh release create "$GITHUB_REF_NAME" *.tar.gz SHA256SUMS ../install.sh \
-            --repo "$GITHUB_REPOSITORY" --title "$GITHUB_REF_NAME" --generate-notes --verify-tag $prerelease
+          state=$(gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft 2>/dev/null || echo missing)
+          if [ "$state" = false ]; then
+            # A re-run after publication: what users already downloaded must not change.
+            echo "$GITHUB_REF_NAME is already published; its files are left as they are"
+          elif [ "$state" = true ]; then
+            gh release upload "$GITHUB_REF_NAME" *.tar.gz SHA256SUMS ../install.sh --repo "$GITHUB_REPOSITORY" --clobber
+            gh release edit "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --notes-file "$RUNNER_TEMP/notes.md"
+          else
+            prerelease=
+            case "$GITHUB_REF_NAME" in *-*) prerelease=--prerelease ;; esac
+            gh release create "$GITHUB_REF_NAME" *.tar.gz SHA256SUMS ../install.sh --repo "$GITHUB_REPOSITORY" \
+              --draft --title "$GITHUB_REF_NAME" --notes-file "$RUNNER_TEMP/notes.md" --verify-tag $prerelease
+          fi
 
   npm:
     name: Publish npm packages
-    needs: build
+    needs: draft
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     permissions:
@@ -125,15 +159,69 @@ jobs:
           provenance=--provenance
           if [ "$PRIVATE_REPOSITORY" != false ]; then provenance=; fi
           cd dist/npm
-          # Platform packages first: the launcher depends on them. Skipping published ones makes a rerun safe.
+          # Upload without changing either public channel. A partial upload must not move latest/next.
           for directory in opengh-*/ opengh/; do
             name=$(basename "$directory")
             if npm view "$name@$version" version >/dev/null 2>&1; then
               echo "$name@$version is already published"
             else
-              npm publish "./$directory" --access public $provenance --tag "$tag"
+              npm publish "./$directory" --access public $provenance --tag staged
             fi
           done
+          # All packages now exist. Promote platforms first, then the launcher. This also repairs a
+          # partially completed promotion, without letting an old retry downgrade latest or next.
+          for directory in opengh-*/ opengh/; do
+            name=$(basename "$directory")
+            # The first publication has only "staged", not "latest". Select the version explicitly.
+            tags=$(npm view "$name@$version" dist-tags --json)
+            promote=$(bun -e '
+              const [json, tag, version] = process.argv.slice(1)
+              const tags = JSON.parse(json)
+              if (!tags || typeof tags !== "object" || Array.isArray(tags)) throw new Error("Invalid npm dist-tags response")
+              const current = tags[tag]
+              if (current !== undefined && typeof current !== "string") throw new Error("Invalid npm channel version")
+              console.log(current === undefined || Bun.semver.order(version, current) > 0 ? "yes" : "no")
+            ' "$tags" "$tag" "$version")
+            if [ "$promote" = yes ]; then
+              npm dist-tag add "$name@$version" "$tag"
+            else
+              echo "$name: $tag already points at $version or a newer version"
+            fi
+          done
+
+  publish:
+    name: Publish the GitHub release
+    needs: npm
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - name: Publish the staged release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # Re-running an old release must not pull "latest" back to it. A failed lookup stops publication.
+          state=$(gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft)
+          if [ "$state" = false ]; then
+            echo "$GITHUB_REF_NAME is already published"
+            exit 0
+          fi
+          test "$state" = true
+          # An older unfinished draft may be retried after a newer release completed. Publish it,
+          # but don't make it what releases/latest (and install.sh) serves. Fail closed on API errors.
+          latest=--latest=false
+          case "$GITHUB_REF_NAME" in
+            *-*) ;;
+            *)
+              published=$(gh api --paginate "repos/$GITHUB_REPOSITORY/releases?per_page=100" \
+                --jq '.[] | select(.draft == false and .prerelease == false) | .tag_name')
+              newest=$(printf '%s\n%s\n' "$published" "$GITHUB_REF_NAME" \
+                | sed -nE 's/^v([0-9]+\.[0-9]+\.[0-9]+)$/\1/p' | sort -V | tail -n 1)
+              if [ "$newest" = "${GITHUB_REF_NAME#v}" ]; then latest=--latest; fi
+              ;;
+          esac
+          gh release edit "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --draft=false $latest
 
   homebrew:
     name: Update the Homebrew tap
@@ -147,12 +235,15 @@ jobs:
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version-file: package.json
-      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
-        with:
-          path: dist
-          merge-multiple: true
       - run: bun install --frozen-lockfile
-      - run: bun run brew:formula
+      - name: Write the formula from the published checksums
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # The published release, not this run's build, is what users download.
+          gh release download "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --pattern SHA256SUMS --dir dist
+          while read -r hash name; do echo "$hash  $name" > "dist/$name.sha256"; done < dist/SHA256SUMS
+          bun run brew:formula
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: leohenon/homebrew-tap
@@ -162,6 +253,13 @@ jobs:
         working-directory: tap
         run: |
           mkdir -p Formula
+          # Re-running an old release must not replace a newer formula.
+          current=$(sed -n 's/^  version "\(.*\)"$/\1/p' Formula/opengh.rb 2>/dev/null || true)
+          new=${GITHUB_REF_NAME#v}
+          if [ -n "$current" ] && [ "$current" != "$new" ] && [ "$(printf '%s\n%s\n' "$current" "$new" | sort -V | tail -n 1)" = "$current" ]; then
+            echo "The tap already has the newer $current"
+            exit 0
+          fi
           install -m 644 ../dist/homebrew/opengh.rb Formula/opengh.rb
           git add -- Formula/opengh.rb
           if git diff --cached --quiet; then
