@@ -12,19 +12,7 @@ import { cp, mkdir, readFile, rm, writeFile } from "node:fs/promises"
 import { dirname, join } from "node:path"
 import solid from "@opentui/solid/bun-plugin"
 import manifest from "../package.json"
-
-const root = join(import.meta.dir, "..")
-const dist = join(root, "dist")
-
-// Linux builds embed exactly one libc variant of OpenTUI's native library.
-const targets: Record<string, { libc?: "glibc" | "musl" }> = {
-  "darwin-arm64": {},
-  "darwin-x64": {},
-  "linux-x64": { libc: "glibc" },
-  "linux-arm64": { libc: "glibc" },
-  "linux-x64-musl": { libc: "musl" },
-  "linux-arm64-musl": { libc: "musl" },
-}
+import { dist, root, targets } from "./targets"
 
 function packageDirectory(name: string, from: string): string | undefined {
   for (let directory = from; ; directory = dirname(directory)) {

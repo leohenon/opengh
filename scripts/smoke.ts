@@ -27,7 +27,8 @@ await chmod(join(tools, "gh"), 0o755)
 function run(...args: string[]) {
   const child = Bun.spawnSync([binary, ...args], {
     cwd, stdin: "ignore", timeout: 30_000,
-    env: { PATH: `${tools}:/usr/bin:/bin`, HOME: cwd, XDG_CONFIG_HOME: join(cwd, "config") },
+    // OPENGH_SMOKE_PATH adds what a wrapper needs, such as Node.js for the npm launcher.
+    env: { PATH: [tools, process.env.OPENGH_SMOKE_PATH, "/usr/bin:/bin"].filter(Boolean).join(":"), HOME: cwd, XDG_CONFIG_HOME: join(cwd, "config") },
   })
   return { code: child.exitCode, stdout: child.stdout.toString(), stderr: child.stderr.toString() }
 }
