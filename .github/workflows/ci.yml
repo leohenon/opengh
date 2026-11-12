@@ -33,3 +33,8 @@ jobs:
       # The executable is what users run: build it and check it starts outside the checkout.
       - run: bun run build
       - run: bun run smoke
+      - name: Check the install script
+        run: |
+          cat dist/*.tar.gz.sha256 > dist/SHA256SUMS
+          OPENGH_DOWNLOAD_BASE_URL="file://$PWD/dist" OPENGH_INSTALL_DIR="$RUNNER_TEMP/bin" sh install.sh
+          bun run smoke "$RUNNER_TEMP/bin/opengh"

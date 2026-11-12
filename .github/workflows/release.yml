@@ -37,6 +37,11 @@ jobs:
       - run: bun run build ${{ matrix.targets }} ${{ matrix.musl }}
       - name: Smoke test
         run: bun run smoke dist/opengh-${{ matrix.targets }}/opengh
+      - name: Check the install script
+        run: |
+          cat dist/*.tar.gz.sha256 > dist/SHA256SUMS
+          OPENGH_DOWNLOAD_BASE_URL="file://$PWD/dist" OPENGH_INSTALL_DIR="$RUNNER_TEMP/bin" sh install.sh
+          bun run smoke "$RUNNER_TEMP/bin/opengh"
       - name: Smoke test (musl, on Alpine)
         if: matrix.musl
         run: |
@@ -58,6 +63,7 @@ jobs:
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           path: dist
@@ -69,8 +75,11 @@ jobs:
           cd dist
           cat *.tar.gz.sha256 > SHA256SUMS
           sha256sum --check SHA256SUMS
-          gh release create "$GITHUB_REF_NAME" *.tar.gz SHA256SUMS \
-            --repo "$GITHUB_REPOSITORY" --title "$GITHUB_REF_NAME" --generate-notes --verify-tag
+          # A pre-release must not become what releases/latest, and so install.sh, serves.
+          prerelease=
+          case "$GITHUB_REF_NAME" in *-*) prerelease=--prerelease ;; esac
+          gh release create "$GITHUB_REF_NAME" *.tar.gz SHA256SUMS ../install.sh \
+            --repo "$GITHUB_REPOSITORY" --title "$GITHUB_REF_NAME" --generate-notes --verify-tag $prerelease
 
   npm:
     name: Publish npm packages
@@ -89,6 +98,8 @@ jobs:
         with:
           node-version: 22
           registry-url: https://registry.npmjs.org
+      # Without this, Bun fetches the bunfig.toml preload on demand, outside the lockfile.
+      - run: bun install --frozen-lockfile
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           path: dist
@@ -105,10 +116,14 @@ jobs:
       - name: Publish
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          PRIVATE_REPOSITORY: ${{ github.event.repository.private }}
         run: |
           version=$(node -p 'require("./package.json").version')
           # Pre-releases must not become the default install.
           case "$version" in *-*) tag=next ;; *) tag=latest ;; esac
+          # npm rejects provenance from a private repository.
+          provenance=--provenance
+          if [ "$PRIVATE_REPOSITORY" != false ]; then provenance=; fi
           cd dist/npm
           # Platform packages first: the launcher depends on them. Skipping published ones makes a rerun safe.
           for directory in opengh-*/ opengh/; do
@@ -116,7 +131,7 @@ jobs:
             if npm view "$name@$version" version >/dev/null 2>&1; then
               echo "$name@$version is already published"
             else
-              npm publish "./$directory" --access public --provenance --tag "$tag"
+              npm publish "./$directory" --access public $provenance --tag "$tag"
             fi
           done
 
@@ -136,6 +151,7 @@ jobs:
         with:
           path: dist
           merge-multiple: true
+      - run: bun install --frozen-lockfile
       - run: bun run brew:formula
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
