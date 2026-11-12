@@ -119,3 +119,40 @@ jobs:
               npm publish "./$directory" --access public --provenance --tag "$tag"
             fi
           done
+
+  homebrew:
+    name: Update the Homebrew tap
+    needs: publish
+    # Homebrew has no pre-release channel, and the formula must point at published archives.
+    if: ${{ !contains(github.ref_name, '-') }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version-file: package.json
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          path: dist
+          merge-multiple: true
+      - run: bun run brew:formula
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: leohenon/homebrew-tap
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          path: tap
+      - name: Commit the formula
+        working-directory: tap
+        run: |
+          mkdir -p Formula
+          install -m 644 ../dist/homebrew/opengh.rb Formula/opengh.rb
+          git add -- Formula/opengh.rb
+          if git diff --cached --quiet; then
+            echo "The tap already has this formula"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "chore(homebrew): update opengh to ${GITHUB_REF_NAME#v}"
+          git push origin HEAD

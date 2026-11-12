@@ -16,6 +16,7 @@
     "build": "bun scripts/build.ts",
     "smoke": "bun scripts/smoke.ts",
     "npm:pack": "bun scripts/npm.ts",
+    "brew:formula": "bun scripts/homebrew.ts",
     "site:build": "bun site/build.ts",
     "site:dev": "bun run site:build && bun site/serve.ts",
     "site:check": "tsc -p site/tsconfig.json && bun run site:build && bun site/check.ts"
