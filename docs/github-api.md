@@ -1,71 +1,76 @@
 # GitHub API integration
 
-opengh uses both GitHub REST and GraphQL through the authenticated GitHub CLI (`gh api`). This document maps the integration; upstream documentation remains the source of truth for endpoint fields, schema, permissions, and limits.
+Use `GitHubTransport` for authenticated requests through `gh api`. Keep response
+validation in `src/github/` and async state in the session layer, not UI components.
+
+## Choose an API
+
+| API | Use for |
+| --- | --- |
+| REST | Repository data, documents, commits, issues, PRs, comments, reviews, Actions. |
+| GraphQL | Connected PR review/check context, reactions, counts, capabilities, merge messages, merging, draft state. |
+| `transport.text()` | Documents and diffs with explicit `Accept` headers. |
+
+Inject the transport into client factories so tests can use fixtures.
+
+## Validate responses
+
+- `json<T>` and `graphql<T>` parse JSON; they do not validate response shapes.
+  A malformed list must fail, not become an empty page.
+- Check GraphQL `errors` and required fields, even when `data` exists.
+- Keep REST IDs, issue/PR numbers, and GraphQL node IDs distinct.
+- REST issue listings include PRs. PR conversation comments use issue-comment
+  endpoints; inline review comments and review threads are separate resources.
+
+## Paginate results
+
+Follow each client's contract: REST lists generally return `{ items, hasMore }`;
+some accumulate pages internally. GraphQL uses cursors, including nested connections.
+
+## Preserve mutation safety
+
+- Authenticate with `gh auth login --hostname github.com`; `GH_TOKEN` and
+  `GITHUB_TOKEN` override saved credentials.
+- Verify the session viewer before writes.
+- Use validated, relative REST endpoints. `--hostname` does not constrain absolute URLs.
+- Check operation-specific permissions and repository state; read access is not write access.
+  Require a successfully loaded resource before a write, not a retained value from a failed reload.
+- Bind stored drafts to the repository's numeric ID. An `owner/name` can be reused by a
+  different repository; review drafts and inline-comment attempts refuse to submit on a mismatch.
+- Reconcile uncertain writes before retrying. Keep drafts and recovery records.
+  Use `GitHubRequestNotSentError` only for proven pre-dispatch failures.
+
+## Limits
+
+| Area | Boundary |
+| --- | --- |
+| Host | GitHub.com only. |
+| Processes | 20-second timeout; JSON, GraphQL, and text requests support cancellation and byte limits. |
+| Responses | 8 MiB default API cap; documents: 1 MiB; diffs: 4 MiB. |
+| Pagination | 20-page automatic limit. |
+| Detail loading | Shared budgets: 60 seconds, 100 requests, 10,000 items, 16 MiB. |
+| GraphQL variables | `Record<string, string>`, sent in a JSON request body through stdin. Other types need explicit transport support. |
+| Scheduling | Four concurrent requests with shared rate-limit cooldowns. No automatic retries. |
+| `transport.page()` | Anonymous GitHub.com HTML fetch; rejects redirects. Not an authenticated API fallback. |
 
 ## Code map
 
-| Layer | Files | Responsibility |
-| --- | --- | --- |
-| Transport | `src/github/transport.ts`, `process.ts`, `errors.ts` | CLI execution, authentication checks, endpoint validation, cancellation, timeouts, and error guidance |
-| Main client | `src/github/client.ts` | Repository metadata, branches, commits, issues, PRs, timelines, Actions, and domain-model mapping |
-| Specialized clients | `src/github/documents.ts`, `diff.ts`, `pull-context.ts`, `reactions.ts`, `reviews.ts` | Repository documents, bounded diff loading, review threads/checks, reactions, and review submission |
-| Repository discovery | `src/github/repository.ts` | Repository resolution and recent history |
-| Session | `src/repository-session.ts` | Async resource state, caching, refresh, pagination, and user actions |
-| Models and UI | `src/models.ts`, `src/ui/` | Domain types and presentation; do not issue API requests directly from UI components |
+| Path | Responsibility |
+| --- | --- |
+| `src/github/transport.ts`, `process.ts`, `errors.ts` | Transport, authentication, validation, cancellation, errors. |
+| `src/github/client.ts` | Main API operations and domain mapping. |
+| `src/github/documents.ts`, `diff.ts`, `pull-context.ts`, `reactions.ts`, `reviews.ts` | Documents, diffs, PR context, reactions, review submission. |
+| `src/github/repository.ts` | Discovery and recent history. |
+| `src/github/releases.ts` | Latest stable release validation for `opengh update`; the bundled installer downloads public archives. |
+| `src/repository-session.ts` | Resource state, caching, refresh, pagination, actions. |
+| `src/models.ts`, `src/ui/` | Domain types and presentation. |
 
-Client factories accept a `GitHubTransport` so responses and failures can be exercised without a live GitHub account. Agent guidance is in [the GitHub API skill](../.agents/skills/github-api/SKILL.md).
+## References
 
-## API choices
+Consult the operation's upstream docs before changing requests:
 
-- **REST:** repository metadata, contents, branches, commits, issue/PR lists and details, conversation comments, issue edits, review submission, and Actions runs/jobs.
-- **GraphQL:** connected PR review/check context, reactions, counts and timeline enrichment, capability data, merge messages, merging, and draft-state changes.
-- **Representation-specific reads:** documents and diffs use explicit `Accept` headers through `transport.text()`.
-
-Keep response parsing in the clients. `json<T>` and `graphql<T>` parse JSON but do not perform runtime schema validation. GraphQL callers must inspect `errors` and required fields even when a response contains `data`.
-
-## Authentication and safety
-
-- Users authenticate with `gh auth login --hostname github.com`. `GH_TOKEN` or `GITHUB_TOKEN` can override saved CLI credentials; error guidance accounts for this.
-- The transport remembers the initial viewer and checks viewer identity again before writes, including GraphQL mutations. Read-only queries reuse the initial identity check.
-- REST endpoints must be relative and pass transport validation. Preserve this restriction: `gh api --hostname` does not prevent an absolute endpoint URL from targeting another host.
-- A failed mutation may have reached GitHub. Preserve reconciliation and draft handling rather than retrying automatically. `GitHubRequestNotSentError` is reserved for proven pre-dispatch failures.
-- Read access does not imply mutation permission. Check operation-specific capabilities and repository state; report permission or SSO failures explicitly.
-
-## Pagination and resource semantics
-
-REST list clients generally expose `{ items, hasMore }` with explicit page sizes; some operations accumulate pages internally. GraphQL connections use cursor pagination, including nested review/comment connections. Follow each caller's contract rather than assuming one request returns a complete collection.
-
-GitHub's REST issues listing includes PRs. PR conversation comments are issue comments, not inline review comments. Review submissions and review threads have separate lifecycles. Numeric REST IDs, issue/PR numbers, and GraphQL node IDs are not interchangeable.
-
-## Current boundaries
-
-- The transport targets **GitHub.com**, not arbitrary GitHub Enterprise hosts.
-- Requests have a 20-second process timeout and bounded output. Request options carry cancellation and shared budgets through nested reads. Diff viewing is capped at 4 MiB.
-- Detail and review operations use aggregate budgets of 100 requests, 16 MiB of transport output, 10,000 items, and 60 seconds. Automatic review pagination also stops at 20 pages per collection. Borrowed budgets are not disposed by nested clients.
-- Repository and branch changes cancel obsolete list reads and stop dispatching their remaining pages. Writes are not cancelled by repository navigation.
-- Inline-comment preflight is bounded and cancellable; after dispatch, uncertain confirmation uses a separate bounded scope independent of view cancellation. Incomplete confirmation retains the marker and never authorizes an automatic retry.
-- GraphQL variables currently use `Record<string, string>` and `gh api -f`; supporting other variable types requires explicit transport design rather than assuming coercion.
-- The scheduler limits concurrent requests to four and observes rate-limit cooldowns. It does not automatically retry mutations.
-- `transport.page()` is a separate anonymous HTML fetch restricted to `https://github.com`, with redirects rejected. It is not an authenticated API fallback.
-
-## Official references
-
-Consult the specific operation before changing a request; do not vendor the full API documentation.
-
-### Transport and reliability
-
-- [GitHub CLI: `gh api`](https://cli.github.com/manual/gh_api) — fields, request methods, headers, pagination, and GraphQL examples.
-- [GitHub CLI environment](https://cli.github.com/manual/gh_help_environment) — token and host configuration.
-- [REST best practices](https://docs.github.com/en/rest/using-the-rest-api/best-practices-for-using-the-rest-api)
-- [REST pagination](https://docs.github.com/en/rest/using-the-rest-api/using-pagination-in-the-rest-api)
-- [REST rate limits](https://docs.github.com/en/rest/using-the-rest-api/rate-limits-for-the-rest-api)
-- [REST troubleshooting](https://docs.github.com/en/rest/using-the-rest-api/troubleshooting-the-rest-api)
-
-### Endpoint and schema references
-
-- [REST repositories](https://docs.github.com/en/rest/repos), [commits](https://docs.github.com/en/rest/commits), and [Actions](https://docs.github.com/en/rest/actions)
-- [REST issues](https://docs.github.com/en/rest/issues) — also covers conversation comments used on PRs.
-- [REST pull requests](https://docs.github.com/en/rest/pulls) — includes reviews and inline review comments.
-- [GraphQL reference](https://docs.github.com/en/graphql/reference) — objects, unions, enums, inputs, and mutations.
-- [GraphQL pagination](https://docs.github.com/en/graphql/guides/using-pagination-in-the-graphql-api)
-- [GraphQL limits](https://docs.github.com/en/graphql/overview/rate-limits-and-query-limits)
+- [GitHub API skill](../.agents/skills/github-api/SKILL.md)
+- GitHub CLI: [`gh api`](https://cli.github.com/manual/gh_api), [environment](https://cli.github.com/manual/gh_help_environment)
+- REST: [best practices](https://docs.github.com/en/rest/using-the-rest-api/best-practices-for-using-the-rest-api), [pagination](https://docs.github.com/en/rest/using-the-rest-api/using-pagination-in-the-rest-api), [rate limits](https://docs.github.com/en/rest/using-the-rest-api/rate-limits-for-the-rest-api), [troubleshooting](https://docs.github.com/en/rest/using-the-rest-api/troubleshooting-the-rest-api)
+- Endpoints: [repositories](https://docs.github.com/en/rest/repos), [commits](https://docs.github.com/en/rest/commits), [issues](https://docs.github.com/en/rest/issues), [PRs](https://docs.github.com/en/rest/pulls), [Actions](https://docs.github.com/en/rest/actions), [latest release](https://docs.github.com/en/rest/releases/releases#get-the-latest-release)
+- GraphQL: [schema](https://docs.github.com/en/graphql/reference), [pagination](https://docs.github.com/en/graphql/guides/using-pagination-in-the-graphql-api), [limits](https://docs.github.com/en/graphql/overview/rate-limits-and-query-limits)

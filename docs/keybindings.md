@@ -18,17 +18,15 @@ Arrays replace defaults; `[]` disables an action.
 
 ## Key syntax
 
-Use characters (`j`, `G`, `?`), named keys (`enter`, `esc`), or modifiers (`ctrl+q`).
-`G` means `shift+g`; write `?`, not `shift+/`. Key sequences are not supported.
+Use characters (`j`, `G`, `?`), named keys (`enter`, `esc`), or modifiers (`ctrl+q`). Uppercase means Shift; use `?`, not `shift+/`. Key sequences aren’t supported.
 
-`ctrl+shift` and `super` shortcuts may require enhanced terminal keyboard support.
+`ctrl+shift` and `super` may require enhanced terminal keyboard support.
+
+If your terminal intercepts right-click, use keyboard shortcuts (`?` lists them).
 
 ## Search the page
 
-Press `/` to search the current page or diff body. `enter` confirms;
-`n`/`N` moves between matches.
-
-Search is literal, smart-case, and limited to loaded, visible content. It does not filter lists.
+`/` searches loaded, visible content; `enter` confirms, `n`/`N` moves next/previous. Search is literal, case-insensitive unless uppercase is used, and does not filter lists.
 
 ## Defaults
 
@@ -91,31 +89,29 @@ Source: [`src/keybindings.ts`](../src/keybindings.ts).
 
 ### Diffs
 
-| Action                | Keys               |
-| --------------------- | ------------------ |
-| `diff.openViewer`     | `v`                |
-| `diff.previousFile`   | `,`                |
-| `diff.nextFile`       | `.`                |
-| `diff.toggleFiles`    | `s`                |
-| `diff.filterFiles`    | `F`                |
-| `diff.previousHunk`   | `[`                |
-| `diff.nextHunk`       | `]`                |
-| `diff.toggleLayout`   | `t`                |
-| `diff.toggleWrap`     | `w`                |
-| `diff.toggleComments` | `z`                |
-| `diff.panLeft`        | `left`, `h`        |
-| `diff.panRight`       | `right`, `l`       |
-
-In diffs, `,`/`.` move through files (including a filtered list); `j`/`k`, arrows, `u`/`d`, `f`/`b`, Space and `g`/`G` scroll the diff regardless of sidebar clicks. `h`/`l` and horizontal arrows pan the diff. The file sidebar is mouse-selectable; `s` toggles it and `F` filters paths. On narrow terminals the sidebar starts hidden and, when shown, shares the screen with the diff. Use a file or body right-click menu for Settings; outside diffs `,` opens Settings.
+| Action                | Keys         |
+| --------------------- | ------------ |
+| `diff.openViewer`     | `v`          |
+| `diff.previousFile`   | `,`          |
+| `diff.nextFile`       | `.`          |
+| `diff.toggleFiles`    | `s`          |
+| `diff.filterFiles`    | `F`          |
+| `diff.previousHunk`   | `[`          |
+| `diff.nextHunk`       | `]`          |
+| `diff.toggleLayout`   | `t`          |
+| `diff.toggleWrap`     | `w`          |
+| `diff.toggleComments` | `z`          |
+| `diff.panLeft`        | `left`, `h`  |
+| `diff.panRight`       | `right`, `l` |
 
 ### Username suggestions
 
 Type `@` in a comment editor. `esc` dismisses suggestions without closing the comment.
 
-| Action | Keys |
-| --- | --- |
-| `mention.up` | `up` |
-| `mention.down` | `down` |
+| Action           | Keys           |
+| ---------------- | -------------- |
+| `mention.up`     | `up`           |
+| `mention.down`   | `down`         |
 | `mention.accept` | `enter`, `tab` |
 
 ### Dialogs and pickers
