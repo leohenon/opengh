@@ -46,6 +46,9 @@ if (dirty) fail(`commit or stash these changes first; a release contains only co
 mustGit("fetch", "--quiet", "--tags", "origin", "main")
 const head = mustGit("rev-parse", "HEAD")
 if (head !== mustGit("rev-parse", "origin/main")) fail("main and origin/main differ. Push or pull first, so CI has run on this commit.")
+for (const file of ["LICENSE", "README.md"]) {
+  if (!git("cat-file", "-e", `${head}:${file}`).ok) fail(`${file} must be committed before releasing; release builds use a clean checkout.`)
+}
 
 const tags = mustGit("tag", "--list", "v*").split("\n").filter(Boolean)
 if (tags.includes(tag)) fail(`${tag} already exists.`)
@@ -53,6 +56,7 @@ const newest = tags.map((name) => name.slice(1)).filter((name) => versionPattern
 if (newest && Bun.semver.order(version, newest) <= 0) fail(`${version} is not newer than the latest release, ${newest}.`)
 const manifestPath = join(root, "package.json")
 const manifestText = readFileSync(manifestPath, "utf8")
+const manifestIndex = mustGit("ls-tree", "--format=%(objectmode) %(objectname) 0\t%(path)", head, "--", "package.json")
 const current = JSON.parse(manifestText).version as string
 
 const ci = Bun.spawnSync(["gh", "run", "list", "--workflow", "ci.yml", "--commit", head, "--limit", "1", "--json", "status,conclusion"], { cwd: root })
@@ -118,6 +122,7 @@ if (!/^y(es)?$/i.test(prompt(`Tag and push ${tag}? [y/N]`)?.trim() ?? "")) stop(
 // The notes may have been open for a while. Release only the commit that was checked above.
 if (mustGit("rev-parse", "HEAD") !== head || mustGit("branch", "--show-current") !== "main") stop("main changed while the notes were open.")
 if (readFileSync(manifestPath, "utf8") !== manifestText) stop("package.json changed while the notes were open.")
+if (mustGit("ls-files", "--stage", "--", "package.json") !== manifestIndex) stop("the staged package.json changed while the notes were open.")
 let writtenManifest: string | undefined
 let releaseCommit: string | undefined
 let tagObject: string | undefined
@@ -133,14 +138,17 @@ try {
     if (!committed.ok) stop(`Could not identify the release commit; local state needs manual recovery: ${committed.error}`)
     releaseCommit = committed.out
   }
+  // Freeze the selected commit: another process may move HEAD or main before tagging or pushing.
+  const releaseHead = releaseCommit ?? head
   // Unsigned and verbatim, so the workflow reads back exactly these notes, Markdown headings included.
-  const tagged = git("tag", "--annotate", "--no-sign", "--cleanup=verbatim", "--file", notesPath, tag)
+  const tagged = git("tag", "--annotate", "--no-sign", "--cleanup=verbatim", "--file", notesPath, tag, releaseHead)
   if (!tagged.ok) throw new Error(tagged.error)
   const taggedObject = git("rev-parse", `refs/tags/${tag}`)
   if (!taggedObject.ok) stop(`Could not identify the created tag; local state needs manual recovery: ${taggedObject.error}`)
   tagObject = taggedObject.out
-  // Atomic: the commit and the tag arrive together or not at all.
-  const pushed = git("push", "--quiet", "--atomic", "origin", "main", `refs/tags/${tag}`)
+  // Push only the captured objects, regardless of concurrent ref changes or push.followTags settings.
+  // Atomic: the selected commit and annotated tag arrive together or not at all.
+  const pushed = git("push", "--quiet", "--atomic", "--no-follow-tags", "origin", `${releaseHead}:refs/heads/main`, `${tagObject}:refs/tags/${tag}`)
   // An error can mean the acknowledgement was lost. Only our exact annotated tag proves success;
   // another maintainer's tag with the same name does not. Exit 2 means a successful lookup found no tag.
   if (!pushed.ok) {
