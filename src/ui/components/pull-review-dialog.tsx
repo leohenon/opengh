@@ -12,7 +12,6 @@ import { reviewAnchorLabel } from "../review-lines"
 import { Action } from "./action"
 import { GitHubMarkdown } from "./github-markdown"
 import { Popup } from "./popup"
-import { READING_WIDTH } from "../detail-layout"
 
 export type ReviewCommentDialogProps = ComposerPresentation & {
   anchor: ReviewAnchor
@@ -87,8 +86,8 @@ function ReviewEditor(props: ComposerPresentation & {
     "dialog.discard": clear,
     ...composer.actions,
   }, { when: () => !blocked(), priority: 160, modal: true })
-  return <><Popup fullscreen={composer.expanded()} reserveStatusBar={props.showStatusBarHints} width={86} height={27} placement="center" zIndex={300} onClose={close}>
-    <box width="100%" maxWidth={READING_WIDTH + 4} alignSelf="center" flexGrow={1} minHeight={0} paddingX={2} paddingBottom={1} flexDirection="column">
+  return <><Popup expanded={composer.expanded()} reserveStatusBar={props.showStatusBarHints} width={86} height={27} placement="center" zIndex={300} onClose={close}>
+    <box width="100%" alignSelf="center" flexGrow={1} minHeight={0} paddingX={2} paddingBottom={1} flexDirection="column">
       <box height={1} flexShrink={0} flexDirection="row" justifyContent="space-between">
         <text flexGrow={1} minWidth={0} wrapMode="none" fg={colors.text} attributes={TextAttributes.BOLD}>{props.title}</text>
         <text fg={colors.muted}>{composer.preview() ? "Preview" : ""}</text>
@@ -107,7 +106,7 @@ function ReviewEditor(props: ComposerPresentation & {
         <Show when={composer.preview()}>
           <scrollbox ref={value => { scroll = value; bindScrollbar(value) }} flexGrow={1} minHeight={0} scrollY scrollX={false} focusable={false}>
             <Show when={body().trim()} fallback={<text fg={colors.muted}>Nothing to preview.</text>}>
-              <GitHubMarkdown content={body()} syntaxStyle={markdownStyle()} backgroundColor={colors.panel} preserveImages codePanels
+              <GitHubMarkdown content={body()} syntaxStyle={markdownStyle()} backgroundColor={colors.panel} preserveImages codePanels wide
                 context={{ repositoryUrl: props.repositoryUrl, ref: props.headSha }} />
             </Show>
           </scrollbox>
@@ -313,7 +312,7 @@ export function PullReviewDialog(props: PullReviewDialogProps) {
       </Popup>
     </Show>
     <Show when={editorOpened()}>
-    <Popup visible={stage() === "edit"} fullscreen={composer.expanded()} reserveStatusBar={props.showStatusBarHints} width={86} height={27} placement="center" zIndex={250} onClose={close}>
+    <Popup visible={stage() === "edit"} expanded={composer.expanded()} reserveStatusBar={props.showStatusBarHints} width={86} height={27} placement="center" zIndex={250} onClose={close}>
       <box flexGrow={1} minHeight={0} paddingX={2} paddingBottom={1} flexDirection="column">
         <box height={1} flexShrink={0} flexDirection="row" justifyContent="space-between">
           <text minWidth={0} wrapMode="none" truncate fg={colors.text} attributes={TextAttributes.BOLD}>{draft()?.event === "APPROVE" ? "Approve" : draft()?.event === "REQUEST_CHANGES" ? "Request changes on" : "Comment on"} PR #{props.number ?? draft()?.number ?? eligibility()?.number ?? "…"}</text>
@@ -336,7 +335,7 @@ export function PullReviewDialog(props: PullReviewDialogProps) {
           <Show when={composer.preview()}>
             <scrollbox ref={value => { previewScroll = value; bindScrollbar(value) }} flexGrow={1} minHeight={0} scrollY scrollX={false} focusable={false}>
               <Show when={draft()?.body.trim()} fallback={<text fg={colors.muted}>Nothing to preview.</text>}>
-                <GitHubMarkdown content={draft()?.body ?? ""} syntaxStyle={markdownStyle()} backgroundColor={colors.panel} preserveImages codePanels
+                <GitHubMarkdown content={draft()?.body ?? ""} syntaxStyle={markdownStyle()} backgroundColor={colors.panel} preserveImages codePanels wide
                   context={{ repositoryUrl: props.repositoryUrl, ref: draft()?.headSha }} />
               </Show>
             </scrollbox>

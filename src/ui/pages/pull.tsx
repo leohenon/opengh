@@ -67,7 +67,7 @@ function PullMetadata(props: { pull: PullRequestDetail; compact: boolean; inline
         <Show when={props.compact} fallback={<br />}>{" · "}</Show>
         <span style={{ fg: colors.green }}>+{props.pull.additions}</span>{" "}<span style={{ fg: colors.red }}>−{props.pull.deletions}</span>
       </MetadataField>
-      <Show when={props.pull.state === "open" && props.pull.mergeable === false}>
+      <Show when={props.pull.state === "open" && props.pull.mergeable === false && (props.context.status !== "ready" || !props.context.value)}>
         <text width="100%" flexShrink={0} marginTop={props.compact ? 0 : 1} fg={colors.red}>Branch has merge conflicts</text>
       </Show>
       <Show when={!props.compact && props.context.value}>

@@ -75,7 +75,7 @@ test("Hunk's [+] opens opengh's markdown editor as a full-width card that owns t
     expect(card().x).toBe(anchor.x + 4)
     expect(card().width).toBe(Math.min(100, anchor.width - 4))
     expect(frame()).toContain("╭─ Comment ─")
-    expect(frame()).toContain("Write a comment…")
+    expect(frame()).not.toContain("Write a comment…")
     expect(frame()).toContain("Post · Cancel")
     expect(frame()).not.toContain("ctrl+s Post")
     expect(frame()).not.toContain("esc Cancel")
@@ -87,11 +87,11 @@ test("Hunk's [+] opens opengh's markdown editor as a full-width card that owns t
     await settle()
     expect(editor()!.plainText).toBe("two words tvwzfo\n**second**")
     expect(inputs.at(-1)).toBe("two words tvwzfo\n**second**")
-    expect(editor()!.height).toBe(2) // The editor grows with its text.
+    expect(editor()!.height).toBe(3)
     expect(frame().split("\n")[row(0).y]).toContain("same") // Split layout was not toggled by "t".
     setup.mockInput.pressKey("p", { ctrl: true }) // Markdown preview, as in every opengh composer.
     for (let i = 0; i < 20 && !frame().includes("│ second"); i++) await settle()
-    expect(frame()).toContain("Comment · preview")
+    expect(frame()).toContain("Comment (preview)")
     expect(frame()).not.toContain("**second**")
     setup.mockInput.pressKey("p", { ctrl: true })
     await settle()

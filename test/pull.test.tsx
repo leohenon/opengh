@@ -4,6 +4,7 @@ import { createSignal } from "solid-js"
 import { createGitHubClient } from "../src/github/client"
 import type { PullDetailState } from "../src/repository-state"
 import { App } from "../src/ui/app"
+import { PullReadinessPanel } from "../src/ui/components/pull-context-panel"
 import { relativeTime } from "../src/ui/format"
 import { githubDataFixture, issueCommentsFixture, issuePullReferenceFixture, repositoryOperationsFixture, pullContextFixture } from "./fixtures/github-data"
 
@@ -72,7 +73,7 @@ test("pull request details map GitHub data and preserve list navigation across n
     expect(frame).toContain("contributor/opentui:")
     expect(frame).toContain("3 commits · 2 files")
     expect(frame).toContain("+18 −7")
-    expect(frame).toContain("Branch has merge conflicts")
+    expect(frame).not.toContain("Branch has merge conflicts")
     expect(frame).toContain("Keep focus during layout changes.")
     expect(frame).toContain("jane, UI team")
     expect(frame).toContain("accessibility")
@@ -84,6 +85,19 @@ test("pull request details map GitHub data and preserve list navigation across n
     expect(frame).toContain("3 commits · 2 comments")
     expect(frame).toContain("Thanks for the clear reproduction.")
     expect(frame).not.toContain("Open on GitHub to read")
+    const ready = detail()!
+    for (const context of [
+      { status: "error", phase: "load", message: "Readiness failed", value: ready.context.value },
+      { status: "error", phase: "load", message: "Readiness failed" },
+      { status: "loading", phase: "load", value: ready.context.value },
+    ] as const) {
+      setDetail({ ...ready, context })
+      await settle()
+      expect(view.captureCharFrame()).toContain("Branch has merge conflicts")
+    }
+    setDetail(ready)
+    await settle()
+    expect(view.captureCharFrame()).not.toContain("Branch has merge conflicts")
     const description = view.renderer.root.findDescendantById("pull-detail-description")!
     const sidebar = view.renderer.root.findDescendantById("pull-detail-sidebar")!
     expect(sidebar.y).toBe(description.y)
@@ -130,6 +144,7 @@ test("pull request details map GitHub data and preserve list navigation across n
     const compactContext = view.renderer.root.findDescendantById("pull-detail-context")!
     expect(compactContext.y - (compactDescription.y + compactDescription.height)).toBe(1)
     expect(view.captureCharFrame()).toContain("Draft")
+    expect(view.captureCharFrame()).not.toContain("Branch has merge conflicts")
     expect(view.captureCharFrame()).toContain("jane, UI team")
     expect(view.captureCharFrame()).toContain("accessibility")
     view.mockInput.pressKey("G")
@@ -153,4 +168,15 @@ test("pull request details map GitHub data and preserve list navigation across n
   } finally {
     view.renderer.destroy()
   }
+})
+
+test("merge conflicts remain visible in the merge-readiness section", async () => {
+  const context = { ...pullContextFixture, readiness: { ...pullContextFixture.readiness,
+    isDraft: false, mergeable: "CONFLICTING" as const, mergeStateStatus: "DIRTY" as const } }
+  const view = await testRender(() => <PullReadinessPanel context={context} expectedHeadSha={context.readiness.headSha} />, { width: 90, height: 20 })
+  try {
+    await view.flush()
+    expect(view.captureCharFrame()).toContain("Merge blocked")
+    expect(view.captureCharFrame()).toContain("Branch: Conflicts reported")
+  } finally { view.renderer.destroy() }
 })

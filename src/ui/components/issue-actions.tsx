@@ -14,7 +14,6 @@ import { KeyInput, replaceEditorText, useKeyActions, useKeybindings } from "../k
 import { Action } from "./action"
 import { mouseClick, mouseHover } from "../mouse"
 import { scrollRowIntoView } from "../scroll-selection"
-import { READING_WIDTH } from "../detail-layout"
 
 export function IssueActionsMenu(props: {
   number: number
@@ -343,13 +342,13 @@ export function IssueActionDialog(props: {
         </Popup>
       </Show>
       <Show when={editorOpened() && !props.confirmOnly}>
-      <Popup visible={stage() === "edit"} fullscreen={expanded()} reserveStatusBar={props.showStatusBarHints}
+      <Popup visible={stage() === "edit"} expanded={expanded()} reserveStatusBar={props.showStatusBarHints}
         width={props.kind === "duplicate" ? 56 : props.kind === "close" && props.parent === "pull" ? 64 : 86}
         height={props.kind === "duplicate" ? props.state.operation.status === "error" ? 11 : 8 : props.kind === "close" && props.parent === "pull" ? 11 : 27}
         placement="center" zIndex={250}
         onClose={requestClose}
       >
-        <box width="100%" maxWidth={props.kind === "comment" && expanded() ? READING_WIDTH + 4 : undefined} alignSelf="center"
+        <box width="100%" alignSelf="center"
           flexGrow={1} minHeight={0} paddingX={2} paddingBottom={1} flexDirection="column">
           <box height={1} flexShrink={0} flexDirection="row" justifyContent="space-between">
             <text flexGrow={1} minWidth={0} wrapMode="none" fg={colors.text} attributes={TextAttributes.BOLD}>{title()}</text>
@@ -403,7 +402,7 @@ export function IssueActionDialog(props: {
               <Show when={previewing() && !retry()}>
                 <scrollbox id="issue-comment-preview-scroll" ref={(value) => { previewScroll = value; bindScrollbar(value) }} focusable={false} flexGrow={1} minHeight={0} scrollX={false} scrollY>
                   <Show when={body().trim()} fallback={<text fg={colors.muted}>Nothing to preview.</text>}>
-                    <GitHubMarkdown content={body()} syntaxStyle={markdownStyle()} backgroundColor={colors.panel} preserveImages codePanels
+                    <GitHubMarkdown content={body()} syntaxStyle={markdownStyle()} backgroundColor={colors.panel} preserveImages codePanels wide
                       context={{ repositoryUrl: props.repositoryUrl, ref: props.defaultBranch, sourceUrl: `${props.repositoryUrl}/${props.parent === "pull" ? "pull" : "issues"}/${props.number}` }} />
                 </Show>
               </scrollbox>

@@ -100,3 +100,36 @@ describe("Popup", () => {
     expect(closes).toBe(1)
   })
 })
+
+test("expanded popups keep an inset and a status row without changing the fullscreen settings mode", async () => {
+  const [expanded, setExpanded] = createSignal(true)
+  const [fullscreen, setFullscreen] = createSignal(false)
+  const [reserveStatusBar, setReserveStatusBar] = createSignal(false)
+  const view = await testRender(() => <Popup width={86} height={27} expanded={expanded()} fullscreen={fullscreen()} reserveStatusBar={reserveStatusBar()}>
+    <box id="popup-probe" flexGrow={1} />
+  </Popup>, { width: 120, height: 40 })
+  active.push(view)
+  await view.flush()
+  const probe = view.renderer.root.findDescendantById("popup-probe")!
+  const panel = probe.parent!
+  expect([panel.x, panel.y, panel.width, panel.height]).toEqual([6, 2, 108, 36])
+  setReserveStatusBar(true)
+  await view.flush()
+  expect([panel.x, panel.y, panel.width, panel.height]).toEqual([6, 2, 108, 35])
+  setFullscreen(true)
+  await view.flush()
+  expect([panel.x, panel.y, panel.width, panel.height]).toEqual([0, 0, 120, 39])
+  setReserveStatusBar(false)
+  await view.flush()
+  expect(panel.height).toBe(40)
+  setFullscreen(false)
+  setExpanded(false)
+  await view.flush()
+  expect(panel.width).toBe(86)
+  expect(panel.height).toBe(27)
+  setExpanded(true)
+  view.resize(48, 20)
+  await view.flush()
+  expect([panel.x, panel.y, panel.width, panel.height]).toEqual([1, 1, 46, 18])
+  expect(view.renderer.root.findDescendantById("popup-probe")).toBe(probe)
+})

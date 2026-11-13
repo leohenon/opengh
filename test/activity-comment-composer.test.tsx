@@ -114,11 +114,11 @@ for (const parent of ["issue", "pull"] as const) {
       const expanded = view.renderer.root.findDescendantById("issue-comment-writer") as TextareaRenderable
       expect(expanded.plainText).toBe(action().body)
       expect(expanded.height).toBeGreaterThan(view.renderer.height - 10)
-      expect(expanded.width).toBe(84)
+      expect(expanded.width).toBe(Math.floor(view.renderer.width * 0.9) - 4)
       expect(expanded.x * 2 + expanded.width).toBe(120)
       view.resize(240, 30)
       await settle()
-      expect(expanded.width).toBe(84)
+      expect(expanded.width).toBe(Math.floor(view.renderer.width * 0.9) - 4)
       expect(expanded.x * 2 + expanded.width).toBe(240)
       view.resize(48, 30)
       await settle()
