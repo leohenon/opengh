@@ -171,6 +171,7 @@ export type RepositorySession = {
   assignableUsers?: Accessor<ResourceState<Paginated<string>> | undefined>
   loadAssignableUsers?(): Promise<void>
   searchMentionableUsers?(query: string, signal?: AbortSignal): Promise<readonly string[]>
+  commentDraft?(number: number, parent?: IssueActionParent): string
   issueAction(number: number, parent?: IssueActionParent): IssueActionState
   prepareIssueAction(number: number, kind: IssueActionKind, parent?: IssueActionParent): void
   updateIssueDraft(number: number, draft: Partial<Pick<IssueActionState, "body" | "reason" | "duplicateTarget" | "selectedAssignees">>, parent?: IssueActionParent): void
@@ -370,7 +371,8 @@ export function createRepositorySession(
   const publishDraftError = () => setDraftSaveError(draftErrors.values().next().value)
   const activeDraftKinds = new Map<string, DraftKind>()
   const unpreparedDraftEdits = new Set<string>()
-  const savedDrafts = new Map<string, IssueDraft>()
+  const [savedDrafts, setSavedDrafts] = createSignal(new Map<string, IssueDraft>())
+  const rememberDraft = (key: string, draft: IssueDraft) => setSavedDrafts(current => new Map(current).set(key, draft))
   const persistedDrafts = new Map<string, IssueDraft | undefined>()
   const dirtyDrafts = new Map<string, IssueDraft>()
   const pendingPublications = new Map<string, IssueDraft>()
@@ -410,11 +412,12 @@ export function createRepositorySession(
   }
   const saveDraft = (key: string, action: IssueActionState) => {
     const kind = activeDraftKinds.get(key)
-    if (!draftStore || !kind) return
+    if (!kind) return
     const draftKey = `${key}:${kind}`
-    if (sameDraft(savedDrafts.get(draftKey), action)) return
+    if (sameDraft(savedDrafts().get(draftKey), action)) return
     const draft = draftSnapshot(action)
-    savedDrafts.set(draftKey, draft)
+    rememberDraft(draftKey, draft)
+    if (!draftStore) return
     dirtyDrafts.set(draftKey, draft)
     clearTimeout(draftTimer)
     draftTimer = setTimeout(flushDrafts, 200)
@@ -1256,6 +1259,7 @@ export function createRepositorySession(
     const current = state()
     let previous = pullDetail()
     if (current.status !== "ready" || (previous?.number === number && previous.resource.status === "loading")) return
+    restoreCommentDraft(number, "pull")
     pullAbort.abort()
     pullAbort = new AbortController()
     if (previous?.number !== number) {
@@ -1462,6 +1466,7 @@ export function createRepositorySession(
     const current = state()
     let previous = issueDetail()
     if (current.status !== "ready" || (previous?.number === number && previous.resource.status === "loading")) return
+    restoreCommentDraft(number, "issue")
     issueAbort.abort()
     issueAbort = new AbortController()
     if (previous?.number !== number) {
@@ -1631,6 +1636,32 @@ export function createRepositorySession(
     return result
   }
 
+  const readDraft = (draftKey: string) => {
+    const dirty = dirtyDrafts.get(draftKey)
+    if (dirty) return dirty
+    if (!draftStore) return savedDrafts().get(draftKey)
+    try {
+      const draft = draftStore.load(draftKey)
+      persistedDrafts.set(draftKey, draft)
+      draftErrors.delete(`load:${draftKey}`)
+      return draft
+    } catch (error) {
+      draftErrors.set(`load:${draftKey}`, `Draft load failed: ${messageFrom(error)}`)
+      return savedDrafts().get(draftKey)
+    } finally { publishDraftError() }
+  }
+  const restoreCommentDraft = (number: number, parent: IssueActionParent = "issue") => {
+    const draftKey = `${issueKey(state().repository, number, parent)}:comment`
+    if (!draftStore || savedDrafts().has(draftKey)) return
+    const draft = readDraft(draftKey)
+    if (!draftErrors.has(`load:${draftKey}`)) rememberDraft(draftKey, draft ?? draftSnapshot(emptyIssueAction))
+  }
+  const commentDraft = (number: number, parent: IssueActionParent = "issue") => {
+    const key = issueKey(state().repository, number, parent)
+    const action = issueActions()[key]
+    return action && (activeDraftKinds.get(key) === "comment" || unpreparedDraftEdits.has(key))
+      ? action.body : savedDrafts().get(`${key}:comment`)?.body ?? ""
+  }
   const issueAction = (number: number, parent: IssueActionParent = "issue") => issueActions()[issueKey(state().repository, number, parent)] ?? emptyIssueAction
   const updateAction = (key: string, update: (action: IssueActionState) => IssueActionState, confirmed = false) => {
     setIssueActions((actions) => {
@@ -1648,14 +1679,14 @@ export function createRepositorySession(
     const draftKey = `${key}:${draftKind}`
     let submitted: IssueDraft | undefined
     if (draftStore) {
-      if (!savedDrafts.has(draftKey)) {
+      if (!savedDrafts().has(draftKey)) {
         const loaded = draftStore.load(draftKey)
         persistedDrafts.set(draftKey, loaded)
-        savedDrafts.set(draftKey, loaded ?? draftSnapshot(emptyIssueAction))
+        rememberDraft(draftKey, loaded ?? draftSnapshot(emptyIssueAction))
       }
       activeDraftKinds.set(key, draftKind)
       saveDraft(key, issueActions()[key] ?? emptyIssueAction)
-      submitted = savedDrafts.get(draftKey)!
+      submitted = savedDrafts().get(draftKey)!
       if (submitted.body !== body) throw new DraftConflictError()
       if (dirtyDrafts.has(draftKey)) persistDraft(draftKey, submitted)
       publishDraftError()
@@ -1689,10 +1720,10 @@ export function createRepositorySession(
           throw new Error(message)
         }
         completion = { draftKey }
-        if (savedDrafts.get(draftKey)?.generation === submitted.generation) {
+        if (savedDrafts().get(draftKey)?.generation === submitted.generation) {
           persistedDrafts.set(draftKey, replacement)
           pendingPublications.delete(draftKey)
-          savedDrafts.set(draftKey, replacement)
+          rememberDraft(draftKey, replacement)
           if (dirtyDrafts.get(draftKey)?.generation === submitted.generation) dirtyDrafts.delete(draftKey)
           draftErrors.delete(`save:${draftKey}`)
           publishDraftError()
@@ -1713,7 +1744,7 @@ export function createRepositorySession(
     return { comment, recovered, commentCount, completion }
   }
   const completeAction = (key: string, completion?: DraftCompletion) => {
-    if (completion && (!completion.generation || savedDrafts.get(completion.draftKey)?.generation !== completion.generation)) {
+    if (completion && (!completion.generation || savedDrafts().get(completion.draftKey)?.generation !== completion.generation)) {
       updateAction(key, action => ({ ...action, operation: idle() }))
       return
     }
@@ -1723,22 +1754,11 @@ export function createRepositorySession(
     if (parent === "pull" && kind === "duplicate") throw new Error("Pull requests cannot be marked as duplicates.")
     const key = issueKey(state().repository, number, parent)
     const current = issueActions()[key]
-    if (draftStore && current?.operation.status !== "loading" && (kind === "comment" || kind === "close" || kind === "reopen")) {
+    if (current?.operation.status !== "loading" && (kind === "comment" || kind === "close" || kind === "reopen")) {
       const previousKind = activeDraftKinds.get(key)
       if (previousKind && previousKind !== kind && current) saveDraft(key, current)
       const draftKey = `${key}:${kind}`
-      let draft = dirtyDrafts.get(draftKey)
-      if (!draft) {
-        try {
-          draft = draftStore.load(draftKey)
-          persistedDrafts.set(draftKey, draft)
-          draftErrors.delete(`load:${draftKey}`)
-        } catch (error) {
-          draft = savedDrafts.get(draftKey)
-          draftErrors.set(`load:${draftKey}`, `Draft load failed: ${messageFrom(error)}`)
-        }
-        publishDraftError()
-      }
+      const draft = readDraft(draftKey)
       const hasEdits = !previousKind && current && unpreparedDraftEdits.has(key)
       const restored = { ...emptyIssueAction,
         ...(draft ? { body: draft.body, reason: draft.reason, retry: draft.retry } : {}),
@@ -1746,7 +1766,7 @@ export function createRepositorySession(
         selectedAssignees: current?.selectedAssignees, duplicateTarget: current?.duplicateTarget }
       activeDraftKinds.set(key, kind)
       setIssueActions((actions) => ({ ...actions, [key]: restored }))
-      savedDrafts.set(draftKey, draft ?? draftSnapshot(emptyIssueAction))
+      rememberDraft(draftKey, draft ?? draftSnapshot(emptyIssueAction))
       if (hasEdits) saveDraft(key, restored)
       unpreparedDraftEdits.delete(key)
     }
@@ -1781,7 +1801,7 @@ export function createRepositorySession(
           && !(dirty && latest?.generation === dirty.generation && sameDraft(latest, dirty))) {
           // Discard stale local edits, not another process's newer draft.
           persistedDrafts.set(draftKey, latest)
-          savedDrafts.set(draftKey, latest ?? draftSnapshot(emptyIssueAction))
+          rememberDraft(draftKey, latest ?? draftSnapshot(emptyIssueAction))
           dirtyDrafts.delete(draftKey)
           pendingPublications.delete(draftKey)
           draftErrors.delete(`save:${draftKey}`)
@@ -2861,6 +2881,7 @@ export function createRepositorySession(
     loadAssignableUsers,
     searchMentionableUsers,
     issueAction,
+    commentDraft,
     prepareIssueAction,
     updateIssueDraft,
     discardIssueDraft,

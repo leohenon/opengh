@@ -129,6 +129,7 @@ export type AppProps = {
   onLoadMoreIssueComments?: () => Promise<void>
   onRetryIssueReferences?: () => Promise<void>
   onCloseIssue?: () => void
+  getCommentDraft?: (number: number, parent?: IssueActionParent) => string
   getIssueAction?: (number: number, parent?: IssueActionParent) => IssueActionState
   assignableUsers?: ResourceState<Paginated<string>>
   onLoadAssignableUsers?: () => Promise<void>
@@ -226,7 +227,7 @@ function AppContent(props: AppProps) {
   const [conversationCommentOpen, setConversationCommentOpen] = createSignal(false)
   const [conversationCommentFocused, setConversationCommentFocused] = createSignal(false)
   const [conversationCommentHint, setConversationCommentHint] = createSignal<string>()
-  const [conversationDrafts, setConversationDrafts] = createSignal(new Map<string, string>())
+  const [localCommentDrafts, setLocalCommentDrafts] = createSignal(new Map<string, string>())
   const [commentConfirmOnly, setCommentConfirmOnly] = createSignal(false)
   const [pendingIssueActions, setPendingIssueActions] = createSignal<Array<NonNullable<ReturnType<typeof issueAction>> & { repository: string }>>([])
   const [reviewTarget, setReviewTarget] = createSignal<{ repository: string; number: number }>()
@@ -419,8 +420,7 @@ function AppContent(props: AppProps) {
     try {
       const result = await props.onSubmitIssueAction(action.number, action.kind, action.parent)
       if (disposed || renderer.isDestroyed || data().repo.nameWithOwner !== repository) return
-      if (action.kind === "comment") rememberConversationDraft({ repository, number: action.number, parent: action.parent },
-        props.getIssueAction?.(action.number, action.parent).body ?? "")
+      if (action.kind === "comment") rememberLocalCommentDraft({ repository, number: action.number, parent: action.parent }, "")
       if ((result.comment || retry) && (action.parent === "pull" ? activePullNumber() : activeIssueNumber()) === action.number)
         setRevealActivity({ number: action.number, id: ++revealId, parent: action.parent })
       setToast({ id: ++toastId, title: action.kind === "comment" ? "Comment posted"
@@ -756,10 +756,14 @@ function AppContent(props: AppProps) {
     const current = conversationComment()
     return !!current && conversationCommentKey(current) === conversationCommentKey(target)
   }
-  const rememberConversationDraft = (target: ConversationCommentTarget, body: string) => setConversationDrafts(current => {
+  const conversationDraft = (target: ConversationCommentTarget) =>
+    props.getCommentDraft?.(target.number, target.parent) ?? localCommentDrafts().get(conversationCommentKey(target)) ?? ""
+  const rememberLocalCommentDraft = (target: ConversationCommentTarget, body: string) => {
+    if (props.getCommentDraft) return
     const key = conversationCommentKey(target)
-    return (current.get(key) ?? "") === body ? current : new Map(current).set(key, body)
-  })
+    const value = props.getIssueAction?.(target.number, target.parent).body ?? body
+    setLocalCommentDrafts(current => (current.get(key) ?? "") === value ? current : new Map(current).set(key, value))
+  }
   const conversationCommentPending = (target: ConversationCommentTarget) => props.getIssueAction?.(target.number, target.parent).operation.status === "loading"
     || pendingIssueActions().some(action => conversationCommentKey(action) === conversationCommentKey(target))
   const conversationCommentEditable = (target: ConversationCommentTarget) => target.repository === data().repo.nameWithOwner
@@ -768,12 +772,12 @@ function AppContent(props: AppProps) {
     && (target.parent === "pull" ? canCommentOnPull() : canActOnIssue("comment"))
   const canOpenConversationComment = (target: ConversationCommentTarget) => conversationCommentEditable(target)
     && (conversationCommentAvailable(target) || sameConversationComment(target) && conversationCommentOpen()
-      || !!conversationDrafts().get(conversationCommentKey(target))?.trim())
+      || !!conversationDraft(target).trim())
   const changeConversationDraft = (target: ConversationCommentTarget, body: string) => {
     // Local drafts remain editable if permission changes; only posting needs current permission.
     if (!sameConversationComment(target) || target.repository !== data().repo.nameWithOwner || conversationCommentPending(target)) return
     props.onIssueDraftChange?.(target.number, { body }, target.parent)
-    rememberConversationDraft(target, props.getIssueAction?.(target.number, target.parent).body ?? body)
+    rememberLocalCommentDraft(target, body)
   }
   const revealConversationComment = (target: ConversationCommentTarget) =>
     setRevealActivity({ number: target.number, parent: target.parent, id: ++revealId })
@@ -781,7 +785,7 @@ function AppContent(props: AppProps) {
     if (!canOpenConversationComment(target)) return
     if (!sameConversationComment(target) || !conversationCommentOpen()) {
       props.onPrepareIssueAction?.(target.number, "comment", target.parent)
-      rememberConversationDraft(target, props.getIssueAction?.(target.number, target.parent).body ?? conversationDrafts().get(conversationCommentKey(target)) ?? "")
+      rememberLocalCommentDraft(target, conversationDraft(target))
     }
     batch(() => { setConversationComment(target); setConversationCommentOpen(true); setConversationCommentFocused(true) })
     revealConversationComment(target)
@@ -801,8 +805,8 @@ function AppContent(props: AppProps) {
     const expanded = selected && overlay() === "issue-action" && issueAction()?.kind === "comment" && !commentConfirmOnly()
     const open = selected && conversationCommentOpen() && !expanded
     return {
-      open, body: selected ? props.getIssueAction?.(number, parent).body ?? conversationDrafts().get(conversationCommentKey(target)) ?? "" : "",
-      saved: !expanded && !open && !!conversationDrafts().get(conversationCommentKey(target))?.trim(),
+      open, body: conversationDraft(target),
+      saved: !expanded && !open && !!conversationDraft(target).trim(),
       focused: selected && conversationCommentFocused(), enabled: conversationCommentEditable(target), canPost: conversationCommentAvailable(target),
       onOpen: () => openConversationComment(target),
       onInput: body => changeConversationDraft(target, body),
@@ -2139,7 +2143,7 @@ function AppContent(props: AppProps) {
             onEditorActiveChange={setIssueEditorActive}
             parent={action.parent}
             state={props.getIssueAction?.(action.number, action.parent) ?? (action.kind === "comment" ? { ...emptyIssueAction,
-              body: conversationDrafts().get(conversationCommentKey({ repository: data().repo.nameWithOwner, number: action.number, parent: action.parent })) ?? "",
+              body: conversationDraft({ repository: data().repo.nameWithOwner, number: action.number, parent: action.parent }),
             } : emptyIssueAction)}
             showScrollbar={config().showScrollbars}
             showStatusBarHints={config().showStatusBarHints}
@@ -2159,8 +2163,7 @@ function AppContent(props: AppProps) {
             onSubmit={() => void submitIssueAction()}
             onDiscard={() => {
               props.onDiscardIssueDraft?.(action.number, action.parent)
-              if (action.kind === "comment") rememberConversationDraft({ repository: data().repo.nameWithOwner, number: action.number, parent: action.parent },
-                props.getIssueAction?.(action.number, action.parent).body ?? "")
+              if (action.kind === "comment") rememberLocalCommentDraft({ repository: data().repo.nameWithOwner, number: action.number, parent: action.parent }, "")
             }}
             onHintChange={setIssueActionHint}
             onClose={action.kind === "comment" && conversationCommentOpen() ? closeConversationCommentDialog : () => { setOverlay(); setIssueAction() }}
