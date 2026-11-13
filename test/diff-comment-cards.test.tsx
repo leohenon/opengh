@@ -1,7 +1,9 @@
 import { expect, test } from "bun:test"
 import { createTestRenderer, KeyCodes } from "@opentui/core/testing"
+import type { BoxRenderable } from "@opentui/core"
 import { render } from "@opentui/solid"
 import { createSignal } from "solid-js"
+import type { ScrollBoxRenderable } from "@opentui/core"
 import type { PullReviewThread } from "../src/models"
 import { initializeHunk } from "../src/ui/hunk-host"
 import { MarkdownProvider } from "../src/ui/markdown-preferences"
@@ -54,8 +56,20 @@ test("posted threads expand real Hunk rows, survive highlighting/layout changes,
     const rows = reviewRows(file, layout)
     const row = setup.renderer.root.findDescendantById(rows.find((row) => row.right?.line === 2)!.id)!
     const next = setup.renderer.root.findDescendantById(rows.find((row) => row.right?.line === 3)!.id)!
-    const card = setup.renderer.root.findDescendantById("diff-comment-card:thread")!
+    const card = setup.renderer.root.findDescendantById("diff-comment-card:thread") as BoxRenderable
     expect(card.parent).toBe(row)
+    expect(card.backgroundColor.a).toBe(0)
+    const backgroundAt = (x: number, y: number) => {
+      let column = 0
+      for (const span of setup.captureSpans().lines[y]!.spans) {
+        if (x < column + span.width) return span.bg
+        column += span.width
+      }
+      throw new Error(`No cell at ${x}, ${y}`)
+    }
+    for (const y of [card.y + 1, card.y + 2]) {
+      expect(backgroundAt(card.x + 2, y)!.equals(backgroundAt(card.x - 1, y)!)).toBe(true)
+    }
     expect(card.height).toBe(7) // Two author/body pairs, a subtle reply divider and the rounded border.
     // Full width in either layout: inserted rows leave the other split side blank anyway.
     expect(card.x).toBe(row.x + 4)
@@ -208,18 +222,20 @@ test("z collapses diff threads from either pane, retains summaries across files/
     setup.mockInput.pressEscape()
     await settle()
     expect(setup.captureCharFrame()).toContain("z expand")
-    await key("j")
+    await key(".")
     expect(card("other").height).toBe(3)
     expect(setup.captureCharFrame()).toContain("╭─ 1 comment ─")
     expect(setup.captureCharFrame()).not.toContain("Other file discussion")
-    setup.mockInput.pressTab()
     await key("t")
     expect(card("other").height).toBe(3)
     await key("z")
+    expect(card("other").findDescendantById("diff-comment-card:other:body:0")).toBeDefined()
+    const otherScroll = setup.renderer.root.findDescendantById("diff-body-scroll") as ScrollBoxRenderable
+    otherScroll.scrollTo(otherScroll.scrollHeight)
+    await settle()
     expect(setup.captureCharFrame()).toContain("Other file discussion")
     expect(setup.captureCharFrame()).toContain("z collapse")
-    setup.mockInput.pressTab()
-    await key("k")
+    await key(",")
     expect(card("thread").parent?.id).toBe(rowId("unified"))
     expect(setup.captureCharFrame()).toContain("Posted discussion body")
     expect(setup.captureCharFrame()).toContain("A reply in the same thread")

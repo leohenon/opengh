@@ -61,7 +61,7 @@ test("saved draft markers follow their source lines and resume exact anchors wit
     expect(setup.captureCharFrame()).toContain("Draft saved · Resume")
     expect(marker("right")!.parent).toBe(expectedRow(initial[0]!.anchor, "split"))
     expect(marker("range")!.parent).toBe(expectedRow(initial[1]!.anchor, "split"))
-    expect(marker("other")).toBeUndefined()
+    expect(marker("other")).toBeDefined() // Other visible files own their own draft markers.
     expect(marker("missing")).toBeUndefined()
     expect(marker("right")!.height).toBe(1)
 
@@ -102,13 +102,12 @@ test("saved draft markers follow their source lines and resume exact anchors wit
     await Bun.sleep(30)
     await settle()
 
-    setup.mockInput.pressTab()
-    setup.mockInput.pressKey("j")
+    setup.mockInput.pressKey(".")
     await settle()
-    expect(marker("right")).toBeUndefined()
-    expect(marker("range")).toBeUndefined()
-    expect(marker("other")).toBeDefined()
-    setup.mockInput.pressKey("k")
+    expect(marker("right")).toBeDefined()
+    expect(marker("range")).toBeDefined()
+    expect(marker("other")).toBeDefined() // Markers for every visible file stay mounted.
+    setup.mockInput.pressKey(",")
     await settle()
     expect(marker("right")).toBeDefined()
     expect(marker("range")).toBeDefined()

@@ -83,7 +83,7 @@ test("clicking the current tab backs out of each detail while other tabs and key
   } finally { view.renderer.destroy() }
 })
 
-test("clicking the current tab unwinds a diff one level, then its detail, using the existing cleanup callbacks", async () => {
+test("Escape unwinds a diff one level, then the current tab unwinds its detail", async () => {
   let closedCommit = 0
   let closedDiff = 0
   const view = await testRender(() => <App data={githubDataFixture} operations={repositoryOperationsFixture}
@@ -97,7 +97,9 @@ test("clicking the current tab unwinds a diff one level, then its detail, using 
     view.mockInput.pressKey("D")
     await view.flush()
     expect(view.renderer.root.findDescendantById("diff-view-commits")).toBeDefined()
-    await clickTab(view, "2 Commits")
+    expect(view.captureCharFrame()).not.toContain("2 Commits")
+    view.mockInput.pressEscape()
+    await Bun.sleep(30); await view.flush()
     expect(closedDiff).toBe(1)
     expect(closedCommit).toBe(0)
     expect(view.renderer.root.findDescendantById("diff-view-commits")).toBeUndefined()
@@ -107,7 +109,8 @@ test("clicking the current tab unwinds a diff one level, then its detail, using 
     expect(view.renderer.root.findDescendantById("commit-detail-scroll")).toBeUndefined()
     view.mockInput.pressKey("D") // A diff opened directly from the list returns directly to that list.
     await view.flush()
-    await clickTab(view, "2 Commits")
+    view.mockInput.pressEscape()
+    await Bun.sleep(30); await view.flush()
     expect(closedDiff).toBe(2)
     expect(closedCommit).toBe(1)
     expect(view.renderer.root.findDescendantById("diff-view-commits")).toBeUndefined()
@@ -138,7 +141,7 @@ test("detail and diff menus retain their actions with Back at the bottom", async
     await view.flush()
     expect(view.renderer.root.findDescendantById("context-menu")).toBeDefined()
     expect(view.captureCharFrame()).toContain("Back")
-    const actions = diff ? ["Open diff on GitHub", "Open diff in external viewer", "Change layout", "Toggle files", "Back"]
+    const actions = diff ? ["Open diff on GitHub", "Open diff in external viewer", "Change layout", "Toggle files", "Settings", "Back"]
       : id === "commit-detail-scroll" ? ["View diff", "Open on GitHub", "Copy SHA", "Back"]
       : id === "pull-detail-scroll" ? ["View diff", "Open on GitHub", "Copy URL", "Collapse", "Back"]
       : id === "issue-detail-scroll" ? ["Open on GitHub", "Copy URL", "Collapse", "Back"]

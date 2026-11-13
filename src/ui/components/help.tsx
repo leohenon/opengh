@@ -169,14 +169,13 @@ export function Help(props: {
     ];
     const entries = props.view === "diff" ? [
       entry("navigation.back", "close diff; return to origin"),
-      entry("diff.focus", "switch files / diff focus"),
-      entry("navigation.activate", "files → diff; error → file list"),
-      ...navigationShortcuts,
+      entry(["diff.previousFile", "diff.nextFile"], "previous / next file"),
+      entry("navigation.activate", "error → file list"),
+      entry(["navigation.up", "navigation.down", "navigation.halfPageUp", "navigation.halfPageDown", "navigation.pageUp", "navigation.pageDown", "navigation.first", "navigation.last"], "scroll diff (j/k, u/d, f/b, Space, g/G)"),
+      entry(["diff.panLeft", "diff.panRight"], "pan diff horizontally"),
       ...searchShortcuts,
-      entry(["navigation.previousTab", "navigation.nextTab"], "files: switch tabs"),
-      entry(["diff.panLeft", "diff.panRight"], "diff: horizontal pan"),
       entry(["diff.previousHunk", "diff.nextHunk"], "previous / next hunk"),
-      entry("diff.toggleFiles", "toggle sidebar; hide → diff focus"),
+      entry("diff.toggleFiles", "toggle file sidebar"),
       entry("diff.filterFiles", "filter file paths in the status bar; Esc clears"),
       entry("diff.toggleLayout", "toggle split / unified"),
       entry("diff.toggleWrap", "toggle line wrapping"),
@@ -184,7 +183,7 @@ export function Help(props: {
       entry("view.refresh", "refresh / retry"),
       entry("item.open", "open diff on GitHub"),
       entry("diff.openViewer", "open diff in external viewer"),
-      ...appShortcuts,
+      ...appShortcuts.filter((item) => !item.actions.includes("global.settings")),
     ] : [
       ...primary,
       ...navigationShortcuts,
@@ -196,10 +195,13 @@ export function Help(props: {
       ...external,
       ...appShortcuts,
     ];
-    return entries.flatMap(({ actions, description }) => {
-      const label = [...new Set(actions.map((action) => keys.key(action, true, obviousKey)).filter(Boolean))].join(" / ");
-      return label ? [{ keys: label, description }] : [];
-    });
+    return [
+      ...entries.flatMap(({ actions, description }) => {
+        const label = [...new Set(actions.map((action) => keys.key(action, true, obviousKey)).filter(Boolean))].join(" / ");
+        return label ? [{ keys: label, description }] : [];
+      }),
+      { keys: "Right-click", description: "open context menu" },
+    ];
   });
   const padding = () => dimensions().width < 20 ? 0 : compact() ? 2 : 4;
   const width = () => Math.max(1, Math.min(100, dimensions().width - 2,

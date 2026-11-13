@@ -263,7 +263,7 @@ test("dismissal shields background controls and old completions cannot affect re
 })
 
 
-test("mouse-only fixture route crosses launcher, repository, tabs, branches, documents, Hunk, reactions and dismissal", async () => {
+test("fixture route crosses launcher, repository, tabs, branches, documents, Hunk, reactions and dismissal", async () => {
   const writes: ReactionTarget[] = []
   const patch = "diff --git a/route.txt b/route.txt\n--- a/route.txt\n+++ b/route.txt\n@@ -1,60 +1,60 @@\n"
     + Array.from({ length: 60 }, (_, index) => `-old-${index}\n`).join("")
@@ -319,7 +319,8 @@ test("mouse-only fixture route crosses launcher, repository, tabs, branches, doc
     await settle(view)
     const retainedScroll = body.scrollTop
     expect(retainedScroll).toBeGreaterThan(0)
-    await clickText("Issues")
+    view.mockInput.pressKey("3") // Hidden tab shortcut retains the diff while review hides the tab strip.
+    await settle(view)
     await clickText(issueDetailFixture.title)
     await messageGesture(view, "No description provided.")
     await clickControl(view, "reaction-picker-row-rocket")
@@ -328,10 +329,12 @@ test("mouse-only fixture route crosses launcher, repository, tabs, branches, doc
     await view.mockMouse.click(0, 0)
     await settle(view)
     expect(view.captureCharFrame()).toContain("✓ 🚀 1")
-    await clickText("Commits")
+    view.mockInput.pressKey("2")
+    await settle(view)
     expect(view.renderer.root.findDescendantById("diff-body-scroll")).toBe(body)
     expect(body.scrollTop).toBe(retainedScroll)
-    await clickText("Issues")
+    view.mockInput.pressKey("3")
+    await settle(view)
     expect(view.captureCharFrame()).toContain("✓ 🚀 1")
     view.resize(48, 28)
     await settle(view)

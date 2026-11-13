@@ -170,7 +170,7 @@ test("Hunk's [+] opens opengh's markdown editor as a full-width card that owns t
   } finally { setup.renderer.destroy() }
 })
 
-test("the composer follows the visible focus and stays mounted, without [+], while review is briefly withheld", async () => {
+test("the composer retains editor focus and stays mounted, without [+], while review is briefly withheld", async () => {
   const setup = await createTestRenderer({ width: 140, height: 30 })
   initializeHunk(setup.renderer)
   const file = parseDiff({ kind: "patch", patch }).files[0]!.body!
@@ -185,16 +185,17 @@ test("the composer follows the visible focus and stays mounted, without [+], whi
   const row = (index: number) => setup.renderer.root.findDescendantById(reviewRows(file, "split")[index]!.id)!
   try {
     await settle()
-    // A reopened draft does not take keys from the focused file list.
-    expect(editor()!.focused).toBe(false)
+    // The composer owns typing until a source click explicitly blurs it.
+    expect(editor()!.focused).toBe(true)
+    await setup.mockMouse.click(row(0).x + 5, row(0).y)
     setup.mockInput.pressKey("x")
     await settle()
     expect(editor()!.plainText).toBe("seed")
     const card = setup.renderer.root.findDescendantById("inline-comment-composer-card")!
     await setup.mockMouse.click(card.x + card.width - 4, card.y + 1)
-    await setup.mockInput.typeText("!")
+    await setup.mockInput.typeText("!,.")
     await settle()
-    expect(text).toBe("seed!")
+    expect(text).toBe("seed!,.")
     const instance = editor()
     setAvailable(false) // e.g. while this comment posts or reviews reload.
     await settle()
@@ -203,13 +204,13 @@ test("the composer follows the visible focus and stays mounted, without [+], whi
     setup.mockInput.pressKey("y")
     await setup.mockMouse.moveTo(row(1).x + 5, row(1).y)
     await settle()
-    expect(editor()!.plainText).toBe("seed!")
+    expect(editor()!.plainText).toBe("seed!,.")
     expect(setup.captureCharFrame()).not.toContain("[+]")
     await setup.mockMouse.click(card.x + card.width - 4, card.y + 1) // Clicking while withheld edits nothing.
     setup.mockInput.pressKey("q")
     await settle()
     expect(editor()!.focused).toBe(false)
-    expect(editor()!.plainText).toBe("seed!")
+    expect(editor()!.plainText).toBe("seed!,.")
     setAvailable(true) // A failed post resumes the same editor, focus and undo history.
     await settle()
     expect(editor()).toBe(instance)

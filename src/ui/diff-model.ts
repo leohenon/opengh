@@ -13,6 +13,14 @@ export type DiffFile = {
 }
 
 const MAX_FILE_LINES = 8_000
+export const STREAM_LINE_BUDGET = 2_000
+export const STREAM_FILE_BUDGET = 50
+
+/** Count source lines, not rendered rows: split/wrap/comments may multiply their cost. */
+export function streamWithinBudget(files: readonly DiffFile[]) {
+  return files.length <= STREAM_FILE_BUDGET && files.reduce((sum, file) =>
+    sum + (file.message ? 0 : (file.body?.metadata.additionLines.length ?? 0) + (file.body?.metadata.deletionLines.length ?? 0)), 0) <= STREAM_LINE_BUDGET
+}
 const MAX_PATCH_LINES = 100_000
 
 export function parseDiff(content: DiffContent): { files: DiffFile[]; notice?: string; error?: string } {

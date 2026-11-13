@@ -2,7 +2,7 @@ import { expect, test } from "bun:test"
 import { mkdtemp, rm, stat, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
-import { expandExternalCommand, openExternalDiff, resolveDiffViewerCommand, terminalHandoff, validateExternalCommand } from "../src/external-actions"
+import { disableExternalTools, expandExternalCommand, openExternalDiff, resolveDiffViewerCommand, terminalHandoff, validateExternalCommand } from "../src/external-actions"
 import { defaultConfig, loadConfig, saveConfig } from "../src/config"
 
 const terminal = () => {
@@ -63,6 +63,27 @@ test("terminal handoff resumes after success, launch and suspend failures; block
   const pending = terminalHandoff(term, async () => await new Promise<void>(done => { release = done }))
   await expect(terminalHandoff(term, async () => {})).rejects.toThrow("already running")
   release(); await pending
+})
+
+test("embedded sessions can block external tools before preparation or terminal handoff", async () => {
+  const term = terminal()
+  disableExternalTools(term, "Viewer disabled in this session")
+  let prepared = false
+  let launched = false
+  await expect(terminalHandoff(term, async launch => {
+    prepared = true
+    await launch(["viewer"], "/")
+  }, async () => { launched = true })).rejects.toThrow("Viewer disabled in this session")
+  await expect(openExternalDiff({ terminal: term, command: ["viewer", "{patch}"],
+    content: { kind: "patch", patch: "loaded patch" } }, async () => { launched = true }))
+    .rejects.toThrow("Viewer disabled in this session")
+  expect(prepared).toBe(false)
+  expect(launched).toBe(false)
+  expect(term.events).toEqual([])
+
+  const other = terminal()
+  await terminalHandoff(other, launch => launch(["viewer"], "/"), async () => { other.events.push("run") })
+  expect(other.events).toEqual(["suspend", "run", "resume"])
 })
 
 test("viewers receive the exact private patch without a checkout and clean up after success or failure", async () => {

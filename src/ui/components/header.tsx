@@ -3,7 +3,7 @@ import { useTerminalDimensions } from "@opentui/solid"
 import { createMemo, For, Show } from "solid-js"
 import type { KeyAction } from "../../keybindings"
 import { useKeybindings } from "../keybindings"
-import type { Repo } from "../../models"
+import type { DiffTarget, Repo } from "../../models"
 import type { Page } from "../../navigation"
 import type { RepositoryData } from "../../repository-state"
 import { useTheme } from "../theme"
@@ -29,6 +29,29 @@ function RepositoryName(props: { repo: Repo; short?: boolean; interactive?: bool
             <a href={props.repo.url}>{props.repo.nameWithOwner.split("/").slice(1).join("/")}</a>
           </Show>
         </text>
+      </box>
+    </box>
+  )
+}
+
+export function ReviewHeader(props: { repo: Repo; target: DiffTarget; totals?: { additions: number; deletions: number } }) {
+  const { colors } = useTheme()
+  const dimensions = useTerminalDimensions()
+  const label = () => props.target.kind === "pull" ? `PR #${props.target.number}` : `${dimensions().width < 45 ? "" : "Commit "}${props.target.sha.slice(0, 7)}`
+  const totalsWidth = () => props.totals ? Bun.stringWidth(`+${props.totals.additions} −${props.totals.deletions}`) : 0
+  const sideWidth = () => Math.max(0, Math.floor((dimensions().width - totalsWidth()) / 2))
+  return (
+    <box height={1} flexShrink={0} minWidth={0} flexDirection="row" backgroundColor={colors.header} overflow="hidden">
+      <box height={1} width={sideWidth()} flexShrink={0} minWidth={0} flexDirection="row" overflow="hidden" gap={1}>
+        <text height={1} flexGrow={1} minWidth={0} wrapMode="none" truncate fg={colors.muted}>{dimensions().width < 60 ? props.repo.nameWithOwner.split("/").at(-1) : props.repo.nameWithOwner}</text>
+      </box>
+      <Show when={props.totals}>
+        {(totals) => <text id="review-totals" height={1} width={totalsWidth()} flexShrink={0} wrapMode="none" fg={colors.muted}>
+          +{totals().additions} −{totals().deletions}
+        </text>}
+      </Show>
+      <box height={1} flexGrow={1} minWidth={0} flexDirection="row" justifyContent="flex-end" overflow="hidden">
+        <text height={1} wrapMode="none" truncate fg={colors.text} attributes={TextAttributes.BOLD}>{label()}</text>
       </box>
     </box>
   )

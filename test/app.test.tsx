@@ -1459,7 +1459,7 @@ describe("opengh TUI", () => {
   });
 
   test("opens settings and applies saved changes immediately", async () => {
-    const [config, setConfig] = createSignal<Config>({ showScrollbars: false, theme: "github", colorMode: "system", reducedMotion: false, markdownStyle: "rich", detailLayout: "centered", detailsPlacement: "auto", diffLayout: "auto", diffWrap: false, showStatusBarHints: true, showTabShortcuts: true, showTabCounts: true, hideDocumentsTab: false, compactHeader: false, iconStyle: "unicode" });
+    const [config, setConfig] = createSignal<Config>({ showScrollbars: false, theme: "github", colorMode: "system", reducedMotion: false, markdownStyle: "rich", detailLayout: "centered", detailsPlacement: "auto", diffLayout: "auto", diffWrap: false, diffFullscreen: true, showStatusBarHints: true, showTabShortcuts: true, showTabCounts: true, hideDocumentsTab: false, compactHeader: false, iconStyle: "unicode" });
     let saves = 0;
     const view = await testRender(
       () => (
@@ -1531,7 +1531,7 @@ describe("opengh TUI", () => {
     await Bun.sleep(0);
     await view.flush();
     expect(saves).toBe(1);
-    expect(config()).toEqual({ showScrollbars: true, theme: "github", colorMode: "system", reducedMotion: false, markdownStyle: "rich", detailLayout: "centered", detailsPlacement: "auto", diffLayout: "auto", diffWrap: false, showStatusBarHints: true, showTabShortcuts: true, showTabCounts: true, hideDocumentsTab: false, compactHeader: false, iconStyle: "unicode" });
+    expect(config()).toEqual({ showScrollbars: true, theme: "github", colorMode: "system", reducedMotion: false, markdownStyle: "rich", detailLayout: "centered", detailsPlacement: "auto", diffLayout: "auto", diffWrap: false, diffFullscreen: true, showStatusBarHints: true, showTabShortcuts: true, showTabCounts: true, hideDocumentsTab: false, compactHeader: false, iconStyle: "unicode" });
     expect(view.captureCharFrame()).toContain("‹ on ›");
 
     for (let i = 0; i < 4; i++) view.mockInput.pressArrow("up");
@@ -1664,7 +1664,7 @@ describe("opengh TUI", () => {
     expect(canvas()).toBe(resolveTheme("opengh", "light").background);
   });
 
-  test("diff layout and wrapping defaults are configurable from the Diffs settings section", async () => {
+  test("diff layout, wrapping and fullscreen are configurable from the Diffs settings section", async () => {
     const [config, setConfig] = createSignal<Config>({ ...defaultConfig, iconStyle: "unicode" });
     const view = await testRender(() => <App data={githubDataFixture} operations={repositoryOperationsFixture}
       config={config()} onConfigChange={async (next) => { setConfig(next); }} />, { width: 120, height: 40 });
@@ -1696,10 +1696,20 @@ describe("opengh TUI", () => {
     await view.flush();
     expect(config().diffWrap).toBe(true);
     expect(view.captureCharFrame()).toContain("‹ on ›");
+    view.mockInput.pressArrow("down");
+    await view.flush();
+    expect(view.captureCharFrame()).toContain("Fullscreen diffs");
+    expect(config().diffFullscreen).toBe(true);
+    view.mockInput.pressArrow("right");
+    await view.flush();
+    expect(config().diffFullscreen).toBe(false);
+    view.mockInput.pressArrow("left");
+    await view.flush();
+    expect(config().diffFullscreen).toBe(true);
   });
 
   test("previews and saves a theme from settings", async () => {
-    const [config, setConfig] = createSignal<Config>({ showScrollbars: false, theme: "github", colorMode: "system", reducedMotion: false, markdownStyle: "rich", detailLayout: "centered", detailsPlacement: "auto", diffLayout: "auto", diffWrap: false, showStatusBarHints: true, showTabShortcuts: true, showTabCounts: true, hideDocumentsTab: false, compactHeader: false, iconStyle: "unicode" });
+    const [config, setConfig] = createSignal<Config>({ showScrollbars: false, theme: "github", colorMode: "system", reducedMotion: false, markdownStyle: "rich", detailLayout: "centered", detailsPlacement: "auto", diffLayout: "auto", diffWrap: false, diffFullscreen: true, showStatusBarHints: true, showTabShortcuts: true, showTabCounts: true, hideDocumentsTab: false, compactHeader: false, iconStyle: "unicode" });
     let canvas = () => "";
     const ThemedApp = () => {
       const current = useTheme();
@@ -1788,7 +1798,7 @@ describe("opengh TUI", () => {
   });
 
   test("restores the configured theme when preview is cancelled", async () => {
-    const config: Config = { showScrollbars: false, theme: "github", colorMode: "system", reducedMotion: false, markdownStyle: "rich", detailLayout: "centered", detailsPlacement: "auto", diffLayout: "auto", diffWrap: false, showStatusBarHints: true, showTabShortcuts: true, showTabCounts: true, hideDocumentsTab: false, compactHeader: false, iconStyle: "unicode" };
+    const config: Config = { showScrollbars: false, theme: "github", colorMode: "system", reducedMotion: false, markdownStyle: "rich", detailLayout: "centered", detailsPlacement: "auto", diffLayout: "auto", diffWrap: false, diffFullscreen: true, showStatusBarHints: true, showTabShortcuts: true, showTabCounts: true, hideDocumentsTab: false, compactHeader: false, iconStyle: "unicode" };
     let canvas = () => "";
     const ThemedApp = () => {
       const current = useTheme();
@@ -1829,7 +1839,7 @@ describe("opengh TUI", () => {
         <App
           data={githubDataFixture}
           operations={repositoryOperationsFixture}
-          config={{ showScrollbars: false, theme: "github", colorMode: "system", reducedMotion: false, markdownStyle: "rich", detailLayout: "centered", detailsPlacement: "auto", diffLayout: "auto", diffWrap: false, showStatusBarHints: true, showTabShortcuts: true, showTabCounts: true, hideDocumentsTab: false, compactHeader: false, iconStyle: "unicode" }}
+          config={{ showScrollbars: false, theme: "github", colorMode: "system", reducedMotion: false, markdownStyle: "rich", detailLayout: "centered", detailsPlacement: "auto", diffLayout: "auto", diffWrap: false, diffFullscreen: true, showStatusBarHints: true, showTabShortcuts: true, showTabCounts: true, hideDocumentsTab: false, compactHeader: false, iconStyle: "unicode" }}
           onConfigChange={async () => { throw new Error("Config directory is read-only") }}
         />
       ),

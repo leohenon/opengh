@@ -25,7 +25,7 @@ Use characters (`j`, `G`, `?`), named keys (`enter`, `esc`), or modifiers (`ctrl
 
 ## Search the page
 
-Press `/` to search the current page or focused diff pane. `enter` confirms;
+Press `/` to search the current page or diff body. `enter` confirms;
 `n`/`N` moves between matches.
 
 Search is literal, smart-case, and limited to loaded, visible content. It does not filter lists.
@@ -94,7 +94,8 @@ Source: [`src/keybindings.ts`](../src/keybindings.ts).
 | Action                | Keys               |
 | --------------------- | ------------------ |
 | `diff.openViewer`     | `v`                |
-| `diff.focus`          | `tab`, `shift+tab` |
+| `diff.previousFile`   | `,`                |
+| `diff.nextFile`       | `.`                |
 | `diff.toggleFiles`    | `s`                |
 | `diff.filterFiles`    | `F`                |
 | `diff.previousHunk`   | `[`                |
@@ -104,6 +105,18 @@ Source: [`src/keybindings.ts`](../src/keybindings.ts).
 | `diff.toggleComments` | `z`                |
 | `diff.panLeft`        | `left`, `h`        |
 | `diff.panRight`       | `right`, `l`       |
+
+In diffs, `,`/`.` move through files (including a filtered list); `j`/`k`, arrows, `u`/`d`, `f`/`b`, Space and `g`/`G` scroll the diff regardless of sidebar clicks. `h`/`l` and horizontal arrows pan the diff. The file sidebar is mouse-selectable; `s` toggles it and `F` filters paths. On narrow terminals the sidebar starts hidden and, when shown, shares the screen with the diff. Use a file or body right-click menu for Settings; outside diffs `,` opens Settings.
+
+### Username suggestions
+
+Type `@` in a comment editor. `esc` dismisses suggestions without closing the comment.
+
+| Action | Keys |
+| --- | --- |
+| `mention.up` | `up` |
+| `mention.down` | `down` |
+| `mention.accept` | `enter`, `tab` |
 
 ### Dialogs and pickers
 

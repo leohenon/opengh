@@ -57,7 +57,7 @@ export function createDiffCommentCards(renderer: RenderContext,
       for (const thread of threads) {
         if (thread.path !== path) continue
         const row = !thread.isOutdated && thread.diffSide && thread.line != null
-          ? rows.find((row) => (thread.diffSide === "LEFT" ? row.left : row.right)?.line === thread.line) : undefined
+          ? rows.find((row) => (thread.diffSide === "LEFT" ? row.left : row.right)?.path === thread.path && (thread.diffSide === "LEFT" ? row.left : row.right)?.line === thread.line) : undefined
         const anchor = row && host.findDescendantById(row.id)
         const line = thread.line ?? thread.originalLine
         // Cards away from their line say where they belong.
@@ -67,7 +67,7 @@ export function createDiffCommentCards(renderer: RenderContext,
         const card = new BoxRenderable(renderer, {
           id: `${prefix}${thread.id}`, ...noteBox(width, layout, anchor ? thread.diffSide : undefined), flexDirection: "column", flexShrink: 0,
           border: true, borderStyle: "rounded", borderColor: colors.border, title: title ? ` ${title} ` : undefined, titleColor: colors.muted,
-          paddingLeft: 1, paddingRight: 1, backgroundColor: colors.panel,
+          paddingLeft: 1, paddingRight: 1,
         })
         const disposeBodies: (() => void)[] = []
         owned.push({ card, disposeBodies })
@@ -103,7 +103,7 @@ export function createDiffCommentCards(renderer: RenderContext,
       if (!renderDraft) return
       for (const draft of savedDrafts) {
         if (draft.anchor.path !== path) continue
-        const row = rows.find((row) => (draft.anchor.side === "LEFT" ? row.left : row.right)?.line === draft.anchor.line)
+        const row = rows.find((row) => (draft.anchor.side === "LEFT" ? row.left : row.right)?.path === draft.anchor.path && (draft.anchor.side === "LEFT" ? row.left : row.right)?.line === draft.anchor.line)
         const anchor = row && host.findDescendantById(row.id)
         if (!anchor) continue
         const card = new BoxRenderable(renderer, {

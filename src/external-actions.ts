@@ -30,8 +30,15 @@ export function resolveDiffViewerCommand(command?: string[], findExecutable = Bu
 
 export type Terminal = { suspend(): void | Promise<void>; resume(): void | Promise<void>; isDestroyed: boolean }
 const busy = new WeakSet<Terminal>()
+const blockedTerminals = new WeakMap<Terminal, string>()
+// Embedders can deny all host editor/viewer launches before preparation or I/O.
+export function disableExternalTools(terminal: Terminal, reason = "External tools are unavailable in this session.") {
+  blockedTerminals.set(terminal, reason)
+}
 // Acquire before any async preparation, so repeated keys cannot race terminal suspension.
 export async function terminalHandoff<T>(terminal: Terminal, work: (launch: (args: string[], cwd: string) => Promise<void>) => Promise<T>, runner = runExternal) {
+  const blocked = blockedTerminals.get(terminal)
+  if (blocked) throw new Error(blocked)
   if (busy.has(terminal)) throw new Error("An external tool is already running")
   busy.add(terminal)
   let suspended = false

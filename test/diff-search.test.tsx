@@ -169,7 +169,6 @@ test("diff search decorates/reveals real Hunk rows and posted comments in split/
   const key = async (value: string) => {
     if (value === "escape") { setup.mockInput.pressEscape(); await Bun.sleep(30) }
     else if (value === "enter") setup.mockInput.pressEnter()
-    else if (value === "tab") setup.mockInput.pressTab()
     else setup.mockInput.pressKey(value)
     await settle()
   }
@@ -185,7 +184,6 @@ test("diff search decorates/reveals real Hunk rows and posted comments in split/
   const rowPosition = (node: Renderable) => node.y - scroll().content.y
   try {
     await settle()
-    await key("tab") // Wide screens initially focus files.
     await wait(() => !!card() && card().height > 1)
     const file = parseDiff({ kind: "patch", patch }).files[0]!.body!
     for (const layout of ["split", "unified"] as const) {
@@ -262,20 +260,21 @@ test("diff search decorates/reveals real Hunk rows and posted comments in split/
     }
     scroll().scrollTo(0)
     await search("needle")
-    await key("tab")
-    await key("n") // Accepted body scope survives focus moving to the visible files pane.
+    const filesPane = setup.renderer.root.findDescendantById("diff-files-pane")!
+    await setup.mockMouse.click(filesPane.x + 4, filesPane.y + 1)
+    await settle()
+    await key("n") // Clicking the sidebar does not change the search scope.
     expect(setup.captureCharFrame()).toContain("2/3")
     expect(painted(currentBg)).toBe("needle")
     await key("n")
     expect(setup.captureCharFrame()).toContain("3/3")
     expect(painted(currentBg).trim()).toBe("needle")
     await key("escape")
-    await search("search.ts") // Restart captures the currently focused files pane instead.
-    expect(setup.captureCharFrame()).toContain("1/1")
-    await key("tab")
+    await search("search.ts") // A new search still targets diff content after a sidebar click.
+    expect(setup.captureCharFrame()).toContain("No matches")
     const fileSearchTop = scroll().scrollTop
     await key("n")
-    expect(setup.captureCharFrame()).toContain("1/1")
+    expect(setup.captureCharFrame()).toContain("No matches")
     expect(scroll().scrollTop).toBe(fileSearchTop)
     await key("escape")
     await search("needle")

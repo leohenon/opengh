@@ -11,7 +11,7 @@ import { useKeyActions, useKeybindings } from "../keybindings"
 import { createRenderedSearch } from "../rendered-search"
 import { useSearchTarget } from "../search-context"
 
-type Setting = "tab-shortcuts" | "theme" | "color-mode" | "reduced-motion" | "markdown-style" | "scrollbars" | "detail-layout" | "details-placement" | "status-bar-hints" | "icon-style" | "compact-header" | "hide-documents-tab" | "tab-counts" | "diff-layout" | "diff-wrap"
+type Setting = "tab-shortcuts" | "theme" | "color-mode" | "reduced-motion" | "markdown-style" | "scrollbars" | "detail-layout" | "details-placement" | "status-bar-hints" | "icon-style" | "compact-header" | "hide-documents-tab" | "tab-counts" | "diff-layout" | "diff-wrap" | "diff-fullscreen"
 
 const sectionOrder = ["Appearance", "Layout", "Usability", "Diffs"] as const
 type Section = typeof sectionOrder[number]
@@ -19,7 +19,7 @@ const sectionSettings: Record<Section, readonly Setting[]> = {
   Appearance: ["theme", "color-mode", "markdown-style"],
   Layout: ["compact-header", "tab-counts", "hide-documents-tab", "detail-layout", "details-placement"],
   Usability: ["icon-style", "status-bar-hints", "scrollbars", "reduced-motion", "tab-shortcuts"],
-  Diffs: ["diff-layout", "diff-wrap"],
+  Diffs: ["diff-layout", "diff-wrap", "diff-fullscreen"],
 }
 const settingOrder = sectionOrder.flatMap((section) => sectionSettings[section])
 const settingDefinitions: Record<Setting, { title: string; value: (config: Config) => string }> = {
@@ -38,6 +38,7 @@ const settingDefinitions: Record<Setting, { title: string; value: (config: Confi
   "reduced-motion": { title: "Reduced motion", value: (config) => config.reducedMotion ? "on" : "off" },
   "diff-layout": { title: "Diff layout", value: (config) => config.diffLayout },
   "diff-wrap": { title: "Diff wrapping", value: (config) => config.diffWrap ? "on" : "off" },
+  "diff-fullscreen": { title: "Fullscreen diffs", value: (config) => config.diffFullscreen ? "on" : "off" },
 }
 const diffLayoutValues = ["auto", "split", "unified"] as const
 const colorModeValues = ["system", "dark", "light"] as const
@@ -115,7 +116,7 @@ export function Settings(props: {
     revealSetting()
   }
 
-  const toggleBoolean = async (key: "reducedMotion" | "showScrollbars" | "showStatusBarHints" | "compactHeader" | "hideDocumentsTab" | "showTabCounts" | "showTabShortcuts" | "diffWrap") => {
+  const toggleBoolean = async (key: "reducedMotion" | "showScrollbars" | "showStatusBarHints" | "compactHeader" | "hideDocumentsTab" | "showTabCounts" | "showTabShortcuts" | "diffWrap" | "diffFullscreen") => {
     if (busy()) return
     setSaving(true)
     setError("")
@@ -244,6 +245,7 @@ export function Settings(props: {
       case "icon-style": void changeIconStyle(); break
       case "diff-layout": void changeDiffLayout(direction); break
       case "diff-wrap": void toggleBoolean("diffWrap"); break
+      case "diff-fullscreen": void toggleBoolean("diffFullscreen"); break
     }
   }
   useKeyActions({}, { when: () => screen() === "settings" && busy(), priority: 200, modal: true })
@@ -358,6 +360,10 @@ export function Settings(props: {
     if (selected() === "diff-wrap") return {
       title: "Diff wrapping",
       description: "Wrap long diff lines instead of panning horizontally." + (keys.key("diff.toggleWrap") ? ` ${keys.key("diff.toggleWrap")} toggles wrapping for the open diff.` : ""),
+    }
+    if (selected() === "diff-fullscreen") return {
+      title: "Fullscreen diffs",
+      description: "Replace the tab bar with a compact review header. Turn off to keep app tabs visible while reviewing diffs.",
     }
     return {
       title: "Shortcut hints",

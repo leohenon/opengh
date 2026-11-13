@@ -1,7 +1,7 @@
 import { MouseButton, RGBA, type BoxRenderable, type ScrollBoxRenderable } from "@opentui/core"
 import { useKeyboard } from "@opentui/solid"
 import { useKeyActions } from "../keybindings"
-import { createEffect, createMemo, createSignal, Index, onCleanup, Show, type Accessor, type JSX } from "solid-js"
+import { createEffect, createMemo, createSignal, Index, on, onCleanup, Show, type Accessor, type JSX } from "solid-js"
 import { mouseHover, type MousePosition } from "../mouse"
 import { fitText } from "../format"
 import { scrollRowIntoView } from "../scroll-selection"
@@ -16,6 +16,7 @@ type ItemKey = string | number
 export function SelectableList<T>(props: {
   items: readonly T[]
   itemKey: (item: T) => ItemKey
+  selectedItemKey?: ItemKey
   active: boolean
   dimSelection?: boolean
   searchRetain?: () => boolean
@@ -59,13 +60,13 @@ export function SelectableList<T>(props: {
   }
   // Appending a page must not reveal an unchanged selection after wheel browsing.
   const indexOfSelection = createMemo(() => {
-    const key = selectedKey()
+    const key = props.selectedItemKey ?? selectedKey()
     return key === undefined ? -1 : props.items.findIndex((item) => props.itemKey(item) === key)
   })
 
   const revealSelection = () => {
     const index = indexOfSelection()
-    if (followSelection && (props.active || searchSelection() && props.searchRetain?.()) && list && index >= 0) {
+    if (followSelection && (props.active || props.selectedItemKey !== undefined || searchSelection() && props.searchRetain?.()) && list && index >= 0) {
       scrollRowIntoView(list, index, rowHeight())
       // Selection-driven scrolling emits the same native change event as the mouse.
       followSelection = true
@@ -94,7 +95,7 @@ export function SelectableList<T>(props: {
     active: () => props.active,
     retain: () => props.searchRetain?.() ?? false,
     position: () => Math.max(0, indexOfSelection()),
-    selection: () => selectedKey() === undefined ? undefined : String(selectedKey()),
+    selection: () => indexOfSelection() < 0 ? undefined : String(props.selectedItemKey ?? selectedKey()),
     search: (query) => {
       matchingRows.clear()
       return props.items.flatMap((item, index) => {
@@ -111,7 +112,7 @@ export function SelectableList<T>(props: {
     },
     clear: () => { for (const adapter of searchRows.values()) adapter.clear() },
     snapshot: () => {
-      const key = selectedKey()
+      const key = props.selectedItemKey ?? selectedKey()
       const top = list?.scrollTop ?? 0
       const follow = followSelection
       return () => {
@@ -158,16 +159,22 @@ export function SelectableList<T>(props: {
     const resetKey = props.resetKey
     if (resetKey !== previousResetKey) {
       previousResetKey = resetKey
-      selectIndex(0)
-      return
+      if (props.selectedItemKey === undefined) { selectIndex(0); return }
     }
 
     const current = indexOfSelection()
     if (current >= 0) selectedIndex = current
-    else selectIndex(Math.min(selectedIndex, Math.max(0, items.length - 1)))
+    else if (props.selectedItemKey === undefined) selectIndex(Math.min(selectedIndex, Math.max(0, items.length - 1)))
   })
 
   createEffect(revealSelection)
+  // External navigation reveals its row without emitting an onSelect feedback loop.
+  // Observe only key changes so wheel browsing can leave an unchanged selection offscreen.
+  createEffect(on(() => props.selectedItemKey, (key) => {
+    if (key === undefined) return
+    followSelection = true
+    revealSelection()
+  }))
 
   const onScrollChange = () => {
     // Native wheel/scrollbar browsing may intentionally leave the selected row offscreen.
@@ -247,7 +254,7 @@ export function SelectableList<T>(props: {
         >
           <Index each={props.items}>
             {(item, index) => {
-              const active = () => selectedKey() === props.itemKey(item())
+              const active = () => (props.selectedItemKey ?? selectedKey()) === props.itemKey(item())
               const hover = mouseHover(mouseActive, () => props.itemKey(item()))
               onCleanup(() => { searchRows.get(index)?.dispose(); searchRows.delete(index) })
               return (

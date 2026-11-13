@@ -31,6 +31,7 @@ With an absolute `XDG_CONFIG_HOME`, the path is `$XDG_CONFIG_HOME/opengh/config.
 | `hideDocumentsTab` | `false` | Hide Overview document tabs; `tab` still cycles documents. |
 | `detailLayout` | `"centered"` | `centered`, `wide`. |
 | `detailsPlacement` | `"auto"` | `auto`: sidebar on wide terminals, inline otherwise. `inline`: always inline. |
+| `diffFullscreen` | `true` | Hide app tabs during diff review. Set `false` to keep tabs visible; the continuous stream is unchanged. |
 | `iconStyle` | `"nerd"` | `nerd` requires a Nerd Font; `unicode` does not; `none` hides icons. |
 | `showStatusBarHints` | `false` | Shortcut hints. |
 | `showScrollbars` | `false` | Scrollbars for overflowing content. |

@@ -23,6 +23,7 @@ export type Config = {
   detailsPlacement: DetailsPlacement
   diffLayout: DiffLayout
   diffWrap: boolean
+  diffFullscreen: boolean
   showStatusBarHints: boolean
   iconStyle: IconStyle
   compactHeader: boolean
@@ -43,6 +44,7 @@ export const defaultConfig: Config = {
   detailsPlacement: "auto",
   diffLayout: "auto",
   diffWrap: false,
+  diffFullscreen: true,
   showStatusBarHints: false,
   iconStyle: "nerd",
   compactHeader: false,
@@ -96,6 +98,7 @@ function normalizeConfig(value: unknown): Config {
       ? input.diffLayout
       : defaultConfig.diffLayout,
     diffWrap: typeof input.diffWrap === "boolean" ? input.diffWrap : defaultConfig.diffWrap,
+    diffFullscreen: typeof input.diffFullscreen === "boolean" ? input.diffFullscreen : defaultConfig.diffFullscreen,
     showStatusBarHints: typeof input.showStatusBarHints === "boolean"
       ? input.showStatusBarHints
       : defaultConfig.showStatusBarHints,

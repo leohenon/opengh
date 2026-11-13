@@ -27,7 +27,7 @@ import { reactionKey } from "../reactions"
 import { ReactionPicker, type ReactionMessage } from "./components/reaction-picker"
 import type { ReactionControls } from "./components/reactions"
 import { BranchPicker } from "./components/branch-picker"
-import { Header } from "./components/header"
+import { Header, ReviewHeader } from "./components/header"
 import { ContextMenu, type ContextMenuItem } from "./components/context-menu"
 import { mouseContextMenu, type MousePosition } from "./mouse"
 import { IssueReferencesPicker } from "./components/issue-references-picker"
@@ -52,7 +52,7 @@ import { IssueScreen } from "./pages/issue"
 import { PullScreen } from "./pages/pull"
 import { RunScreen } from "./pages/run"
 import { CommitScreen } from "./pages/commit"
-import { DiffScreen, type DiffFocus } from "./pages/diff"
+import { DiffScreen } from "./pages/diff"
 import { aboutSidebarVisible, OverviewScreen, type AboutSidebar } from "./pages/overview"
 import { WorkScreen } from "./pages/work"
 import { SwitchRepositoryScreen } from "./pages/switch-repository"
@@ -217,7 +217,7 @@ function AppContent(props: AppProps) {
   const [documentAnchor, setDocumentAnchor] = createSignal<MarkdownAnchorRequest>()
   const overviewDocument = () => navigation().document
   const setOverviewDocument = (document: string | undefined) => setNavigation((state) => ({ ...state, document }))
-  const [diffFocus, setDiffFocus] = createSignal<Partial<Record<Page, DiffFocus>>>({})
+  const [diffTotals, setDiffTotals] = createSignal<Partial<Record<Page, { target: DiffTarget; additions: number; deletions: number }>>>({})
   const [diffCommentsCollapsed, setDiffCommentsCollapsed] = createSignal<Partial<Record<Page, boolean>>>({})
   const [overlay, setOverlay] = createSignal<Overlay>()
   const [toast, setToast] = createSignal<ToastState>()
@@ -1041,6 +1041,7 @@ function AppContent(props: AppProps) {
     if (current.branch.status === "loading") return "switching-branch"
     const resource = activeResource()
     if (resource?.status === "loading") {
+      if (diffTarget()) return resource.value === undefined ? "loading-resource" : "refreshing"
       if (resource.phase === "pagination") return "loading-more"
       if (activeRunId() && resource.value !== undefined) return "refreshing"
       if (activeCommitSha() && resource.value !== undefined) return "refreshing"
@@ -1491,13 +1492,13 @@ function AppContent(props: AppProps) {
     if (diffTarget()) {
       if (inlineDraftFocused()[page()]) return hint(["dialog.submit", "post"], ["dialog.togglePreview", "preview"],
         ["dialog.toggleExpanded", "expand"], ["dialog.externalEditor", "editor"], ["dialog.discard", "clear"], ["dialog.close", "cancel"])
-      const files = diffFocus()[page()] === "files"
       const failed = resource?.status === "error"
       const recovery: HintEntry[] = failed ? [...retry, ["navigation.activate", "file list"]]
         : canRefresh && diffResource().value?.kind === "files" ? [["view.refresh", "retry full diff"]] : []
       const comments: HintEntry[] = threadsForDiff(diffTarget()!).length
         ? [["diff.toggleComments", diffCommentsCollapsed()[page()] ? "expand" : "collapse"]] : []
-      return hint(back, ...recovery, ["diff.focus", `focus ${files ? "diff" : "files"}`],
+      return hint(back, ...recovery,
+        [["diff.previousFile", "diff.nextFile"], "files"],
         [["diff.previousHunk", "diff.nextHunk"], "hunks"],
         ...(failed ? [] : [["diff.toggleLayout", "layout"], ["diff.toggleWrap", "wrap"]] as const),
         ["diff.toggleFiles", "toggle files"], ["diff.filterFiles", "filter files"],
@@ -1562,7 +1563,7 @@ function AppContent(props: AppProps) {
   useKeyActions({
     "global.quit": quit,
     "global.help": () => setOverlay("help"),
-    "global.settings": () => setOverlay("settings"),
+    "global.settings": () => { if (diffTarget()) return false; setOverlay("settings") },
     "global.openFullApp": openFullApp,
     "global.switchRepository": () => {
       if (!props.onSwitchRepository) return false
@@ -1783,7 +1784,7 @@ function AppContent(props: AppProps) {
     <box width={dimensions().width} height={dimensions().height} flexDirection="column" backgroundColor={colors.canvas}>
       <StatusPromptProvider>
       <SearchProvider enabled={overlay() === undefined || overlay() === "settings"} scope={overlay() === "settings" ? "settings" : undefined}
-        footer={<StatusPromptBar fallback={<StatusBar kind={status()} detail={statusDetail()} error={statusError()}
+        footer={<StatusPromptBar fallback={<StatusBar kind={diffTarget() && (status() === "loading-resource" || status() === "refreshing" || status() === "loading-more") ? undefined : status()} detail={statusDetail()} error={statusError()}
           hint={statusError() ? keys.hint("view.refresh", "retry") : shortcutHint()}
           zIndex={overlay() && (config().showStatusBarHints || ((status() || statusError()) && !fullscreenEditorOpen())) ? 350 : 0} />} />}
         identity={JSON.stringify([
@@ -1791,10 +1792,15 @@ function AppContent(props: AppProps) {
         page() === "commits" ? data().currentBranch : page() === "issues" ? issueState() : page() === "pulls" ? pullState()
           : page() === "overview" ? [overviewDocument() === overviewDocuments()[0]?.id ? undefined : overviewDocument(), data().currentBranch] : undefined,
       ])}>
-      <Show when={!standalone()}>
-      <Header repo={data().repo} page={page()} tabs={visibleTabs()} workCounts={data().workCounts} compact={config().compactHeader} showTabCounts={config().showTabCounts} showTabShortcuts={config().showTabShortcuts}
-        interactive={overlay() === undefined} onSelect={selectHeaderPage}
-        onOpenRepository={props.onSwitchRepository ? openRepositoryPicker : undefined} />
+      <Show when={config().diffFullscreen ? diffTarget() : undefined} keyed fallback={
+        <Show when={!standalone()}>
+          <Header repo={data().repo} page={page()} tabs={visibleTabs()} workCounts={data().workCounts} compact={config().compactHeader} showTabCounts={config().showTabCounts} showTabShortcuts={config().showTabShortcuts}
+            interactive={overlay() === undefined} onSelect={selectHeaderPage}
+            onOpenRepository={props.onSwitchRepository ? openRepositoryPicker : undefined} />
+        </Show>
+      }>
+        {(target) => <ReviewHeader repo={data().repo} target={target}
+          totals={diffTotals()[page()]?.target === target ? diffTotals()[page()] : undefined} />}
       </Show>
       <box {...pageMouse} flexGrow={1} minHeight={0} flexDirection="column">
       <SearchSurface active={!diffTarget()}>
@@ -1980,24 +1986,23 @@ function AppContent(props: AppProps) {
       <For each={["commits", "pulls"] as const}>
         {(owner) => <Show when={(!standalone() || page() === owner) && navigation().diffs?.[owner]} keyed>
           {(target) => <box id={`diff-view-${owner}`} visible={page() === owner} flexGrow={1} minHeight={0} flexDirection="column">
-            <DiffScreen target={target} resource={resourceForDiff(target)} active={page() === owner}
+            <DiffScreen target={target} resource={resourceForDiff(target)} active={page() === owner} hideHeader={config().diffFullscreen}
               defaultLayout={configuredDiffLayout()} defaultWrap={config().diffWrap}
               review={reviewForDiff(target)} commentable={!!commentableDiff(target)} draft={draftForDiff(target)} savedDrafts={savedDraftsForDiff(target)}
               onDraftInput={(body) => { const context = inlineContext(); if (context) saveInlineDraft(context, body) }}
               threads={threadsForDiff(target)} repositoryUrl={data().repo.url}
               interactive={page() === owner && overlay() === undefined}
-              onMovePage={movePage}
               onOpenGitHub={() => openCurrentDiffGitHub(target)}
               onOpenExternal={() => { void openDiffTool(target) }}
               onContextMenu={(position, items) =>
                 openContextMenu(
                   position,
-                  [...items, ...backContextItems()],
+                  [...items, { label: "Settings", run: () => setOverlay("settings") }, ...backContextItems()],
                   () => page() === owner && navigation().diffs?.[owner] === target,
                 )
               }
-              onFocusChange={(focus) => setDiffFocus((current) => ({ ...current, [owner]: focus }))}
               onDraftFocusChange={(focused) => setInlineDraftFocused((current) => ({ ...current, [owner]: focused }))}
+              onTotalsChange={(totals) => setDiffTotals((current) => ({ ...current, [owner]: totals ? { target, ...totals } : undefined }))}
               onCommentsCollapsedChange={(collapsed) => setDiffCommentsCollapsed((current) => ({ ...current, [owner]: collapsed }))}
               showScrollbar={config().showScrollbars} onLoadFiles={() => void props.onLoadDiff?.(target, true)} />
           </box>}

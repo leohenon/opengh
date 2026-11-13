@@ -30,6 +30,8 @@ test("Help puts primary actions before secondary actions and omits redundant nav
       expect(frame).not.toContain("1 / 2")
       expect(frame).not.toContain("PgUp")
       expect(frame).not.toContain("PgDn")
+      expect(frame).toContain("Right-click")
+      expect(frame).toContain("open context menu")
       if (target === "commits" || target === "pulls")
         expect(frame.indexOf(primary)).toBeLessThan(frame.indexOf("view diff"))
       expect(frame.indexOf("refresh / retry")).toBeLessThan(frame.indexOf("open " + (target === "overview" ? "repo on GitHub" : target === "diff" ? "diff on GitHub" : "on GitHub")))
