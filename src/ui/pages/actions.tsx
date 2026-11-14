@@ -11,7 +11,7 @@ import { useTheme } from "../theme"
 import { useIcons } from "../icon-style"
 import type { MousePosition } from "../mouse"
 import { runColor, runIcon, runState } from "../workflow-status"
-import { useLoadingDots } from "../motion"
+import { useSpinner } from "../motion"
 
 export function ActionsScreen(props: {
   runs: ResourceState<Paginated<WorkflowRunSummary>>
@@ -29,7 +29,7 @@ export function ActionsScreen(props: {
   const runCount = () => props.runs.value?.items.length ?? 0
   const working = createMemo(() => props.active && props.interactive && Boolean(icons().workflow.clock)
     && Boolean(props.runs.value?.items.some((run) => run.status === "in_progress")))
-  const dots = useLoadingDots(working)
+  const spinner = useSpinner(working)
 
   return (
     <PageShell
@@ -60,7 +60,7 @@ export function ActionsScreen(props: {
             {(run, active) => (
               <>
                 <box height={2} width={runIcon(run(), icons().workflow) ? 3 : 0} flexShrink={0} alignItems="flex-start">
-                  <text fg={runColor(run(), colors)}>{run().status === "in_progress" && icons().workflow.clock ? dots() : runIcon(run(), icons().workflow)}</text>
+                  <text fg={runColor(run(), colors)}>{run().status === "in_progress" && icons().workflow.clock ? spinner() : runIcon(run(), icons().workflow)}</text>
                 </box>
                 <box height={2} flexGrow={1} flexBasis={0} minWidth={0} flexDirection="column" overflow="hidden">
                   <ListLine

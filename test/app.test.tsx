@@ -885,22 +885,22 @@ describe("opengh TUI", () => {
       ["queued run", workflowIcons.clock, colors.muted],
       ["waiting run", workflowIcons.clock, colors.yellow],
     ]) expect(icon(title!, glyph!)?.fg).toEqual(RGBA.fromHex(color!));
-    const dots = () => view.captureSpans().lines
+    const spinner = () => view.captureSpans().lines
       .find((line) => line.spans.some((span) => span.text.includes("in_progress run")))?.spans
-      .find((span) => /\./.test(span.text));
-    expect(dots()?.fg).toEqual(RGBA.fromHex(colors.yellow));
-    const first = dots()?.text;
-    for (let attempt = 0; attempt < 12 && dots()?.text === first; attempt++) {
+      .find((span) => /[◐◓◑◒]/.test(span.text));
+    expect(spinner()?.fg).toEqual(RGBA.fromHex(colors.yellow));
+    const first = spinner()?.text;
+    for (let attempt = 0; attempt < 12 && spinner()?.text === first; attempt++) {
       await Bun.sleep(40);
       await view.flush();
     }
-    expect(dots()?.text).not.toBe(first);
+    expect(spinner()?.text).not.toBe(first);
     setConfig((current) => ({ ...current, reducedMotion: true }));
     await view.flush();
-    expect(dots()?.text.trim()).toBe("...");
+    expect(spinner()?.text.trim()).toBe("◐");
     await Bun.sleep(170);
     await view.flush();
-    expect(dots()?.text.trim()).toBe("...");
+    expect(spinner()?.text.trim()).toBe("◐");
     expect(view.captureCharFrame()).toContain("in progress");
   });
 

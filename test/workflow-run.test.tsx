@@ -2,6 +2,7 @@ import { expect, spyOn, test } from "bun:test"
 import { testRender } from "@opentui/solid"
 import { createSignal } from "solid-js"
 import type { RunDetailState } from "../src/repository-state"
+import { defaultConfig } from "../src/config"
 import { App } from "../src/ui/app"
 import { githubDataFixture, repositoryOperationsFixture } from "./fixtures/github-data"
 import { workflowJobFixture, workflowRunFixture } from "./fixtures/workflow-run"
@@ -78,6 +79,53 @@ test("Actions opens run details, retains them across tabs, and restores the sele
   }
 })
 
+
+test("run detail refreshes stay quiet while retaining content and footer hints", async () => {
+  const value = { ...workflowRunFixture, status: "in_progress", conclusion: "" }
+  const jobs = { items: [workflowJobFixture], page: 1, hasMore: false }
+  const [detail, setDetail] = createSignal<RunDetailState>({ id: 9812,
+    resource: { status: "ready", value }, jobs: { status: "ready", value: jobs },
+  })
+  const [operations, setOperations] = createSignal(repositoryOperationsFixture)
+  const view = await testRender(() => (
+    <App data={githubDataFixture} operations={operations()} runDetail={detail()}
+      config={{ ...defaultConfig, showStatusBarHints: true }} />
+  ), { width: 110, height: 36 })
+  const footer = () => view.captureCharFrame().split("\n").filter(Boolean).at(-1)!.trim()
+  try {
+    await view.flush()
+    view.mockInput.pressKey("5")
+    await view.flush()
+    view.mockInput.pressEnter()
+    await view.flush()
+    const hints = footer()
+    expect(hints).toContain("r refresh")
+    expect(view.captureCharFrame()).toContain("Run unit tests")
+    for (const part of ["resource", "jobs"] as const) {
+      setDetail({ id: 9812,
+        resource: part === "resource" ? { status: "loading", phase: "load", value } : { status: "ready", value },
+        jobs: { status: "loading", phase: "load", value: jobs },
+      })
+      setOperations({ ...repositoryOperationsFixture, refresh: { status: "loading" } })
+      await view.flush()
+      await Bun.sleep(250)
+      await view.flush()
+      expect(view.captureCharFrame()).not.toContain("Refreshing")
+      expect(view.captureCharFrame()).toContain("Run unit tests")
+      expect(footer()).toBe(hints.replace(" · r refresh", ""))
+    }
+    setOperations(repositoryOperationsFixture)
+    setDetail({ id: 9812, resource: { status: "ready", value },
+      jobs: { status: "loading", phase: "pagination", value: jobs },
+    })
+    await view.flush()
+    await Bun.sleep(250)
+    await view.flush()
+    expect(footer()).toContain("Loading more")
+  } finally {
+    view.renderer.destroy()
+  }
+})
 
 test("active run details poll every five seconds, pause off-tab, and stop on completion or close", async () => {
   const timers = new Map<ReturnType<typeof setInterval>, () => void>()

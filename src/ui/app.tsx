@@ -1037,13 +1037,13 @@ function AppContent(props: AppProps) {
     }
     if (overlay() === "issue-actions") return undefined
     const current = operations()
-    if (current.refresh.status === "loading") return "refreshing"
+    if (current.refresh.status === "loading" && !activeRunId()) return "refreshing"
     if (current.branch.status === "loading") return "switching-branch"
     const resource = activeResource()
     if (resource?.status === "loading") {
       if (diffTarget()) return resource.value === undefined ? "loading-resource" : "refreshing"
       if (resource.phase === "pagination") return "loading-more"
-      if (activeRunId() && resource.value !== undefined) return "refreshing"
+      if (activeRunId() && resource.value !== undefined) return undefined
       if (activeCommitSha() && resource.value !== undefined) return "refreshing"
       if (activePullNumber() && pullResource().value) {
         if (pullRefresh()?.number === activePullNumber() || resource.value !== undefined) return "refreshing"
