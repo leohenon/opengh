@@ -7,7 +7,7 @@
 - [x] Open file references and links
 - [ ] Browse repository files
 - [ ] Add Vim mode for text editing
-- [x] Navigate with the mouse
+- [x] Full mouse support
 - [ ] Decide default icon style
 
 #### Issues & PRs
@@ -29,13 +29,18 @@
 - [ ] Pin and unpin issues
 - [ ] Reply to messages in threads
 
+#### Repository overview
+
+- [ ] Show repository releases
+- [ ] Show repository tags
+
 #### Discussions
 
 - [ ] Browse repository discussions
 
 #### Coding agents
 
-- [ ] Publish an agent skill for efficient GitHub context retrieval
+- [x] Publish an agent skill for efficient GitHub context retrieval
 - [ ] Add private diff notes and review-context handoff to coding agents
 
 #### GitHub Actions

@@ -43,15 +43,3 @@ Full keys available in the bundled queries (a particular snippet will only emit 
 
 - Python: `comment`, `constant`, `constant.builtin`, `constructor`, `embedded`, `escape`, `function`, `function.builtin`, `function.method`, `keyword`, `number`, `operator`, `property`, `punctuation.special`, `string`, `type`, `variable`.
 - Rust: `attribute`, `comment`, `comment.documentation`, `constant`, `constant.builtin`, `constructor`, `escape`, `function`, `function.macro`, `function.method`, `keyword`, `label`, `operator`, `property`, `punctuation.bracket`, `punctuation.delimiter`, `string`, `type`, `type.builtin`, `variable.builtin`, `variable.parameter`.
-
-Public `TreeSitterClient.highlightOnce` smoke checks passed with OpenTUI 0.4.5 and Bun 1.3.14, both from source and from a Bun JS bundle run with a different working directory. All four grammars and all five aliases returned nonempty highlights without warnings/errors. The JSON sample emitted every key except `comment`; the unified-diff sample emitted `attribute`, `constant`, `diff.minus`, `diff.plus`, `function`, `keyword`, `number`, `punctuation.special`, `string.special.path`, and `variable.parameter`. Targeted TypeScript checking of the registration module and asset declarations also passed.
-
-Additional source-level `highlightOnce` checks passed with Bun 1.3.14 for Python, `py`, Rust, and `rs`, using a fresh temporary client data directory and no warnings/errors. The actual qdrant README sample was:
-
-```python
-from qdrant_client import QdrantClient
-
-client = QdrantClient(url="http://localhost:6333")
-```
-
-Both Python names returned identical captures: `constructor`, `function`, `keyword`, `operator`, `string`, `variable`. Rust and `rs` also returned identical captures for `fn main() { let client: &str = "qdrant"; println!("{}", client); }`: `function`, `function.macro`, `keyword`, `operator`, `punctuation.bracket`, `punctuation.delimiter`, `string`, `type.builtin`. These additions were verified from source; the earlier bundle and TypeScript checks above describe the original four parsers.

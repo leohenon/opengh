@@ -6,7 +6,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/leohenon/opengh/releases"><img src="https://img.shields.io/github/v/release/leohenon/opengh?include_prereleases&amp;style=flat-square&amp;labelColor=24292f&amp;color=orange" alt="Latest release" /></a>&nbsp;
+  <a href="https://github.com/leohenon/opengh/releases"><img src="https://img.shields.io/github/v/release/leohenon/opengh?sort=semver&amp;style=flat-square&amp;labelColor=24292f&amp;color=orange" alt="Latest release" /></a>&nbsp;
   <a href="https://github.com/leohenon/opengh/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/leohenon/opengh/ci.yml?style=flat-square&amp;branch=main&amp;label=CI&amp;labelColor=24292f" alt="CI" /></a>
 </p>
 
@@ -20,17 +20,20 @@
   <img src="docs/assets/screenshot-light.png" alt="opengh showing a split diff and inline review for OpenTUI PR #209" />
 </picture>
 
-- **Manage** repositories, issues, pull requests, and Actions.
-- **Review** diffs, leave inline comments, and submit reviews.
-- **Navigate** with your keyboard or mouse.
+- **Browse** repositories, commits, and Actions.
+- **Manage** issues and pull requests.
+- **Review** split or unified diffs, leave inline comments, and submit reviews.
+- **Navigate** by keyboard or mouse, with customizable shortcuts and themes.
 
-## Install
+## Install · [Guide](docs/installation.md)
 
-Available for macOS and Linux. Uses [GitHub CLI authentication](https://cli.github.com/manual/gh_auth).
+Available for macOS and Linux.
 
 ```sh
 # Curl
-curl -fsSL https://github.com/leohenon/opengh/releases/download/v0.0.0-beta.2/install.sh | OPENGH_VERSION=0.0.0-beta.2 sh
+curl -fsSL \
+  https://github.com/leohenon/opengh/releases/download/v0.0.0-beta.2/install.sh \
+  | OPENGH_VERSION=0.0.0-beta.2 sh
 
 # Homebrew
 brew install leohenon/tap/opengh
@@ -42,11 +45,22 @@ npm install --global @leohenon/opengh
 nix profile install github:leohenon/opengh#opengh nixpkgs#gh
 ```
 
-## Open a repository
+Requires [GitHub CLI](https://cli.github.com/) authentication.
+
+## Get started · [Usage](docs/usage.md)
 
 ```sh
-opengh .               # Current directory's repository
-opengh owner/repo      # Any repository
+opengh .                       # Current directory's repository
+opengh owner/repo              # Any repository
+opengh owner/repo --pr 123     # Open a specific pull request
+```
+
+## For agents · [Agent CLI](docs/agent-cli.md)
+
+Descriptions, diffs, comments, and review threads in one command.
+
+```sh
+npx skills add leohenon/opengh --skill opengh --global
 ```
 
 ## Update
@@ -57,9 +71,7 @@ opengh update
 
 ## Documentation
 
-[Configuration](https://github.com/leohenon/opengh/blob/main/docs/configuration.md) · [Keybindings](https://github.com/leohenon/opengh/blob/main/docs/keybindings.md) · [CLI](https://github.com/leohenon/opengh/blob/main/docs/cli.md) · [Agent CLI](docs/agent-cli.md) · [Development](https://github.com/leohenon/opengh/blob/main/docs/development.md)
-
-See the [roadmap](https://github.com/leohenon/opengh/blob/main/ROADMAP.md) for what's planned.
+[Installation](docs/installation.md) · [Usage](docs/usage.md) · [CLI](docs/cli.md) · [Keybindings](docs/keybindings.md) · [Configuration](docs/configuration.md) · [Agent CLI](docs/agent-cli.md) · [Development](docs/development.md) · [Roadmap](ROADMAP.md)
 
 ---
 

@@ -96,4 +96,6 @@ Add `--diff` to include a validated PR or commit patch; optionally use `--file P
 to keep one file's patch and review threads (use the new path for renames).
 `--diff` fails rather than returning incomplete output.
 
+See [Agent CLI](agent-cli.md) for agent skill setup and `--inline` usage.
+
 Run `opengh --help` for all options.

@@ -2,7 +2,7 @@
 
 ## Change a shortcut
 
-Set `keybindings` in [config.json](configuration.md):
+Set `keybindings` in your `config.json` file. See [Configuration](configuration.md).
 
 ```json
 {

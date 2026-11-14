@@ -41,7 +41,7 @@ Omitted options use defaults. An absolute `XDG_CONFIG_HOME` changes the path to
 | `showScrollbars`     | `false`                                       | Scrollbars for overflowing content.                                            |
 | `reducedMotion`      | `false`                                       | Static loading indicators.                                                     |
 | `diffViewerCommand`  | `hunk patch {patch}` when `hunk` is on `PATH` | External diff viewer.                                                          |
-| `keybindings`        | No overrides                                  | Customize shortcuts.                                                           |
+| `keybindings`        | No overrides                                  | [Customize shortcuts](keybindings.md#change-a-shortcut).                                                           |
 
 ## External diff viewer
 

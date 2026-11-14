@@ -9,7 +9,7 @@ The skill is a short set of instructions, not a service.
 ## Install
 
 ```sh
-npx skills add . --skill opengh --global
+npx skills add leohenon/opengh --skill opengh --global
 ```
 
 ## Use

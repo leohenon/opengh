@@ -2,6 +2,8 @@
 
 ## Run locally
 
+Use the Bun version pinned in `package.json`.
+
 ```sh
 bun install --frozen-lockfile
 gh auth login --hostname github.com

@@ -2,4 +2,3 @@ node_modules/
 dist/
 result
 .DS_Store
-USAGE.local.md
