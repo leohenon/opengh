@@ -5,6 +5,11 @@
   </picture>
 </p>
 
+<p align="center">
+  <a href="https://github.com/leohenon/opengh/releases"><img src="https://img.shields.io/github/v/release/leohenon/opengh?include_prereleases&amp;style=flat-square&amp;labelColor=24292f&amp;color=orange" alt="Latest release" /></a>&nbsp;
+  <a href="https://github.com/leohenon/opengh/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/leohenon/opengh/ci.yml?style=flat-square&amp;branch=main&amp;label=CI&amp;labelColor=24292f" alt="CI" /></a>
+</p>
+
 <p align="center">A familiar terminal interface for GitHub.</p>
 
 <picture>
@@ -30,8 +35,8 @@ brew install leohenon/tap/opengh
 # npm
 npm install --global @leohenon/opengh
 
-# Curl
-curl -fsSL https://github.com/leohenon/opengh/releases/latest/download/install.sh | sh
+# Curl (pinned to a version while opengh is in beta)
+curl -fsSL https://github.com/leohenon/opengh/releases/download/v0.0.0-beta.2/install.sh | OPENGH_VERSION=0.0.0-beta.2 sh
 
 # Nix
 nix profile install github:leohenon/opengh#opengh nixpkgs#gh
