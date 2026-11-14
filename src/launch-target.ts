@@ -10,6 +10,7 @@ export type LaunchOptions = {
   focus?: boolean
   inline?: boolean
   resume?: boolean
+  interactive?: boolean
   update?: boolean
   help?: boolean
   version?: boolean
@@ -20,13 +21,15 @@ export const launchUsage = `Usage:
   opengh --resume                         Restore the last repository and page
   opengh update                           Update to the latest stable release
   opengh <owner/repo|.>                   Open a repository
+  opengh issues|pulls|actions             Open a repository page (current directory)
+  opengh issues --repo <owner/repo>       Open a page in an explicit repository
   opengh <github-url>                     Open a repository, page, or detail
   opengh [owner/repo|.] <number|hash>     Open an issue, PR, or commit
   opengh [owner/repo|.] --commit <hash>   Open a commit
   opengh [owner/repo|.] --issue <number>  Open an issue
   opengh [owner/repo|.] --pr <number>     Open a pull request
 
-Without an explicit repository, identifiers use the current directory's GitHub repository.
+Without an explicit repository, pages and identifiers use the current directory's GitHub repository.
 Numbers automatically resolve to an issue or PR; use --commit for a digits-only hash.
 Commit hashes may be abbreviated (4–40 hexadecimal characters).
 
@@ -42,6 +45,8 @@ URL query strings and anchors are ignored (no comment or line jumping).
 Quote URLs containing shell metacharacters and identifiers such as '#123'.
 
 Options:
+  --repo <owner/repo|.>                   Select a repository
+  -i, --interactive                       Choose a page before opening the app
   --resume                                Restore the last interactive page (no repository or target)
   -f, --focus                             Hide global navigation; Ctrl+O opens the full app
   --inline                                Print a bounded page snapshot to stdout and exit
@@ -120,9 +125,11 @@ export function parseLaunchArguments(args: readonly string[]): LaunchOptions {
   }
   const positional: string[] = []
   let explicitDetail: LaunchDetail | undefined
+  let explicitRepository: string | undefined
   let focus = false
   let inlineMode = false
   let resume = false
+  let interactive = false
   let options = true
   for (let index = 0; index < args.length; index++) {
     const argument = args[index]!
@@ -132,8 +139,23 @@ export function parseLaunchArguments(args: readonly string[]): LaunchOptions {
     if (options && (argument === "--focus" || argument === "-f" || argument === "--standalone")) { focus = true; continue }
     if (options && argument === "--inline") { inlineMode = true; continue }
     if (options && argument === "--resume") { resume = true; continue }
+    if (options && (argument === "-i" || argument === "--interactive")) { interactive = true; continue }
+    if (options && /^-[if]{2,}$/.test(argument)) {
+      focus ||= argument.includes("f")
+      interactive ||= argument.includes("i")
+      continue
+    }
     if (!options || !argument.startsWith("-")) { positional.push(argument.trim()); continue }
     const [option, inline] = argument.split(/=(.*)/s)
+    if (option === "--repo") {
+      if (explicitRepository !== undefined) throw new Error("Specify --repo only once.")
+      const value = inline ?? args[++index]
+      if (!value || value.startsWith("-")) throw new Error("--repo requires owner/repo or '.'.")
+      const repository = value === "." ? value : normalizeRepository(value)
+      if (!repository) throw new Error(`Invalid repository: “${value}”. Expected owner/repo or '.'.`)
+      explicitRepository = repository
+      continue
+    }
     if (!["--commit", "--issue", "--pr"].includes(option!))
       throw new Error(`Unknown option: “${option}”.`)
     if (explicitDetail) throw new Error("Specify only one of --commit, --issue, or --pr.")
@@ -142,14 +164,36 @@ export function parseLaunchArguments(args: readonly string[]): LaunchOptions {
     explicitDetail = option === "--commit" ? { kind: "commit", sha: commitHash(value) }
       : { kind: option === "--pr" ? "pull" : "issue", number: positiveNumber(value) }
   }
-  if (resume && (positional.length || explicitDetail || inlineMode))
+  if (interactive && (resume || inlineMode || explicitDetail))
+    throw new Error("--interactive cannot be combined with --resume, --inline, or a detail target.")
+  if (resume && (positional.length || explicitRepository || explicitDetail || inlineMode))
     throw new Error("--resume cannot be combined with a repository, target, or --inline.")
   const mode: LaunchOptions = {
     ...(focus ? { focus: true } : {}),
     ...(inlineMode ? { inline: true } : {}),
     ...(resume ? { resume: true } : {}),
+    ...(interactive ? { interactive: true } : {}),
+  }
+  const page = positional[0]
+  if (page === "issues" || page === "pulls" || page === "actions") {
+    if (interactive) throw new Error("--interactive cannot be combined with an explicit page.")
+    if (positional.length > 1 || explicitDetail)
+      throw new Error(`opengh ${page} selects a page; use --repo to select a repository and do not specify a target.`)
+    return { ...mode, repositoryArgument: explicitRepository ?? ".", initialPage: page }
+  }
+  if (explicitRepository !== undefined) {
+    if (positional.some((value) => repositoryLocation(value)))
+      throw new Error("Specify a repository either positionally or with --repo, not both.")
+    positional.unshift(explicitRepository)
   }
   if (positional.length > 2) throw new Error("Expected at most a repository and one target.")
+  if (interactive) {
+    if (positional.length > 1) throw new Error("--interactive accepts only a repository, not a target.")
+    const location = positional.length ? repositoryLocation(positional[0]!) : { repositoryArgument: "." }
+    if (!location || location.initialPage || location.initialDetail)
+      throw new Error("--interactive accepts only a repository, not a page or detail target.")
+    return { ...mode, ...location }
+  }
   if (!positional.length) return explicitDetail ? { ...mode, repositoryArgument: ".", initialDetail: explicitDetail } : mode
 
   const location = repositoryLocation(positional[0]!)

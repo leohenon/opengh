@@ -30,6 +30,17 @@ opengh owner/repo --commit 1234567
 
 ## Open a page or workflow run
 
+Uses the current repository unless `--repo` is specified:
+
+```sh
+opengh issues
+opengh pulls
+opengh actions
+opengh issues --repo owner/repo
+```
+
+Or use a GitHub URL:
+
 ```sh
 opengh https://github.com/owner/repo/issues
 opengh https://github.com/owner/repo/pulls
@@ -40,18 +51,29 @@ opengh https://github.com/owner/repo/actions/runs/789
 
 Only GitHub.com URLs are supported.
 
+## Choose a page interactively
+
+```sh
+opengh -i
+opengh --interactive --repo owner/repo
+```
+
+Press 1–5 to open a page immediately.
+
 ## Resume the last page
 
 ```sh
 opengh --resume
 ```
 
-## Focus mode
+## Focus
 
 `--focus` / `-f` hides global navigation and loads only the requested page:
 
 ```sh
-opengh owner/repo --pr 456 --focus
+opengh issues --focus
+opengh owner/repo --pr 456 -f
+opengh -if                      # Page menu + focus
 ```
 
 Press `ctrl+o` to open the full app.

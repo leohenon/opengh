@@ -68,6 +68,18 @@ if (launch.inline) {
   process.exit(process.exitCode ?? 0)
 }
 
+if (launch.interactive) {
+  try {
+    const { choosePage } = await import("./page-menu")
+    const page = await choosePage()
+    if (!page) process.exit(0)
+    launch.initialPage = page
+  } catch (error) {
+    console.error(`opengh: ${error instanceof Error ? error.message : "Could not choose a page"}`)
+    process.exit(1)
+  }
+}
+
 const resumeLocation = launch.resume ? await loadResume() : undefined
 const resumeWriter = createResumeWriter(saveResume)
 

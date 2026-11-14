@@ -5,7 +5,7 @@ import { launchUsage, parseLaunchArguments, updateUsage, type LaunchOptions } fr
 describe("launch arguments", () => {
   test("aligns help descriptions across usage and options", () => {
     const rows = launchUsage.split("\n").filter((line) => line.startsWith("  opengh") || line.startsWith("  -"))
-    expect(rows).toHaveLength(14)
+    expect(rows).toHaveLength(18)
     for (const row of rows) {
       const columns = /^  (\S.*?)( {2,})(\S.*)$/.exec(row)
       expect(columns).not.toBeNull()
@@ -18,8 +18,6 @@ describe("launch arguments", () => {
       [[], {}],
       [["."], { repositoryArgument: "." }],
       [["--focus"], { focus: true }],
-      [["-f"], { focus: true }],
-      [["--standalone"], { focus: true }],
       [["--inline"], { inline: true }],
       [["--resume"], { resume: true }],
       [["--resume", "--focus"], { resume: true, focus: true }],
@@ -55,6 +53,81 @@ describe("launch arguments", () => {
       [["-v"], { version: true }],
     ]
     for (const [args, expected] of cases) expect(parseLaunchArguments(args)).toEqual(expected)
+  })
+
+  test("supports focus flags and the legacy compatibility alias", () => {
+    for (const flag of ["--focus", "-f", "--standalone"]) {
+      expect(parseLaunchArguments(["issues", flag])).toEqual({
+        repositoryArgument: ".", initialPage: "issues", focus: true,
+      })
+      expect(parseLaunchArguments(["owner/repo", "--pr", "456", flag])).toEqual({
+        repositoryArgument: "owner/repo", initialDetail: { kind: "pull", number: 456 }, focus: true,
+      })
+    }
+    for (const flags of [["-if"], ["-fi"], ["-i", "-f"]]) {
+      expect(parseLaunchArguments(flags)).toEqual({ repositoryArgument: ".", interactive: true, focus: true })
+      expect(parseLaunchArguments([...flags, "--repo", "owner/repo"])).toEqual({
+        repositoryArgument: "owner/repo", interactive: true, focus: true,
+      })
+    }
+    expect(launchUsage).toContain("-f, --focus")
+    expect(launchUsage).not.toContain("--standalone")
+    for (const args of [["--focus=false"], ["-f=false"], ["--standalone=false"], ["--", "-f"], ["--", "-if"], ["-ifx"]])
+      expect(() => parseLaunchArguments(args)).toThrow()
+  })
+
+  test("opens page commands in the current or explicitly selected repository", () => {
+    for (const page of ["issues", "pulls", "actions"] as const) {
+      expect(parseLaunchArguments([page])).toEqual({ repositoryArgument: ".", initialPage: page })
+      expect(parseLaunchArguments([page, "--repo", "owner/repo"])).toEqual({ repositoryArgument: "owner/repo", initialPage: page })
+      expect(parseLaunchArguments(["--repo=owner/repo", page])).toEqual({ repositoryArgument: "owner/repo", initialPage: page })
+      expect(parseLaunchArguments([page, "--repo", ".", "--focus", "--inline"])).toEqual({
+        repositoryArgument: ".", initialPage: page, focus: true, inline: true,
+      })
+      expect(parseLaunchArguments([page, "--help"])).toEqual({ help: true })
+      expect(parseLaunchArguments([`owner/${page}`])).toEqual({ repositoryArgument: `owner/${page}` })
+    }
+  })
+
+  test("opens the interactive page picker with a repository but no target", () => {
+    for (const flag of ["-i", "--interactive"]) {
+      expect(parseLaunchArguments([flag])).toEqual({ interactive: true, repositoryArgument: "." })
+      expect(parseLaunchArguments([flag, "--repo", "owner/repo"])).toEqual({ interactive: true, repositoryArgument: "owner/repo" })
+      expect(parseLaunchArguments(["owner/repo", flag, "--focus"])).toEqual({
+        interactive: true, repositoryArgument: "owner/repo", focus: true,
+      })
+      expect(parseLaunchArguments([flag, "--help"])).toEqual({ help: true })
+      for (const extra of [
+        ["issues"], ["pulls"], ["actions"], ["123"], ["abcd"], ["owner/repo", "123"],
+        ["--pr", "123"], ["--resume"], ["--inline"],
+        ["https://github.com/owner/repo/issues"], ["https://github.com/owner/repo/pull/123"],
+      ]) expect(() => parseLaunchArguments([flag, ...extra])).toThrow()
+    }
+  })
+
+  test("supports repository flags for existing launch targets", () => {
+    expect(parseLaunchArguments(["--repo", "owner/repo"])).toEqual({ repositoryArgument: "owner/repo" })
+    expect(parseLaunchArguments(["123", "--repo=owner/repo"])).toEqual({
+      repositoryArgument: "owner/repo", initialDetail: { kind: "number", number: 123 },
+    })
+    expect(parseLaunchArguments(["--repo", "owner/repo", "--pr", "456"])).toEqual({
+      repositoryArgument: "owner/repo", initialDetail: { kind: "pull", number: 456 },
+    })
+  })
+
+  test("rejects conflicting page commands and repository flags", () => {
+    const cases = [
+      ["issues", "pulls"], ["issues", "123"], ["issues", "owner/repo"],
+      ["issues", "--issue", "123"], ["pulls", "--pr", "123"], ["actions", "--commit", "abcd"],
+      ["--resume", "issues"], ["--resume", "--repo", "owner/repo"],
+      ["--repo"], ["--repo="], ["issues", "--repo", "--inline"],
+      ["issues", "--repo", "invalid"], ["--repo", "https://github.com/owner/repo/issues"],
+      ["issues", "--repo", "owner/repo", "--repo", "other/repo"],
+      ["owner/repo", "--repo", "other/repo"],
+      ["--repo", "owner/repo", "https://github.com/other/repo/issues"],
+      ["issues", "--", "--repo", "owner/repo"],
+    ]
+    for (const args of cases) expect(() => parseLaunchArguments(args)).toThrow()
   })
 
   test("parses update and update help without running the updater", () => {
