@@ -1,0 +1,63 @@
+name: Verify install channels
+
+# Installs a published release through each channel on Intel runners and smoke tests the result.
+# Release builds are tested before publication; this checks what users download afterwards.
+# Apple silicon cannot stand in for these: Rosetta is given the arm64 executable by install.sh.
+#
+#   gh workflow run verify-install.yml -f version=0.1.0
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Published version to install, such as 0.1.0 (without the "v")
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  install:
+    name: ${{ matrix.channel }} (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-15-intel, ubuntu-24.04]
+        channel: [curl, npm, homebrew]
+    env:
+      VERSION: ${{ inputs.version }}
+    steps:
+      # The release's own smoke test, which also expects that release's version.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: v${{ inputs.version }}
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version-file: package.json
+      # Without this, Bun fetches the bunfig.toml preload on demand, outside the lockfile.
+      - run: bun install --frozen-lockfile
+      - name: Install with curl
+        if: matrix.channel == 'curl'
+        run: |
+          curl -fsSL "https://github.com/leohenon/opengh/releases/download/v$VERSION/install.sh" \
+            | OPENGH_VERSION="$VERSION" OPENGH_INSTALL_DIR="$RUNNER_TEMP/bin" sh
+          echo "OPENGH=$RUNNER_TEMP/bin/opengh" >> "$GITHUB_ENV"
+      - name: Install with npm
+        if: matrix.channel == 'npm'
+        run: |
+          npm install --prefix "$RUNNER_TEMP/npm" "@leohenon/opengh@$VERSION"
+          echo "OPENGH=$RUNNER_TEMP/npm/node_modules/.bin/opengh" >> "$GITHUB_ENV"
+          # The launcher is a Node.js script.
+          echo "OPENGH_SMOKE_PATH=$(dirname "$(command -v node)")" >> "$GITHUB_ENV"
+      - name: Install with Homebrew
+        if: matrix.channel == 'homebrew'
+        run: |
+          # Linux runners have Homebrew, but not on PATH.
+          if ! command -v brew >/dev/null; then eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"; fi
+          # The tap serves only its current formula, so this passes for the newest release alone.
+          brew install leohenon/tap/opengh
+          echo "OPENGH=$(brew --prefix)/bin/opengh" >> "$GITHUB_ENV"
+      - name: Smoke test
+        run: bun run smoke "$OPENGH"

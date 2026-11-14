@@ -29,14 +29,14 @@
 Available for macOS and Linux. Uses [GitHub CLI authentication](https://cli.github.com/manual/gh_auth).
 
 ```sh
+# Curl
+curl -fsSL https://github.com/leohenon/opengh/releases/download/v0.0.0-beta.2/install.sh | OPENGH_VERSION=0.0.0-beta.2 sh
+
 # Homebrew
 brew install leohenon/tap/opengh
 
 # npm
 npm install --global @leohenon/opengh
-
-# Curl (pinned to a version while opengh is in beta)
-curl -fsSL https://github.com/leohenon/opengh/releases/download/v0.0.0-beta.2/install.sh | OPENGH_VERSION=0.0.0-beta.2 sh
 
 # Nix
 nix profile install github:leohenon/opengh#opengh nixpkgs#gh
