@@ -3,7 +3,10 @@ import { spawnGitHub } from "./process";
 import { GitHubApiError } from "./errors";
 import { configDirectory } from "../paths";
 import { atomicPrivateWrite, ensureTrustedDirectory, readPrivateJson, regularOwnedFile } from "../filesystem";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
+import { homedir } from "node:os";
+import { stat } from "node:fs/promises";
+import { isRepositoryPath } from "../repository-path";
 
 const MAX_RECENT = 100;
 
@@ -47,7 +50,19 @@ export async function resolveRepository(
   fromDirectory = repositoryFromDirectory,
 ) {
   if (!argument) return undefined;
-  if (argument === ".") return fromDirectory(cwd);
+  if (isRepositoryPath(argument)) {
+    const directory = resolve(cwd, argument.startsWith("~/") ? join(homedir(), argument.slice(2)) : argument);
+    let info;
+    try {
+      info = await stat(directory);
+    } catch (error) {
+      throw new Error(`Cannot open local repository path “${directory}”: ${error instanceof Error ? error.message : String(error)}`);
+    }
+    if (!info.isDirectory()) throw new Error(`Local repository path “${directory}” is not a directory.`);
+    const repository = await fromDirectory(directory);
+    if (!repository) throw new Error(`No GitHub repository found in “${directory}”.`);
+    return repository;
+  }
   return normalizeRepository(argument);
 }
 

@@ -178,6 +178,20 @@ describe("launch arguments", () => {
     for (const [args, expected] of cases) expect(parseLaunchArguments(args)).toEqual(expected)
   })
 
+  test("accepts explicit local paths without treating them as GitHub names", () => {
+    for (const path of [".", "..", "../", "/path/to/repo/", "/owner/repo", "./owner/repo", "../repo", "~/projects/repo", "./repo with spaces"]) {
+      expect(parseLaunchArguments([path])).toEqual({ repositoryArgument: path })
+      expect(parseLaunchArguments([path, "123"])).toEqual({ repositoryArgument: path, initialDetail: { kind: "number", number: 123 } })
+      expect(parseLaunchArguments([path, "--pr", "123", "--inline"])).toEqual({ repositoryArgument: path, initialDetail: { kind: "pull", number: 123 }, inline: true })
+      expect(parseLaunchArguments(["issues", "--repo", path])).toEqual({ repositoryArgument: path, initialPage: "issues" })
+      expect(parseLaunchArguments([`--repo=${path}`, "--pr", "123"])).toEqual({ repositoryArgument: path, initialDetail: { kind: "pull", number: 123 } })
+      expect(parseLaunchArguments(["--interactive", "--repo", path])).toEqual({ repositoryArgument: path, interactive: true })
+      expect(() => parseLaunchArguments(["--repo", path, "owner/repo"])).toThrow()
+      expect(() => parseLaunchArguments(["--resume", path])).toThrow()
+    }
+    expect(parseLaunchArguments(["owner/repo"])).toEqual({ repositoryArgument: "owner/repo" })
+  })
+
   test("rejects malformed, conflicting, unsupported, and unsafe targets", () => {
     const cases = [
       ["not-a-repository"], ["owner/repo", "xyz"], ["owner/repo", "123", "456"],

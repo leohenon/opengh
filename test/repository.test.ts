@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import { chmod, lstat, mkdir, readdir, rm, stat, symlink } from "node:fs/promises"
-import { join } from "node:path"
+import { join, resolve } from "node:path"
+import { homedir, tmpdir } from "node:os"
 import { loadRecentRepositories, rememberRepository, resolveRepository } from "../src/github/repository"
 import { normalizeRepository } from "../src/repository-name"
 
@@ -29,12 +30,48 @@ describe("repository resolution", () => {
   })
 
   test("a dot resolves the repository from the current directory", async () => {
-    const resolved = await resolveRepository(".", "/repo", async (cwd) => {
-      expect(cwd).toBe("/repo")
+    const resolved = await resolveRepository(".", tmpdir(), async (cwd) => {
+      expect(cwd).toBe(resolve(tmpdir()))
       return "cli/cli"
     })
 
     expect(resolved).toBe("cli/cli")
+  })
+
+  test("resolves local paths against the launch directory, including home paths", async () => {
+    const directory = (await Bun.$`mktemp -d`.text()).trim()
+    try {
+      await mkdir(join(directory, "owner", "repo"), { recursive: true })
+      const cases: [string, string, string][] = [
+        [directory, "/unrelated", directory],
+        ["../", join(directory, "owner"), directory],
+        ["..", join(directory, "owner"), directory],
+        ["./owner/repo", directory, join(directory, "owner", "repo")],
+        ["~/", directory, homedir()],
+      ]
+      for (const [argument, cwd, expected] of cases) {
+        expect(await resolveRepository(argument, cwd, async (path) => {
+          expect(path).toBe(resolve(expected))
+          return "cli/cli"
+        })).toBe("cli/cli")
+      }
+    } finally {
+      await rm(directory, { recursive: true, force: true })
+    }
+  })
+
+  test("reports missing paths, files, and directories without a GitHub repository", async () => {
+    const directory = (await Bun.$`mktemp -d`.text()).trim()
+    try {
+      await Bun.write(join(directory, "file"), "not a directory")
+      const unexpectedDiscovery = async () => { throw new Error("discovery should not run") }
+      await expect(resolveRepository("./missing", directory, unexpectedDiscovery)).rejects.toThrow("Cannot open local repository path")
+      await expect(resolveRepository("./file", directory, unexpectedDiscovery)).rejects.toThrow("is not a directory")
+      await expect(resolveRepository(".", directory, async () => undefined)).rejects.toThrow("No GitHub repository found")
+      await expect(resolveRepository(".", directory, async () => { throw new Error("no GitHub remote") })).rejects.toThrow("no GitHub remote")
+    } finally {
+      await rm(directory, { recursive: true, force: true })
+    }
   })
 
   test("stores unique recent repositories in newest-first order", async () => {

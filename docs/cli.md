@@ -3,10 +3,14 @@
 ## Open a repository
 
 ```sh
-opengh                 # Repository picker
-opengh .               # Current directory's repository
-opengh owner/repo      # Explicit repository
+opengh
+opengh owner/repo
+opengh .
+opengh /path/to/repo
+opengh ../
 ```
+
+Local directories need a GitHub.com remote.
 
 ## Open an issue, PR, or commit
 
@@ -37,6 +41,7 @@ opengh issues
 opengh pulls
 opengh actions
 opengh issues --repo owner/repo
+opengh issues --repo ../
 ```
 
 Or use a GitHub URL:

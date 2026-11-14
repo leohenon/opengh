@@ -1,5 +1,6 @@
 import type { DetailTarget, Page } from "./navigation"
 import { normalizeRepository } from "./repository-name"
+import { isRepositoryPath } from "./repository-path"
 
 export type LaunchDetail = DetailTarget | { kind: "number"; number: number }
 
@@ -20,14 +21,17 @@ export const launchUsage = `Usage:
   opengh                                  Open the repository picker
   opengh --resume                         Restore the last repository and page
   opengh update                           Update to the latest stable release
-  opengh <owner/repo|.>                   Open a repository
+  opengh <owner/repo|path>                Open a repository
   opengh issues|pulls|actions             Open a repository page (current directory)
-  opengh issues --repo <owner/repo>       Open a page in an explicit repository
+  opengh issues --repo <owner/repo|path>  Open a page in an explicit repository
   opengh <github-url>                     Open a repository, page, or detail
-  opengh [owner/repo|.] <number|hash>     Open an issue, PR, or commit
-  opengh [owner/repo|.] --commit <hash>   Open a commit
-  opengh [owner/repo|.] --issue <number>  Open an issue
-  opengh [owner/repo|.] --pr <number>     Open a pull request
+  opengh [repo|path] <number|hash>        Open an issue, PR, or commit
+  opengh [repo|path] --commit <hash>      Open a commit
+  opengh [repo|path] --issue <number>     Open an issue
+  opengh [repo|path] --pr <number>        Open a pull request
+
+Local paths: ., .., /path/to/repo, ./repo, ../repo, or ~/repo.
+Use ./owner/repo to open a local path instead of the GitHub name owner/repo.
 
 Without an explicit repository, pages and identifiers use the current directory's GitHub repository.
 Numbers automatically resolve to an issue or PR; use --commit for a digits-only hash.
@@ -45,7 +49,7 @@ URL query strings and anchors are ignored (no comment or line jumping).
 Quote URLs containing shell metacharacters and identifiers such as '#123'.
 
 Options:
-  --repo <owner/repo|.>                   Select a repository
+  --repo <owner/repo|path>                Select a repository
   -i, --interactive                       Choose a page before opening the app
   --resume                                Restore the last interactive page (no repository or target)
   -f, --focus                             Hide global navigation; Ctrl+O opens the full app
@@ -84,7 +88,7 @@ function identifier(value: string): LaunchDetail {
 }
 
 function repositoryLocation(value: string): LaunchOptions | undefined {
-  if (value === ".") return { repositoryArgument: "." }
+  if (isRepositoryPath(value)) return { repositoryArgument: value }
   if (/^[a-z][a-z\d+.-]*:\/\//i.test(value) || /^github\.com(?:[/?#]|$)/i.test(value)) {
     // Validate before WHATWG parsing can strip controls or change the selected path.
     const rawPath = value.replace(/^(?:[a-z][a-z\d+.-]*:\/\/)?[^/?#]*/i, "").split(/[?#]/, 1)[0]!
@@ -150,9 +154,9 @@ export function parseLaunchArguments(args: readonly string[]): LaunchOptions {
     if (option === "--repo") {
       if (explicitRepository !== undefined) throw new Error("Specify --repo only once.")
       const value = inline ?? args[++index]
-      if (!value || value.startsWith("-")) throw new Error("--repo requires owner/repo or '.'.")
-      const repository = value === "." ? value : normalizeRepository(value)
-      if (!repository) throw new Error(`Invalid repository: “${value}”. Expected owner/repo or '.'.`)
+      if (!value || value.startsWith("-")) throw new Error("--repo requires owner/repo or a local path.")
+      const repository = isRepositoryPath(value) ? value : normalizeRepository(value)
+      if (!repository) throw new Error(`Invalid repository: “${value}”. Expected owner/repo or a local path.`)
       explicitRepository = repository
       continue
     }
@@ -198,7 +202,7 @@ export function parseLaunchArguments(args: readonly string[]): LaunchOptions {
 
   const location = repositoryLocation(positional[0]!)
   if (!location) {
-    if (positional.length > 1 || explicitDetail) throw new Error(`Invalid repository: “${positional[0]}”. Expected owner/repo, a GitHub URL, or '.'.`)
+    if (positional.length > 1 || explicitDetail) throw new Error(`Invalid repository: “${positional[0]}”. Expected owner/repo, a GitHub URL, or a local path.`)
     return { ...mode, repositoryArgument: ".", initialDetail: identifier(positional[0]!) }
   }
   if (positional[1] !== undefined && explicitDetail) throw new Error("Specify a target either positionally or with an option, not both.")
