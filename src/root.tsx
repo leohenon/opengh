@@ -77,7 +77,7 @@ export function Root(props: {
   repositoryArgument?: string
   initialPage?: Page
   initialDetail?: LaunchDetail
-  standalone?: boolean
+  focus?: boolean
   resumeLocation?: ResumeLocation
   onNavigationChange?: (location: ResumeLocation) => void
   cwd: string
@@ -86,7 +86,7 @@ export function Root(props: {
   const services = { ...defaultServices, ...props.services }
   const savedResume = props.resumeLocation
   const renderer = useRenderer()
-  const [standalone, setStandalone] = createSignal(props.standalone ?? false)
+  const [focus, setFocus] = createSignal(props.focus ?? false)
   const [view, setView] = createSignal<View>("resolving")
   const [recent, setRecent] = createSignal<string[]>([])
   const [pickerError, setPickerError] = createSignal("")
@@ -240,7 +240,7 @@ export function Root(props: {
     pendingNavigation = initial ? { ...initial, repository } : undefined
     setLaunchError(undefined)
     const restored = pendingState?.state
-    loadScope = !standalone() ? "full" : initial?.detail || initial?.diff || restored?.details?.[restored.page] || restored?.diffs?.[restored.page]
+    loadScope = !focus() ? "full" : initial?.detail || initial?.diff || restored?.details?.[restored.page] || restored?.diffs?.[restored.page]
       ? "detail" : initial?.page ?? restored?.page ?? repositoryTabs()[repository.toLowerCase()] ?? "overview"
     void session.load(repository, loadScope)
     setView("repository")
@@ -390,8 +390,8 @@ export function Root(props: {
               operations={() => current().operations}
               initialPage={repositoryTabs()[repositoryName.toLowerCase()]}
               initialNavigation={initialNavigation}
-              standalone={standalone()}
-              onOpenFullApp={() => setStandalone(false)}
+              focus={focus()}
+              onOpenFullApp={() => setFocus(false)}
               onEnsureResources={(scope) => { void session.ensure?.(scope) }}
               initialState={restored?.state}
               resume={!!restored && restored === savedResume}
@@ -401,7 +401,7 @@ export function Root(props: {
               onOpenLocation={followRepository}
               onResolveIssueKind={services.loadIssueKind}
               onOpenUrl={services.openUrl}
-              onPageChange={(page) => { if (!standalone()) rememberTab(repositoryName, page) }}
+              onPageChange={(page) => { if (!focus()) rememberTab(repositoryName, page) }}
               config={config()}
               configSaving={configSaving() || configReloading()}
               configError={configError()}

@@ -48,7 +48,7 @@ function Shortcut(props: { keys: string; keyWidth: number; children: JSX.Element
 
 export function Help(props: {
   onClose: () => void;
-  standalone?: boolean;
+  focus?: boolean;
   view: Page | "run" | "commit" | "issue" | "pull" | "diff";
   hasDocumentTabs?: boolean;
   hasMoreFiles?: boolean;
@@ -164,7 +164,7 @@ export function Help(props: {
     // Stable sections across every page: primary actions, navigation/options,
     // external actions, then app controls. Numbered tab keys are in the header.
     const appShortcuts = [
-      ...(props.standalone ? [entry("global.openFullApp", "open full app")] : []),
+      ...(props.focus ? [entry("global.openFullApp", "open full app")] : []),
       ...applicationShortcuts,
     ];
     const entries = props.view === "diff" ? [
@@ -188,7 +188,7 @@ export function Help(props: {
       ...primary,
       ...navigationShortcuts,
       ...searchShortcuts,
-      ...(!props.standalone ? [entry(["navigation.previousTab", "navigation.nextTab"], "switch tabs")] : []),
+      ...(!props.focus ? [entry(["navigation.previousTab", "navigation.nextTab"], "switch tabs")] : []),
       ...options,
       ...(props.command ? [entry("command.clone", props.command)] : []),
       entry("view.refresh", "refresh / retry"),

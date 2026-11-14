@@ -17,16 +17,18 @@ describe("launch arguments", () => {
     const cases: [string[], LaunchOptions][] = [
       [[], {}],
       [["."], { repositoryArgument: "." }],
-      [["--standalone"], { standalone: true }],
+      [["--focus"], { focus: true }],
+      [["-f"], { focus: true }],
+      [["--standalone"], { focus: true }],
       [["--inline"], { inline: true }],
       [["--resume"], { resume: true }],
-      [["--resume", "--standalone"], { resume: true, standalone: true }],
+      [["--resume", "--focus"], { resume: true, focus: true }],
       [["#234", "--inline"], { inline: true, repositoryArgument: ".", initialDetail: { kind: "number", number: 234 } }],
       [["owner/repo", "--inline", "--pr=456"], { inline: true, repositoryArgument: "owner/repo", initialDetail: { kind: "pull", number: 456 } }],
-      [["--inline", "--standalone", "https://github.com/owner/repo/issues"], { standalone: true, inline: true, repositoryArgument: "owner/repo", initialPage: "issues" }],
-      [["#234", "--standalone"], { standalone: true, repositoryArgument: ".", initialDetail: { kind: "number", number: 234 } }],
-      [["--standalone", "owner/repo", "--pr", "456"], { standalone: true, repositoryArgument: "owner/repo", initialDetail: { kind: "pull", number: 456 } }],
-      [["https://github.com/owner/repo/issues", "--standalone"], { standalone: true, repositoryArgument: "owner/repo", initialPage: "issues" }],
+      [["--inline", "--focus", "https://github.com/owner/repo/issues"], { focus: true, inline: true, repositoryArgument: "owner/repo", initialPage: "issues" }],
+      [["#234", "--focus"], { focus: true, repositoryArgument: ".", initialDetail: { kind: "number", number: 234 } }],
+      [["--focus", "owner/repo", "--pr", "456"], { focus: true, repositoryArgument: "owner/repo", initialDetail: { kind: "pull", number: 456 } }],
+      [["https://github.com/owner/repo/issues", "--focus"], { focus: true, repositoryArgument: "owner/repo", initialPage: "issues" }],
       [["owner/repo"], { repositoryArgument: "owner/repo" }],
       [["https://github.com/owner/repo.git/"], { repositoryArgument: "owner/repo" }],
       [["https://github.com/owner/repo/issues/123?foo=bar#issuecomment-456"], { repositoryArgument: "owner/repo", initialDetail: { kind: "number", number: 123 } }],
@@ -71,7 +73,7 @@ describe("launch arguments", () => {
     expect(parseLaunchArguments(["https://github.com/owner/update"])).toEqual({ repositoryArgument: "owner/update" })
     for (const args of [
       ["--", "update"], ["owner/repo", "update"], ["--inline", "update"],
-      ["--standalone", "update"], ["--resume", "update"], ["UPDATE"], [" update"], ["update "],
+      ["--focus", "update"], ["--resume", "update"], ["UPDATE"], [" update"], ["update "],
     ]) expect(() => parseLaunchArguments(args)).toThrow()
   })
 
@@ -79,10 +81,10 @@ describe("launch arguments", () => {
     const extras = [
       ["owner/repo"], ["."], ["https://github.com/owner/repo"], ["123"], ["abcd"], ["update"],
       ["--issue", "123"], ["--pr=123"], ["--commit", "abcd"],
-      ["--resume"], ["--inline"], ["--standalone"], ["--unknown"], ["--force"], ["--check"],
+      ["--resume"], ["--inline"], ["--focus"], ["--unknown"], ["--force"], ["--check"],
       ["--version"], ["-v"], ["v1.2.3"], ["--version=1.2.3"], ["--"], ["--", "owner/repo"],
       ["--help", "owner/repo"], ["owner/repo", "--help"], ["--help", "--help"],
-      ...["--resume", "--inline", "--standalone", "--unknown"].flatMap((option) => [
+      ...["--resume", "--inline", "--focus", "--unknown"].flatMap((option) => [
         ["--help", option], [option, "-h"],
       ]),
     ]
@@ -111,7 +113,7 @@ describe("launch arguments", () => {
       ["--height", "12"], ["--inline", "--height"], ["--inline", "--height", "--pr"],
       ["--inline", "--height=0"], ["--inline", "--height=-1"], ["--inline", "--height=1.5"],
       ["--inline", "--height=Infinity"], ["--inline", "--height=9007199254740992"], ["--inline=false"],
-      ["--standalone=false"], ["--standalone", "--", "--standalone"],
+      ["--focus=false"], ["--focus", "--", "--focus"],
       ["--resume=false"], ["--resume", "owner/repo"], ["--resume", "--inline"],
       ["--resume", "123"], ["--resume", "--pr", "123"],
       ["--issue", "-1"], ["--pr=1.5"], ["--unknown"], ["--", "--help"],

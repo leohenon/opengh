@@ -46,10 +46,12 @@ Only GitHub.com URLs are supported.
 opengh --resume
 ```
 
-## Open only the requested page
+## Focus mode
+
+`--focus` / `-f` hides global navigation and loads only the requested page:
 
 ```sh
-opengh owner/repo --pr 456 --standalone
+opengh owner/repo --pr 456 --focus
 ```
 
 Press `ctrl+o` to open the full app.

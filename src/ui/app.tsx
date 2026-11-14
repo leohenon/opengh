@@ -86,7 +86,7 @@ export type AppProps = {
   localRepository?: LocalRepository
   onRunCommand?: (spec: CommandSpec, output: (chunk: string) => void, signal: AbortSignal) => Promise<CommandTask>
   onCommandCaptureCancel?: (cancel: (() => void) | undefined) => void
-  standalone?: boolean
+  focus?: boolean
   onOpenFullApp?: () => void
   onEnsureResources?: (scope: RepositoryScope) => void
   initialPage?: Page
@@ -175,11 +175,11 @@ function AppContent(props: AppProps) {
   const { colors } = useTheme()
   const dimensions = useTerminalDimensions()
   // Startup intent and preferences are sampled once; later writes must not navigate.
-  const standaloneLaunch = props.standalone ?? false
-  const [standalone, setStandalone] = createSignal(standaloneLaunch)
+  const focusLaunch = props.focus ?? false
+  const [focus, setFocus] = createSignal(focusLaunch)
   const openFullApp = () => {
-    if (!standalone()) return false
-    setStandalone(false)
+    if (!focus()) return false
+    setFocus(false)
     props.onOpenFullApp?.()
     props.onPageChange?.(page())
   }
@@ -187,7 +187,7 @@ function AppContent(props: AppProps) {
   const initialDetail = initialNavigation?.detail
   const initialPage = initialNavigation?.page ?? props.initialPage ?? "overview"
   const requestedActions = props.initialState?.page === "actions" || !!props.initialState?.details?.actions || initialNavigation?.page === "actions" || initialDetail?.kind === "run"
-  let initialPagePending = !standalone() && !props.initialState && !initialNavigation && initialPage === "actions"
+  let initialPagePending = !focus() && !props.initialState && !initialNavigation && initialPage === "actions"
   const initialState: NavigationState = { page: initialPagePending ? "overview" : initialPage }
   let startingState = props.initialState ?? (initialDetail ? openDetail(initialState, initialDetail) : initialState)
   if (initialNavigation?.diff) startingState = openDiff(startingState, initialNavigation.diff)
@@ -197,14 +197,14 @@ function AppContent(props: AppProps) {
   onMount(() => {
     if (initialNavigation || props.initialState) props.onPageChange?.(navigation().page)
     for (const [owner, detail] of Object.entries(startingState.details ?? {})) {
-      if (standalone() && owner !== startingState.page) continue
+      if (focus() && owner !== startingState.page) continue
       if (detail.kind === "commit") void props.onLoadCommit?.(detail.sha)
       if (detail.kind === "issue") void props.onLoadIssue?.(detail.number)
       if (detail.kind === "pull") void props.onLoadPull?.(detail.number)
       if (detail.kind === "run") void props.onLoadRun?.(detail.id)
     }
     for (const [owner, target] of Object.entries(startingState.diffs ?? {})) {
-      if (standalone() && owner !== startingState.page) continue
+      if (focus() && owner !== startingState.page) continue
       if (owner === startingState.page) loadDiff(target)
       else void props.onLoadDiff?.(target)
     }
@@ -281,15 +281,15 @@ function AppContent(props: AppProps) {
   const configuredDiffLayout = () => { const layout = config().diffLayout; return layout === "auto" ? undefined : layout }
   const resourceScope = createMemo<RepositoryScope>(() => {
     const current = navigation()
-    return !standalone() ? "full" : current.details?.[current.page] || current.diffs?.[current.page] ? "detail" : current.page
+    return !focus() ? "full" : current.details?.[current.page] || current.diffs?.[current.page] ? "detail" : current.page
   })
   createEffect(() => {
     const scope = resourceScope()
     // Retry an ensure deferred during metadata revalidation.
     if (operations().refresh.status !== "loading") props.onEnsureResources?.(scope)
   })
-  const mountList = (target: Page) => !standalone() || page() === target && !navigation().details?.[target] && !diffTarget()
-  const mountDetail = (target: Page) => !standalone() || page() === target && !diffTarget()
+  const mountList = (target: Page) => !focus() || page() === target && !navigation().details?.[target] && !diffTarget()
+  const mountDetail = (target: Page) => !focus() || page() === target && !diffTarget()
   const resourceForDiff = (target?: DiffTarget): ResourceState<DiffContent> => {
     const loaded = target && props.diffs?.[target.kind]
     const matches = target?.kind === "commit" ? loaded?.target.kind === "commit" && loaded.target.sha === target.sha
@@ -934,7 +934,7 @@ function AppContent(props: AppProps) {
   const pullSummary = createMemo(() => listed([data().pulls.open, data().pulls.closed], (item) => item.number === pullNumber()))
   const commitSummary = createMemo(() => listed([data().commits], (item) => item.sha === commitSha()))
   const runSummary = createMemo(() => listed([data().runs], (item) => item.id === runId()))
-  const baseTabs = requestedActions || standalone() ? tabs : tabs.filter((tab) => tab.page !== "actions")
+  const baseTabs = requestedActions || focus() ? tabs : tabs.filter((tab) => tab.page !== "actions")
   const sectionAvailable = (...resources: ResourceState<{ items: readonly unknown[]; hasMore: boolean }>[]) => resources.some((resource) =>
     resource.status === "error" || Boolean(resource.value && (resource.value.items.length > 0 || resource.value.hasMore)),
   )
@@ -947,7 +947,7 @@ function AppContent(props: AppProps) {
     if (pending && previous.repository === repository && previous.resolved) return previous
     if (pending && conditional.some((resource) => resource.value === undefined)) return { repository, tabs: baseTabs, resolved: false }
     const available = tabs.filter((tab) => {
-      if (tab.page === "actions") return requestedActions || standaloneLaunch && navigation().page === "actions" || sectionAvailable(current.runs)
+      if (tab.page === "actions") return requestedActions || focusLaunch && navigation().page === "actions" || sectionAvailable(current.runs)
       return true
     })
     if (previous.repository === repository && previous.resolved && available.length === previous.tabs.length
@@ -1478,7 +1478,7 @@ function AppContent(props: AppProps) {
     if (editingConversationComment()) return conversationCommentHint()
     // Arrays are priority lists, identical at every terminal width. The footer
     // fits whole hints without hiding recovery/primary actions behind copy/open.
-    const common: HintEntry[] = [...(standalone() ? [["global.openFullApp", "full app"] as const] : []), ["search.start", "search"], ...(props.onSwitchRepository ? [["global.switchRepository", "switch repo"] as const] : []), help]
+    const common: HintEntry[] = [...(focus() ? [["global.openFullApp", "full app"] as const] : []), ["search.start", "search"], ...(props.onSwitchRepository ? [["global.switchRepository", "switch repo"] as const] : []), help]
     const resource = activeResource()
     if (resource?.status === "loading" && resource.value === undefined) {
       const detail = diffTarget() || activeRunId() || activeCommitSha() || activeIssueNumber() || activePullNumber()
@@ -1554,7 +1554,7 @@ function AppContent(props: AppProps) {
   })
 
   const selectTab = (index: number) => {
-    if (standalone()) return false
+    if (focus()) return false
     const tab = visibleTabs()[index]
     if (!tab) return false
     selectPage(tab.page)
@@ -1579,8 +1579,8 @@ function AppContent(props: AppProps) {
     "navigation.tab3": () => selectTab(2),
     "navigation.tab4": () => selectTab(3),
     "navigation.tab5": () => selectTab(4),
-    "navigation.previousTab": () => { if (diffTarget() || standalone()) return false; movePage(-1) },
-    "navigation.nextTab": () => { if (diffTarget() || standalone()) return false; movePage(1) },
+    "navigation.previousTab": () => { if (diffTarget() || focus()) return false; movePage(-1) },
+    "navigation.nextTab": () => { if (diffTarget() || focus()) return false; movePage(1) },
     "item.open": () => {
       const diff = diffTarget()
       if (diff) openCurrentDiffGitHub(diff)
@@ -1793,7 +1793,7 @@ function AppContent(props: AppProps) {
           : page() === "overview" ? [overviewDocument() === overviewDocuments()[0]?.id ? undefined : overviewDocument(), data().currentBranch] : undefined,
       ])}>
       <Show when={config().diffFullscreen ? diffTarget() : undefined} keyed fallback={
-        <Show when={!standalone()}>
+        <Show when={!focus()}>
           <Header repo={data().repo} page={page()} tabs={visibleTabs()} workCounts={data().workCounts} compact={config().compactHeader} showTabCounts={config().showTabCounts} showTabShortcuts={config().showTabShortcuts}
             interactive={overlay() === undefined} onSelect={selectHeaderPage}
             onOpenRepository={props.onSwitchRepository ? openRepositoryPicker : undefined} />
@@ -1984,7 +1984,7 @@ function AppContent(props: AppProps) {
       </Show>
       </SearchSurface>
       <For each={["commits", "pulls"] as const}>
-        {(owner) => <Show when={(!standalone() || page() === owner) && navigation().diffs?.[owner]} keyed>
+        {(owner) => <Show when={(!focus() || page() === owner) && navigation().diffs?.[owner]} keyed>
           {(target) => <box id={`diff-view-${owner}`} visible={page() === owner} flexGrow={1} minHeight={0} flexDirection="column">
             <DiffScreen target={target} resource={resourceForDiff(target)} active={page() === owner} hideHeader={config().diffFullscreen}
               defaultLayout={configuredDiffLayout()} defaultWrap={config().diffWrap}
@@ -2056,7 +2056,7 @@ function AppContent(props: AppProps) {
       <Show when={overlay() === "help"}>
         <Help
           onClose={() => setOverlay()}
-          standalone={standalone()}
+          focus={focus()}
           view={diffTarget() ? "diff" : activeRunId() ? "run" : activeCommitSha() ? "commit" : activeIssueNumber() ? "issue" : activePullNumber() ? "pull" : page()}
           hasDocumentTabs={overviewDocuments().length > 1}
           hasMoreFiles={commitResource().value?.files.hasMore}

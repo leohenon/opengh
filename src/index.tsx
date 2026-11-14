@@ -98,7 +98,7 @@ try {
       repositoryArgument={launch.repositoryArgument}
       initialPage={launch.initialPage}
       initialDetail={launch.initialDetail}
-      standalone={launch.standalone}
+      focus={launch.focus}
       resumeLocation={resumeLocation}
       onNavigationChange={resumeWriter.remember}
       cwd={cwd}

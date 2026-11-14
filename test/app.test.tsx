@@ -104,14 +104,14 @@ describe("opengh TUI", () => {
     expect(aboutColumn()).toBe(column);
   });
 
-  test("standalone hides global navigation and expands without losing the requested detail", async () => {
+  test("focus hides global navigation and expands without losing the requested detail", async () => {
     const failed = { status: "error" as const, phase: "load" as const, message: "Direct target unavailable" };
     const pages: Page[] = [];
     const scopes: string[] = [];
     let expanded = 0;
     let quit = 0;
     const view = await testRender(() => <App data={githubDataFixture} operations={repositoryOperationsFixture}
-      standalone initialNavigation={{ detail: { kind: "issue", number: 234 } }}
+      focus initialNavigation={{ detail: { kind: "issue", number: 234 } }}
       onEnsureResources={(scope) => scopes.push(scope)}
       issueDetail={{ number: 234, resource: failed, comments: failed, references: failed }}
       onPageChange={(page) => pages.push(page)} onOpenFullApp={() => expanded++} onQuit={() => quit++}
@@ -143,11 +143,11 @@ describe("opengh TUI", () => {
     expect(quit).toBe(1);
   });
 
-  test("standalone Back ensures the parent list rather than the rest of the app", async () => {
+  test("focus Back ensures the parent list rather than the rest of the app", async () => {
     const scopes: string[] = [];
     const failed = { status: "error" as const, phase: "load" as const, message: "Direct target unavailable" };
     const view = await testRender(() => <App data={githubDataFixture} operations={repositoryOperationsFixture}
-      standalone initialNavigation={{ detail: { kind: "issue", number: 234 } }}
+      focus initialNavigation={{ detail: { kind: "issue", number: 234 } }}
       issueDetail={{ number: 234, resource: failed, comments: failed, references: failed }}
       onEnsureResources={(scope) => scopes.push(scope)}
     />, { width: 120, height: 32 });

@@ -7,7 +7,7 @@ export type LaunchOptions = {
   repositoryArgument?: string
   initialPage?: Page
   initialDetail?: LaunchDetail
-  standalone?: boolean
+  focus?: boolean
   inline?: boolean
   resume?: boolean
   update?: boolean
@@ -43,7 +43,7 @@ Quote URLs containing shell metacharacters and identifiers such as '#123'.
 
 Options:
   --resume                                Restore the last interactive page (no repository or target)
-  --standalone                            Hide global navigation; Ctrl+O opens the full app
+  -f, --focus                             Hide global navigation; Ctrl+O opens the full app
   --inline                                Print a bounded page snapshot to stdout and exit
   -h, --help                              Show this help
   -v, --version                           Show version
@@ -120,7 +120,7 @@ export function parseLaunchArguments(args: readonly string[]): LaunchOptions {
   }
   const positional: string[] = []
   let explicitDetail: LaunchDetail | undefined
-  let standalone = false
+  let focus = false
   let inlineMode = false
   let resume = false
   let options = true
@@ -129,7 +129,7 @@ export function parseLaunchArguments(args: readonly string[]): LaunchOptions {
     if (options && argument === "--") { options = false; continue }
     if (options && (argument === "--help" || argument === "-h")) return { help: true }
     if (options && (argument === "--version" || argument === "-v")) return { version: true }
-    if (options && argument === "--standalone") { standalone = true; continue }
+    if (options && (argument === "--focus" || argument === "-f" || argument === "--standalone")) { focus = true; continue }
     if (options && argument === "--inline") { inlineMode = true; continue }
     if (options && argument === "--resume") { resume = true; continue }
     if (!options || !argument.startsWith("-")) { positional.push(argument.trim()); continue }
@@ -145,7 +145,7 @@ export function parseLaunchArguments(args: readonly string[]): LaunchOptions {
   if (resume && (positional.length || explicitDetail || inlineMode))
     throw new Error("--resume cannot be combined with a repository, target, or --inline.")
   const mode: LaunchOptions = {
-    ...(standalone ? { standalone: true } : {}),
+    ...(focus ? { focus: true } : {}),
     ...(inlineMode ? { inline: true } : {}),
     ...(resume ? { resume: true } : {}),
   }

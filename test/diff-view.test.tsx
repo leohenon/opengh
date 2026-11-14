@@ -483,7 +483,7 @@ test.each([120, 35])("review header replaces tabs at width %i; Escape restores d
   } finally { setup.renderer.destroy(); await setup.renderer.closed }
 })
 
-test.each([[false, false], [true, false], [false, true]])("diffFullscreen changes headers without remounting the stream (compact: %s, standalone: %s)", async (compactHeader, standalone) => {
+test.each([[false, false], [true, false], [false, true]])("diffFullscreen changes headers without remounting the stream (compact: %s, focus: %s)", async (compactHeader, focus) => {
   const setup = await createTestRenderer({ width: 120, height: 20 })
   initializeHunk(setup.renderer)
   const target = { kind: "commit" as const, sha: commitDetailFixture.sha }
@@ -491,7 +491,7 @@ test.each([[false, false], [true, false], [false, true]])("diffFullscreen change
   const patch = patchFixture + `diff --git a/second.ts b/second.ts\n--- a/second.ts\n+++ b/second.ts\n@@ -1,40 +1,40 @@\n`
     + Array.from({ length: 40 }, (_, i) => `-old-${i}\n+new-${i}\n`).join("")
   await render(() => <App data={githubDataFixture} operations={repositoryOperationsFixture}
-    config={config()} standalone={standalone} initialState={{ page: "commits", diffs: { commits: target } }}
+    config={config()} focus={focus} initialState={{ page: "commits", diffs: { commits: target } }}
     diffs={{ commit: { target, resource: { status: "ready", value: { kind: "patch", patch } } } }} />,
   setup.renderer)
   const settle = async () => { await setup.flush(); await setup.renderer.idle(); await setup.flush() }
@@ -500,7 +500,7 @@ test.each([[false, false], [true, false], [false, true]])("diffFullscreen change
   try {
     await settle()
     expect(totals()).toBeUndefined()
-    expect(frame().includes("2 Commits")).toBe(!standalone)
+    expect(frame().includes("2 Commits")).toBe(!focus)
     const body = setup.renderer.root.findDescendantById("diff-body-scroll") as ScrollBoxRenderable
     const header = setup.renderer.root.findDescendantById("diff-file-header:second.ts")!
     expect(header).toBeDefined()
@@ -512,7 +512,7 @@ test.each([[false, false], [true, false], [false, true]])("diffFullscreen change
     for (const diffFullscreen of [true, false]) {
       setConfig(current => ({ ...current, diffFullscreen }))
       await settle()
-      expect(frame().includes("2 Commits")).toBe(!standalone && !diffFullscreen)
+      expect(frame().includes("2 Commits")).toBe(!focus && !diffFullscreen)
       expect(!!totals()).toBe(diffFullscreen)
       expect(setup.renderer.root.findDescendantById("diff-body-scroll")).toBe(body)
       expect(setup.renderer.root.findDescendantById("diff-file-header:second.ts")).toBe(header)
