@@ -81,6 +81,8 @@ export function Root(props: {
   resumeLocation?: ResumeLocation
   onNavigationChange?: (location: ResumeLocation) => void
   cwd: string
+  initialConfig?: Config
+  initialConfigError?: string
   services?: Partial<RootServices>
 }) {
   const services = { ...defaultServices, ...props.services }
@@ -91,8 +93,7 @@ export function Root(props: {
   const [recent, setRecent] = createSignal<string[]>([])
   const [pickerError, setPickerError] = createSignal("")
   const [launchError, setLaunchError] = createSignal<LaunchRequest & { message: string }>()
-  const [launchRepository, setLaunchRepository] = createSignal<string>()
-  const [config, setConfig] = createSignal(defaultConfig)
+  const [config, setConfig] = createSignal(props.initialConfig ?? defaultConfig)
   const [repositoryTabs, setRepositoryTabs] = createSignal<RepositoryTabs>({})
   let tabSaveTimer: ReturnType<typeof setTimeout> | undefined
   const dirtyTabs: Record<string, { page: Page }> = {}
@@ -127,7 +128,8 @@ export function Root(props: {
   const [configReloading, setConfigReloading] = createSignal(false)
   const [configReloaded, setConfigReloaded] = createSignal(false)
   const [configReloadFailed, setConfigReloadFailed] = createSignal(false)
-  const [configError, setConfigError] = createSignal("")
+  const configLoadWarning = (message: string) => `${message}. Fix or move the config file and reload configuration before saving settings.`
+  const [configError, setConfigError] = createSignal(props.initialConfigError ? configLoadWarning(props.initialConfigError) : "")
   const [configWarningDismissed, setConfigWarningDismissed] = createSignal(false)
   const session = services.createRepositorySession()
   const [dismissedDraftError, setDismissedDraftError] = createSignal<string>()
@@ -219,12 +221,9 @@ export function Root(props: {
     return current.status === "ready" ? current.repository : undefined
   })
   const loadingMessage = createMemo(() => {
-    if (view() === "resolving") {
-      const repository = launchRepository()
-      return repository ? `Loading ${repository}…` : "Finding repository…"
-    }
+    if (view() === "resolving") return "Loading repository…"
     const current = session.state()
-    return view() === "repository" && current.status === "loading" ? `Loading ${current.repository}…` : undefined
+    return view() === "repository" && current.status === "loading" ? "Loading repository…" : undefined
   })
   createEffect(() => {
     const repository = accessibleRepository()
@@ -269,7 +268,6 @@ export function Root(props: {
   }
   const resolveLaunch = async (request: LaunchRequest) => {
     setLaunchError(undefined)
-    setLaunchRepository(request.repository)
     setView("resolving")
     let detail: DetailTarget | undefined
     try {
@@ -297,9 +295,9 @@ export function Root(props: {
       }),
       services.loadRecentRepositories().catch(() => []),
       services.loadRepositoryTabs().catch(() => ({})),
-      services.loadConfig().catch((error) => {
+      props.initialConfig ? Promise.resolve(props.initialConfig) : services.loadConfig().catch((error) => {
         const message = error instanceof Error ? error.message : "Could not load config"
-        setConfigError(`${message}. Fix or move the config file and reload configuration before saving settings.`)
+        setConfigError(configLoadWarning(message))
         return { ...defaultConfig }
       }),
     ]).then(([resolved, repositories, savedTabs, loadedConfig]) => {

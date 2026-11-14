@@ -6,9 +6,10 @@ import { initializeHunk } from "../src/ui/hunk-host"
 import { resumeLocation, type ResumeLocation } from "../src/resume"
 import type { DiffTarget } from "../src/models"
 import { patchFixture } from "./fixtures/diff"
-import { CodeRenderable, type Renderable } from "@opentui/core"
+import { BoxRenderable, CodeRenderable, RGBA, type Renderable } from "@opentui/core"
 import { createSignal } from "solid-js"
 import { defaultConfig, type Config } from "../src/config"
+import { appColors, resolveTheme } from "../src/theme"
 import type { CommitDetailState, DiffState, IssueDetailState, PullDetailState, RepositoryState } from "../src/repository-state"
 import { parseLaunchArguments } from "../src/launch-target"
 import { Root } from "../src/root"
@@ -205,6 +206,45 @@ describe("application root", () => {
     expect(loads).toBe(1)
   })
 
+  test("keeps the saved theme and one loading message from discovery through session loading", async () => {
+    const resolution = deferred<string | undefined>()
+    const config: Config = { ...defaultConfig, theme: "github", colorMode: "light" }
+    let configLoads = 0
+    const view = await testRender(() => <Root cwd="/work" initialConfig={config} services={{
+      createPullReviewSession: createTestReviewSession,
+      createRepositorySession: () => ({ ...readySession(), state: () => ({ status: "loading" as const, repository: "cli/cli" }) }),
+      resolveRepository: () => resolution.promise,
+      resolveLocalRepository: async () => undefined,
+      loadRecentRepositories: async () => [],
+      loadRepositoryTabs: async () => ({}),
+      loadConfig: async () => { configLoads++; return defaultConfig },
+    }} />, { width: 80, height: 24 })
+    active.push(view)
+    const boxes = (node: Renderable): BoxRenderable[] => [
+      ...(node instanceof BoxRenderable ? [node] : []), ...node.getChildren().flatMap(boxes),
+    ]
+    const expected = RGBA.fromHex(appColors(resolveTheme("github", "light")).canvas)
+    const checkBackground = () => {
+      const screen = boxes(view.renderer.root).find((box) => box.width === 80 && box.height === 24 && box.backgroundColor.a > 0)
+      expect(screen).toBeDefined()
+      expect(screen!.backgroundColor).toEqual(expected)
+    }
+    // Check the background before the loading text's 200ms reveal delay.
+    await view.flush()
+    checkBackground()
+    await Bun.sleep(250)
+    await view.flush()
+    expect(view.captureCharFrame()).toContain("Loading repository")
+    resolution.resolve("cli/cli")
+    await Bun.sleep(0)
+    await view.flush()
+    // No new reveal delay: the same loading component remains mounted.
+    expect(view.captureCharFrame()).toContain("Loading repository")
+    expect(view.captureCharFrame()).not.toContain("Loading cli/cli")
+    checkBackground()
+    expect(configLoads).toBe(0)
+  })
+
   test("resolves startup services before showing the repository picker", async () => {
     const resolution = deferred<string | undefined>()
     let receivedArgument: string | undefined
@@ -234,11 +274,11 @@ describe("application root", () => {
     await view.flush()
 
     expect(view.captureCharFrame().trim()).toBe("")
-    for (let attempt = 0; attempt < 40 && !view.captureCharFrame().includes("Finding repository"); attempt++) {
+    for (let attempt = 0; attempt < 40 && !view.captureCharFrame().includes("Loading repository"); attempt++) {
       await Bun.sleep(25)
       await view.flush()
     }
-    expect(view.captureCharFrame()).toContain("Finding repository")
+    expect(view.captureCharFrame()).toContain("Loading repository")
     expect(view.captureCharFrame()).not.toContain("Open a GitHub repository")
     expect(receivedArgument).toBe(".")
     expect(receivedCwd).toBe("/work/repository")
@@ -283,12 +323,14 @@ describe("application root", () => {
     for (const word of error.message.split(/\s+/)) expect(frame).toContain(word)
   })
 
-  test("warns and prevents overwriting config when loading fails", async () => {
+  test.each([false, true])("warns and prevents overwriting config when loading fails (preloaded: %s)", async (preloaded) => {
     let saves = 0
     const view = await testRender(
       () => (
         <Root
           cwd="/work/repository"
+          initialConfig={preloaded ? defaultConfig : undefined}
+          initialConfigError={preloaded ? "Malformed config" : undefined}
           services={{ createPullReviewSession: createTestReviewSession,
             resolveRepository: async () => undefined,
             loadRepositoryTabs: async () => ({}),

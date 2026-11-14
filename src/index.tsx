@@ -7,7 +7,7 @@ import { stopClipboardProcesses } from "./clipboard"
 import { stopCommandProcesses } from "./command-actions"
 import { saveRepositoryTabs } from "./repository-tabs"
 import { createResumeWriter, loadResume, saveResume } from "./resume"
-import { saveConfig } from "./config"
+import { defaultConfig, loadConfig, saveConfig } from "./config"
 import { rememberRepository } from "./github/repository"
 import { launchUsage, parseLaunchArguments, updateUsage, type LaunchOptions } from "./launch-target"
 import { version } from "../package.json"
@@ -83,6 +83,15 @@ if (launch.interactive) {
 const resumeLocation = launch.resume ? await loadResume() : undefined
 const resumeWriter = createResumeWriter(saveResume)
 
+// Resolve preferences before mounting the first loading frame.
+let initialConfig = defaultConfig
+let initialConfigError = ""
+try {
+  initialConfig = await loadConfig()
+} catch (error) {
+  initialConfigError = error instanceof Error ? error.message : "Could not load config"
+}
+
 const renderer = await createCliRenderer({
   targetFps: 30,
   exitOnCtrlC: false,
@@ -114,6 +123,8 @@ try {
       resumeLocation={resumeLocation}
       onNavigationChange={resumeWriter.remember}
       cwd={cwd}
+      initialConfig={initialConfig}
+      initialConfigError={initialConfigError}
       services={{
         saveConfig: (config) => trackSave(saveConfig(config)),
         saveRepositoryTabs: (tabs) => trackSave(saveRepositoryTabs(tabs)),
