@@ -136,7 +136,7 @@ export function createMentionAutocomplete(options: { editor: Accessor<TextareaRe
   }
   const move = (delta: number) => {
     if (!users().length) { dismiss(); return false }
-    setSelected(Math.max(0, Math.min(users().length - 1, index() + delta)))
+    setSelected((index() + delta + users().length) % users().length)
   }
   useKeyActions({
     "mention.up": () => move(-1),

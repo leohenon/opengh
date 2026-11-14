@@ -106,13 +106,13 @@ Source: [`src/keybindings.ts`](../src/keybindings.ts).
 
 ### Username suggestions
 
-Type `@` in a comment editor. `esc` dismisses suggestions without closing the comment.
+Type `@` in a comment editor.
 
-| Action           | Keys           |
-| ---------------- | -------------- |
-| `mention.up`     | `up`           |
-| `mention.down`   | `down`         |
-| `mention.accept` | `enter`, `tab` |
+| Action           | Keys              |
+| ---------------- | ----------------- |
+| `mention.up`     | `shift+tab`, `up` |
+| `mention.down`   | `tab`, `down`     |
+| `mention.accept` | `enter`           |
 
 ### Dialogs and pickers
 
