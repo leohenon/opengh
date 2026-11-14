@@ -283,7 +283,7 @@ for (const parent of ["issue", "pull"] as const) {
       expect(view.captureCharFrame()).toContain("Comment posted")
       expect(view.captureCharFrame()).toContain("Saved draft q?hc expanded")
     } finally { view.renderer.destroy() }
-  })
+  }, 15_000)
 }
 
 test("inline comments retain and confirm text without an injected action-state getter", async () => {

@@ -15,6 +15,7 @@ import { resolveTheme } from "../src/theme"
 import { defaultConfig } from "../src/config"
 import { App } from "../src/ui/app"
 import { mouseClick } from "../src/ui/mouse"
+import { waitForText } from "./fixtures/wait"
 import { githubDataFixture, repositoryOperationsFixture } from "./fixtures/github-data"
 
 type View = Awaited<ReturnType<typeof testRender>>
@@ -289,7 +290,7 @@ The heading target is here.
       expect(view.captureCharFrame()).toContain("Footnote target text")
       await click(backlinkUrl)
       expect(external).toEqual([])
-      expect(view.captureCharFrame()).toContain("Second reference")
+      await waitForText(view, "Second reference")
       const referenceCells = linkCells(view, noteUrl)
       expect(referenceCells[0]!.y).toBe(scroll.viewport.y)
       scroll.scrollTo(0)
@@ -305,7 +306,8 @@ The heading target is here.
     expect(view.captureCharFrame()).toContain("Second heading target")
     expect(view.captureCharFrame()).not.toContain("First heading.")
     await click(backlinkUrl)
-    expect(view.captureCharFrame()).toContain("Second reference")
+    // Cross-document anchor scrolling finishes asynchronously after the destination mounts.
+    await waitForText(view, "Second reference")
     expect(external).toEqual([])
   } finally { view.renderer.destroy() }
 })
