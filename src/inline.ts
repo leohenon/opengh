@@ -1,8 +1,10 @@
 import { createGitHubClient } from "./github/client"
+import { loadGitHubDiff } from "./github/diff"
 import { githubTransport } from "./github/transport"
 import { createRequestBudget, isRequestInterrupted, RequestBudgetLimitError } from "./github/request-budget"
 import { resolveRepository } from "./github/repository"
 import type { LaunchOptions } from "./launch-target"
+import { loadCommitReview, loadPullReview, truncationWarning, type DiffLoader } from "./review"
 
 const defaultClient = createGitHubClient(githubTransport)
 
@@ -165,11 +167,58 @@ export async function inlinePage(
   return safeOutput(sections.filter(Boolean).join("\n\n")) + "\n"
 }
 
+function fenced(patch: string) {
+  let length = 3
+  for (const match of patch.matchAll(/`+/g)) length = Math.max(length, match[0].length + 1)
+  const fence = "`".repeat(length)
+  return `${fence}diff\n${patch}${patch.endsWith("\n") ? "" : "\n"}${fence}`
+}
+
+export async function inlineDiffPage(
+  repository: string,
+  launch: LaunchOptions,
+  client = defaultClient,
+  loadDiff: DiffLoader = loadGitHubDiff,
+): Promise<string> {
+  let detail = launch.initialDetail
+  if (detail?.kind === "number") detail = { kind: await client.issueKind(repository, detail.number), number: detail.number }
+  const sections: string[] = []
+  if (detail?.kind === "pull") {
+    const review = await loadPullReview(repository, detail.number, client, loadDiff, launch.file)
+    const item = review.detail
+    const state = item.merged ? "merged" : item.draft ? "draft" : item.state
+    sections.push(`# ${repository} #${item.number}: ${item.title}`, item.url,
+      `${state} · @${item.author} · ${item.createdAt} · ${item.commentCount} comments`,
+      ...(item.labels.length ? [`Labels: ${item.labels.join(", ")}`] : []),
+      ...(item.assignees.length ? [`Assignees: ${item.assignees.join(", ")}`] : []),
+      `${item.headBranch} → ${item.baseBranch} · +${item.additions} −${item.deletions} · ${item.changedFiles} files`,
+      item.body || "No description provided.")
+    for (const comment of review.comments) sections.push(`## @${comment.author} · ${comment.createdAt}`, comment.body)
+    for (const event of review.reviews) sections.push(`## Review: ${event.state} · @${event.actor} · ${event.createdAt}`, event.body)
+    for (const thread of review.threads) {
+      const marks = [...(thread.isResolved ? ["resolved"] : []), ...(thread.isOutdated ? ["outdated"] : [])]
+      sections.push(`## ${thread.path}:${thread.line ?? thread.originalLine ?? ""}${marks.length ? ` (${marks.join(", ")})` : ""}`)
+      for (const comment of thread.comments) sections.push(`### @${comment.author} · ${comment.createdAt}`, comment.body)
+    }
+    for (const warning of review.context.warnings) sections.push(`Warning: ${warning}`)
+    sections.push("## Diff", `head ${review.revisions.head} · base ${review.revisions.base}`, fenced(safeOutput(review.patch)))
+  } else if (detail?.kind === "commit") {
+    const { commit, files, truncated, patch } = await loadCommitReview(repository, detail.sha, client, loadDiff, launch.file)
+    sections.push(`# ${repository} · ${commit.sha}`, `https://github.com/${repository}/commit/${commit.sha}`,
+      `${commit.author} · ${commit.date}`, commit.fullMessage,
+      "## Files", files.map(file => `${file.status} ${file.path} (+${file.additions} −${file.deletions})`).join("\n"),
+      ...(truncated ? [`Warning: ${truncationWarning}`] : []),
+      "## Diff", fenced(safeOutput(patch)))
+  } else throw new Error("--diff requires a PR or commit target.")
+  return safeOutput(sections.filter(Boolean).join("\n\n")) + "\n"
+}
+
 export async function printInline(launch: LaunchOptions, cwd: string) {
   const repository = await resolveRepository(launch.repositoryArgument ?? ".", cwd)
   if (!repository) throw new Error("No GitHub repository found. Specify owner/repo explicitly.")
   let output: string
-  if (process.stdout.isTTY) {
+  if (launch.diff) output = await inlineDiffPage(repository, launch)
+  else if (process.stdout.isTTY) {
     const { renderInlineScreen } = await import("./inline-screen")
     output = await renderInlineScreen(repository, launch, defaultClient, process.stdout.columns || 80,
       !(process.env.NO_COLOR || process.env.TERM === "dumb"))

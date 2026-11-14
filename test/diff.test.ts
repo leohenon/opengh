@@ -1,8 +1,9 @@
 import { expect, spyOn, test } from "bun:test"
 import { createGitHubDiff, MAX_DIFF_BYTES } from "../src/github/diff"
-import type { RequestBudget } from "../src/github/request-budget"
+import { createRequestBudget, type RequestBudget } from "../src/github/request-budget"
 import type { GitHubTransport } from "../src/github/transport"
 import { parseDiff } from "../src/ui/diff-model"
+import { MAX_PATCH_LINES, parsePatchFiles } from "../src/patch-files"
 
 import { patchFixture } from "./fixtures/diff"
 
@@ -115,6 +116,18 @@ test("one diff deadline spans every page and caller cancellation still aborts in
       expect(deadlines - before).toBe(1)
       expect(controller.signal.aborted).toBe(reason === "cancel")
     }
+    const before = deadlines
+    const budget = createRequestBudget()
+    const seen: RequestBudget[] = []
+    const load = createGitHubDiff(transport(async (_path, _accept, options) => {
+      seen.push(options!.budget!)
+      return JSON.stringify([{ filename: "a.txt", status: "modified", additions: 1, deletions: 1 }])
+    }))
+    await load("owner/repo", { kind: "pull", number: 1 }, budget.signal, true, budget)
+    expect(seen).toEqual([budget])
+    expect(deadlines).toBe(before + 1)
+    expect(budget.signal.aborted).toBe(false)
+    budget.dispose()
   } finally { timers.mockRestore() }
 })
 
@@ -171,4 +184,43 @@ Binary files a/image.png and b/image.png differ
     }))
     await expect(load("owner/repo", { kind: "pull", number: 42 }, new AbortController().signal)).rejects.toThrow("changed while loading")
   }
+})
+
+test("agent patch files keep original sections with Hunk paths and hunk metadata", () => {
+  const sections = [
+    'diff --git "a/dir/sp ace \\303\\251.txt" "b/dir/sp ace \\303\\251.txt"\r\nindex 1111111..2222222 100644\r\n--- "a/dir/sp ace \\303\\251.txt"\r\n+++ "b/dir/sp ace \\303\\251.txt"\r\n@@ -1,2 +1,2 @@ ctx\r\n-\x1b[31mold\x9b\r\n+new  \r\n \r\n@@ -10,0 +11 @@\r\n+added\r\n',
+    "diff --git a/old name.ts b/new name.ts\nsimilarity index 90%\nrename from old name.ts\nrename to new name.ts\nindex 3333333..4444444 100644\n--- a/old name.ts\n+++ b/new name.ts\n@@ -3 +3 @@\n-a\n+b\n",
+    "diff --git a/gone.ts b/gone.ts\ndeleted file mode 100644\nindex 5555555..0000000\n--- a/gone.ts\n+++ /dev/null\n@@ -1 +0,0 @@\n-x\n\\ No newline at end of file\n",
+    "diff --git a/img.png b/img.png\nindex 6666666..7777777 100644\nBinary files a/img.png and b/img.png differ\n",
+    "diff --git a/mode.sh b/mode.sh\nold mode 100644\nnew mode 100755\n",
+    "diff --git a/a b/b\nsimilarity index 100%\ncopy from a\ncopy to b\n",
+    "diff --git a/empty b/empty\nnew file mode 100644\nindex 0000000..e69de29\n",
+  ]
+  const files = parsePatchFiles(sections.join(""))
+  expect(files.map(file => file.patch)).toEqual(sections)
+  expect(files.map(({ patch: _patch, hunks: _hunks, ...file }) => file)).toEqual([
+    { path: "dir/sp ace é.txt", previousPath: null, status: "modified", additions: 2, deletions: 1, binary: false, mode: "100644", previousMode: null },
+    { path: "new name.ts", previousPath: "old name.ts", status: "renamed", additions: 1, deletions: 1, binary: false, mode: "100644", previousMode: null },
+    { path: "gone.ts", previousPath: null, status: "removed", additions: 0, deletions: 1, binary: false, mode: "100644", previousMode: null },
+    { path: "img.png", previousPath: null, status: "modified", additions: 0, deletions: 0, binary: true, mode: "100644", previousMode: null },
+    { path: "mode.sh", previousPath: null, status: "modified", additions: 0, deletions: 0, binary: false, mode: "100755", previousMode: "100644" },
+    { path: "b", previousPath: "a", status: "copied", additions: 0, deletions: 0, binary: false, mode: null, previousMode: null },
+    { path: "empty", previousPath: null, status: "added", additions: 0, deletions: 0, binary: false, mode: "100644", previousMode: null },
+  ])
+  expect(files[0]!.hunks).toEqual([
+    { index: 0, header: "@@ -1,2 +1,2 @@ ctx", oldStart: 1, oldCount: 2, newStart: 1, newCount: 2, additions: 1, deletions: 1 },
+    { index: 1, header: "@@ -10,0 +11 @@", oldStart: 10, oldCount: 0, newStart: 11, newCount: 1, additions: 1, deletions: 0 },
+  ])
+  expect(files[2]!.hunks[0]).toMatchObject({ oldStart: 1, oldCount: 1, newStart: 0, newCount: 0 })
+})
+
+test("agent patch parsing rejects unsupported or desynchronized sections", () => {
+  const file = "diff --git a/a b/a\n--- a/a\n+++ b/a\n@@ -1 +1 @@\n-x\n+y\n"
+  for (const patch of [
+    "diff --cc a\n", `preamble\n${file}`, "diff --git a/a b/a\n", "diff --git a/a b/a\nnot a diff\n",
+    "diff --git a/a b/a\nindex 1111111..2222222 100644\n", "diff --git a/a b/a\n--- a/a\n+++ b/a\n", `${file}\\ invalid marker\n`,
+    `${file}trailing\n`, `${file}\x1b[0m${file}`, "diff --git a/a b/a\n--- a/a\n+++ b/a\n@@ -1,3 +1 @@\n-x\n+y\n",
+    file + "\n".repeat(MAX_PATCH_LINES),
+  ]) expect(() => parsePatchFiles(patch)).toThrow()
+  expect(parsePatchFiles("")).toEqual([])
 })

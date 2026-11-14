@@ -10,6 +10,8 @@ export type LaunchOptions = {
   initialDetail?: LaunchDetail
   focus?: boolean
   inline?: boolean
+  diff?: boolean
+  file?: string
   resume?: boolean
   interactive?: boolean
   update?: boolean
@@ -54,6 +56,8 @@ Options:
   --resume                                Restore the last interactive page (no repository or target)
   -f, --focus                             Hide global navigation; Ctrl+O opens the full app
   --inline                                Print a bounded page snapshot to stdout and exit
+  --diff                                  Add the patch to --inline (PR or commit)
+  --file <path>                           Limit --diff to one changed file
   -h, --help                              Show this help
   -v, --version                           Show version
 `
@@ -132,6 +136,8 @@ export function parseLaunchArguments(args: readonly string[]): LaunchOptions {
   let explicitRepository: string | undefined
   let focus = false
   let inlineMode = false
+  let diff = false
+  let file: string | undefined
   let resume = false
   let interactive = false
   let options = true
@@ -142,6 +148,7 @@ export function parseLaunchArguments(args: readonly string[]): LaunchOptions {
     if (options && (argument === "--version" || argument === "-v")) return { version: true }
     if (options && (argument === "--focus" || argument === "-f" || argument === "--standalone")) { focus = true; continue }
     if (options && argument === "--inline") { inlineMode = true; continue }
+    if (options && argument === "--diff") { diff = true; continue }
     if (options && argument === "--resume") { resume = true; continue }
     if (options && (argument === "-i" || argument === "--interactive")) { interactive = true; continue }
     if (options && /^-[if]{2,}$/.test(argument)) {
@@ -160,6 +167,14 @@ export function parseLaunchArguments(args: readonly string[]): LaunchOptions {
       explicitRepository = repository
       continue
     }
+    if (option === "--file") {
+      if (file !== undefined) throw new Error("Specify --file only once.")
+      const value = inline ?? args[++index]
+      if (!value || (inline === undefined && value.startsWith("-")))
+        throw new Error("--file requires a repository-relative path; use --file=<path> for paths starting with -.")
+      file = value
+      continue
+    }
     if (!["--commit", "--issue", "--pr"].includes(option!))
       throw new Error(`Unknown option: “${option}”.`)
     if (explicitDetail) throw new Error("Specify only one of --commit, --issue, or --pr.")
@@ -175,15 +190,24 @@ export function parseLaunchArguments(args: readonly string[]): LaunchOptions {
   const mode: LaunchOptions = {
     ...(focus ? { focus: true } : {}),
     ...(inlineMode ? { inline: true } : {}),
+    ...(diff ? { diff: true } : {}),
+    ...(file !== undefined ? { file } : {}),
     ...(resume ? { resume: true } : {}),
     ...(interactive ? { interactive: true } : {}),
+  }
+  const finish = (launch: LaunchOptions): LaunchOptions => {
+    if (diff && !inlineMode) throw new Error("--diff requires --inline.")
+    if (file !== undefined && !diff) throw new Error("--file requires --diff.")
+    if (diff && !["pull", "commit", "number"].includes(launch.initialDetail?.kind ?? ""))
+      throw new Error("--diff requires a PR or commit target.")
+    return launch
   }
   const page = positional[0]
   if (page === "issues" || page === "pulls" || page === "actions") {
     if (interactive) throw new Error("--interactive cannot be combined with an explicit page.")
     if (positional.length > 1 || explicitDetail)
       throw new Error(`opengh ${page} selects a page; use --repo to select a repository and do not specify a target.`)
-    return { ...mode, repositoryArgument: explicitRepository ?? ".", initialPage: page }
+    return finish({ ...mode, repositoryArgument: explicitRepository ?? ".", initialPage: page })
   }
   if (explicitRepository !== undefined) {
     if (positional.some((value) => repositoryLocation(value)))
@@ -196,17 +220,17 @@ export function parseLaunchArguments(args: readonly string[]): LaunchOptions {
     const location = positional.length ? repositoryLocation(positional[0]!) : { repositoryArgument: "." }
     if (!location || location.initialPage || location.initialDetail)
       throw new Error("--interactive accepts only a repository, not a page or detail target.")
-    return { ...mode, ...location }
+    return finish({ ...mode, ...location })
   }
-  if (!positional.length) return explicitDetail ? { ...mode, repositoryArgument: ".", initialDetail: explicitDetail } : mode
+  if (!positional.length) return finish(explicitDetail ? { ...mode, repositoryArgument: ".", initialDetail: explicitDetail } : mode)
 
   const location = repositoryLocation(positional[0]!)
   if (!location) {
     if (positional.length > 1 || explicitDetail) throw new Error(`Invalid repository: “${positional[0]}”. Expected owner/repo, a GitHub URL, or a local path.`)
-    return { ...mode, repositoryArgument: ".", initialDetail: identifier(positional[0]!) }
+    return finish({ ...mode, repositoryArgument: ".", initialDetail: identifier(positional[0]!) })
   }
   if (positional[1] !== undefined && explicitDetail) throw new Error("Specify a target either positionally or with an option, not both.")
   const detail = explicitDetail ?? (positional[1] !== undefined ? identifier(positional[1]) : undefined)
   if (detail && (location.initialPage || location.initialDetail)) throw new Error("The URL already selects a page or detail; do not specify another target.")
-  return detail ? { ...mode, ...location, initialDetail: detail } : { ...mode, ...location }
+  return finish(detail ? { ...mode, ...location, initialDetail: detail } : { ...mode, ...location })
 }

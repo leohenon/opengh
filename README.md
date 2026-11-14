@@ -57,7 +57,7 @@ opengh update
 
 ## Documentation
 
-[Configuration](https://github.com/leohenon/opengh/blob/main/docs/configuration.md) · [Keybindings](https://github.com/leohenon/opengh/blob/main/docs/keybindings.md) · [CLI](https://github.com/leohenon/opengh/blob/main/docs/cli.md) · [Development](https://github.com/leohenon/opengh/blob/main/docs/development.md)
+[Configuration](https://github.com/leohenon/opengh/blob/main/docs/configuration.md) · [Keybindings](https://github.com/leohenon/opengh/blob/main/docs/keybindings.md) · [CLI](https://github.com/leohenon/opengh/blob/main/docs/cli.md) · [Agent CLI](docs/agent-cli.md) · [Development](https://github.com/leohenon/opengh/blob/main/docs/development.md)
 
 See the [roadmap](https://github.com/leohenon/opengh/blob/main/ROADMAP.md) for what's planned.
 

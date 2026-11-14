@@ -85,8 +85,15 @@ Press `ctrl+o` to open the full app.
 
 ## Print a page without launching the app
 
+Output is rendered in terminals and plain Markdown when piped. `--diff` always
+prints plain Markdown.
+
 ```sh
 opengh owner/repo --pr 456 --inline
 ```
+
+Add `--diff` to include a validated PR or commit patch; optionally use `--file PATH`
+to keep one file's patch and review threads (use the new path for renames).
+`--diff` fails rather than returning incomplete output.
 
 Run `opengh --help` for all options.

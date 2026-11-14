@@ -5,7 +5,7 @@ import { launchUsage, parseLaunchArguments, updateUsage, type LaunchOptions } fr
 describe("launch arguments", () => {
   test("aligns help descriptions across usage and options", () => {
     const rows = launchUsage.split("\n").filter((line) => line.startsWith("  opengh") || line.startsWith("  -"))
-    expect(rows).toHaveLength(18)
+    expect(rows).toHaveLength(20)
     for (const row of rows) {
       const columns = /^  (\S.*?)( {2,})(\S.*)$/.exec(row)
       expect(columns).not.toBeNull()
@@ -227,4 +227,31 @@ describe("launch arguments", () => {
     ]
     for (const args of cases) expect(() => parseLaunchArguments(args)).toThrow()
   })
+})
+
+test("diff flags parse with PR and commit targets", () => {
+  const cases: [string[], LaunchOptions][] = [
+    [["owner/repo", "--pr", "123", "--inline", "--diff"], { inline: true, diff: true, repositoryArgument: "owner/repo", initialDetail: { kind: "pull", number: 123 } }],
+    [["--diff", "--inline", "--commit", "abc1234"], { inline: true, diff: true, repositoryArgument: ".", initialDetail: { kind: "commit", sha: "abc1234" } }],
+    [["123", "--inline", "--diff"], { inline: true, diff: true, repositoryArgument: ".", initialDetail: { kind: "number", number: 123 } }],
+    [["--inline", "--diff", "--file", " dir/sp ace é.ts", "--repo", "owner/repo", "--pr", "1"], { inline: true, diff: true, file: " dir/sp ace é.ts", repositoryArgument: "owner/repo", initialDetail: { kind: "pull", number: 1 } }],
+    [["--commit=abcd", "--inline", "--diff", "--file=-x=y"], { inline: true, diff: true, file: "-x=y", repositoryArgument: ".", initialDetail: { kind: "commit", sha: "abcd" } }],
+  ]
+  for (const [args, expected] of cases) expect(parseLaunchArguments(args)).toEqual(expected)
+})
+
+test("diff flags require --inline and a PR or commit target", () => {
+  const cases: [string[], string][] = [
+    [["--diff", "--pr", "123"], "--diff requires --inline"],
+    [["--inline", "--file", "a.ts", "--pr", "123"], "--file requires --diff"],
+    [["--inline", "--diff", "--file", "a.ts", "--file", "b.ts", "--pr", "1"], "only once"],
+    [["--inline", "--diff", "--file=", "--pr", "1"], "--file requires a repository-relative path"],
+    [["--inline", "--diff", "--file", "--pr", "1"], "--file requires a repository-relative path"],
+    [["--inline", "--diff", "--issue", "123"], "--diff requires a PR or commit target"],
+    [["--inline", "--diff"], "--diff requires a PR or commit target"],
+    [["pulls", "--inline", "--diff"], "--diff requires a PR or commit target"],
+    [["https://github.com/owner/repo/actions/runs/123", "--inline", "--diff"], "--diff requires a PR or commit target"],
+    [["owner/repo", "--pr", "1", "--json"], "Unknown option"],
+  ]
+  for (const [args, message] of cases) expect(() => parseLaunchArguments(args)).toThrow(message)
 })
