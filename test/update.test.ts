@@ -40,6 +40,7 @@ test.each([["0.1.0", "0.1.0"], ["0.1.0", "0.0.9"], ["0.3.0-rc.1", "0.2.0"]])("in
 
 test("managed installations are identified before any release request or file replacement", async () => {
   expect(installationUpdateHint("/nix/store/hash-opengh/bin/.opengh-wrapped")).toContain("Nix")
+  expect(installationUpdateHint("/tmp/node_modules/@leohenon/opengh/bin/opengh")).toContain("npm install --global @leohenon/opengh")
   expect(installationUpdateHint("/opt/homebrew/Cellar/opengh/0.1.0/bin/opengh")).toContain("brew upgrade")
   for (const relative of ["node_modules/opengh-darwin-arm64/bin/opengh", "custom-cellar/opengh/0.1.0/bin/opengh"]) {
     const f = await fixture(relative)
@@ -59,7 +60,7 @@ test("symlinks cannot bypass package manager protection", async () => {
 })
 
 test.each([
-  "opengh", "opengh-darwin-arm64", "opengh-darwin-x64", "opengh-linux-arm64",
+  "opengh", "@leohenon/opengh", "opengh-darwin-arm64", "opengh-darwin-x64", "opengh-linux-arm64",
   "opengh-linux-x64", "opengh-linux-arm64-musl", "opengh-linux-x64-musl",
 ])("linked %s packages are protected outside node_modules", async name => {
   const f = await fixture(`workspace/${name}/bin/opengh`)
@@ -68,7 +69,7 @@ test.each([
   const manifest = `${JSON.stringify({ name, version: "0.1.0" })}\n`
   await writeFile(manifestPath, manifest)
   const modules = join(f.directory, "node_modules")
-  await mkdir(modules)
+  await mkdir(dirname(join(modules, name)), { recursive: true })
   await symlink(packageRoot, join(modules, name))
   const linked = join(modules, name, "bin/opengh")
   expect((await realpath(linked)).split("/")).not.toContain("node_modules")

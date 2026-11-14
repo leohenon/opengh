@@ -315,13 +315,13 @@ if (args[0] === "view" && args[2] === "version") {
   await f.tool("npm", `exec ${JSON.stringify(process.execPath)} ${JSON.stringify(script)} "$@"`)
   // Match the pinned runtime running the workflow's semver comparisons, rather than an arbitrary PATH Bun.
   await f.tool("bun", `exec ${JSON.stringify(process.execPath)} "$@"`)
-  const names = ["opengh-darwin-arm64", "opengh-linux-x64", "opengh"]
+  const names = ["opengh-darwin-arm64", "opengh-linux-x64", "@leohenon/opengh"]
   const state = async (): Promise<Registry> => JSON.parse(await readFile(registry, "utf8"))
   const set = async (fields: Partial<Registry>) => { await writeFile(registry, JSON.stringify({ ...await state(), ...fields })) }
   const publish = async (version: string) => {
     await writeFile(join(f.directory, "package.json"), JSON.stringify({ version }))
     for (const name of names) {
-      const directory = join(f.directory, "dist/npm", name)
+      const directory = join(f.directory, "dist/npm", name === "@leohenon/opengh" ? "opengh" : name)
       await mkdir(directory, { recursive: true })
       await writeFile(join(directory, "package.json"), JSON.stringify({ name, version }))
     }
@@ -332,7 +332,7 @@ if (args[0] === "view" && args[2] === "version") {
 
 test.each(["upload", "promotion"] as const)("retrying incomplete npm %s cannot downgrade latest after a newer release", async failure => {
   const f = await npmFixture()
-  await f.set(failure === "upload" ? { failPublish: "opengh" } : { failPromote: "opengh" })
+  await f.set(failure === "upload" ? { failPublish: "@leohenon/opengh" } : { failPromote: "@leohenon/opengh" })
   expect((await f.publish("0.0.1")).code).not.toBe(0)
   // Finish a newer release before retrying the old one.
   await f.set({ failPublish: undefined, failPromote: undefined })
@@ -348,10 +348,10 @@ test.each(["upload", "promotion"] as const)("retrying incomplete npm %s cannot d
 
 test("npm stages every package before promotion, repairs failed promotion, and does not downgrade next", async () => {
   const f = await npmFixture()
-  await f.set({ failPublish: "opengh" })
+  await f.set({ failPublish: "@leohenon/opengh" })
   expect((await f.publish("0.0.0")).code).not.toBe(0)
   expect(Object.values((await f.state()).tags).every(tags => !tags.latest && !tags.next)).toBe(true)
-  await f.set({ failPublish: undefined, failPromote: "opengh" })
+  await f.set({ failPublish: undefined, failPromote: "@leohenon/opengh" })
   expect((await f.publish("0.0.0")).code).not.toBe(0)
   const publishes = (await f.state()).log.filter(call => call[0] === "publish").length
   await f.set({ failPromote: undefined })

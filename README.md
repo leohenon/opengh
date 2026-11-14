@@ -28,7 +28,7 @@ Available for macOS and Linux. Uses [GitHub CLI authentication](https://cli.gith
 brew install leohenon/tap/opengh
 
 # npm
-npm install --global opengh
+npm install --global @leohenon/opengh
 
 # Curl
 curl -fsSL https://github.com/leohenon/opengh/releases/latest/download/install.sh | sh
@@ -43,9 +43,6 @@ nix profile install github:leohenon/opengh#opengh nixpkgs#gh
 opengh .               # Current directory's repository
 opengh owner/repo      # Any repository
 ```
-
-> [!TIP]
-> Press `?` for shortcuts, `,` for settings, or right-click for actions.
 
 ## Update
 

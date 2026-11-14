@@ -73,7 +73,7 @@ function isJavaScriptInstallation(executable: string) {
   if (!manifest || typeof manifest !== "object" || Array.isArray(manifest))
     throw new Error(`Invalid installation metadata at ${path}. Use the original installation method to update.`)
   const name = (manifest as Record<string, unknown>).name
-  return typeof name === "string" && (name === "opengh"
+  return typeof name === "string" && (name === "opengh" || name === "@leohenon/opengh"
     || /^opengh-(?:darwin-(?:arm64|x64)|linux-(?:arm64|x64)(?:-musl)?)$/.test(name))
 }
 
@@ -81,7 +81,7 @@ export function installationUpdateHint(executable: string) {
   if (executable.startsWith("/nix/store/"))
     return "This installation is managed by Nix. Find its entry with nix profile list, then update it with nix profile upgrade."
   if (isJavaScriptInstallation(executable))
-    return "This installation is managed by a JavaScript package manager. Use the manager that installed it; for a global npm install: npm install --global opengh"
+    return "This installation is managed by a JavaScript package manager. Use the manager that installed it; for a global npm install: npm install --global @leohenon/opengh"
   if (executable.includes("/Cellar/opengh/") || existsSync(join(dirname(dirname(executable)), "INSTALL_RECEIPT.json")))
     return "This installation is managed by Homebrew. Run: brew update && brew upgrade leohenon/tap/opengh"
 }
