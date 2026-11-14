@@ -78,6 +78,10 @@ export type ReactionActionState = { kind?: ReactionKind; operation: OperationSta
 
 export type IssueActionState = {
   selectedAssignees?: string[]
+  // Assignees when the picker opened. Only the differences are sent, so concurrent changes survive.
+  assigneeBaseline?: string[]
+  // Logins whose last update failed; their chosen state is sent again on the next save.
+  uncertainAssignees?: string[]
   body: string
   reason: IssueCloseReason
   duplicateTarget?: string

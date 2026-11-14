@@ -31,7 +31,9 @@ import {
   updateGitHubPullDraft,
   mergeGitHubPull,
   loadGitHubPullMergeMessage,
-  setGitHubIssueAssignees,
+  updateGitHubIssueAssignees,
+  AssigneeUpdateError,
+  type AssigneeChanges,
   loadGitHubAssignableUsers,
   markGitHubIssueDuplicate,
   addGitHubReaction,
@@ -46,8 +48,10 @@ import { createCacheBudget, createDetailCache, type DetailCacheOptions } from ".
 import { createDiskDraftStore, DraftConflictError, type DraftKind, type DraftStore, type IssueDraft } from "./drafts"
 import { loadGitHubDiff } from "./github/diff"
 import { pullMergeBlocker } from "./pull-merge"
+import { assigneeChanges } from "./assignee-changes"
 import { reactionKey, reactionParent, validateReactionKind } from "./reactions"
 import type {
+  AssignableUser,
   CommitDetail,
   DiffContent,
   DiffTarget,
@@ -117,8 +121,8 @@ export type RepositoryLoaders = {
   issueReferences(repository: RepositoryTarget, number: number, options?: RequestOptions): Promise<IssueReference[]>
   createIssueComment?(repository: Repo, number: number, body: string, onConfirmed?: IssueCommentConfirmation, draftKey?: string, draft?: IssueCommentDraft): Promise<IssueComment>
   updateIssueState?(repository: Repo, number: number, state: ListState, reason?: IssueCloseReason): Promise<IssueDetail>
-  setIssueAssignees?(repository: Repo, number: number, assignees: string[]): Promise<IssueDetail>
-  assignableUsers?(repository: RepositoryTarget, page?: number, options?: RequestOptions): Promise<Page<string>>
+  updateIssueAssignees?(repository: Repo, number: number, changes: AssigneeChanges): Promise<IssueDetail>
+  assignableUsers?(repository: RepositoryTarget, page?: number, options?: RequestOptions, after?: string): Promise<Page<AssignableUser> & { cursor?: string }>
   mentionableUsers?(repository: RepositoryTarget, query: string, options?: RequestOptions): Promise<string[]>
   markIssueDuplicate?(repository: Repo, number: number, canonicalNumber: number): Promise<IssueDetail>
   issueTimeline?(repository: RepositoryTarget, number: number, options?: RequestOptions): Promise<IssueTimeline>
@@ -168,8 +172,9 @@ export type RepositorySession = {
   loadMoreIssueComments(): Promise<void>
   retryIssueReferences(): Promise<void>
   clearIssue(): void
-  assignableUsers?: Accessor<ResourceState<Paginated<string>> | undefined>
+  assignableUsers?: Accessor<ResourceState<Paginated<AssignableUser>> | undefined>
   loadAssignableUsers?(): Promise<void>
+  reloadAssignableUsers?(): Promise<void>
   searchMentionableUsers?(query: string, signal?: AbortSignal): Promise<readonly string[]>
   commentDraft?(number: number, parent?: IssueActionParent): string
   issueAction(number: number, parent?: IssueActionParent): IssueActionState
@@ -210,7 +215,7 @@ const defaultLoaders: RepositoryLoaders = {
   updatePullDraft: updateGitHubPullDraft,
   mergePull: mergeGitHubPull,
   pullMergeMessage: loadGitHubPullMergeMessage,
-  setIssueAssignees: setGitHubIssueAssignees,
+  updateIssueAssignees: updateGitHubIssueAssignees,
   assignableUsers: loadGitHubAssignableUsers,
   mentionableUsers: loadGitHubMentionableUsers,
   markIssueDuplicate: markGitHubIssueDuplicate,
@@ -1575,43 +1580,47 @@ export function createRepositorySession(
   }
 
   // Repository-keyed resources retain pages and in-flight requests across picker opens.
-  const [assignableUserCache, setAssignableUserCache] = createSignal<Record<string, ResourceState<Paginated<string>>>>({})
+  const [assignableUserCache, setAssignableUserCache] = createSignal<Record<string, ResourceState<Paginated<AssignableUser>>>>({})
   const assignableUsers = () => {
     const current = state()
     return current.status === "ready" ? assignableUserCache()[String(current.data.repo.id)] : undefined
   }
-  const loadAssignableUsers = async () => {
+  // Restarting loads the first page again and replaces the list, which stays visible meanwhile.
+  const loadAssignableUserPage = async (restart: boolean) => {
     const current = state()
     if (current.status !== "ready") return
     const key = String(current.data.repo.id)
     const previous = assignableUserCache()[key]
-    if (previous?.status === "loading" || (previous?.value && !previous.value.hasMore)) return
+    if (previous?.status === "loading" || (!restart && previous?.value && !previous.value.hasMore)) return
     const value = previous?.value
-    const nextPage = (value?.page ?? 0) + 1
+    const nextPage = restart ? 1 : (value?.page ?? 0) + 1
     const phase = value ? "pagination" : "load"
-    const store = (resource: ResourceState<Paginated<string>>) =>
+    const store = (resource: ResourceState<Paginated<AssignableUser>>) =>
       setAssignableUserCache((cache) => ({ ...cache, [key]: resource }))
     const pending = loadingResource(value, phase)
     store(pending)
-    const finish = (resource: ResourceState<Paginated<string>>) => {
+    const finish = (resource: ResourceState<Paginated<AssignableUser>>) => {
       // A repository refresh invalidates this request along with its cached pages.
       if (assignableUserCache()[key] === pending) store(resource)
     }
     try {
       if (!loaders.assignableUsers) throw new Error("Assignable users are unavailable.")
-      const next = await loaders.assignableUsers(current.data.repo, nextPage, repositoryReads())
+      const next = await loaders.assignableUsers(current.data.repo, nextPage, repositoryReads(), restart ? undefined : value?.cursor)
       const seen = new Set<string>()
-      const items = [...(value?.items ?? []), ...next.items].filter((login) => {
-        const key = login.toLowerCase()
+      const items = [...(restart ? [] : value?.items ?? []), ...next.items].filter((user) => {
+        const key = user.login.toLowerCase()
         if (seen.has(key)) return false
         seen.add(key)
         return true
       })
-      finish({ status: "ready", value: { items, page: nextPage, hasMore: next.hasMore } })
+      finish({ status: "ready", value: { items, page: nextPage, hasMore: next.hasMore, ...(next.cursor ? { cursor: next.cursor } : {}) } })
     } catch (error) {
       finish(failedResource(error, value, phase))
     }
   }
+  const loadAssignableUsers = () => loadAssignableUserPage(false)
+  // E.g. after collaborators were added while the picker was open.
+  const reloadAssignableUsers = () => loadAssignableUserPage(true)
 
   const searchMentionableUsers = async (query: string, callerSignal?: AbortSignal): Promise<readonly string[]> => {
     if (!/^[a-z\d-]{0,39}$/i.test(query)) throw new TypeError("Invalid username query.")
@@ -1775,8 +1784,10 @@ export function createRepositorySession(
       // Selecting a new action must not resume a different failed state change.
       const detail = parent === "pull" ? pullDetail() : issueDetail()
       const issue = detail?.number === number ? detail.resource.value : undefined
-      const selectedAssignees = issue && kind === "assignees" ? [...issue.assignees] : action.selectedAssignees
-      return { ...action, selectedAssignees, retry: draftStore ? action.retry : undefined, operation: idle() }
+      const opening = issue && kind === "assignees"
+      const selectedAssignees = opening ? [...issue.assignees] : action.selectedAssignees
+      const assigneeBaseline = opening ? [...issue.assignees] : action.assigneeBaseline
+      return { ...action, selectedAssignees, assigneeBaseline, retry: draftStore ? action.retry : undefined, operation: idle() }
     })
     if (kind === "assignees" && !assignableUsers()) void loadAssignableUsers()
   }
@@ -2105,6 +2116,25 @@ export function createRepositorySession(
     }
   }
 
+  const savedAssigneeChanges = (action: IssueActionState, current: readonly string[], noun: string): AssigneeChanges => {
+    if (!action.selectedAssignees) throw new Error("Open the assignee picker before saving.")
+    const baseline = action.assigneeBaseline ?? current
+    const allowed = new Set([...current, ...baseline, ...(assignableUsers()?.value?.items ?? []).map((user) => user.login)]
+      .map((login) => login.toLowerCase()))
+    if (action.selectedAssignees.some((login) => !allowed.has(login.toLowerCase())))
+      throw new Error("Select assignees from the suggested users.")
+    if (new Set(action.selectedAssignees.map((login) => login.toLowerCase())).size > 10)
+      throw new Error(`${noun} can have at most 10 assignees.`)
+    return assigneeChanges(baseline, action.selectedAssignees, action.uncertainAssignees)
+  }
+  const assigneesSaved = (draft: IssueActionState): IssueActionState =>
+    ({ ...draft, selectedAssignees: undefined, assigneeBaseline: undefined, uncertainAssignees: undefined, operation: idle() })
+  const assigneesUncertain = (draft: IssueActionState, changes: AssigneeChanges): IssueActionState => {
+    const known = new Set((draft.uncertainAssignees ?? []).map((login) => login.toLowerCase()))
+    const added = [...changes.add, ...changes.remove].filter((login) => !known.has(login.toLowerCase()))
+    return { ...draft, uncertainAssignees: [...(draft.uncertainAssignees ?? []), ...added] }
+  }
+
   const submitPullAction = async (number: number, kind: "close" | "reopen" | "assignees"): Promise<IssueActionResult> => {
     const current = state()
     const detail = pullDetail()
@@ -2119,34 +2149,36 @@ export function createRepositorySession(
     const scope = repositoryScope
     const result: IssueActionResult = {}
     let commentCompletion: DraftCompletion | undefined
+    let attempted: AssigneeChanges | undefined
     updateAction(key, (draft) => ({ ...draft, operation: loading() }))
     try {
       if (pull.merged && kind !== "assignees") throw new Error("Merged pull requests cannot be closed or reopened.")
       if (!pull.permissions?.[kind]) throw new Error("You do not have permission to perform this pull request action.")
       if (kind === "assignees") {
-        if (!loaders.setIssueAssignees) throw new Error("Assigning pull requests is unavailable.")
-        if (!action.selectedAssignees) throw new Error("Open the assignee picker before saving.")
-        const allowed = new Set([...pull.assignees, ...(assignableUsers()?.value?.items ?? [])].map((login) => login.toLowerCase()))
-        if (action.selectedAssignees.some((login) => !allowed.has(login.toLowerCase())))
-          throw new Error("Select assignees from the suggested users.")
-        const seen = new Set<string>()
-        const selected = action.selectedAssignees.filter((login) => {
-          const key = login.toLowerCase()
-          if (seen.has(key)) return false
-          seen.add(key)
-          return true
-        })
-        if (selected.length > 10) throw new Error("A pull request can have at most 10 assignees.")
+        if (!loaders.updateIssueAssignees) throw new Error("Assigning pull requests is unavailable.")
+        const changes = savedAssigneeChanges(action, pull.assignees, "A pull request")
+        if (!changes.add.length && !changes.remove.length) {
+          updateAction(key, assigneesSaved)
+          return {}
+        }
         const reactionRead = reactionRevision
-        const loaded = await loaders.setIssueAssignees(current.data.repo, number, selected)
-        const confirmed = new Set(loaded.assignees.map((login) => login.toLowerCase()))
-        if (loaded.number !== number || confirmed.size !== selected.length || selected.some((login) => !confirmed.has(login.toLowerCase())))
-          throw new Error("GitHub did not confirm the requested assignees.")
         // The issues endpoint cannot supply PR-specific fields or permissions.
-        const latest = scope === repositoryScope && state().repository === repository && pullDetail()?.number === number
-          ? pullDetail()?.resource.value ?? pull : pull
-        const updated = reconcilePullState(repository, number, { ...latest, assignees: loaded.assignees, updatedAt: loaded.updatedAt }, scope, reactionRead, key)
-        updateAction(key, (draft) => ({ ...draft, selectedAssignees: undefined, operation: idle() }))
+        const reconcile = (loaded: IssueDetail) => {
+          const latest = scope === repositoryScope && state().repository === repository && pullDetail()?.number === number
+            ? pullDetail()?.resource.value ?? pull : pull
+          return reconcilePullState(repository, number, { ...latest, assignees: loaded.assignees, updatedAt: loaded.updatedAt }, scope, reactionRead, key)
+        }
+        attempted = changes
+        let loaded: IssueDetail
+        try {
+          loaded = await loaders.updateIssueAssignees(current.data.repo, number, changes)
+        } catch (error) {
+          if (error instanceof AssigneeUpdateError && error.detail?.number === number) reconcile(error.detail)
+          throw error
+        }
+        if (loaded.number !== number) throw new Error("GitHub returned a different pull request.")
+        const updated = reconcile(loaded)
+        updateAction(key, assigneesSaved)
         return { pull: updated }
       }
       if (!loaders.updatePullState) throw new Error("Pull request state changes are unavailable.")
@@ -2193,7 +2225,7 @@ export function createRepositorySession(
       const retry = issueActions()[key]?.retry
       const failure = actionError(error, pull.locked ?? false, "pull request")
       const message = retry ? `Comment posted, but ${retry === "close" ? "closing" : "reopening"} failed. ${failure}` : failure
-      updateAction(key, (draft) => ({ ...draft, operation: { status: "error", message } }))
+      updateAction(key, (draft) => ({ ...(attempted ? assigneesUncertain(draft, attempted) : draft), operation: { status: "error", message } }))
       throw new Error(message)
     }
   }
@@ -2220,31 +2252,32 @@ export function createRepositorySession(
     const scope = repositoryScope
     const result: IssueActionResult = {}
     let commentCompletion: DraftCompletion | undefined
+    let attempted: AssigneeChanges | undefined
     const stillHere = () => scope === repositoryScope && state().repository === repository
     updateAction(key, (draft) => ({ ...draft, operation: loading() }))
     try {
       if (!issue.permissions?.[kind]) throw new Error("You do not have permission to perform this issue action.")
       if (kind === "assignees") {
-        if (!loaders.setIssueAssignees) throw new Error("Assigning issues is unavailable.")
-        if (!action.selectedAssignees) throw new Error("Open the assignee picker before saving.")
-        const candidates = [...issue.assignees, ...(assignableUsers()?.value?.items ?? [])]
-        const allowed = new Set(candidates.map((login) => login.toLowerCase()))
-        if (action.selectedAssignees.some((login) => !allowed.has(login.toLowerCase())))
-          throw new Error("Select assignees from the suggested users.")
-        const seen = new Set<string>()
-        const selected = action.selectedAssignees.filter((login) => {
-          const key = login.toLowerCase()
-          if (seen.has(key)) return false
-          seen.add(key)
-          return true
-        })
-        if (selected.length > 10) throw new Error("An issue can have at most 10 assignees.")
+        if (!loaders.updateIssueAssignees) throw new Error("Assigning issues is unavailable.")
+        const changes = savedAssigneeChanges(action, issue.assignees, "An issue")
+        // Assignment never posts or discards the independent comment draft.
+        if (!changes.add.length && !changes.remove.length) {
+          updateAction(key, assigneesSaved)
+          return {}
+        }
         const reactionRead = reactionRevision
-        const loaded = await loaders.setIssueAssignees(current.data.repo, number, selected)
+        attempted = changes
+        let loaded: IssueDetail
+        try {
+          loaded = await loaders.updateIssueAssignees(current.data.repo, number, changes)
+        } catch (error) {
+          if (error instanceof AssigneeUpdateError && error.detail?.number === number)
+            reconcileIssueState(repository, number, error.detail, scope, reactionRead, key)
+          throw error
+        }
         if (loaded.number !== number) throw new Error("GitHub returned a different issue.")
         const updated = reconcileIssueState(repository, number, loaded, scope, reactionRead, key)
-        // Assignment never posts or discards the independent comment draft.
-        updateAction(key, (draft) => ({ ...draft, selectedAssignees: undefined, operation: idle() }))
+        updateAction(key, assigneesSaved)
         return { issue: updated }
       }
       if (!action.retry && kind !== "duplicate" && action.body.trim() && !issue.permissions.comment)
@@ -2301,7 +2334,7 @@ export function createRepositorySession(
       const retry = issueActions()[key]?.retry
       const failure = actionError(error, issue.locked)
       const message = retry ? `Comment posted, but ${retry === "close" ? "closing" : "reopening"} failed. ${failure}` : failure
-      updateAction(key, (draft) => ({ ...draft, operation: { status: "error", message } }))
+      updateAction(key, (draft) => ({ ...(attempted ? assigneesUncertain(draft, attempted) : draft), operation: { status: "error", message } }))
       throw new Error(message)
     }
   }
@@ -2878,6 +2911,7 @@ export function createRepositorySession(
     retryIssueReferences,
     clearIssue,
     assignableUsers,
+    reloadAssignableUsers,
     loadAssignableUsers,
     searchMentionableUsers,
     issueAction,

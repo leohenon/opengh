@@ -1,8 +1,9 @@
 import { workflowJobFixture, workflowRunFixture } from "./fixtures/workflow-run"
 
 import { describe, expect, test } from "bun:test"
-import type { DiffContent, CommitDetail, CommitSummary, IssueDetail, IssueComment, IssueTimeline, RepositoryDocument, ReactionState, ReactionTarget, PullRequestDetail, PullContext, Repo } from "../src/models"
+import type { AssignableUser, DiffContent, CommitDetail, CommitSummary, IssueDetail, IssueComment, IssueTimeline, RepositoryDocument, ReactionState, ReactionTarget, PullRequestDetail, PullContext, Repo } from "../src/models"
 import type { RepositoryLoaders } from "../src/repository-session"
+import type { AssigneeChanges } from "../src/github/client"
 import { createRepositorySession } from "../src/repository-session"
 import { commitDetailFixture, githubDataFixture, issueDetailFixture, issueCommentsFixture, issuePullReferenceFixture, pullContextFixture } from "./fixtures/github-data"
 
@@ -1084,18 +1085,18 @@ describe("repository session", () => {
     let staleRead = false
     let fail = true
     let commentCalls = 0
-    const updates: string[][] = []
+    const updates: AssigneeChanges[] = []
     const candidates = Array.from({ length: 11 }, (_, index) => `user${index}`)
     const session = createRepositorySession(loaders({
       issue: async () => staleRead ? stale.promise : remote,
       issues: async (_repository, state) => ({ items: remote.state === state ? [remote] : [], hasMore: false }),
-      assignableUsers: async () => ({ items: ["octocat", ...candidates], hasMore: false }),
+      assignableUsers: async () => ({ items: ["octocat", ...candidates].map((login) => ({ login })), hasMore: false }),
       createIssueComment: async () => { commentCalls++; return issueCommentsFixture[0]! },
-      setIssueAssignees: async (_repository, _number, selected) => {
-        updates.push(selected)
+      updateIssueAssignees: async (_repository, _number, changes) => {
+        updates.push(changes)
         if (fail) throw new Error("Assignment denied")
-        if (!selected.length) return pending.promise
-        remote = { ...remote, assignees: selected }
+        if (!changes.add.length) return pending.promise
+        remote = { ...remote, assignees: [...remote.assignees.filter((login) => !changes.remove.includes(login)), ...changes.add] }
         return remote
       },
     }))
@@ -1113,6 +1114,8 @@ describe("repository session", () => {
     session.updateIssueDraft(number, { selectedAssignees: [] })
     await expect(session.submitIssueAction(number, "assignees")).rejects.toThrow("Assignment denied")
     expect(session.issueAction(number).selectedAssignees).toEqual([])
+    // The failed removal's outcome is unknown, so the retry sends it again.
+    expect(session.issueAction(number).uncertainAssignees).toEqual(["max", "jane"])
     fail = false
     const saving = session.submitIssueAction(number, "assignees")
     await expect(session.submitIssueAction(number, "assignees")).rejects.toThrow("already in progress")
@@ -1128,11 +1131,17 @@ describe("repository session", () => {
     await reading
     expect(session.issueDetail()?.resource.value).toMatchObject({ assignees: [], title: old.title, body: old.body, labels: old.labels })
     expect(ready(session).data.issues.closed.value?.items.some((item) => item.number === number)).toBe(true)
-    expect(updates).toEqual([[], []])
+    const clear = { add: [], remove: ["max", "jane"] }
+    expect(updates).toEqual([clear, clear])
+    expect(session.issueAction(number).uncertainAssignees).toBeUndefined()
     session.prepareIssueAction(number, "assignees")
     session.updateIssueDraft(number, { selectedAssignees: ["octocat", "OCTOCAT"] })
     await session.submitIssueAction(number, "assignees")
-    expect(updates).toEqual([[], [], ["octocat"]])
+    expect(updates).toEqual([clear, clear, { add: ["octocat"], remove: [] }])
+    // An unchanged selection saves without a request.
+    session.prepareIssueAction(number, "assignees")
+    expect(await session.submitIssueAction(number, "assignees")).toEqual({})
+    expect(updates).toHaveLength(3)
     expect(session.issueDetail()?.resource.value?.assignees).toEqual(["octocat"])
     expect(session.issueAction(number).body).toBe("Unrelated comment draft")
     expect(commentCalls).toBe(0)
@@ -1145,55 +1154,66 @@ describe("repository session", () => {
     expect(updates).toHaveLength(3)
   })
 
-  test("assignable users cache by repository, dedupe pages, retry the failed page and guard concurrent requests", async () => {
-    const first = deferred<{ items: string[]; hasMore: boolean }>()
+  test("assignable users cache by repository, continue by cursor, dedupe pages, retry the failed page, reload, and guard concurrent requests", async () => {
+    type UserPage = { items: AssignableUser[]; hasMore: boolean; cursor?: string }
+    const users = (...logins: string[]) => logins.map((login) => ({ login }))
+    const first = deferred<UserPage>()
     let firstPage = first.promise
-    const calls: [string, number | undefined][] = []
+    const calls: [string, number | undefined, string | undefined][] = []
     let fail = true
     const session = createRepositorySession(loaders({
-      assignableUsers: async ({ nameWithOwner: repository }, page) => {
-        calls.push([repository, page])
+      assignableUsers: async ({ nameWithOwner: repository }, page, _options, after) => {
+        calls.push([repository, page, after])
         if (repository === "owner/repo" && page === 1) return firstPage
-        if (repository === "owner/other") return { items: ["other"], hasMore: false }
+        if (repository === "owner/other") return { items: users("other"), hasMore: false }
         if (fail) throw new Error("Try again")
-        return { items: ["ALICE", "bob"], hasMore: false }
+        return { items: [{ login: "ALICE", name: "Alice" }, { login: "bob", name: "Bob" }], hasMore: false }
       },
     }))
     await session.load("owner/repo")
     await session.loadIssue(issueDetailFixture.number)
     session.prepareIssueAction(issueDetailFixture.number, "assignees")
     await session.loadAssignableUsers!()
-    expect(calls).toEqual([["owner/repo", 1]])
+    expect(calls).toEqual([["owner/repo", 1, undefined]])
     await session.load("owner/other")
     expect(session.assignableUsers!()).toBeUndefined()
     await session.loadAssignableUsers!()
-    first.resolve({ items: ["alice"], hasMore: true })
+    first.resolve({ items: users("alice"), hasMore: true, cursor: "c1" })
     await first.promise
     await Promise.resolve()
-    expect(session.assignableUsers!()?.value?.items).toEqual(["other"])
+    expect(session.assignableUsers!()?.value?.items).toEqual(users("other"))
     await session.load("owner/repo")
-    expect(session.assignableUsers!()?.value?.items).toEqual(["alice"])
+    expect(session.assignableUsers!()?.value?.items).toEqual(users("alice"))
     await session.loadIssue(issueDetailFixture.number)
     session.prepareIssueAction(issueDetailFixture.number, "assignees")
     expect(calls).toHaveLength(2)
     await session.loadAssignableUsers!()
-    expect(session.assignableUsers!()).toMatchObject({ status: "error", value: { page: 1, items: ["alice"], hasMore: true } })
+    expect(session.assignableUsers!()).toMatchObject({ status: "error", value: { page: 1, items: users("alice"), hasMore: true, cursor: "c1" } })
     fail = false
     await session.loadAssignableUsers!()
-    expect(session.assignableUsers!()).toEqual({ status: "ready", value: { page: 2, items: ["alice", "bob"], hasMore: false } })
+    expect(session.assignableUsers!()).toEqual({ status: "ready", value: { page: 2, items: [{ login: "alice" }, { login: "bob", name: "Bob" }], hasMore: false } })
     await session.loadAssignableUsers!()
-    expect(calls).toEqual([["owner/repo", 1], ["owner/other", 1], ["owner/repo", 2], ["owner/repo", 2]])
-    firstPage = Promise.resolve({ items: ["new-collaborator"], hasMore: false })
+    expect(calls).toEqual([["owner/repo", 1, undefined], ["owner/other", 1, undefined], ["owner/repo", 2, "c1"], ["owner/repo", 2, "c1"]])
+    // Reloading starts over from the first page, keeping the old list visible until it arrives.
+    const reloaded = deferred<UserPage>()
+    firstPage = reloaded.promise
+    const reloading = session.reloadAssignableUsers!()
+    expect(session.assignableUsers!()).toMatchObject({ status: "loading", value: { items: [{ login: "alice" }, { login: "bob", name: "Bob" }] } })
+    reloaded.resolve({ items: users("reloaded"), hasMore: false })
+    await reloading
+    expect(session.assignableUsers!()?.value?.items).toEqual(users("reloaded"))
+    expect(calls.at(-1)).toEqual(["owner/repo", 1, undefined])
+    firstPage = Promise.resolve({ items: users("new-collaborator"), hasMore: false })
     await session.refresh()
     expect(session.assignableUsers!()).toBeUndefined()
     await session.loadAssignableUsers!()
-    expect(session.assignableUsers!()?.value?.items).toEqual(["new-collaborator"])
-    const late = deferred<{ items: string[]; hasMore: boolean }>()
+    expect(session.assignableUsers!()?.value?.items).toEqual(users("new-collaborator"))
+    const late = deferred<UserPage>()
     firstPage = late.promise
     await session.refresh()
     const loading = session.loadAssignableUsers!()
     await session.refresh()
-    late.resolve({ items: ["stale"], hasMore: false })
+    late.resolve({ items: users("stale"), hasMore: false })
     await loading
     expect(session.assignableUsers!()).toBeUndefined()
   })
@@ -1948,7 +1968,10 @@ describe("reaction mutations", () => {
       issue: async () => structuredClone(server),
       issueComments: async () => ({ items: [issueCommentsFixture[0]!], hasMore: true }),
       createIssueComment: async () => { posts++; server.commentCount++; return structuredClone(posted) },
-      setIssueAssignees: async (_repository, _number, assignees) => { server = { ...server, assignees }; return assignment.promise },
+      updateIssueAssignees: async (_repository, _number, changes) => {
+        server = { ...server, assignees: [...server.assignees.filter((login) => !changes.remove.includes(login)), ...changes.add] }
+        return assignment.promise
+      },
       addReaction: async (_repository, target) => {
         if (target.kind === "issue") server = { ...server, ...reactionSnapshot(9) }
         return reactionSnapshot(target.kind === "issue" ? 9 : 7)

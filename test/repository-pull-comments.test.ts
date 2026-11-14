@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import type { IssueComment, PullRequestDetail } from "../src/models"
 import { createRepositorySession, type RepositoryLoaders } from "../src/repository-session"
+import type { AssigneeChanges } from "../src/github/client"
 import { commitDetailFixture, githubDataFixture, issueCommentsFixture, issueDetailFixture, pullContextFixture } from "./fixtures/github-data"
 
 function deferred<T>() {
@@ -76,15 +77,15 @@ describe("pull request conversation comments", () => {
 
   test("assignees initialize from PR, validate suggestions, preserve merged PR fields and never post drafts", async () => {
     let comments = 0
-    const calls: string[][] = []
+    const calls: AssigneeChanges[] = []
     const original = { ...pull(), merged: true, state: "closed" as const, assignees: ["alice"], permissions: { comment: true, close: true, reopen: true, assignees: true } }
     const session = await setup({
       pull: async () => original,
-      assignableUsers: async () => ({ items: ["bob"], hasMore: false }),
+      assignableUsers: async () => ({ items: [{ login: "bob" }], hasMore: false }),
       createIssueComment: async () => { comments++; return comment },
-      setIssueAssignees: async (_repo, number, assignees) => {
-        calls.push(assignees)
-        return { ...issueDetailFixture, number, assignees, commentCount: 999 }
+      updateIssueAssignees: async (_repo, number, changes) => {
+        calls.push(changes)
+        return { ...issueDetailFixture, number, assignees: ["bob"], commentCount: 999 }
       },
     })
     session.prepareIssueAction(421, "assignees", "pull")
@@ -95,7 +96,8 @@ describe("pull request conversation comments", () => {
     session.updateIssueDraft(421, { selectedAssignees: ["bob", "BOB"] }, "pull")
     const result = await session.submitIssueAction(421, "assignees", "pull")
     expect(result.pull).toMatchObject({ ...original, assignees: ["bob"], updatedAt: issueDetailFixture.updatedAt })
-    expect(calls).toEqual([["bob"]])
+    // Only the change is sent: alice is removed and bob added.
+    expect(calls).toEqual([{ add: ["bob"], remove: ["alice"] }])
     expect(comments).toBe(0)
     expect(session.issueAction(421, "pull").body).toBe(comment.body)
     await expect(session.submitIssueAction(421, "reopen", "pull")).rejects.toThrow("Merged")

@@ -3,7 +3,7 @@ import { testRender } from "@opentui/solid";
 import type { ScrollBoxRenderable, TextareaRenderable, TextRenderable } from "@opentui/core";
 import { createSignal, Show } from "solid-js";
 import { defaultConfig } from "../src/config";
-import type { IssueActionResult, Paginated } from "../src/models";
+import type { AssignableUser, IssueActionResult, Paginated } from "../src/models";
 import type {
   IssueActionState,
   IssueDetailState,
@@ -426,11 +426,13 @@ test("issue action overlays isolate input and confirm comments, closing, reopeni
   }
 });
 
-test("assignee suggestions filter locally, preserve selection, retry and save independently of comments", async () => {
+test("assignee suggestions filter by login or name, preserve selection, retry, reload and save changes independently of comments", async () => {
   const [action, setAction] = createSignal<IssueActionState>({ body: "Comment draft", reason: "completed", operation: { status: "idle" } });
   const submitted: string[] = [];
-  const [users, setUsers] = createSignal<ResourceState<Paginated<string>>>({ status: "ready", value: { items: ["john", "jane", "kate"], page: 1, hasMore: true } });
+  const [users, setUsers] = createSignal<ResourceState<Paginated<AssignableUser>>>({ status: "ready", value: {
+    items: [{ login: "john", name: "John Smith" }, { login: "jane" }, { login: "kate", name: "Kate Jones" }], page: 1, hasMore: true } });
   let candidateCalls = 0;
+  let reloads = 0;
   let finishSave: (() => void) | undefined;
   let fail = true;
   const view = await testRender(() => <App
@@ -446,14 +448,17 @@ test("assignee suggestions filter locally, preserve selection, retry and save in
     onLoadAssignableUsers={async () => {
       candidateCalls++;
       setUsers(candidateCalls === 1 ? { status: "error", phase: "pagination", message: "Candidates failed", value: users().value }
-        : { status: "ready", value: { items: ["john", "jane", "kate", "zoe"], page: 2, hasMore: false } });
+        : { status: "ready", value: { items: ["john", "jane", "kate", "zoe"].map((login) => ({ login })), page: 2, hasMore: false } });
     }}
+    onReloadAssignableUsers={async () => { reloads++; }}
     onPrepareIssueAction={() => setAction((draft) => ({ ...draft, selectedAssignees: [...issueDetailFixture.assignees], operation: { status: "idle" } }))}
     onIssueDraftChange={(_number, draft) => setAction((current) => ({ ...current, ...draft }))}
     onSubmitIssueAction={async (_number, kind) => {
       submitted.push(kind);
       if (fail) {
-        setAction((draft) => ({ ...draft, operation: { status: "error", message: "Save failed. GitHub did not confirm the requested assignees. Check GitHub before retrying." } }));
+        // As the session does: the failed change's outcome is unknown, so it is sent again next time.
+        setAction((draft) => ({ ...draft, uncertainAssignees: ["john"],
+          operation: { status: "error", message: "Save failed. GitHub did not confirm the requested assignees. Check GitHub before retrying." } }));
         throw new Error("Save failed");
       }
       setAction((draft) => ({ ...draft, operation: { status: "loading" } }));
@@ -473,8 +478,13 @@ test("assignee suggestions filter locally, preserve selection, retry and save in
     view.mockInput.pressEnter(); await settle();
     expect(view.captureCharFrame()).toMatch(/@max +✓ selected/);
     expect(view.captureCharFrame()).toMatch(/@jane +✓ selected/);
-    await view.mockInput.typeText("@jo"); await settle();
-    expect(view.captureCharFrame()).toContain("@john");
+    await view.mockInput.typeText("jones"); await settle();
+    expect(view.captureCharFrame()).toMatch(/@kate Kate Jones/);
+    expect(view.captureCharFrame()).not.toContain("@john");
+    for (let index = 0; index < 5; index++) view.mockInput.pressBackspace();
+    // "@jo" would also match Kate Jones by name.
+    await view.mockInput.typeText("@joh"); await settle();
+    expect(view.captureCharFrame()).toMatch(/@john John Smith/);
     expect(view.captureCharFrame()).not.toMatch(/@john +✓ selected/);
     expect(view.captureCharFrame()).not.toContain("@kate");
     expect(view.captureCharFrame()).not.toContain("@max");
@@ -492,12 +502,24 @@ test("assignee suggestions filter locally, preserve selection, retry and save in
     view.mockInput.pressEnter(); await settle();
     expect(candidateCalls).toBe(2);
     expect(view.captureCharFrame()).not.toContain("Retry loading users");
+    // Ctrl+R reloads the user list here rather than the configuration.
+    view.mockInput.pressKey("r", { ctrl: true }); await settle();
+    expect(reloads).toBe(1);
+    // Saving an unchanged selection closes the picker without a request.
     await clickControl(view, "assignees-save"); await settle();
     expect(submitted).toEqual([]);
+    expect(view.renderer.root.findDescendantById("assignees-save")).toBeUndefined();
+    view.mockInput.pressKey("a"); await settle();
+    view.mockInput.pressEnter(); await settle();
+    setAction((draft) => ({ ...draft, selectedAssignees: ["max", "jane", "john"] })); await settle();
+    await clickControl(view, "assignees-save"); await settle();
+    expect(submitted).toEqual([]);
+    expect(view.captureCharFrame()).toContain("Save assignee changes for #");
+    expect(view.captureCharFrame()).toContain("+ @john");
     await clickControl(view, "assignees-confirm"); await settle();
     expect(view.captureCharFrame()).toContain("Save failed");
     expect(view.captureCharFrame().replace(/\s+/g, " ")).toContain("GitHub before retrying.");
-    expect(action().selectedAssignees).toEqual(["max", "jane"]);
+    expect(action().selectedAssignees).toEqual(["max", "jane", "john"]);
     expect(action().body).toBe("Comment draft");
     expect(view.renderer.root.findDescendantById("assignees-save")).toBeUndefined();
     fail = false;
@@ -505,7 +527,9 @@ test("assignee suggestions filter locally, preserve selection, retry and save in
     view.mockInput.pressKey("a"); await settle();
     view.mockInput.pressEnter(); await settle();
     expect(action().selectedAssignees).toEqual(["max", "jane"]);
+    // Unchanged, but john's earlier change is uncertain, so it is sent again: he stays unassigned.
     await clickControl(view, "assignees-save"); await settle();
+    expect(view.captureCharFrame()).toContain("− @john");
     await clickControl(view, "assignees-confirm"); await settle();
     // Saving feedback lives in the status bar, which delays its loading indicator.
     await Bun.sleep(220); await view.flush();
@@ -584,7 +608,7 @@ test("assignee picker limits selection and requires confirmation before saving",
   let saves = 0;
   let closes = 0;
   const view = await testRender(() => <IssueAssigneesPicker number={42} state={action()}
-    users={{ status: "ready", value: { items: logins, page: 1, hasMore: false } }}
+    users={{ status: "ready", value: { items: logins.map((login) => ({ login })), page: 1, hasMore: false } }}
     onChange={(selectedAssignees) => setAction((current) => ({ ...current, selectedAssignees }))}
     onLoadMore={() => {}} onSubmit={() => { saves++; }} onHintChange={() => {}} onClose={() => { closes++; }} />,
     { width: 80, height: 30 });
@@ -608,7 +632,7 @@ test("assignee picker limits selection and requires confirmation before saving",
     expect(action().selectedAssignees).toHaveLength(10);
     view.mockInput.pressKey("s", { ctrl: true }); await settle();
     expect(saves).toBe(0);
-    expect(view.captureCharFrame()).toContain("Save assignees for #42?");
+    expect(view.captureCharFrame()).toContain("Save assignee changes for #42?");
     view.mockInput.pressKey("s", { ctrl: true }); await settle();
     expect(saves).toBe(0);
     view.mockInput.pressEscape(); await settle();
@@ -622,7 +646,7 @@ test("assignee picker limits selection and requires confirmation before saving",
     expect(action().selectedAssignees).toHaveLength(10);
     setAction((current) => ({ ...current, selectedAssignees: [] }));
     view.mockInput.pressKey("s", { ctrl: true }); await settle();
-    expect(view.captureCharFrame()).toContain("Remove all assignees from #42?");
+    expect(view.captureCharFrame()).toContain("− @user0");
     expect(saves).toBe(1);
     view.mockInput.pressEnter(); await settle();
     expect(saves).toBe(2);
@@ -645,7 +669,7 @@ test("PR actions route close, reopen and assignees to PR drafts and hide state a
     } }, comments: { status: "ready", value: { items: [], page: 1, hasMore: false } },
       commits: { status: "ready", value: [] }, context: { status: "ready", value: pullContextFixture }, references: { status: "ready", value: [] } }}
     getIssueAction={(_number, parent) => parent === "pull" ? action() : { body: "Issue draft", reason: "completed", operation: { status: "idle" } }}
-    assignableUsers={{ status: "ready", value: { items: ["jane", "john"], page: 1, hasMore: false } }}
+    assignableUsers={{ status: "ready", value: { items: [{ login: "jane" }, { login: "john" }], page: 1, hasMore: false } }}
     onPrepareIssueAction={(_number, kind, parent) => {
       expect(parent).toBe("pull");
       if (kind === "assignees") setAction((draft) => ({ ...draft, selectedAssignees: ["jane"] }));

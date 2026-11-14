@@ -57,6 +57,7 @@ export const keybindingDefinitions = {
   "picker.up": binding(["up"], "Previous search result"),
   "picker.down": binding(["down"], "Next search result"),
   "picker.accept": binding(["enter"], "Select search result / toggle assignee"),
+  "picker.reload": binding(["ctrl+r"], "Reload assignable users"),
   "mention.up": binding(["shift+tab", "up"], "Previous username suggestion"),
   "mention.down": binding(["tab", "down"], "Next username suggestion"),
   "mention.accept": binding(["enter"], "Insert username suggestion"),
@@ -224,7 +225,8 @@ export const keybindingContexts: Record<string, KeyAction[]> = {
   diffBody: [...browse.filter((action) => !["global.settings", "navigation.previousTab", "navigation.nextTab", "item.copy"].includes(action)), "diff.openViewer", "navigation.back", "diff.previousFile", "diff.nextFile", "diff.toggleFiles", "diff.filterFiles", "diff.previousHunk", "diff.nextHunk", "diff.toggleLayout", "diff.toggleWrap", "diff.toggleComments", "diff.panLeft", "diff.panRight"],
   picker,
   mentions: [...dialogs, "mention.up", "mention.down", "mention.accept"],
-  assignees: [...picker, "dialog.submit"],
+  // Ctrl+R reloads the user list here instead of the configuration.
+  assignees: [...picker.filter((action) => action !== "global.reloadConfig"), "dialog.submit", "picker.reload"],
   settings: [...dialogs, ...searchActions, "navigation.up", "navigation.down", "navigation.activate", "settings.previousValue", "settings.nextValue"],
   references: [...dialogs, ...navigationActions, "navigation.activate", "item.open", "item.copy", "references.switchTab"],
   issueMenu: [...dialogs, "navigation.up", "navigation.down", "navigation.activate"],

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { createGitHubClient } from "../src/github/client"
+import { AssigneeUpdateError, createGitHubClient } from "../src/github/client"
 import { githubDataFixture } from "./fixtures/github-data"
 import { createRequestBudget, MAX_DETAIL_ITEMS, ResponseLimitError } from "../src/github/request-budget"
 import { currentPullReviews } from "../src/ui/pull-reviews"
@@ -528,53 +528,101 @@ describe("GitHub client", () => {
     ])
   })
 
-  test("paginates assignable logins and clears assignees with an isolated PATCH", async () => {
-    const paths: string[] = []
-    const calls: unknown[] = []
-    let returnedAssignees: string[] = []
+  test("loads assignable users with display names by cursor, reports GraphQL errors, and falls back to REST logins", async () => {
+    const queries: Record<string, string>[] = []
+    let failure: string | undefined
     const client = createGitHubClient({
       ...transport(),
+      async graphql<T>(query: string, variables: Record<string, string>) {
+        expect(query).toContain("assignableUsers(first: 100, after: $after) { nodes { login name }")
+        queries.push(variables)
+        if (failure) return { errors: [{ message: failure }] } as T
+        return { data: { repository: { assignableUsers: variables.after
+          ? { nodes: [{ login: "carol", name: " " }, { name: "No login" }], pageInfo: { hasNextPage: false, endCursor: null } }
+          : { nodes: [{ login: "alice", name: "Alice Smith" }, { login: "bob", name: null }], pageInfo: { hasNextPage: true, endCursor: "c1" } },
+        } } } as T
+      },
+    })
+    expect(await client.assignableUsers("owner/repo")).toEqual(
+      { items: [{ login: "alice", name: "Alice Smith" }, { login: "bob" }], hasMore: true, cursor: "c1" })
+    expect(await client.assignableUsers("owner/repo", 2, undefined, "c1")).toEqual({ items: [{ login: "carol" }], hasMore: false })
+    expect(queries).toEqual([{ owner: "owner", name: "repo" }, { owner: "owner", name: "repo", after: "c1" }])
+    failure = "Could not resolve to a Repository"
+    await expect(client.assignableUsers("owner/repo")).rejects.toThrow("Could not resolve to a Repository")
+
+    const paths: string[] = []
+    const { graphql: _, ...restOnly } = transport()
+    const rest = createGitHubClient({
+      ...restOnly,
       async json<T>(path: string) {
         paths.push(path)
         return Array.from({ length: path.endsWith("page=1") ? 100 : 1 }, (_, index) => ({ login: `user${index}` })) as T
       },
-      async mutate<T>(path: string, method: "POST" | "PATCH", body: Record<string, unknown>) {
+    })
+    expect(await rest.assignableUsers("owner/repo")).toMatchObject({ hasMore: true })
+    expect(await rest.assignableUsers("owner/repo", 2)).toEqual({ items: [{ login: "user0" }], hasMore: false })
+    expect(paths).toEqual(["repos/owner/repo/assignees?per_page=100&page=1", "repos/owner/repo/assignees?per_page=100&page=2"])
+  })
+
+  test("sends only assignee changes, keeps concurrent assignees, and reports ignored or partial writes", async () => {
+    const calls: unknown[] = []
+    let server: string[] = []
+    let ignore = false
+    let failRemoval: Error | undefined
+    const client = createGitHubClient({
+      ...transport(),
+      async mutate<T>(path: string, method: "POST" | "PATCH" | "DELETE", body: Record<string, unknown>) {
         calls.push({ path, method, body })
-        return { number: 42, state: "closed", title: "Original", body: "", user: null,
+        const logins = body.assignees as string[]
+        if (method === "DELETE" && failRemoval) throw failRemoval
+        if (!ignore) server = method === "POST" ? [...server, ...logins]
+          : server.filter((login) => !logins.some((other) => other.toLowerCase() === login.toLowerCase()))
+        return { number: 42, state: "open", title: "Original", body: "", user: null,
           created_at: "2026-01-01", updated_at: "2026-01-01", html_url: "https://github.com/owner/repo/issues/42",
-          locked: false, labels: [], assignees: returnedAssignees.map((login) => ({ login })), comments: 0 } as T
+          locked: false, labels: [], assignees: server.map((login) => ({ login })), comments: 0 } as T
       },
-      async graphql<T>(query: string, variables: Record<string, string>) {
-        expect(variables).toEqual({ repositoryId: "R_fixture_123" })
-        expect(query).toContain("repository: node(id: $repositoryId)")
-        expect(query).not.toContain("$owner")
+      async graphql<T>(query: string) {
         expect(query).toContain("viewerCanAssign")
-        expect(query).not.toContain("viewerCanUpdate")
-        expect(query).not.toContain("viewerCanLabel")
         return { data: { repository: { isArchived: false, viewerPermission: "READ", issue: {
           viewerCanClose: false, viewerCanReopen: false, viewerCanAssign: true,
         } } } } as T
       },
     })
-    expect(await client.assignableUsers("owner/repo")).toMatchObject({ hasMore: true })
-    expect(await client.assignableUsers("owner/repo", 2)).toEqual({ items: ["user0"], hasMore: false })
-    expect(paths).toEqual(["repos/owner/repo/assignees?per_page=100&page=1", "repos/owner/repo/assignees?per_page=100&page=2"])
-    const updated = await client.setIssueAssignees(repository, 42, [])
+    // Someone else assigned carol meanwhile; only our own changes are sent.
+    server = ["bob", "carol"]
+    const updated = await client.updateIssueAssignees(repository, 42, { add: ["alice"], remove: ["BOB"] })
+    expect(updated.assignees).toEqual(["carol", "alice"])
     expect(updated.permissions?.assignees).toBe(true)
-    expect(updated.assignees).toEqual([])
-    expect(calls).toEqual([{ path: "repositories/123/issues/42", method: "PATCH", body: { assignees: [] } }])
-    returnedAssignees = ["BOB", "Alice"]
-    expect((await client.setIssueAssignees(repository, 42, ["alice", "bob"])).assignees).toEqual(returnedAssignees)
-    for (const [requested, returned] of [
-      [["alice"], []], // Ignored addition.
-      [[], ["alice"]], // Ignored removal.
-      [["alice", "bob"], ["alice"]], // Partial assignment.
-      [["alice"], ["bob"]], // Different assignee, same count.
-      [["alice"], ["alice", "bob"]], // Unexpected extra assignee.
-    ]) {
-      returnedAssignees = returned!
-      await expect(client.setIssueAssignees(repository, 42, requested!)).rejects.toThrow("did not confirm the requested assignees")
-    }
+    expect(calls).toEqual([
+      { path: "repositories/123/issues/42/assignees", method: "POST", body: { assignees: ["alice"] } },
+      { path: "repositories/123/issues/42/assignees", method: "DELETE", body: { assignees: ["BOB"] } },
+    ])
+    calls.length = 0
+    await client.updateIssueAssignees(repository, 42, { add: [], remove: ["carol"] })
+    expect(calls).toEqual([{ path: "repositories/123/issues/42/assignees", method: "DELETE", body: { assignees: ["carol"] } }])
+    calls.length = 0
+    await expect(client.updateIssueAssignees(repository, 42, { add: [], remove: [] })).rejects.toThrow("no assignee changes")
+    expect(calls).toEqual([])
+
+    // GitHub silently ignores users it cannot assign.
+    ignore = true
+    server = ["alice"]
+    const ignored = await client.updateIssueAssignees(repository, 42, { add: ["dave"], remove: ["alice"] }).catch((error) => error)
+    expect(ignored).toBeInstanceOf(AssigneeUpdateError)
+    expect(ignored.message).toContain("GitHub did not assign @dave. GitHub did not unassign @alice.")
+    expect(ignored.detail.assignees).toEqual(["alice"])
+
+    ignore = false
+    server = ["bob"]
+    failRemoval = new Error("Server error")
+    const partial = await client.updateIssueAssignees(repository, 42, { add: ["alice"], remove: ["bob"] }).catch((error) => error)
+    expect(partial).toBeInstanceOf(AssigneeUpdateError)
+    expect(partial.message).toBe("Added @alice, but removing @bob failed: Server error")
+    expect(partial.detail.assignees).toEqual(["bob", "alice"])
+    // Nothing was added, so the original failure is reported unchanged.
+    const removal = await client.updateIssueAssignees(repository, 42, { add: [], remove: ["bob"] }).catch((error) => error)
+    expect(removal).not.toBeInstanceOf(AssigneeUpdateError)
+    expect(removal.message).toBe("Server error")
   })
 
   test("closes duplicates using the canonical global ID and rejects invalid targets without writes", async () => {

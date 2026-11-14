@@ -374,4 +374,8 @@ export type Paginated<T> = {
   items: T[]
   page: number
   hasMore: boolean
+  // Cursor-paginated sources (GraphQL) continue from here instead of a page number.
+  cursor?: string
 }
+
+export type AssignableUser = { login: string; name?: string }

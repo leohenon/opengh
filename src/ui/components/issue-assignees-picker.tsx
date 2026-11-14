@@ -1,7 +1,8 @@
 import { TextAttributes, type ScrollBoxRenderable } from "@opentui/core"
 import { usePaste, useTerminalDimensions } from "@opentui/solid"
 import { createEffect, createMemo, createSignal, Index, onCleanup, Show } from "solid-js"
-import type { Paginated } from "../../models"
+import type { AssignableUser, Paginated } from "../../models"
+import { assigneeChanges } from "../../assignee-changes"
 import type { IssueActionState, ResourceState } from "../../repository-state"
 import { createScrollbarVisibility } from "../scrollbar-visibility"
 import { useTheme } from "../theme"
@@ -13,10 +14,11 @@ import { mouseClick, mouseHover } from "../mouse"
 export function IssueAssigneesPicker(props: {
   number: number
   state: IssueActionState
-  users?: ResourceState<Paginated<string>>
+  users?: ResourceState<Paginated<AssignableUser>>
   showScrollbar?: boolean
   onChange(logins: string[]): void
   onLoadMore(): void
+  onReload?(): void
   onSubmit(): void
   onHintChange(hint: string | undefined): void
   onClose(): void
@@ -39,7 +41,13 @@ export function IssueAssigneesPicker(props: {
     if (confirming()) setConfirming(false)
     else props.onClose()
   }
-  const review = () => { if (!blocked()) setConfirming(true) }
+  // Exactly what saving sends; with no changes there is nothing to confirm.
+  const changes = createMemo(() => assigneeChanges(props.state.assigneeBaseline ?? initial, selected(), props.state.uncertainAssignees))
+  const review = () => {
+    if (blocked()) return
+    if (!changes().add.length && !changes().remove.length) props.onClose()
+    else setConfirming(true)
+  }
   const submit = () => {
     if (pending() || !confirming()) return
     setConfirming(false)
@@ -47,18 +55,21 @@ export function IssueAssigneesPicker(props: {
   }
   const loading = () => props.users?.status === "loading"
   const canLoad = () => !props.users || props.users.status === "error" || props.users.value?.hasMore === true
+  const names = createMemo(() => new Map((props.users?.value?.items ?? [])
+    .flatMap((user) => user.name ? [[user.login.toLowerCase(), user.name] as const] : [])))
   const candidates = createMemo(() => {
     const seen = new Set<string>()
-    return [...initial, ...(props.users?.value?.items ?? []), ...selected()].filter((login) => {
+    return [...initial, ...(props.users?.value?.items ?? []).map((user) => user.login), ...selected()].filter((login) => {
       const key = login.toLowerCase()
       if (seen.has(key)) return false
       seen.add(key)
       return true
     })
   })
+  const nameOf = (login: string) => names().get(login.toLowerCase())
   const filtered = createMemo(() => {
     const needle = query().trim().replace(/^@/, "").toLowerCase()
-    return candidates().filter((login) => login.toLowerCase().includes(needle))
+    return candidates().filter((login) => login.toLowerCase().includes(needle) || nameOf(login)?.toLowerCase().includes(needle))
   })
   const isSelected = (login: string) => selected().some((value) => value.toLowerCase() === login.toLowerCase())
   const toggle = (login: string) => {
@@ -91,6 +102,7 @@ export function IssueAssigneesPicker(props: {
     ? keys.hints(["dialog.confirm", "confirm"], ["dialog.close", "back"]) : keys.hints(
       ["dialog.submit", "save"],
       ...(filtered()[currentRow()] || !loading() ? [["picker.accept", filtered()[currentRow()] ? "toggle" : props.users?.status === "error" ? "retry users" : "load users"] as const] : []),
+      ...(props.onReload && !loading() ? [["picker.reload", "reload users"] as const] : []),
       ["dialog.close", "cancel"])))
   onCleanup(() => props.onHintChange(undefined))
   usePaste((event) => {
@@ -98,6 +110,9 @@ export function IssueAssigneesPicker(props: {
   })
   const move = (delta: number) => { setActive(Math.max(0, Math.min(rowCount() - 1, currentRow() + delta))) }
   useKeyActions({}, { when: pending, priority: 200, modal: true })
+  // Above the global config reload, which the picker context leaves unbound.
+  useKeyActions({ "picker.reload": () => { if (!loading()) props.onReload?.() } },
+    { when: () => !blocked() && props.onReload !== undefined, priority: 1001 })
   useKeyActions({ "dialog.close": requestClose, "dialog.confirm": submit },
     { when: () => confirming() && !pending(), priority: 150, modal: true })
   useKeyActions({
@@ -166,7 +181,9 @@ export function IssueAssigneesPicker(props: {
                 backgroundColor={currentRow() === index || hover.hovered() ? colors.panelHover : colors.panel}
                 {...mouseClick(() => activate(index), () => !blocked(), () => login(), hover)}>
                 <text width={2} flexShrink={0} fg={colors.blue}>{currentRow() === index ? "›" : " "}</text>
-                <text height={1} minWidth={0} wrapMode="none" truncate flexGrow={1} flexShrink={1} fg={colors.blue} attributes={TextAttributes.BOLD}>@{login()}</text>
+                <text height={1} minWidth={0} wrapMode="none" truncate flexGrow={1} flexShrink={1} fg={colors.blue} attributes={TextAttributes.BOLD}>
+                  @{login()}<Show when={nameOf(login())}>{(name) => <span style={{ fg: colors.muted }}> {name()}</span>}</Show>
+                </text>
                 <text width={10} flexShrink={0} fg={colors.green}>{isSelected(login()) ? "✓ selected" : ""}</text>
               </box>
             )
@@ -186,15 +203,12 @@ export function IssueAssigneesPicker(props: {
       </box>
     </Popup>
     <Show when={confirming()}>
-      <Popup width={56} height={Math.max(1, selected().length) + 6} placement="center" zIndex={300} onClose={requestClose}>
+      <Popup width={56} height={Math.max(1, changes().add.length + changes().remove.length) + 6} placement="center" zIndex={300} onClose={requestClose}>
         <box flexGrow={1} minHeight={0} paddingX={2} paddingBottom={1} flexDirection="column">
-          <text flexShrink={0} fg={colors.text} attributes={TextAttributes.BOLD}>
-            {selected().length ? `Save assignees for #${props.number}?` : `Remove all assignees from #${props.number}?`}
-          </text>
+          <text flexShrink={0} fg={colors.text} attributes={TextAttributes.BOLD}>Save assignee changes for #{props.number}?</text>
           <scrollbox ref={(value) => { confirmationList = value }} marginTop={1} flexGrow={1} minHeight={0} scrollY focusable={false}>
-            <Show when={selected().length} fallback={<text fg={colors.muted}>No assignees will remain.</text>}>
-              <Index each={selected()}>{(login) => <text height={1} wrapMode="none" truncate fg={colors.text}>@{login()}</text>}</Index>
-            </Show>
+            <Index each={changes().add}>{(login) => <text height={1} wrapMode="none" truncate fg={colors.green}>+ @{login()}</text>}</Index>
+            <Index each={changes().remove}>{(login) => <text height={1} wrapMode="none" truncate fg={colors.red}>− @{login()}</text>}</Index>
           </scrollbox>
           <box height={1} flexShrink={0} marginTop={1}>
             <Action id="assignees-confirm" disabled={pending()} onActivate={submit}>Confirm</Action>

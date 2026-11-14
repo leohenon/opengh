@@ -1,4 +1,5 @@
 import type {
+  AssignableUser,
   CommitDetail,
   CommitSummary,
   ForcePushCommit,
@@ -28,6 +29,7 @@ import type {
   WorkflowJob,
 } from "../models"
 import { pullMergeBlocker } from "../pull-merge"
+import type { AssigneeChanges } from "../assignee-changes"
 import { repositoryName, repositoryPath, repositorySelector, type RepositoryReference } from "./repository-target"
 import { createGitHubDocuments } from "./documents"
 import { createIssueComments, issueComment, type IssueCommentResponse, type IssueCommentStorage } from "./issue-comments"
@@ -50,6 +52,17 @@ const PAGE_SIZE = 30
 const BRANCH_PAGE_SIZE = 100
 
 type Page<T> = { items: T[]; hasMore: boolean }
+
+export type { AssigneeChanges } from "../assignee-changes"
+
+// The update may have partly applied; detail holds GitHub's state after the last successful request.
+export class AssigneeUpdateError extends Error {
+  constructor(message: string, readonly detail?: IssueDetail) {
+    super(message)
+  }
+}
+
+const mentions = (logins: readonly string[]) => logins.map((login) => `@${login}`).join(", ")
 
 type RepositoryResponse = {
   id: number
@@ -651,26 +664,75 @@ export function createGitHubClient(transport: GitHubTransport, commentStorage?: 
     return withIssuePermissions(repository, number, issueDetail(item))
   }
 
-  const assignableUsers = async (repository: RepositoryReference, page = 1, options?: RequestOptions): Promise<Page<string>> => {
-    const users = await transport.json<{ login: string }[]>(`${repositoryPath(repository)}/assignees?per_page=100&page=${page}`, options)
-    options?.budget?.consumeItems(users.length)
-    return { items: users.map((user) => user.login), hasMore: users.length === 100 }
+  // GraphQL includes display names; REST returns logins only, so it is the fallback.
+  const assignableUsers = async (
+    repository: RepositoryReference, page = 1, options?: RequestOptions, after?: string,
+  ): Promise<Page<AssignableUser> & { cursor?: string }> => {
+    if (!transport.graphql) {
+      const users = await transport.json<{ login: string }[]>(`${repositoryPath(repository)}/assignees?per_page=100&page=${page}`, options)
+      options?.budget?.consumeItems(users.length)
+      return { items: users.map((user) => ({ login: user.login })), hasMore: users.length === 100 }
+    }
+    const failure = `Assignable users for ${repositoryName(repository)} could not be loaded.`
+    const selector = repositorySelector(repository)
+    const response = record(await transport.graphql<unknown>(
+      `query(${selector.declarations}, $after: String) { ${selector.select("assignableUsers(first: 100, after: $after) { nodes { login name } pageInfo { hasNextPage endCursor } }")} }`,
+      { ...selector.variables, ...(after ? { after } : {}) }, options,
+    ))
+    if (response?.errors != null && (!Array.isArray(response.errors) || response.errors.length)) {
+      const messages = Array.isArray(response.errors)
+        ? response.errors.map((error) => record(error)?.message).filter((message): message is string => typeof message === "string" && !!message.trim())
+        : []
+      throw new Error(messages.join(" · ") || failure)
+    }
+    const connection = record(record(record(response?.data)?.repository)?.assignableUsers)
+    const pageInfo = record(connection?.pageInfo)
+    if (!Array.isArray(connection?.nodes) || typeof pageInfo?.hasNextPage !== "boolean") throw new Error(failure)
+    const items = connection.nodes.flatMap((node) => {
+      const user = record(node)
+      if (typeof user?.login !== "string" || !user.login) return []
+      return [typeof user.name === "string" && user.name.trim() ? { login: user.login, name: user.name.trim() } : { login: user.login }]
+    })
+    const cursor = typeof pageInfo.endCursor === "string" && pageInfo.endCursor ? pageInfo.endCursor : undefined
+    options?.budget?.consumeItems(items.length)
+    return { items, hasMore: pageInfo.hasNextPage && cursor !== undefined, cursor }
   }
 
-  const setIssueAssignees = async (repository: Repo, number: number, assignees: string[]): Promise<IssueDetail> => {
+  // Sends only the changes, so assignees someone else changed meanwhile are left alone.
+  const updateIssueAssignees = async (repository: Repo, number: number, changes: AssigneeChanges): Promise<IssueDetail> => {
     if (!transport.mutate) throw new Error("GitHub transport does not support mutations.")
-    const item = await transport.mutate<IssueDetailResponse>(
-      `${repositoryIssues(repository)}/${number}`, "PATCH", { assignees },
-    )
+    if (!changes.add.length && !changes.remove.length) throw new Error("There are no assignee changes to save.")
     // GitHub manages PR assignees through the issues endpoint too.
-    const detail = issueDetail(item, true)
-    const requested = new Set(assignees.map((login) => login.toLowerCase()))
-    const confirmed = new Set(detail.assignees.map((login) => login.toLowerCase()))
-    if (detail.number !== number || requested.size !== confirmed.size
-      || [...requested].some((login) => !confirmed.has(login))) {
-      throw new Error("GitHub did not confirm the requested assignees. Check the issue and your permissions on GitHub before retrying.")
+    const path = `${repositoryIssues(repository)}/${number}/assignees`
+    const result = async (item: IssueDetailResponse) => {
+      const detail = issueDetail(item, true)
+      if (detail.number !== number) throw new Error("GitHub returned a different issue.")
+      return "pull_request" in item ? detail : withIssuePermissions(repository, number, detail)
     }
-    return "pull_request" in item ? detail : withIssuePermissions(repository, number, detail)
+    let item: IssueDetailResponse | undefined
+    if (changes.add.length) item = await transport.mutate<IssueDetailResponse>(path, "POST", { assignees: changes.add })
+    if (changes.remove.length) {
+      try {
+        item = await transport.mutate<IssueDetailResponse>(path, "DELETE", { assignees: changes.remove })
+      } catch (error) {
+        if (!item) throw error
+        const reason = error instanceof Error ? error.message : String(error)
+        throw new AssigneeUpdateError(`Added ${mentions(changes.add)}, but removing ${mentions(changes.remove)} failed: ${reason}`,
+          await result(item).catch(() => undefined))
+      }
+    }
+    const detail = await result(item!)
+    const assigned = new Set(detail.assignees.map((login) => login.toLowerCase()))
+    const missing = changes.add.filter((login) => !assigned.has(login.toLowerCase()))
+    const remaining = changes.remove.filter((login) => assigned.has(login.toLowerCase()))
+    if (missing.length || remaining.length) {
+      throw new AssigneeUpdateError([
+        missing.length ? `GitHub did not assign ${mentions(missing)}.` : "",
+        remaining.length ? `GitHub did not unassign ${mentions(remaining)}.` : "",
+        "Check their access to the repository and your permissions on GitHub before retrying.",
+      ].filter(Boolean).join(" "), detail)
+    }
+    return detail
   }
 
   const markIssueDuplicate = async (
@@ -1268,7 +1330,7 @@ export function createGitHubClient(transport: GitHubTransport, commentStorage?: 
     }
   }
 
-  return { metadata, documents, document, branches, commits, commitCount, commit, issues, workCounts, hasIssues, issueKind, issue, issueComments, createIssueComment, addReaction, updateIssueState, updatePullState, updatePullDraft, assignableUsers, setIssueAssignees, markIssueDuplicate, issueReferences, issueTimeline, pulls, pull, pullMergeMessage, mergePull, pullCommits, pullContext, runs, run, runJobs }
+  return { metadata, documents, document, branches, commits, commitCount, commit, issues, workCounts, hasIssues, issueKind, issue, issueComments, createIssueComment, addReaction, updateIssueState, updatePullState, updatePullDraft, assignableUsers, updateIssueAssignees, markIssueDuplicate, issueReferences, issueTimeline, pulls, pull, pullMergeMessage, mergePull, pullCommits, pullContext, runs, run, runJobs }
 }
 
 const client = createGitHubClient(githubTransport)
@@ -1293,7 +1355,7 @@ export const updateGitHubPullDraft = client.updatePullDraft
 export const mergeGitHubPull = client.mergePull
 export const loadGitHubPullMergeMessage = client.pullMergeMessage
 export const loadGitHubAssignableUsers = client.assignableUsers
-export const setGitHubIssueAssignees = client.setIssueAssignees
+export const updateGitHubIssueAssignees = client.updateIssueAssignees
 export const markGitHubIssueDuplicate = client.markIssueDuplicate
 export const loadGitHubIssueReferences = client.issueReferences
 export const loadGitHubIssueTimeline = client.issueTimeline

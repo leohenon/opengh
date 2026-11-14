@@ -121,6 +121,7 @@ Type `@` in a comment editor.
 | `dialog.close`           | `esc`                                         |
 | `dialog.confirm`         | `enter`                                       |
 | `dialog.submit`          | `ctrl+s`                                      |
+| `picker.reload`          | `ctrl+r` (assignee picker: reload users)      |
 | `dialog.discard`         | `ctrl+d`                                      |
 | `dialog.toggleExpanded`  | `ctrl+o`                                      |
 | `dialog.externalEditor`  | `ctrl+g`                                      |

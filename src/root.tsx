@@ -442,6 +442,7 @@ export function Root(props: {
               onCloseIssue={session.clearIssue}
               assignableUsers={session.assignableUsers?.()}
               onLoadAssignableUsers={session.loadAssignableUsers}
+              onReloadAssignableUsers={session.reloadAssignableUsers}
               onSearchMentionUsers={session.searchMentionableUsers}
               getCommentDraft={session.commentDraft}
               getIssueAction={session.issueAction}

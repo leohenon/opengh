@@ -9,7 +9,7 @@ export type RequestOptions = { signal?: AbortSignal; maxBytes?: number; limitMes
 
 export type GitHubTransport = {
   json<T>(path: string, options?: RequestOptions): Promise<T>
-  mutate?<T>(path: string, method: "POST" | "PATCH", body: Record<string, unknown>, options?: RequestOptions): Promise<T>
+  mutate?<T>(path: string, method: "POST" | "PATCH" | "DELETE", body: Record<string, unknown>, options?: RequestOptions): Promise<T>
   graphql?<T>(query: string, variables: Record<string, string>, options?: RequestOptions): Promise<T>
   text(path: string, accept?: string, options?: RequestOptions): Promise<string>
   page?(url: string, options?: RequestOptions): Promise<string>
@@ -19,7 +19,7 @@ type RequestArguments = [
   path: string,
   accept?: string,
   fields?: Record<string, string>,
-  mutation?: { method: "POST" | "PATCH"; body: Record<string, unknown> },
+  mutation?: { method: "POST" | "PATCH" | "DELETE"; body: Record<string, unknown> },
   options?: RequestOptions,
 ]
 
@@ -236,7 +236,7 @@ export function createGitHubTransport(scheduler: GitHubRequestScheduler = github
     async json<T>(path: string, options?: RequestOptions) {
       return JSON.parse(await authenticatedRequest(path, undefined, undefined, undefined, options)) as T
     },
-    async mutate<T>(path: string, method: "POST" | "PATCH", body: Record<string, unknown>, options?: RequestOptions) {
+    async mutate<T>(path: string, method: "POST" | "PATCH" | "DELETE", body: Record<string, unknown>, options?: RequestOptions) {
       return JSON.parse(await authenticatedRequest(path, undefined, undefined, { method, body }, options)) as T
     },
     async graphql<T>(query: string, variables: Record<string, string>, options?: RequestOptions) {

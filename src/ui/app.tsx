@@ -8,7 +8,7 @@ import type { HintEntry } from "../keybindings"
 import { KeybindingsBoundary, useKeyActions, useKeybindings } from "./keybindings"
 import { cloneCommand, cloneDestination, matchesLocalRepository, type LocalRepository, type CommandSpec, type CommandTask } from "../command-actions"
 import { CommandDialog, type CommandAction } from "./components/command-dialog"
-import type { IssueReference, CommitDetail, DiffContent, DiffTarget, IssueActionKind, IssueActionParent, IssueActionResult, Paginated, ListState, PullMergeDraft, PullMergeMessage, PullMergeMethod, PullRequestDetail, PullReviewThread, ReactionKind, ReactionState, ReactionTarget } from "../models"
+import type { AssignableUser, IssueReference, CommitDetail, DiffContent, DiffTarget, IssueActionKind, IssueActionParent, IssueActionResult, Paginated, ListState, PullMergeDraft, PullMergeMessage, PullMergeMethod, PullRequestDetail, PullReviewThread, ReactionKind, ReactionState, ReactionTarget } from "../models"
 import { atRepositoryEntry, back, navigate, openDetail, openDiff, openPage, type DetailTarget, type InitialNavigation, type NavigationState, type Page } from "../navigation"
 import type {
   CommitDetailState,
@@ -131,8 +131,9 @@ export type AppProps = {
   onCloseIssue?: () => void
   getCommentDraft?: (number: number, parent?: IssueActionParent) => string
   getIssueAction?: (number: number, parent?: IssueActionParent) => IssueActionState
-  assignableUsers?: ResourceState<Paginated<string>>
+  assignableUsers?: ResourceState<Paginated<AssignableUser>>
   onLoadAssignableUsers?: () => Promise<void>
+  onReloadAssignableUsers?: () => Promise<void>
   onSearchMentionUsers?: MentionSearch
   onPrepareIssueAction?: (number: number, kind: IssueActionKind, parent?: IssueActionParent) => void
   onIssueDraftChange?: (number: number, draft: Partial<Pick<IssueActionState, "body" | "reason" | "duplicateTarget" | "selectedAssignees">>, parent?: IssueActionParent) => void
@@ -1770,7 +1771,7 @@ function AppContent(props: AppProps) {
       ...(subject?.events?.flatMap(event => "actor" in event ? [event.actor] : "author" in event ? [event.author] : []) ?? []),
       ...(pull?.context.value?.threads.flatMap(thread => thread.comments.map(comment => comment.author)) ?? []),
       ...(viewer?.repository.toLowerCase() === data().repo.nameWithOwner.toLowerCase() ? [viewer.login] : []),
-      ...(props.assignableUsers?.value?.items ?? []),
+      ...(props.assignableUsers?.value?.items.map((user) => user.login) ?? []),
     ]
   })
 
@@ -2179,6 +2180,7 @@ function AppContent(props: AppProps) {
             users={props.assignableUsers}
             showScrollbar={config().showScrollbars}
             onLoadMore={() => void props.onLoadAssignableUsers?.()}
+            onReload={() => void props.onReloadAssignableUsers?.()}
             onChange={(selectedAssignees) => props.onIssueDraftChange?.(action.number, { selectedAssignees }, action.parent)}
             onSubmit={() => void submitIssueAction()}
             onHintChange={setIssueActionHint}

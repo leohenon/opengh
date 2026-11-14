@@ -36,17 +36,21 @@ const bodyReactions = { data: { repository: { pullRequest: {
 
 describe("PR conversation comments", () => {
   test("accepts PR assignment responses from the issues endpoint when assigning and clearing", async () => {
-    for (const assignees of [["author"], []]) {
+    for (const [method, changes, assignees] of [
+      ["POST", { add: ["author"], remove: [] }, ["author"]],
+      ["DELETE", { add: [], remove: ["author"] }, []],
+    ] as const) {
       let permissionQueries = 0
       const client = createGitHubClient({ ...rest(),
-        async mutate<T>(path: string, method: "POST" | "PATCH", input: Record<string, unknown>) {
-          expect([path, method, input]).toEqual(["repositories/71/issues/42", "PATCH", { assignees }])
+        async mutate<T>(path: string, actual: "POST" | "PATCH" | "DELETE", input: Record<string, unknown>) {
+          expect([path, actual, input]).toEqual(["repositories/71/issues/42/assignees", method, { assignees: ["author"] }])
           return { ...pull, pull_request: { url: "https://api.github.com/repos/owner/repo/pulls/42" },
             assignees: assignees.map((login) => ({ login })) } as T
         },
         async graphql<T>(): Promise<T> { permissionQueries++; throw new Error("Unexpected permission query") },
       })
-      expect(await client.setIssueAssignees(repository, 42, assignees)).toMatchObject({ number: 42, assignees })
+      expect(await client.updateIssueAssignees(repository, 42, { add: [...changes.add], remove: [...changes.remove] }))
+        .toMatchObject({ number: 42, assignees })
       expect(permissionQueries).toBe(0)
       // Browsing an issue must still reject a PR returned by the issues endpoint.
       const issueClient = createGitHubClient({ ...rest(), async json<T>() {
