@@ -6,6 +6,7 @@
 # Environment:
 #   OPENGH_VERSION      Release to install, such as 0.1.0. Default: the latest release.
 #   OPENGH_INSTALL_DIR  Directory for the executable. Default: ~/.local/bin.
+#   OPENGH_INSTALL_NAME Executable filename. Default: opengh.
 set -eu
 
 repository="leohenon/opengh"
@@ -23,9 +24,9 @@ uses_musl() {
 
 download() {
   if command -v curl >/dev/null 2>&1; then
-    curl -fsSL "$1" -o "$2"
+    curl -fsSL "$1" -o "$2" --connect-timeout 15 --max-time 120
   elif command -v wget >/dev/null 2>&1; then
-    wget -qO "$2" "$1"
+    wget -T 120 -qO "$2" "$1"
   else
     fail "curl or wget is required."
   fi
@@ -72,6 +73,8 @@ main() {
     base="https://github.com/$repository/releases/latest/download"
   fi
   directory="${OPENGH_INSTALL_DIR:-$HOME/.local/bin}"
+  name="${OPENGH_INSTALL_NAME:-opengh}"
+  case "$name" in . | .. | */*) fail "OPENGH_INSTALL_NAME must be a filename, not a path." ;; esac
   archive="opengh-$target.tar.gz"
 
   work=$(mktemp -d)
@@ -87,9 +90,9 @@ main() {
 
   tar -xzf "$work/$archive" -C "$work"
   mkdir -p "$directory"
-  [ ! -d "$directory/opengh" ] || fail "$directory/opengh is a directory; nothing was installed."
+  [ ! -d "$directory/$name" ] || fail "$directory/$name is a directory; nothing was installed."
   # Test on the destination filesystem before replacing a working installation.
-  staged=$(mktemp "$directory/.opengh.XXXXXX")
+  staged=$(mktemp "${OPENGH_UPDATE_STAGE_DIR:-$directory}/.opengh.XXXXXX")
   cp "$work/opengh-$target/opengh" "$staged"
   chmod 755 "$staged"
   installed=$("$staged" --version 2>/dev/null) || {
@@ -98,13 +101,19 @@ main() {
     fi
     fail "downloaded opengh does not start; nothing was installed."
   }
+  [ -z "$version" ] || [ "$installed" = "opengh $version" ] || fail "downloaded executable has the wrong version; nothing was installed."
+  # The self-updater pins the version it started from. Do not overwrite another completed update.
+  if [ -n "${OPENGH_UPDATE_FROM:-}" ]; then
+    current=$("$directory/$name" --version 2>/dev/null) || fail "the installed executable changed or cannot start; nothing was installed."
+    [ "$current" = "opengh $OPENGH_UPDATE_FROM" ] || fail "the installed version changed during the update; nothing was installed."
+  fi
   # Replace in one step, so an opengh that is running keeps its own copy.
-  mv -f "$staged" "$directory/opengh"
+  mv -f "$staged" "$directory/$name"
   staged=
-  printf 'Installed %s to %s\n' "$installed" "$directory/opengh"
+  printf 'Installed %s to %s\n' "$installed" "$directory/$name"
   case ":$PATH:" in
     *":$directory:"*) ;;
-    *) printf 'Add %s to your PATH to run it as "opengh".\n' "$directory" ;;
+    *) printf 'Add %s to your PATH to run it as "%s".\n' "$directory" "$name" ;;
   esac
   command -v gh >/dev/null 2>&1 || printf 'opengh needs the GitHub CLI: https://cli.github.com\n'
 }

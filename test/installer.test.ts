@@ -1,6 +1,6 @@
 import { afterEach, expect, test } from "bun:test"
 import { createHash } from "node:crypto"
-import { chmod, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises"
+import { chmod, mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { fileURLToPath } from "node:url"
@@ -33,9 +33,10 @@ case "$2" in "file://$FIXTURE_RELEASE/"*) cp "\${2#file://}" "$4";; *) exit 2;; 
   const checksum = createHash("sha256").update(await readFile(join(release, archive))).digest("hex")
   await writeFile(join(release, "SHA256SUMS"), `${checksum}  ${archive}\n`)
   const env = { ...process.env, PATH: `${tools}:${process.env.PATH}`, HOME: directory, TMPDIR: temporary,
-    FIXTURE_RELEASE: release, OPENGH_INSTALL_DIR: destination, OPENGH_DOWNLOAD_BASE_URL: `file://${release}` }
-  return { destination, temporary, script, run: async () => {
-    const child = Bun.spawn(["sh", installer], { cwd: directory, env, stdin: "ignore", stdout: "pipe", stderr: "pipe" })
+    FIXTURE_RELEASE: release, OPENGH_INSTALL_DIR: destination, OPENGH_DOWNLOAD_BASE_URL: `file://${release}`,
+    OPENGH_VERSION: "", OPENGH_INSTALL_NAME: "opengh", OPENGH_UPDATE_FROM: "" }
+  return { directory, tools, destination, temporary, script, run: async (extra: Record<string, string> = {}) => {
+    const child = Bun.spawn(["sh", installer], { cwd: directory, env: { ...env, ...extra }, stdin: "ignore", stdout: "pipe", stderr: "pipe" })
     const [code, out, error] = await Promise.all([child.exited, new Response(child.stdout).text(), new Response(child.stderr).text()])
     return { code, out, error }
   } }
@@ -83,4 +84,30 @@ test("a destination directory named opengh is not treated as an installed execut
   expect((await f.run()).code).not.toBe(0)
   expect(await readdir(join(f.destination, "opengh"))).toEqual([])
   expect(await readdir(f.destination)).toEqual(["opengh"])
+})
+
+test.each([".", "..", "../elsewhere", "sub/opengh"])("installer rejects a non-filename destination: %s", async name => {
+  const f = await fixture('echo "opengh 0.0.0"')
+  const result = await f.run({ OPENGH_INSTALL_NAME: name })
+  expect(result.code).not.toBe(0)
+  expect(result.error).toContain("must be a filename")
+  expect(await readdir(f.destination)).toEqual([])
+  expect(await readdir(f.temporary)).toEqual([])
+})
+
+test("wget-only installations use portable timeout flags and never reach the network", async () => {
+  const f = await fixture('echo "opengh 0.0.0"')
+  const tools = join(f.directory, "wget-tools")
+  await mkdir(tools)
+  for (const name of ["sh", "awk", "mkdir", "mktemp", "rm", "tar", "gzip", "cp", "chmod", "mv", "sha256sum", "shasum"]) {
+    const path = Bun.which(name)
+    if (path) await symlink(path, join(tools, name))
+  }
+  await symlink(join(f.tools, "uname"), join(tools, "uname"))
+  await f.script(join(tools, "wget"), `test "$1" = -T && test "$2" = 120 && test "$3" = -qO || exit 2
+case "$5" in "file://$FIXTURE_RELEASE/"*) cp "\${5#file://}" "$4";; *) exit 2;; esac`)
+  const result = await f.run({ PATH: tools })
+  expect(result, result.error).toMatchObject({ code: 0 })
+  expect(await readFile(join(f.destination, "opengh"), "utf8")).toContain("opengh 0.0.0")
+  expect(await readdir(f.temporary)).toEqual([])
 })

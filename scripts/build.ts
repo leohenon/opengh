@@ -78,7 +78,11 @@ async function build(name: string) {
     // application; src/index.tsx resolves it relative to itself.
     entrypoints: [join(root, "src/index.tsx"), join(root, "src/ui/workers/hunk-highlight.js")],
     plugins: [solid],
-    define: target.libc ? { "process.env.OPENTUI_LIBC": JSON.stringify(target.libc) } : undefined,
+    define: {
+      OPENGH_BUILD_TARGET: JSON.stringify(name),
+      OPENGH_INSTALL_SCRIPT: JSON.stringify(await readFile(join(root, "install.sh"), "utf8")),
+      ...(target.libc ? { "process.env.OPENTUI_LIBC": JSON.stringify(target.libc) } : {}),
+    },
     compile: {
       target: `bun-${name}` as Bun.Build.CompileTarget,
       outfile: join(directory, "opengh"),

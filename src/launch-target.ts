@@ -10,6 +10,7 @@ export type LaunchOptions = {
   standalone?: boolean
   inline?: boolean
   resume?: boolean
+  update?: boolean
   help?: boolean
   version?: boolean
 }
@@ -17,6 +18,7 @@ export type LaunchOptions = {
 export const launchUsage = `Usage:
   opengh                                  Open the repository picker
   opengh --resume                         Restore the last repository and page
+  opengh update                           Update to the latest stable release
   opengh <owner/repo|.>                   Open a repository
   opengh <github-url>                     Open a repository, page, or detail
   opengh [owner/repo|.] <number|hash>     Open an issue, PR, or commit
@@ -45,6 +47,16 @@ Options:
   --inline                                Print a bounded page snapshot to stdout and exit
   -h, --help                              Show this help
   -v, --version                           Show version
+`
+
+export const updateUsage = `Usage:
+  opengh update                           Update a standalone binary to the latest stable release
+
+Homebrew, npm, Nix, and source installs must be updated using their installation method.
+opengh update prints instructions for these installs instead of replacing them.
+
+Options:
+  -h, --help                              Show this help
 `
 
 function positiveNumber(value: string): number {
@@ -101,6 +113,11 @@ function repositoryLocation(value: string): LaunchOptions | undefined {
 }
 
 export function parseLaunchArguments(args: readonly string[]): LaunchOptions {
+  if (args[0] === "update") {
+    if (args.length === 1) return { update: true }
+    if (args.length === 2 && (args[1] === "--help" || args[1] === "-h")) return { update: true, help: true }
+    throw new Error("opengh update accepts no arguments other than --help or -h.")
+  }
   const positional: string[] = []
   let explicitDetail: LaunchDetail | undefined
   let standalone = false

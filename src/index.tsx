@@ -9,7 +9,7 @@ import { saveRepositoryTabs } from "./repository-tabs"
 import { createResumeWriter, loadResume, saveResume } from "./resume"
 import { saveConfig } from "./config"
 import { rememberRepository } from "./github/repository"
-import { launchUsage, parseLaunchArguments, type LaunchOptions } from "./launch-target"
+import { launchUsage, parseLaunchArguments, updateUsage, type LaunchOptions } from "./launch-target"
 import { version } from "../package.json"
 
 const pendingSaves = new Set<Promise<void>>()
@@ -38,8 +38,21 @@ if (launch.version) {
   process.exit(0)
 }
 if (launch.help) {
-  console.log(launchUsage)
+  console.log(launch.update ? updateUsage : launchUsage)
   process.exit(0)
+}
+
+if (launch.update) {
+  try {
+    const { runUpdate } = await import("./update")
+    await runUpdate()
+  } catch (error) {
+    console.error(`opengh: ${error instanceof Error ? error.message : "Could not update"}`)
+    process.exitCode ||= 1
+  } finally {
+    await stopGitHubProcesses()
+  }
+  process.exit(process.exitCode ?? 0)
 }
 
 if (launch.inline) {

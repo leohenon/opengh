@@ -1,10 +1,11 @@
 import { describe, expect, test } from "bun:test"
-import { launchUsage, parseLaunchArguments, type LaunchOptions } from "../src/launch-target"
+import { launchUsage, parseLaunchArguments, updateUsage, type LaunchOptions } from "../src/launch-target"
 
+// Parser-only tests: never import the CLI/updater or perform updates/network requests.
 describe("launch arguments", () => {
   test("aligns help descriptions across usage and options", () => {
     const rows = launchUsage.split("\n").filter((line) => line.startsWith("  opengh") || line.startsWith("  -"))
-    expect(rows).toHaveLength(13)
+    expect(rows).toHaveLength(14)
     for (const row of rows) {
       const columns = /^  (\S.*?)( {2,})(\S.*)$/.exec(row)
       expect(columns).not.toBeNull()
@@ -50,6 +51,54 @@ describe("launch arguments", () => {
       [["-h"], { help: true }],
       [["--version"], { version: true }],
       [["-v"], { version: true }],
+    ]
+    for (const [args, expected] of cases) expect(parseLaunchArguments(args)).toEqual(expected)
+  })
+
+  test("parses update and update help without running the updater", () => {
+    expect(parseLaunchArguments(["update"])).toEqual({ update: true })
+    for (const help of ["--help", "-h"])
+      expect(parseLaunchArguments(["update", help])).toEqual({ update: true, help: true })
+    expect(launchUsage).toContain("  opengh update")
+    expect(updateUsage).toContain("opengh update")
+    expect(updateUsage).toContain("latest stable")
+    expect(updateUsage).toContain("-h, --help")
+  })
+
+  test("recognizes update only as the exact first argument", () => {
+    expect(parseLaunchArguments(["owner/update"])).toEqual({ repositoryArgument: "owner/update" })
+    expect(parseLaunchArguments(["update/repo"])).toEqual({ repositoryArgument: "update/repo" })
+    expect(parseLaunchArguments(["https://github.com/owner/update"])).toEqual({ repositoryArgument: "owner/update" })
+    for (const args of [
+      ["--", "update"], ["owner/repo", "update"], ["--inline", "update"],
+      ["--standalone", "update"], ["--resume", "update"], ["UPDATE"], [" update"], ["update "],
+    ]) expect(() => parseLaunchArguments(args)).toThrow()
+  })
+
+  test("rejects repositories, targets, modes, and extra update arguments even with help", () => {
+    const extras = [
+      ["owner/repo"], ["."], ["https://github.com/owner/repo"], ["123"], ["abcd"], ["update"],
+      ["--issue", "123"], ["--pr=123"], ["--commit", "abcd"],
+      ["--resume"], ["--inline"], ["--standalone"], ["--unknown"], ["--force"], ["--check"],
+      ["--version"], ["-v"], ["v1.2.3"], ["--version=1.2.3"], ["--"], ["--", "owner/repo"],
+      ["--help", "owner/repo"], ["owner/repo", "--help"], ["--help", "--help"],
+      ...["--resume", "--inline", "--standalone", "--unknown"].flatMap((option) => [
+        ["--help", option], [option, "-h"],
+      ]),
+    ]
+    for (const extra of extras)
+      expect(() => parseLaunchArguments(["update", ...extra])).toThrow("opengh update")
+  })
+
+  test("preserves root help and version behavior before update or after mode flags", () => {
+    const cases: [string[], LaunchOptions][] = [
+      [["--help", "update", "--force"], { help: true }],
+      [["-h", "update"], { help: true }],
+      [["--version", "update", "--inline"], { version: true }],
+      [["-v", "update"], { version: true }],
+      [["--resume", "--help"], { help: true }],
+      [["--inline", "--version"], { version: true }],
+      [["owner/repo", "--help"], { help: true }],
     ]
     for (const [args, expected] of cases) expect(parseLaunchArguments(args)).toEqual(expected)
   })
