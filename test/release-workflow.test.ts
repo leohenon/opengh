@@ -277,14 +277,20 @@ async function npmFixture() {
   const f = await fixture()
   const registry = join(f.directory, "registry.json"), script = join(f.directory, "registry.cjs")
   type Registry = { versions: Record<string, string[]>; tags: Record<string, Record<string, string>>;
-    log: string[][]; failPublish?: string; failPromote?: string; failLookup?: boolean }
-  const empty: Registry = { versions: {}, tags: {}, log: [] }
+    log: string[][]; failPublish?: string; failPromote?: string; failLookup?: boolean
+    // npm accepts an upload before the version is readable: each new version first fails this many lookups.
+    lag?: number; processing: Record<string, number>; waits: number }
+  const empty: Registry = { versions: {}, tags: {}, log: [], processing: {}, waits: 0 }
   await writeFile(registry, JSON.stringify(empty))
   await writeFile(script, `
 const fs = require("node:fs"), path = require("node:path")
 const state = JSON.parse(fs.readFileSync(process.env.REGISTRY, "utf8")), args = process.argv.slice(2)
 const save = () => fs.writeFileSync(process.env.REGISTRY, JSON.stringify(state))
 const split = value => { const at = value.lastIndexOf("@"); return [value.slice(0, at), value.slice(at + 1)] }
+if (args[0] === "view" && state.processing[args[1]] > 0) {
+  state.processing[args[1]]--; save()
+  console.error("npm error code E404"); process.exit(1)
+}
 if (args[0] === "view" && args[2] === "version") {
   const [name, version] = split(args[1])
   if (!(state.versions[name] || []).includes(version)) process.exit(1)
@@ -302,6 +308,7 @@ if (args[0] === "view" && args[2] === "version") {
   if (versions.includes(pkg.version)) { console.error("already published"); process.exit(1) }
   const tag = args[args.indexOf("--tag") + 1]
   versions.push(pkg.version)
+  if (state.lag) state.processing[pkg.name + "@" + pkg.version] = state.lag
   ;(state.tags[pkg.name] ||= {})[tag] = pkg.version
   state.log.push(["publish", pkg.name, pkg.version, tag]); save()
 } else if (args[0] === "dist-tag" && args[1] === "add") {
@@ -315,6 +322,8 @@ if (args[0] === "view" && args[2] === "version") {
   await f.tool("npm", `exec ${JSON.stringify(process.execPath)} ${JSON.stringify(script)} "$@"`)
   // Match the pinned runtime running the workflow's semver comparisons, rather than an arbitrary PATH Bun.
   await f.tool("bun", `exec ${JSON.stringify(process.execPath)} "$@"`)
+  // Waiting for the registry is counted, not endured.
+  await f.tool("sleep", `exec ${JSON.stringify(process.execPath)} -e 'const fs = require("node:fs"), state = JSON.parse(fs.readFileSync(process.env.REGISTRY, "utf8")); state.waits++; fs.writeFileSync(process.env.REGISTRY, JSON.stringify(state))'`)
   const names = ["opengh-darwin-arm64", "opengh-linux-x64", "@leohenon/opengh"]
   const state = async (): Promise<Registry> => JSON.parse(await readFile(registry, "utf8"))
   const set = async (fields: Partial<Registry>) => { await writeFile(registry, JSON.stringify({ ...await state(), ...fields })) }
@@ -362,6 +371,25 @@ test("npm stages every package before promotion, repairs failed promotion, and d
   expect((await f.publish("0.0.1-rc.8")).code).toBe(0)
   for (const name of f.names) expect((await f.state()).tags[name]).toMatchObject({ latest: "0.0.0", next: "0.0.1-rc.10" })
 }, 20_000)
+
+test("npm promotion waits for uploaded versions to become readable, and gives up without promoting any", async () => {
+  const f = await npmFixture()
+  await f.set({ lag: 3 })
+  const published = await f.publish("0.0.1-rc.1")
+  expect(published, published.error).toMatchObject({ code: 0 })
+  let state = await f.state()
+  expect(state.waits).toBe(3 * f.names.length)
+  for (const name of f.names) expect(state.tags[name]).toMatchObject({ staged: "0.0.1-rc.1", next: "0.0.1-rc.1" })
+  // Every package is uploaded, but none becomes readable in time: no channel may move.
+  await f.set({ lag: 1000 })
+  const stuck = await f.publish("0.0.1-rc.2")
+  expect(stuck.code).not.toBe(0)
+  expect(stuck.out).toContain("opengh-darwin-arm64@0.0.1-rc.2 did not appear on npm")
+  state = await f.state()
+  expect(state.log.filter(call => call[0] === "publish" && call[2] === "0.0.1-rc.2")).toHaveLength(f.names.length)
+  expect(state.log.filter(call => call[0] === "promote" && call[2] === "0.0.1-rc.2")).toEqual([])
+  for (const name of f.names) expect(state.tags[name]!.next).toBe("0.0.1-rc.1")
+}, 30_000)
 
 test("npm does not promote when it cannot determine the current channel version", async () => {
   const f = await npmFixture()

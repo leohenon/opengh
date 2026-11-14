@@ -170,6 +170,20 @@ jobs:
               npm publish "./$directory" --access public $provenance --tag staged
             fi
           done
+          # npm processes an upload for a few minutes before the version can be read or tagged.
+          # Wait for every package, so that promotion starts only once it can be completed.
+          for directory in opengh-*/ opengh/; do
+            name=$(cd "$directory" && node -p 'require("./package.json").name')
+            tries=0
+            until npm view "$name@$version" version >/dev/null 2>&1; do
+              tries=$((tries + 1))
+              if [ "$tries" -ge 60 ]; then
+                echo "::error::$name@$version did not appear on npm within 10 minutes. Re-run this job once it has."
+                exit 1
+              fi
+              sleep 10
+            done
+          done
           # All packages now exist. Promote platforms first, then the launcher. This also repairs a
           # partially completed promotion, without letting an old retry downgrade latest or next.
           for directory in opengh-*/ opengh/; do

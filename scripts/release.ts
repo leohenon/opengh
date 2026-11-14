@@ -11,7 +11,6 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { root } from "./targets"
 
-const roadmap = "https://github.com/leohenon/opengh/blob/main/ROADMAP.md"
 // Semantic versioning without build metadata. npm rejects anything looser, such as 01.0.0 or 1.0.0-rc.01,
 // and it would do so only after the tag was pushed.
 const identifier = "(0|[1-9]\\d*|\\d*[A-Za-z-][0-9A-Za-z-]*)"
@@ -114,7 +113,6 @@ const draft = [
   ...(commits.length ? [`## Changes\n\n${commits.map((subject) => `- ${subject}`).join("\n")}`] : []),
   ...(contributors ? [`## New contributors\n\n${contributors}`] : []),
   ...(previous.ok ? [`**Full changelog:** https://github.com/leohenon/opengh/compare/${previous.out}...${tag}`] : []),
-  ...(git("cat-file", "-e", "HEAD:ROADMAP.md").ok ? [`[Roadmap](${roadmap})`] : []),
 ].join("\n\n")
 
 const scratch = mkdtempSync(join(tmpdir(), "opengh-release-"))
