@@ -159,7 +159,7 @@ test.each(["LICENSE", "README.md"])("an untracked %s does not satisfy the commit
   expect(result.code).not.toBe(0)
   expect(result.error).toContain(file)
   // Check attempted publication too: rollback must not hide an editor, commit, tag, or push.
-  expect(await readFile(join(f.directory, "calls"), "utf8")).not.toMatch(/^(editor|commit |tag --annotate |push )/m)
+  expect(await readFile(join(f.directory, "calls"), "utf8")).not.toMatch(/^(editor|commit |tag --annotate |update-ref --no-deref refs\/tags\/|push )/m)
   expect(await readFile(join(f.repo, file), "utf8")).toBe(original)
   expect(await f.git("status", "--porcelain")).toBe(`?? ${file}`)
   expect(await f.git("rev-parse", "HEAD")).toBe(head)
@@ -196,7 +196,7 @@ ${JSON.stringify(realGit)} ls-files --stage -- package.json > "$TMPDIR/expected-
   const result = await f.release(version)
   expect(result.code).not.toBe(0)
   expect(result.error).toContain("package.json")
-  expect(await readFile(join(f.directory, "calls"), "utf8")).not.toMatch(/^(commit |tag --annotate |push )/m)
+  expect(await readFile(join(f.directory, "calls"), "utf8")).not.toMatch(/^(commit |tag --annotate |update-ref --no-deref refs\/tags\/|push )/m)
   expect(await readFile(join(f.repo, "package.json"), "utf8")).toBe(original)
   expect(await f.git("show", ":package.json")).toBe(foreign.trim())
   expect(await f.git("ls-files", "--stage", "--", "package.json")).toBe((await readFile(join(f.directory, "expected-index"), "utf8")).trim())
@@ -206,10 +206,76 @@ ${JSON.stringify(realGit)} ls-files --stage -- package.json > "$TMPDIR/expected-
   expect(await f.git("--git-dir", f.remote, "tag")).toBe("")
 }, 15_000)
 
+test.each(["0.0.0", "0.0.1"])("a worktree manifest edit during fetch aborts a %s release without overwriting it", async version => {
+  const f = await fixture()
+  const original = await readFile(join(f.repo, "package.json"), "utf8")
+  const foreign = '{\n  "name": "uncommitted change",\n  "version": "0.0.0"\n}\n'
+  await writeFile(join(f.directory, "foreign.json"), foreign)
+  await writeFile(join(f.directory, "calls"), "")
+  await f.tool("git", `printf '%s\\n' "$*" >> "$TMPDIR/calls"
+if [ "$1" = fetch ]; then
+  ${JSON.stringify(realGit)} "$@"
+  cp "$TMPDIR/foreign.json" package.json
+  exit 0
+fi
+exec ${JSON.stringify(realGit)} "$@"`)
+  const result = await f.release(version)
+  expect(result.code).not.toBe(0)
+  expect(result.error).toContain("package.json")
+  expect(await readFile(join(f.directory, "calls"), "utf8")).not.toMatch(/^(commit |tag --annotate |update-ref --no-deref refs\/tags\/|push )/m)
+  expect(await readFile(join(f.repo, "package.json"), "utf8")).toBe(foreign)
+  expect(await f.git("show", ":package.json")).toBe(original.trim())
+  expect(await f.git("status", "--porcelain")).toBe("M package.json")
+  expect(await f.git("rev-parse", "HEAD")).toBe(f.head)
+  expect(await f.git("tag")).toBe("")
+  expect(await f.git("--git-dir", f.remote, "rev-parse", "refs/heads/main")).toBe(f.head)
+  expect(await f.git("--git-dir", f.remote, "tag")).toBe("")
+}, 15_000)
+
+test.each(["extra commit", "extra path", "altered manifest"])("an unexpected %s before release HEAD capture is preserved instead of published", async change => {
+  const f = await fixture()
+  const foreign = '{\n  "name": "other writer",\n  "version": "0.0.1"\n}\n'
+  await writeFile(join(f.directory, "foreign.json"), foreign)
+  await writeFile(join(f.directory, "calls"), "")
+  await f.tool("git", `printf '%s\\n' "$*" >> "$TMPDIR/calls"
+if [ "$1" = commit ]; then
+  ${JSON.stringify(realGit)} "$@"
+  ${JSON.stringify(realGit)} rev-parse HEAD > "$TMPDIR/selected-head"
+  ${change === "altered manifest" ? 'cp "$TMPDIR/foreign.json" package.json' : "printf 'committed elsewhere\\n' > work.txt"}
+  ${JSON.stringify(realGit)} add ${change === "altered manifest" ? "package.json" : "work.txt"}
+  ${JSON.stringify(realGit)} commit --quiet ${change === "extra commit" ? "-m 'another process'" : "--amend --no-edit"}
+  ${JSON.stringify(realGit)} rev-parse HEAD > "$TMPDIR/foreign-head"
+  exit 0
+fi
+exec ${JSON.stringify(realGit)} "$@"`)
+  const result = await f.release("0.0.1")
+  expect(result.code).not.toBe(0)
+  expect(result.error).toContain("manual recovery")
+  expect(result.error).not.toContain("main is back")
+  expect(await readFile(join(f.directory, "calls"), "utf8")).not.toMatch(/^(tag --annotate |update-ref --no-deref refs\/tags\/|push )/m)
+  const selectedHead = (await readFile(join(f.directory, "selected-head"), "utf8")).trim()
+  const foreignHead = (await readFile(join(f.directory, "foreign-head"), "utf8")).trim()
+  expect(await f.git("rev-parse", `${selectedHead}^`)).toBe(f.head)
+  expect(foreignHead).not.toBe(selectedHead)
+  expect(await f.git("rev-parse", `${foreignHead}^`)).toBe(change === "extra commit" ? selectedHead : f.head)
+  expect(await f.git("rev-parse", "HEAD")).toBe(foreignHead)
+  expect(await f.git("rev-parse", "main")).toBe(foreignHead)
+  const manifest = change === "altered manifest" ? foreign : '{\n  "name": "release-fixture",\n  "version": "0.0.1"\n}\n'
+  expect(await readFile(join(f.repo, "package.json"), "utf8")).toBe(manifest)
+  expect(await f.git("show", ":package.json")).toBe(manifest.trim())
+  const work = change === "altered manifest" ? "original\n" : "committed elsewhere\n"
+  expect(await readFile(join(f.repo, "work.txt"), "utf8")).toBe(work)
+  expect(await f.git("show", ":work.txt")).toBe(work.trim())
+  expect(await f.git("status", "--porcelain")).toBe("")
+  expect(await f.git("tag")).toBe("")
+  expect(await f.git("--git-dir", f.remote, "rev-parse", "refs/heads/main")).toBe(f.head)
+  expect(await f.git("--git-dir", f.remote, "tag")).toBe("")
+}, 15_000)
+
 test.each(["0.0.0", "0.0.1"])("a foreign commit immediately before tagging is not included in a %s release", async version => {
   const f = await fixture()
   await f.tool("git", `
-if [ "$1 $2" = 'tag --annotate' ]; then
+if [ "$1 $2" = 'update-ref --no-deref' ] && [ "$3" = 'refs/tags/v${version}' ]; then
   ${JSON.stringify(realGit)} rev-parse HEAD > "$TMPDIR/selected-head"
   printf 'committed elsewhere\\n' > work.txt
   ${JSON.stringify(realGit)} add work.txt
@@ -238,21 +304,35 @@ exec ${JSON.stringify(realGit)} "$@"`)
   expect(JSON.parse(await f.git("--git-dir", f.remote, "show", `v${version}:package.json`)).version).toBe(version)
 }, 15_000)
 
-test("a replacement tag immediately before pushing stays local and cannot replace the release notes or commit", async () => {
+test.each([false, true])("a replacement tag immediately after creation stays local without replacing the captured release (push rejected: %s)", async rejected => {
   const f = await fixture()
   await f.tool("git", `
-if [ "$1" = push ]; then
+if [ "$1 $2" = 'update-ref --no-deref' ] && [ "$3" = refs/tags/v0.0.1 ]; then
+  ${JSON.stringify(realGit)} "$@"
   ${JSON.stringify(realGit)} rev-parse HEAD > "$TMPDIR/selected-head"
-  ${JSON.stringify(realGit)} rev-parse refs/tags/v0.0.1 > "$TMPDIR/selected-tag"
+  printf '%s\\n' "$4" > "$TMPDIR/selected-tag"
   ${JSON.stringify(realGit)} tag --force --annotate --no-sign -m 'replacement notes' v0.0.1 ${JSON.stringify(f.head)}
   ${JSON.stringify(realGit)} rev-parse refs/tags/v0.0.1 > "$TMPDIR/foreign-tag"
+  exit 0
+fi
+if [ "$1" = push ]; then
+  printf '%s\\n' "$@" > "$TMPDIR/push-args"
+  ${rejected ? "echo 'push rejected' >&2; exit 1" : ":"}
 fi
 exec ${JSON.stringify(realGit)} "$@"`)
   const result = await f.release("0.0.1")
-  expect(result, result.error).toMatchObject({ code: 0 })
+  if (rejected) {
+    expect(result.code).not.toBe(0)
+    expect(result.error).toContain("push rejected")
+    expect(result.error).toContain("manual recovery")
+    expect(result.error).not.toContain("main is back")
+  } else expect(result, result.error).toMatchObject({ code: 0 })
   const selectedHead = (await readFile(join(f.directory, "selected-head"), "utf8")).trim()
   const selectedTag = (await readFile(join(f.directory, "selected-tag"), "utf8")).trim()
   const foreignTag = (await readFile(join(f.directory, "foreign-tag"), "utf8")).trim()
+  const pushArgs = (await readFile(join(f.directory, "push-args"), "utf8")).trim().split("\n")
+  expect(pushArgs).toContain(`${selectedHead}:refs/heads/main`)
+  expect(pushArgs).toContain(`${selectedTag}:refs/tags/v0.0.1`)
   expect(selectedHead).not.toBe(f.head)
   expect(foreignTag).not.toBe(selectedTag)
   expect(await f.git("rev-parse", "HEAD")).toBe(selectedHead)
@@ -260,10 +340,13 @@ exec ${JSON.stringify(realGit)} "$@"`)
   expect(await f.git("rev-parse", "v0.0.1^{commit}")).toBe(f.head)
   expect(await f.git("for-each-ref", "--format=%(contents)", "refs/tags/v0.0.1")).toBe("replacement notes")
   expect(await f.git("status", "--porcelain")).toBe("")
-  expect(await f.git("--git-dir", f.remote, "rev-parse", "refs/heads/main")).toBe(selectedHead)
-  expect(await f.git("--git-dir", f.remote, "rev-parse", "refs/tags/v0.0.1")).toBe(selectedTag)
-  expect(await f.git("--git-dir", f.remote, "rev-parse", "v0.0.1^{commit}")).toBe(selectedHead)
-  expect(await f.git("--git-dir", f.remote, "for-each-ref", "--format=%(contents)", "refs/tags/v0.0.1")).toBe(f.notes.trim())
+  expect(await f.git("--git-dir", f.remote, "rev-parse", "refs/heads/main")).toBe(rejected ? f.head : selectedHead)
+  if (rejected) expect(await f.git("--git-dir", f.remote, "tag")).toBe("")
+  else {
+    expect(await f.git("--git-dir", f.remote, "rev-parse", "refs/tags/v0.0.1")).toBe(selectedTag)
+    expect(await f.git("--git-dir", f.remote, "rev-parse", "v0.0.1^{commit}")).toBe(selectedHead)
+    expect(await f.git("--git-dir", f.remote, "for-each-ref", "--format=%(contents)", "refs/tags/v0.0.1")).toBe(f.notes.trim())
+  }
 }, 15_000)
 
 test.each([false, true])("a rejected push rolls back only the release and preserves edits made while notes were open (staged: %s)", async staged => {
@@ -474,6 +557,34 @@ exec ${JSON.stringify(realGit)} "$@"`)
     expect(result, result.error).toMatchObject({ code: 0 })
     expect(result.out).toContain("Pushed v0.0.1")
   }
+}, 15_000)
+
+test("a CAS tag creation collision preserves another writer's identical tag object", async () => {
+  const f = await fixture()
+  const original = await readFile(join(f.repo, "package.json"), "utf8")
+  await writeFile(join(f.directory, "calls"), "")
+  await f.tool("git", `printf '%s\\n' "$*" >> "$TMPDIR/calls"
+if [ "$1 $2" = 'update-ref --no-deref' ] && [ "$3" = refs/tags/v0.0.1 ]; then
+  # Another writer installs even the same object before our compare-and-swap.
+  ${JSON.stringify(realGit)} "$@"
+  ${JSON.stringify(realGit)} rev-parse refs/tags/v0.0.1 > "$TMPDIR/foreign-tag"
+fi
+exec ${JSON.stringify(realGit)} "$@"`)
+  const result = await f.release("0.0.1")
+  expect(result.code).not.toBe(0)
+  expect(result.error).toContain("already exists")
+  expect(await readFile(join(f.directory, "calls"), "utf8")).not.toMatch(/^(push |update-ref -d refs\/tags\/)/m)
+  const foreignTag = (await readFile(join(f.directory, "foreign-tag"), "utf8")).trim()
+  expect(await f.git("rev-parse", "refs/tags/v0.0.1")).toBe(foreignTag)
+  expect(await f.git("for-each-ref", "--format=%(contents)", "refs/tags/v0.0.1")).toBe(f.notes.trim())
+  const taggedHead = await f.git("rev-parse", "v0.0.1^{commit}")
+  expect(taggedHead).not.toBe(f.head)
+  expect(await f.git("rev-parse", `${taggedHead}^`)).toBe(f.head)
+  expect(await f.git("rev-parse", "HEAD")).toBe(f.head)
+  expect(await readFile(join(f.repo, "package.json"), "utf8")).toBe(original)
+  expect(await f.git("status", "--porcelain")).toBe("")
+  expect(await f.git("--git-dir", f.remote, "rev-parse", "refs/heads/main")).toBe(f.head)
+  expect(await f.git("--git-dir", f.remote, "tag")).toBe("")
 }, 15_000)
 
 test("a local tag created while notes were open is not deleted when tag creation fails", async () => {

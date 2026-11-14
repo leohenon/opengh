@@ -24,7 +24,8 @@ function fail(message: string): never {
 
 function git(...args: string[]) {
   const result = Bun.spawnSync(["git", ...args], { cwd: root })
-  return { code: result.exitCode, ok: result.exitCode === 0, out: result.stdout.toString().trimEnd(), error: result.stderr.toString().trim() }
+  const raw = result.stdout.toString()
+  return { code: result.exitCode, ok: result.exitCode === 0, out: raw.trimEnd(), raw, error: result.stderr.toString().trim() }
 }
 function mustGit(...args: string[]) {
   const result = git(...args)
@@ -55,7 +56,10 @@ if (tags.includes(tag)) fail(`${tag} already exists.`)
 const newest = tags.map((name) => name.slice(1)).filter((name) => versionPattern.test(name)).sort(Bun.semver.order).at(-1)
 if (newest && Bun.semver.order(version, newest) <= 0) fail(`${version} is not newer than the latest release, ${newest}.`)
 const manifestPath = join(root, "package.json")
-const manifestText = readFileSync(manifestPath, "utf8")
+// Fetching and CI checks can take time. Only the validated commit supplies release contents.
+const manifest = git("cat-file", "blob", `${head}:package.json`)
+if (!manifest.ok) fail(`could not read the committed package.json: ${manifest.error}`)
+const manifestText = manifest.raw
 const manifestIndex = mustGit("ls-tree", "--format=%(objectmode) %(objectname) 0\t%(path)", head, "--", "package.json")
 const current = JSON.parse(manifestText).version as string
 
@@ -143,7 +147,7 @@ if (dryRun) {
 if (!/^y(es)?$/i.test(prompt(`Tag and push ${tag}? [y/N]`)?.trim() ?? "")) stop("Cancelled.")
 // The notes may have been open for a while. Release only the commit that was checked above.
 if (mustGit("rev-parse", "HEAD") !== head || mustGit("branch", "--show-current") !== "main") stop("main changed while the notes were open.")
-if (readFileSync(manifestPath, "utf8") !== manifestText) stop("package.json changed while the notes were open.")
+if (!git("diff", "--quiet", head, "--", "package.json").ok) stop("package.json changed while preparing the release.")
 if (mustGit("ls-files", "--stage", "--", "package.json") !== manifestIndex) stop("the staged package.json changed while the notes were open.")
 let writtenManifest: string | undefined
 let releaseCommit: string | undefined
@@ -152,22 +156,39 @@ try {
   if (bump) {
     const updated = manifestText.replace(/^(\s*"version":\s*")[^"]*(")/m, `$1${version}$2`)
     if (JSON.parse(updated).version !== version) throw new Error("could not set the version in package.json")
+    const expectedPath = join(scratch, "package.json")
+    writeFileSync(expectedPath, updated)
+    const expectedBlob = git("hash-object", "--", expectedPath)
+    if (!expectedBlob.ok) throw new Error(expectedBlob.error)
+    const expectedIndex = `${manifestIndex.split(" ")[0]} ${expectedBlob.out} 0\tpackage.json`
     writeFileSync(manifestPath, updated)
     writtenManifest = updated
     const commit = git("commit", "--quiet", "-m", `release ${version}`, "--", "package.json")
     if (!commit.ok) throw new Error(commit.error)
     const committed = git("rev-parse", "HEAD")
     if (!committed.ok) stop(`Could not identify the release commit; local state needs manual recovery: ${committed.error}`)
+    // HEAD may already belong to another writer. Verify the entire intended change before claiming it.
+    const parent = git("rev-parse", `${committed.out}^@`)
+    const changed = git("diff-tree", "--no-commit-id", "--name-only", "-r", head, committed.out)
+    const committedIndex = git("ls-tree", "--format=%(objectmode) %(objectname) 0\t%(path)", committed.out, "--", "package.json")
+    if (!parent.ok || parent.out !== head || !changed.ok || changed.out !== "package.json" || !committedIndex.ok || committedIndex.out !== expectedIndex) {
+      stop("Could not verify the release commit; local state needs manual recovery. Inspect HEAD and package.json before retrying.")
+    }
     releaseCommit = committed.out
   }
-  // Freeze the selected commit: another process may move HEAD or main before tagging or pushing.
   const releaseHead = releaseCommit ?? head
-  // Unsigned and verbatim, so the workflow reads back exactly these notes, Markdown headings included.
-  const tagged = git("tag", "--annotate", "--no-sign", "--cleanup=verbatim", "--file", notesPath, tag, releaseHead)
+  // Construct the unsigned tag object directly, preserving the notes verbatim. Its ID is independent
+  // of the mutable tag ref, which another writer may replace immediately after creation.
+  const tagger = git("var", "GIT_COMMITTER_IDENT")
+  if (!tagger.ok) throw new Error(tagger.error)
+  const tagPath = join(scratch, "tag")
+  writeFileSync(tagPath, `object ${releaseHead}\ntype commit\ntag ${tag}\ntagger ${tagger.out}\n\n${notes}`)
+  const tagged = git("hash-object", "-w", "-t", "tag", "--", tagPath)
   if (!tagged.ok) throw new Error(tagged.error)
-  const taggedObject = git("rev-parse", `refs/tags/${tag}`)
-  if (!taggedObject.ok) stop(`Could not identify the created tag; local state needs manual recovery: ${taggedObject.error}`)
-  tagObject = taggedObject.out
+  const created = git("update-ref", "--no-deref", `refs/tags/${tag}`, tagged.out, "")
+  if (!created.ok) throw new Error(created.error)
+  // Claim ownership only after compare-and-create succeeds; never delete another writer's tag.
+  tagObject = tagged.out
   // Push only the captured objects, regardless of concurrent ref changes or push.followTags settings.
   // Atomic: the selected commit and annotated tag arrive together or not at all.
   console.log("Pushing release commit and tag; pre-push checks may take several minutes.")
