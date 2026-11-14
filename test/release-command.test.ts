@@ -27,7 +27,15 @@ async function fixture() {
     await writeFile(join(tools, name), `#!/bin/sh\nset -eu\n${body}\n`)
     await chmod(join(tools, name), 0o755)
   }
-  await tool("gh", `test "$1 $2" = 'run list'\nprintf '%s\\n' '[{"status":"completed","conclusion":"success"}]'`)
+  await writeFile(join(directory, "generated-notes.json"), JSON.stringify({ body: "" }))
+  await tool("gh", `if [ "$1" = api ]; then
+  test "$2 $3 $4" = '--method POST repos/leohenon/opengh/releases/generate-notes'
+  printf '%s\\n' "$@" > "$TMPDIR/generated-args"
+  cat "$TMPDIR/generated-notes.json"
+else
+  test "$1 $2" = 'run list'
+  printf '%s\\n' '[{"status":"completed","conclusion":"success"}]'
+fi`)
   const notes = "## Highlights\n\n- The first release.\n"
   await writeFile(join(directory, "notes"), notes)
   await tool("editor", `cat "$TMPDIR/notes" > "$1"`)
@@ -62,6 +70,46 @@ test("the first release can be 0.0.0 and its editor notes reach the annotated ta
   expect(await f.git("rev-parse", "HEAD")).toBe(f.head) // No version-bump commit required.
   expect(await f.git("--git-dir", f.remote, "cat-file", "-t", "refs/tags/v0.0.0")).toBe("tag")
   expect(await f.git("--git-dir", f.remote, "for-each-ref", "--format=%(contents)", "refs/tags/v0.0.0")).toBe(f.notes.trim())
+}, 15_000)
+
+test.each([false, true])("new contributors appear in the editable draft (previous release: %s)", async previous => {
+  const f = await fixture()
+  if (previous) await f.git("tag", "v0.0.0")
+  await writeFile(join(f.directory, "generated-notes.json"), JSON.stringify({ body:
+    "## What's Changed\r\n* Generated change\r\n\r\n## New Contributors\r\n* @alice made their first contribution in https://github.com/leohenon/opengh/pull/12\r\n\r\n**Full Changelog**: generated comparison\r\n" }))
+  await f.tool("editor", 'cp "$1" "$TMPDIR/draft"\nexit 1')
+  expect((await f.release(previous ? "0.0.1" : "0.0.0")).code).not.toBe(0)
+  const draft = await readFile(join(f.directory, "draft"), "utf8")
+  expect(draft).toContain("## New contributors\n\n* @alice made their first contribution in https://github.com/leohenon/opengh/pull/12")
+  expect(draft).not.toContain("Generated change")
+  expect(draft).not.toContain("generated comparison")
+  expect(draft.includes("**Full changelog:**")).toBe(previous)
+  if (previous) expect(draft.indexOf("## New contributors")).toBeLessThan(draft.indexOf("**Full changelog:**"))
+  const args = await readFile(join(f.directory, "generated-args"), "utf8")
+  expect(args).toContain(`target_commitish=${f.head}`)
+  expect(args).toContain(`tag_name=${previous ? "v0.0.1" : "v0.0.0"}`)
+  expect(args.includes("previous_tag_name=v0.0.0")).toBe(previous)
+}, 15_000)
+
+test("no new contributors omits the section", async () => {
+  const f = await fixture()
+  await writeFile(join(f.directory, "generated-notes.json"), JSON.stringify({ body: "## What's Changed\n* A change\n" }))
+  await f.tool("editor", 'cp "$1" "$TMPDIR/draft"\nexit 1')
+  expect((await f.release("0.0.0")).code).not.toBe(0)
+  expect(await readFile(join(f.directory, "draft"), "utf8")).not.toContain("## New contributors")
+}, 15_000)
+
+test.each(["failure", "malformed"])("contributor lookup %s stops before opening the editor", async mode => {
+  const f = await fixture()
+  if (mode === "failure") await f.tool("gh", `if [ "$1" = api ]; then echo 'API unavailable' >&2; exit 1; fi
+printf '%s\\n' '[{"status":"completed","conclusion":"success"}]'`)
+  else await writeFile(join(f.directory, "generated-notes.json"), JSON.stringify({ body: null }))
+  await f.tool("editor", "echo 'editor must not open' >&2\nexit 1")
+  const result = await f.release("0.0.0")
+  expect(result.code).not.toBe(0)
+  expect(result.error).toContain(mode === "failure" ? "could not generate new contributors" : "invalid generated release notes response")
+  expect(result.error).not.toContain("editor must not open")
+  expect(await f.git("tag")).toBe("")
 }, 15_000)
 
 test("a dry run never pushes, and an invalid npm version is rejected before tagging", async () => {

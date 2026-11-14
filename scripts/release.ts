@@ -78,16 +78,38 @@ const highlights = ticked("HEAD").filter((item) => !before.has(item))
 const commits = previous.ok
   ? mustGit("log", "--no-merges", "--reverse", "--format=%s", `${previous.out}..HEAD`).split("\n").filter((subject) => subject && !/^release \d/.test(subject))
   : []
+// GitHub identifies first-time contributors from merged PRs. This endpoint only generates
+// text; it does not create a release or tag. Keep our own notes and use just its contributor list.
+const generated = Bun.spawnSync(["gh", "api", "--method", "POST", "repos/leohenon/opengh/releases/generate-notes",
+  "-f", `tag_name=${tag}`, "-f", `target_commitish=${head}`,
+  ...(previous.ok ? ["-f", `previous_tag_name=${previous.out}`] : []),
+], { cwd: root })
+if (generated.exitCode !== 0) fail(`could not generate new contributors: ${generated.stderr.toString().trim()}`)
+let generatedNotes: unknown
+try { generatedNotes = JSON.parse(generated.stdout.toString()) }
+catch { fail("invalid generated release notes response.") }
+if (!generatedNotes || typeof generatedNotes !== "object" || !("body" in generatedNotes) || typeof generatedNotes.body !== "string") {
+  fail("invalid generated release notes response.")
+}
+const contributorLines: string[] = []
+let inContributors = false
+for (const line of generatedNotes.body.split(/\r?\n/)) {
+  if (/^## New Contributors\s*$/i.test(line)) { inContributors = true; continue }
+  if (inContributors && (/^#{1,6} /.test(line) || /^\*\*Full Changelog\b/i.test(line))) break
+  if (inContributors) contributorLines.push(line)
+}
+const contributors = contributorLines.join("\n").trim()
 const instructions = [
   "<!-- opengh-release-instructions",
-  `Release notes for ${tag}. What you save is published exactly as written.`,
-  "This unchanged instruction block is removed; everything else is kept verbatim. Save an empty file to cancel.",
-  ...(previous.ok ? [] : ["First release: there is no earlier tag to list changes from."]),
+  `Edit release notes for ${tag} below.`,
+  "This comment is removed before publishing. Clear the file to cancel.",
   "-->",
 ].join("\n")
 const draft = [
-  ...(highlights.length ? [`## Highlights\n\n${highlights.map((item) => `- ${item}`).join("\n")}`] : []),
+  ...(highlights.length ? [`## What's new\n\n${highlights.map((item) => `- ${item}`).join("\n")}`] : []),
   ...(commits.length ? [`## Changes\n\n${commits.map((subject) => `- ${subject}`).join("\n")}`] : []),
+  ...(contributors ? [`## New contributors\n\n${contributors}`] : []),
+  ...(previous.ok ? [`**Full changelog:** https://github.com/leohenon/opengh/compare/${previous.out}...${tag}`] : []),
   ...(git("cat-file", "-e", "HEAD:ROADMAP.md").ok ? [`[Roadmap](${roadmap})`] : []),
 ].join("\n\n")
 

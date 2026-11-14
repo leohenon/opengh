@@ -226,8 +226,8 @@ jobs:
   homebrew:
     name: Update the Homebrew tap
     needs: publish
-    # Homebrew has no pre-release channel, and the formula must point at published archives.
-    if: ${{ !contains(github.ref_name, '-') }}
+    # Stable and pre-release versions share the formula.
+    # Archives must be published first.
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
@@ -256,9 +256,15 @@ jobs:
           # Re-running an old release must not replace a newer formula.
           current=$(sed -n 's/^  version "\(.*\)"$/\1/p' Formula/opengh.rb 2>/dev/null || true)
           new=${GITHUB_REF_NAME#v}
-          if [ -n "$current" ] && [ "$current" != "$new" ] && [ "$(printf '%s\n%s\n' "$current" "$new" | sort -V | tail -n 1)" = "$current" ]; then
-            echo "The tap already has the newer $current"
-            exit 0
+          if [ -n "$current" ]; then
+            newer=$(bun -e '
+              const [current, next] = process.argv.slice(1)
+              console.log(Bun.semver.order(current, next) > 0 ? "yes" : "no")
+            ' "$current" "$new")
+            if [ "$newer" = yes ]; then
+              echo "The tap already has the newer $current"
+              exit 0
+            fi
           fi
           install -m 644 ../dist/homebrew/opengh.rb Formula/opengh.rb
           git add -- Formula/opengh.rb
@@ -270,3 +276,21 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git commit -m "chore(homebrew): update opengh to ${GITHUB_REF_NAME#v}"
           git push origin HEAD
+
+  report:
+    name: Report release status
+    needs: [test, build, draft, npm, publish, homebrew]
+    if: ${{ always() }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # No dependency install: report even when installation or builds fail.
+      - name: Update the release failure issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_JOBS: ${{ toJSON(needs) }}
+        run: node scripts/release-status.mjs

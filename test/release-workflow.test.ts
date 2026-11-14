@@ -6,7 +6,7 @@ import { join } from "node:path"
 // Execute the actual workflow steps with local stand-ins: these tests must never publish anything.
 const workflow = Bun.YAML.parse(await readFile(new URL("../.github/workflows/release.yml", import.meta.url), "utf8")) as {
   concurrency?: { group: string; "cancel-in-progress": boolean; queue: string }
-  jobs: Record<string, { name?: string; uses?: string; needs?: string; permissions?: Record<string, string>; steps?: Array<{ name?: string; run?: string }> }>
+  jobs: Record<string, { name?: string; uses?: string; needs?: string | string[]; if?: string; permissions?: Record<string, string>; steps?: Array<{ name?: string; run?: string }> }>
 }
 const directories: string[] = []
 afterEach(async () => { await Promise.all(directories.splice(0).map(path => rm(path, { recursive: true, force: true }))) })
@@ -35,6 +35,132 @@ async function fixture() {
   return { directory, tool, run, step }
 }
 
+test("release reporting runs after every stage with isolated issue permissions", () => {
+  const report = workflow.jobs.report!
+  expect(report.needs).toEqual(["test", "build", "draft", "npm", "publish", "homebrew"])
+  expect(report.if).toBe("${{ always() }}")
+  expect(report.permissions).toEqual({ contents: "read", issues: "write" })
+  expect(report.steps?.find(step => step.name === "Update the release failure issue")?.run).toBe("node scripts/release-status.mjs")
+})
+
+async function reportingFixture() {
+  const f = await fixture()
+  const runtime = Bun.which("node")!
+  const registry = join(f.directory, "issues.json")
+  type State = { issues: Array<{ number: number; title: string; body: string; state: string; pull_request?: object }>;
+    calls: string[][]; failLookup?: boolean; loseCreateAcknowledgement?: boolean }
+  await writeFile(registry, JSON.stringify({ issues: [], calls: [] }))
+  const read = async (): Promise<State> => JSON.parse(await readFile(registry, "utf8"))
+  const update = async (values: Partial<State>) => writeFile(registry, JSON.stringify({ ...await read(), ...values }))
+  const mock = join(f.directory, "gh.mjs")
+  await writeFile(mock, `
+import fs from "node:fs"
+const file = process.env.ISSUES_FILE, state = JSON.parse(fs.readFileSync(file, "utf8"))
+const args = process.argv.slice(2), value = flag => args[args.indexOf(flag) + 1]
+state.calls.push(args)
+const save = () => fs.writeFileSync(file, JSON.stringify(state))
+if (args[0] === "api") {
+  if (!args.includes("--paginate") || !args.includes("--slurp")) throw Error("missing pagination")
+  if (!args.at(-1).endsWith("/issues?state=all&per_page=100")) throw Error("unexpected API")
+  save()
+  if (state.failLookup) { console.error("lookup failed"); process.exit(1) }
+  console.log(JSON.stringify([[], state.issues]))
+} else if (args[0] === "issue") {
+  if (value("--repo") !== "fixture/repository") throw Error("wrong repository")
+  const issue = state.issues.find(issue => issue.number === Number(args[2]))
+  switch (args[1]) {
+    case "create":
+      state.issues.push({ number: 42, title: value("--title"), body: fs.readFileSync(0, "utf8"), state: "open" })
+      save()
+      if (state.loseCreateAcknowledgement) process.exit(1)
+      break
+    case "edit": issue.body = fs.readFileSync(0, "utf8"); break
+    case "close": issue.state = "closed"; break
+    case "reopen": issue.state = "open"; break
+    default: throw Error("unexpected issue mutation")
+  }
+  save()
+} else throw Error("unexpected gh command")
+`)
+  await f.tool("gh", `exec ${JSON.stringify(runtime)} ${JSON.stringify(mock)} "$@"`)
+  const script = join(f.directory, "report.mjs")
+  await writeFile(script, await readFile(new URL("../scripts/release-status.mjs", import.meta.url), "utf8"))
+  const report = (overrides: Record<string, string> = {}) => f.run([runtime, script], f.directory, {
+    ISSUES_FILE: registry, GITHUB_REF_NAME: "v0.0.0-beta.1", GITHUB_RUN_ID: "123", GITHUB_RUN_ATTEMPT: "2",
+    RELEASE_JOBS: JSON.stringify(Object.fromEntries(["test", "build", "draft", "npm", "publish", "homebrew"]
+      .map(key => [key, { result: overrides[key] ?? "success" }]))),
+  })
+  return { read, update, report }
+}
+
+test("release failure reporting updates one issue, closes on recovery, and reopens on another failure", async () => {
+  const f = await reportingFixture()
+  const failure = { npm: "failure", publish: "skipped", homebrew: "skipped" }
+  expect((await f.report(failure)).code).toBe(0)
+  let state = await f.read()
+  expect(state.issues).toHaveLength(1)
+  expect(state.issues[0]).toMatchObject({ title: "release v0.0.0-beta.1 failed", state: "open" })
+  expect(state.issues[0]!.body).toContain("| npm publication | failure |")
+  expect(state.issues[0]!.body).toContain("| GitHub publication | skipped |")
+  expect(state.issues[0]!.body).toContain("/actions/runs/123/attempts/2")
+  expect(state.issues[0]!.body).toContain("may have partially succeeded")
+  expect(state.issues[0]!.body).toContain("re-run failed jobs")
+  expect((await f.report(failure)).code).toBe(0)
+  expect((await f.read()).issues).toHaveLength(1)
+  expect((await f.report()).code).toBe(0)
+  state = await f.read()
+  expect(state.issues[0]!.state).toBe("closed")
+  expect(state.issues[0]!.body).toContain("recovered successfully")
+  const mutations = state.calls.filter(args => args[0] === "issue").length
+  expect((await f.report()).code).toBe(0)
+  expect((await f.read()).calls.filter(args => args[0] === "issue")).toHaveLength(mutations)
+  expect((await f.report({ homebrew: "failure" })).code).toBe(0)
+  state = await f.read()
+  expect(state.issues).toHaveLength(1)
+  expect(state.issues[0]!.state).toBe("open")
+  expect(state.issues[0]!.body).toContain("| GitHub publication | success |")
+  expect(state.issues[0]!.body).toContain("| Homebrew tap update | failure |")
+})
+
+test("successful and cancelled releases do not create failure issues", async () => {
+  const f = await reportingFixture()
+  expect((await f.report()).code).toBe(0)
+  expect((await f.read()).issues).toEqual([])
+  const calls = (await f.read()).calls.length
+  expect((await f.report({ npm: "cancelled", publish: "skipped", homebrew: "skipped" })).code).toBe(0)
+  expect((await f.read()).calls).toHaveLength(calls)
+  expect((await f.report({ npm: "unexpected" })).code).not.toBe(0)
+  expect((await f.read()).calls).toHaveLength(calls)
+})
+
+test("release issue lookup failures stop writes and lost create acknowledgements do not cause duplicates", async () => {
+  const f = await reportingFixture()
+  await f.update({ failLookup: true })
+  expect((await f.report({ homebrew: "failure" })).code).not.toBe(0)
+  expect((await f.read()).calls.every(args => args[0] === "api")).toBe(true)
+  await f.update({ failLookup: false, loseCreateAcknowledgement: true })
+  expect((await f.report({ homebrew: "failure" })).code).not.toBe(0)
+  expect((await f.read()).issues).toHaveLength(1)
+  expect((await f.read()).calls.filter(args => args[1] === "create")).toHaveLength(1)
+  expect((await f.report({ homebrew: "failure" })).code).toBe(0)
+  expect((await f.read()).issues).toHaveLength(1)
+  expect((await f.read()).calls.filter(args => args[1] === "create")).toHaveLength(1)
+})
+
+test("release reporting ignores unrelated issues and pull requests", async () => {
+  const f = await reportingFixture()
+  const title = "release v0.0.0-beta.1 failed", body = "<!-- opengh-release-failure:v0.0.0-beta.1 -->"
+  await f.update({ issues: [
+    { number: 1, title, body: "Manually written issue", state: "open" },
+    { number: 2, title, body, state: "open", pull_request: {} },
+    { number: 3, title: "release v0.0.0-beta.2 failed", body, state: "open" },
+  ] })
+  expect((await f.report()).code).toBe(0)
+  expect((await f.read()).calls.every(args => args[0] === "api")).toBe(true)
+  expect((await f.report({ build: "failure", draft: "skipped", npm: "skipped", publish: "skipped", homebrew: "skipped" })).code).toBe(0)
+  expect((await f.read()).issues).toHaveLength(4)
+})
+
 test("publication retries leave an already published release alone and stop on a lookup error", async () => {
   const f = await fixture()
   const calls = join(f.directory, "edits")
@@ -62,7 +188,10 @@ esac`)
 })
 
 test("the Homebrew step installs and upgrades but an old release cannot downgrade the tap", async () => {
+  expect(workflow.jobs.homebrew!.if).toBeUndefined() // Prereleases run this job too.
+  expect(workflow.jobs.homebrew!.needs).toBe("publish")
   const f = await fixture()
+  await f.tool("bun", `exec ${JSON.stringify(process.execPath)} "$@"`)
   const tap = join(f.directory, "tap"), generated = join(f.directory, "dist/homebrew")
   await mkdir(tap)
   await mkdir(generated, { recursive: true })
@@ -85,6 +214,18 @@ test("the Homebrew step installs and upgrades but an old release cannot downgrad
     const result = await f.step("homebrew", "Commit the formula", tap, version)
     expect(result, result.error).toMatchObject({ code: 0 })
   }
+  await install("0.0.0-beta.1")
+  expect(await readFile(join(tap, "Formula/opengh.rb"), "utf8")).toBe(formula("0.0.0-beta.1"))
+  await install("0.0.0-beta.2")
+  const betaHead = await command(["rev-parse", "HEAD"])
+  await install("0.0.0-beta.1")
+  expect(await command(["rev-parse", "HEAD"])).toBe(betaHead)
+  await install("0.0.0")
+  const stableHead = await command(["rev-parse", "HEAD"])
+  await install("0.0.0-beta.2")
+  expect(await command(["rev-parse", "HEAD"])).toBe(stableHead)
+  await install("0.0.1-beta.1") // A newer beta can replace the stable formula.
+  expect(await readFile(join(tap, "Formula/opengh.rb"), "utf8")).toBe(formula("0.0.1-beta.1"))
   await install("0.0.1")
   await install("0.0.2")
   const head = await command(["rev-parse", "HEAD"])
