@@ -170,15 +170,19 @@ try {
   tagObject = taggedObject.out
   // Push only the captured objects, regardless of concurrent ref changes or push.followTags settings.
   // Atomic: the selected commit and annotated tag arrive together or not at all.
-  const pushed = git("push", "--quiet", "--atomic", "--no-follow-tags", "origin", `${releaseHead}:refs/heads/main`, `${tagObject}:refs/tags/${tag}`)
+  console.log("Pushing release commit and tag; pre-push checks may take several minutes.")
+  // Inherit output so Git and pre-push checks are visible while they run.
+  const pushed = Bun.spawnSync(["git", "push", "--progress", "--atomic", "--no-follow-tags", "origin",
+    `${releaseHead}:refs/heads/main`, `${tagObject}:refs/tags/${tag}`,
+  ], { cwd: root, stdin: "inherit", stdout: "inherit", stderr: "inherit" })
   // An error can mean the acknowledgement was lost. Only our exact annotated tag proves success;
   // another maintainer's tag with the same name does not. Exit 2 means a successful lookup found no tag.
-  if (!pushed.ok) {
+  if (pushed.exitCode !== 0) {
     const remote = git("ls-remote", "--exit-code", "--refs", "origin", `refs/tags/${tag}`)
     if (!remote.ok && remote.code !== 2) {
       fail(`Push failed and we could not verify its outcome: ${remote.error}\nThe release may already be running. The local commit and tag have been kept; check GitHub before retrying.\nYour notes are kept in ${notesPath}`)
     }
-    if (!remote.ok) throw new Error(`push failed: ${pushed.error}`)
+    if (!remote.ok) throw new Error(`push failed (exit ${pushed.exitCode}); see Git output above.`)
     if (remote.out.split(/\s+/)[0] !== tagObject) throw new Error(`origin has a different tag named ${tag}; our release was not pushed.`)
   }
 } catch (error) {

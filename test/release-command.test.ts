@@ -72,6 +72,28 @@ test("the first release can be 0.0.0 and its editor notes reach the annotated ta
   expect(await f.git("--git-dir", f.remote, "for-each-ref", "--format=%(contents)", "refs/tags/v0.0.0")).toBe(f.notes.trim())
 }, 15_000)
 
+test.each([0, 1])("pre-push output is visible and hook exit %s is respected", async exit => {
+  const f = await fixture()
+  const hooks = join(f.repo, ".git/hooks")
+  await mkdir(hooks, { recursive: true })
+  const hook = join(hooks, "pre-push")
+  await writeFile(hook, `#!/bin/sh\nprintf 'pre-push: typecheck running\\n'\nprintf 'pre-push: tests running\\n' >&2\nexit ${exit}\n`)
+  await chmod(hook, 0o755)
+  await f.git("config", "core.hooksPath", hooks)
+  const result = await f.release("0.0.0")
+  expect(result.out).toContain("pre-push: typecheck running")
+  expect(result.error).toContain("pre-push: tests running")
+  expect(result.code).toBe(exit)
+  if (exit === 0) {
+    expect(await f.git("--git-dir", f.remote, "cat-file", "-t", "refs/tags/v0.0.0")).toBe("tag")
+  } else {
+    expect(result.error).toContain("push failed")
+    expect(await f.git("tag")).toBe("")
+    expect(await f.git("--git-dir", f.remote, "tag")).toBe("")
+    expect(await f.git("rev-parse", "HEAD")).toBe(f.head)
+  }
+}, 15_000)
+
 test.each([false, true])("new contributors appear in the editable draft (previous release: %s)", async previous => {
   const f = await fixture()
   if (previous) await f.git("tag", "v0.0.0")
