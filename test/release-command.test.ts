@@ -639,7 +639,8 @@ test("notes without a final newline are not reformatted", async () => {
   const f = await fixture()
   const notes = "    indented code\n\nA final line with two spaces.  "
   await writeFile(join(f.directory, "notes"), notes)
-  expect((await f.release("0.0.0")).code).toBe(0)
+  const result = await f.release("0.0.0")
+  expect(result, result.error).toMatchObject({ code: 0 })
   const tag = await f.run([realGit, "--git-dir", f.remote, "cat-file", "tag", "refs/tags/v0.0.0"])
   expect(tag.code).toBe(0)
   expect(tag.out.slice(tag.out.indexOf("\n\n") + 2)).toBe(notes)
