@@ -43,6 +43,7 @@ export async function runUpdateInstaller(script: string, options: InstallerOptio
   const timeout = setTimeout(() => stop("timeout"), timeoutMs)
   try {
     const code = await child.exited
+    if (state.stopped && process.stdout.isTTY) process.stdout.write("\n")
     if (state.stopped === "timeout")
       throw new Error("Update timed out; installer processes were stopped. Check opengh --version before retrying.")
     if (state.stopped) {
@@ -84,6 +85,12 @@ export function installationUpdateHint(executable: string) {
     return "This installation is managed by a JavaScript package manager. Use the manager that installed it; for a global npm install: npm install --global @leohenon/opengh"
   if (executable.includes("/Cellar/opengh/") || existsSync(join(dirname(dirname(executable)), "INSTALL_RECEIPT.json")))
     return "This installation is managed by Homebrew. Run: brew update && brew upgrade leohenon/tap/opengh"
+}
+
+function updatedMessage(version: string) {
+  if (!process.stdout.isTTY) return `Updated to opengh ${version}.`
+  const color = !process.env.NO_COLOR && process.env.TERM !== "dumb"
+  return `${color ? "\x1b[32m✓\x1b[0m" : "✓"} Updated to opengh ${version}`
 }
 
 export async function runUpdate(options: UpdateOptions = {}): Promise<void> {
@@ -133,7 +140,7 @@ export async function runUpdate(options: UpdateOptions = {}): Promise<void> {
       },
     })
     if (code !== 0) throw new Error("Update did not complete successfully. Check opengh --version before retrying.")
-    log(`Updated to opengh ${latest.version}.`)
+    log(updatedMessage(latest.version))
   } finally {
     await rm(lock, { recursive: true, force: true })
   }

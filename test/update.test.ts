@@ -10,6 +10,18 @@ import { installationUpdateHint, runUpdate } from "../src/update"
 const directories: string[] = []
 afterEach(async () => { await Promise.all(directories.splice(0).map(path => rm(path, { recursive: true, force: true }))) })
 
+// The success message depends on whether stdout is a terminal, which differs between a piped run and the pre-push hook.
+async function withStdoutTTY<T>(isTTY: boolean, run: () => Promise<T>): Promise<T> {
+  const before = Object.getOwnPropertyDescriptor(process.stdout, "isTTY")
+  Object.defineProperty(process.stdout, "isTTY", { value: isTTY, configurable: true })
+  try {
+    return await run()
+  } finally {
+    if (before) Object.defineProperty(process.stdout, "isTTY", before)
+    else delete (process.stdout as { isTTY?: boolean }).isTTY
+  }
+}
+
 async function fixture(relative = "bin/opengh") {
   const directory = await mkdtemp(join(tmpdir(), "opengh-update-"))
   directories.push(directory)
@@ -114,7 +126,7 @@ test("installer settings are pinned to the release and real executable, not ambi
   const f = await fixture("bin/opengh preview")
   const alias = join(f.directory, "alias")
   await symlink(f.executable, alias)
-  await runUpdate({ ...f.options, executable: alias, install: async (script, options) => {
+  await withStdoutTTY(false, () => runUpdate({ ...f.options, executable: alias, install: async (script, options) => {
     expect(script).toBe("fixture installer")
     expect(options.env.OPENGH_VERSION).toBe("0.2.0")
     expect(options.env.OPENGH_INSTALL_DIR).toBe(dirname(await realpath(f.executable)))
@@ -125,7 +137,7 @@ test("installer settings are pinned to the release and real executable, not ambi
     expect(options.env.TMPDIR).toBe(options.cwd)
     expect(options.env.OPENGH_UPDATE_STAGE_DIR).toBe(options.cwd)
     return 0
-  } })
+  } }))
   expect(f.messages.at(-1)).toBe("Updated to opengh 0.2.0.")
   expect(existsSync(f.lock)).toBe(false)
 })
@@ -274,7 +286,9 @@ test.each(["success", "checksum", "version", "changed install"])("standalone upd
   expect(code === 0, error).toBe(mode === "success")
   if (mode === "success") {
     expect(out).toContain("Updated to opengh 0.2.0")
-    expect(out).toContain('run it as "opengh preview"')
+    expect(out).not.toContain("Installed")
+    expect(out).not.toContain("PATH")
+    expect(out).not.toContain("GitHub CLI")
     expect(await readFile(f.executable, "utf8")).toContain("opengh 0.2.0")
   } else expect(await readFile(f.executable, "utf8")).toBe(f.previous)
   expect(await readdir(dirname(f.executable))).toEqual(["opengh preview"])

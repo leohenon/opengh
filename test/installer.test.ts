@@ -78,6 +78,14 @@ test.each([false, true])("a working download installs and reinstalls cleanly (ex
   }
 })
 
+test("updates run by opengh print nothing on success, leaving the result to opengh", async () => {
+  const f = await fixture('echo "opengh 0.2.0"')
+  await f.script(join(f.destination, "opengh"), 'echo "opengh 0.1.0"')
+  const result = await f.run({ OPENGH_UPDATE_FROM: "0.1.0", PATH: `${f.tools}:/usr/bin:/bin` })
+  expect(result, result.error).toMatchObject({ code: 0, out: "", error: "" })
+  expect(await readFile(join(f.destination, "opengh"), "utf8")).toContain("opengh 0.2.0")
+})
+
 test("a destination directory named opengh is not treated as an installed executable", async () => {
   const f = await fixture('echo "opengh 0.0.0"')
   await mkdir(join(f.destination, "opengh"))

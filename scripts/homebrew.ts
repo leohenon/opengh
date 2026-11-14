@@ -18,6 +18,20 @@ async function archive(target: string) {
   return `      url "${base}/${name}"\n      sha256 "${sha256}"`
 }
 
+const logo = [
+  "    {b}▄▄██████▄▄",
+  "  {b}▄████████████▄",
+  " {b}▟██ ▝▀▀▀▀▀▀▘ ██▙                                  █",
+  "{b}▟██▛  {o}▀▄      {b}▜██▙   █▀▀█  █▀▀█  █▀▀█  █▀▀█  █▀▀█  █▀▀█",
+  "{b}███    {o}▄▀      {b}███   █  █  █  █  █▀▀▀  █  █  █  █  █  █",
+  "{b}▜██▖  {o}▀  ▀▀▀▘ {b}▗██▛   █▄▄█  █▄▄█  █▄▄▄  █  █  █▄▄█  █  █",
+  "{b}▝██▀▙▄▄    ▄▄▟███▘         █                 ▄▄▄█",
+  "  {b}▜▙▖▀▀    ▜███▛",
+  "   {b}▝▀▜▌    ▐▛▀▘",
+]
+
+const logoLines = logo.map(line => `      ${line.replaceAll("{b}", "#{b}").replaceAll("{o}", "#{o}")}#{r}`).join("\n")
+
 // Homebrew on Linux uses glibc, so the musl executables are not offered here.
 const formula = `class Opengh < Formula
   desc "Familiar terminal interface for GitHub"
@@ -46,6 +60,20 @@ ${await archive("linux-x64")}
   def install
     bin.install "opengh"
     prefix.install "THIRD-PARTY-NOTICES.md"
+  end
+
+  def caveats
+    b, o, r = Tty.color? ? ["\\e[0m\\e[1m", "\\e[38;5;208m", "\\e[0m"] : ["", "", ""]
+    text = <<~EOS
+${logoLines}
+    EOS
+    gh = Formula["gh"].opt_bin/"gh"
+    unless gh.executable? && quiet_system(gh, "auth", "token", "--hostname", "github.com")
+      text += "\\nThe GitHub CLI is not signed in. Sign in with:\\n  gh auth login --hostname github.com\\n"
+    end
+    text + "\\nGet started:\\n  #{b}opengh#{r}\\n"
+  rescue FormulaUnavailableError
+    text
   end
 
   test do
