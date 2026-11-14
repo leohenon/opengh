@@ -14,8 +14,26 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  changes:
+    name: Check CI scope
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      run_ci: ${{ steps.scope.outputs.run_ci }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 2
+      - name: Check for a version-only release commit
+        id: scope
+        env:
+          PUSH_BEFORE: ${{ github.event.before }}
+        run: node scripts/ci-release-check.mjs
+
   test:
     name: Test (${{ matrix.os }})
+    needs: changes
+    if: ${{ needs.changes.outputs.run_ci == 'true' }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 20
     strategy:
@@ -41,6 +59,8 @@ jobs:
 
   nix:
     name: Nix (${{ matrix.os }})
+    needs: changes
+    if: ${{ needs.changes.outputs.run_ci == 'true' }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     strategy:

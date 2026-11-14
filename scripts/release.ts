@@ -191,11 +191,14 @@ try {
   tagObject = tagged.out
   // Push only the captured objects, regardless of concurrent ref changes or push.followTags settings.
   // Atomic: the selected commit and annotated tag arrive together or not at all.
-  console.log("Pushing release commit and tag; pre-push checks may take several minutes.")
+  console.log("Pushing release commit and tag; release-tag CI will verify this release.")
   // Inherit output so Git and pre-push checks are visible while they run.
   const pushed = Bun.spawnSync(["git", "push", "--progress", "--atomic", "--no-follow-tags", "origin",
     `${releaseHead}:refs/heads/main`, `${tagObject}:refs/tags/${tag}`,
-  ], { cwd: root, stdin: "inherit", stdout: "inherit", stderr: "inherit" })
+  ], { cwd: root, stdin: "inherit", stdout: "inherit", stderr: "inherit",
+    // The base commit already passed CI; the tag workflow tests the release again.
+    env: { ...process.env, OPENGH_RELEASE_PUSH: "1" },
+  })
   // An error can mean the acknowledgement was lost. Only our exact annotated tag proves success;
   // another maintainer's tag with the same name does not. Exit 2 means a successful lookup found no tag.
   if (pushed.exitCode !== 0) {

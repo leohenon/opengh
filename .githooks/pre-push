@@ -2,5 +2,9 @@
 set -eu
 
 cd "$(git rev-parse --show-toplevel)"
+if [ "${OPENGH_RELEASE_PUSH:-}" = 1 ]; then
+  echo "Skipping pre-push checks; release-tag CI will verify this release."
+  exit 0
+fi
 bun run typecheck </dev/null
 bun test </dev/null

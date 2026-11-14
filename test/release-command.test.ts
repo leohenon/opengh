@@ -94,6 +94,25 @@ test.each([0, 1])("pre-push output is visible and hook exit %s is respected", as
   }
 }, 15_000)
 
+test.each([0, 1])("release pushes skip the project hook while ordinary hook checks retain exit %s", async exit => {
+  const f = await fixture()
+  const hooks = join(f.repo, ".git/hooks")
+  const hook = join(hooks, "pre-push")
+  await mkdir(hooks, { recursive: true })
+  await copyFile(new URL("../.githooks/pre-push", import.meta.url), hook)
+  await chmod(hook, 0o755)
+  await f.git("config", "core.hooksPath", hooks)
+  await f.tool("bun", `printf '%s\\n' "$*" >> "$TMPDIR/checks"\nexit ${exit}`)
+  expect((await f.run(["sh", hook])).code).toBe(exit)
+  expect(await readFile(join(f.directory, "checks"), "utf8")).toBe(exit === 0 ? "run typecheck\ntest\n" : "run typecheck\n")
+  await writeFile(join(f.directory, "checks"), "")
+  const release = await f.release("0.0.1")
+  expect(release, release.error).toMatchObject({ code: 0 })
+  expect(release.out).toContain("Skipping pre-push checks; release-tag CI will verify this release.")
+  expect(await readFile(join(f.directory, "checks"), "utf8")).toBe("")
+  expect(await f.git("--git-dir", f.remote, "cat-file", "-t", "refs/tags/v0.0.1")).toBe("tag")
+}, 15_000)
+
 test.each([false, true])("new contributors appear in the editable draft (previous release: %s)", async previous => {
   const f = await fixture()
   if (previous) await f.git("tag", "v0.0.0")
