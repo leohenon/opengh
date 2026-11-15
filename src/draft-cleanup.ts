@@ -6,7 +6,11 @@ import { join } from "node:path"
 export function cleanupDraftTemporaryFiles(directory: string) {
   const cutoff = Date.now() - 24 * 60 * 60 * 1000
   let names: string[]
-  try { names = readdirSync(directory) } catch { return }
+  try {
+    names = readdirSync(directory)
+  } catch {
+    return
+  }
   for (const name of names) {
     if (!/^[a-f0-9]{64}\.json(?:\.submission)?\.[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}\.tmp$/.test(name)) continue
     try {

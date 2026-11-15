@@ -34,15 +34,26 @@ function fakeChild(exited: Promise<number>, kill = () => {}) {
 
 test("passes literal UTF-8 stdin and waits for successful completion", async () => {
   let finish!: (code: number) => void
-  spawn.mockReturnValue(fakeChild(new Promise((resolve) => { finish = resolve })))
+  spawn.mockReturnValue(
+    fakeChild(
+      new Promise((resolve) => {
+        finish = resolve
+      }),
+    ),
+  )
   const text = "héllo 世界\n$(not-a-shell-command) ' \""
   let completed = false
-  const copying = copyToHostClipboard(text).then((result) => { completed = true; return result })
+  const copying = copyToHostClipboard(text).then((result) => {
+    completed = true
+    return result
+  })
   await Promise.resolve()
   expect(completed).toBe(false)
   expect(which).toHaveBeenCalledWith("pbcopy")
   expect(spawn).toHaveBeenCalledWith(["/fake/pbcopy"], {
-    stdin: new TextEncoder().encode(text), stdout: "ignore", stderr: "ignore",
+    stdin: new TextEncoder().encode(text),
+    stdout: "ignore",
+    stderr: "ignore",
   })
   finish(0)
   expect(await copying).toBe(true)
@@ -72,7 +83,7 @@ test("Linux selects available desktop tools in preference order", async () => {
     ["xclip", ["-selection", "clipboard"]],
     ["xsel", ["--clipboard", "--input"]],
   ] as const) {
-    which.mockImplementation((command) => command === available ? `/fake/${command}` : null)
+    which.mockImplementation((command) => (command === available ? `/fake/${command}` : null))
     expect(await copyToHostClipboard("text")).toBe(true)
     expect(spawn.mock.calls.at(-1)?.[0]).toEqual([`/fake/${available}`, ...args])
   }
@@ -89,12 +100,19 @@ test("shutdown kills active copies and prevents new ones", async () => {
   const clipboard = await import(modulePath)
   let finish!: (code: number) => void
   let killed = false
-  const exited = new Promise<number>((resolve) => { finish = resolve })
-  spawn.mockReturnValue(fakeChild(exited, () => { killed = true; finish(137) }))
+  const exited = new Promise<number>((resolve) => {
+    finish = resolve
+  })
+  spawn.mockReturnValue(
+    fakeChild(exited, () => {
+      killed = true
+      finish(137)
+    }),
+  )
   const copying = clipboard.copyToHostClipboard("text").catch((error: Error) => error)
   await clipboard.stopClipboardProcesses()
   expect(await copying).toBeInstanceOf(Error)
-  expect((await copying as Error).message).toContain("exit code 137")
+  expect(((await copying) as Error).message).toContain("exit code 137")
   expect(killed).toBe(true)
   await expect(clipboard.copyToHostClipboard("text")).rejects.toThrow("shutting down")
   expect(spawn).toHaveBeenCalledTimes(1)
@@ -103,8 +121,15 @@ test("shutdown kills active copies and prevents new ones", async () => {
 test("timeout kills the process and rejects", async () => {
   let finish!: (code: number) => void
   let killed = false
-  const exited = new Promise<number>((resolve) => { finish = resolve })
-  spawn.mockReturnValue(fakeChild(exited, () => { killed = true; finish(137) }))
+  const exited = new Promise<number>((resolve) => {
+    finish = resolve
+  })
+  spawn.mockReturnValue(
+    fakeChild(exited, () => {
+      killed = true
+      finish(137)
+    }),
+  )
   await expect(copyToHostClipboard("text")).rejects.toThrow("pbcopy timed out after 3 seconds")
   expect(killed).toBe(true)
 })

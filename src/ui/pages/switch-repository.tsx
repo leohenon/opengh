@@ -30,8 +30,7 @@ export function SwitchRepositoryScreen(props: {
   })
   const typedRepository = createMemo(() => {
     const repository = normalizeRepository(query())
-    return repository && !repositories().some((recent) => recent.toLowerCase() === repository.toLowerCase())
-      ? repository : undefined
+    return repository && !repositories().some((recent) => recent.toLowerCase() === repository.toLowerCase()) ? repository : undefined
   })
   const candidates = createMemo(() => {
     const typed = typedRepository()
@@ -65,7 +64,10 @@ export function SwitchRepositoryScreen(props: {
         empty="No matching repositories — enter owner/repository or a GitHub URL"
         showScrollbar={props.showScrollbar}
         error={error()}
-        onQueryChange={(value) => { setQuery(value); setError("") }}
+        onQueryChange={(value) => {
+          setQuery(value)
+          setError("")
+        }}
         onSelect={props.onOpen}
         onSubmit={submit}
         onClose={props.onClose}
@@ -75,10 +77,16 @@ export function SwitchRepositoryScreen(props: {
           return (
             <>
               <box flexGrow={1} minWidth={0} flexDirection="row" overflow="hidden">
-                <text flexShrink={0} fg={colors.muted}>{owner} / </text>
-                <text minWidth={0} flexShrink={1} height={1} wrapMode="none" truncate fg={colors.blue} attributes={TextAttributes.BOLD}>{nameParts.join("/")}</text>
+                <text flexShrink={0} fg={colors.muted}>
+                  {owner} /{" "}
+                </text>
+                <text minWidth={0} flexShrink={1} height={1} wrapMode="none" truncate fg={colors.blue} attributes={TextAttributes.BOLD}>
+                  {nameParts.join("/")}
+                </text>
               </box>
-              <text width={10} flexShrink={0} fg={colors.green}>{repository.toLowerCase() === props.current?.toLowerCase() ? "✓ current" : repository === typedRepository() ? "typed" : ""}</text>
+              <text width={10} flexShrink={0} fg={colors.green}>
+                {repository.toLowerCase() === props.current?.toLowerCase() ? "✓ current" : repository === typedRepository() ? "typed" : ""}
+              </text>
             </>
           )
         }}

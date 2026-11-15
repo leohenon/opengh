@@ -16,23 +16,39 @@ describe("Popup", () => {
     const [query, setQuery] = createSignal("")
     let backgroundEvents = 0
     let scroll!: ScrollBoxRenderable
-    const view = await testRender(() => (
-      <scrollbox ref={(value) => { scroll = value }} width="100%" height="100%" focusable={false}>
-        <box height={40} flexShrink={0} onMouse={(event) => {
-          if (event.type === "down" || event.type === "up" || event.type === "scroll") backgroundEvents++
-        }}><text selectable={false}>Background</text></box>
-        <Show when={open()}>
-          <Popup width={40} height={10} onClose={() => setOpen(false)}>
-            <input focused={!confirming()} value={query()} onInput={setQuery} />
-          </Popup>
-        </Show>
-        <Show when={confirming()}>
-          <Popup width={24} height={6} zIndex={200} onClose={() => setConfirming(false)}>
-            <text>Confirmation</text>
-          </Popup>
-        </Show>
-      </scrollbox>
-    ), { width: 60, height: 20 })
+    const view = await testRender(
+      () => (
+        <scrollbox
+          ref={(value) => {
+            scroll = value
+          }}
+          width="100%"
+          height="100%"
+          focusable={false}
+        >
+          <box
+            height={40}
+            flexShrink={0}
+            onMouse={(event) => {
+              if (event.type === "down" || event.type === "up" || event.type === "scroll") backgroundEvents++
+            }}
+          >
+            <text selectable={false}>Background</text>
+          </box>
+          <Show when={open()}>
+            <Popup width={40} height={10} onClose={() => setOpen(false)}>
+              <input focused={!confirming()} value={query()} onInput={setQuery} />
+            </Popup>
+          </Show>
+          <Show when={confirming()}>
+            <Popup width={24} height={6} zIndex={200} onClose={() => setConfirming(false)}>
+              <text>Confirmation</text>
+            </Popup>
+          </Show>
+        </scrollbox>
+      ),
+      { width: 60, height: 20 },
+    )
     active.push(view)
     await view.flush()
 
@@ -105,9 +121,14 @@ test("expanded popups keep an inset and a status row without changing the fullsc
   const [expanded, setExpanded] = createSignal(true)
   const [fullscreen, setFullscreen] = createSignal(false)
   const [reserveStatusBar, setReserveStatusBar] = createSignal(false)
-  const view = await testRender(() => <Popup width={86} height={27} expanded={expanded()} fullscreen={fullscreen()} reserveStatusBar={reserveStatusBar()}>
-    <box id="popup-probe" flexGrow={1} />
-  </Popup>, { width: 120, height: 40 })
+  const view = await testRender(
+    () => (
+      <Popup width={86} height={27} expanded={expanded()} fullscreen={fullscreen()} reserveStatusBar={reserveStatusBar()}>
+        <box id="popup-probe" flexGrow={1} />
+      </Popup>
+    ),
+    { width: 120, height: 40 },
+  )
   active.push(view)
   await view.flush()
   const probe = view.renderer.root.findDescendantById("popup-probe")!

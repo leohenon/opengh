@@ -52,7 +52,11 @@ for (const file of ["LICENSE", "README.md"]) {
 
 const tags = mustGit("tag", "--list", "v*").split("\n").filter(Boolean)
 if (tags.includes(tag)) fail(`${tag} already exists.`)
-const newest = tags.map((name) => name.slice(1)).filter((name) => versionPattern.test(name)).sort(Bun.semver.order).at(-1)
+const newest = tags
+  .map((name) => name.slice(1))
+  .filter((name) => versionPattern.test(name))
+  .sort(Bun.semver.order)
+  .at(-1)
 if (newest && Bun.semver.order(version, newest) <= 0) fail(`${version} is not newer than the latest release, ${newest}.`)
 const manifestPath = join(root, "package.json")
 // Fetching and CI checks can take time. Only the validated commit supplies release contents.
@@ -62,7 +66,9 @@ const manifestText = manifest.raw
 const manifestIndex = mustGit("ls-tree", "--format=%(objectmode) %(objectname) 0\t%(path)", head, "--", "package.json")
 const current = JSON.parse(manifestText).version as string
 
-const ci = Bun.spawnSync(["gh", "run", "list", "--workflow", "ci.yml", "--commit", head, "--limit", "1", "--json", "status,conclusion"], { cwd: root })
+const ci = Bun.spawnSync(["gh", "run", "list", "--workflow", "ci.yml", "--commit", head, "--limit", "1", "--json", "status,conclusion"], {
+  cwd: root,
+})
 if (ci.exitCode !== 0) fail(`could not read the CI result for this commit: ${ci.stderr.toString().trim()}`)
 const [run] = JSON.parse(ci.stdout.toString() || "[]") as Array<{ status: string; conclusion: string }>
 if (!run) fail("CI has not run on this commit.")
@@ -79,25 +85,44 @@ const ticked = (ref: string) => {
 const before = new Set(previous.ok ? ticked(previous.out) : [])
 const highlights = ticked("HEAD").filter((item) => !before.has(item))
 const commits = previous.ok
-  ? mustGit("log", "--no-merges", "--reverse", "--format=%s", `${previous.out}..HEAD`).split("\n").filter((subject) => subject && !/^release \d/.test(subject))
+  ? mustGit("log", "--no-merges", "--reverse", "--format=%s", `${previous.out}..HEAD`)
+      .split("\n")
+      .filter((subject) => subject && !/^release \d/.test(subject))
   : []
 // GitHub identifies first-time contributors from merged PRs. This endpoint only generates
 // text; it does not create a release or tag. Keep our own notes and use just its contributor list.
-const generated = Bun.spawnSync(["gh", "api", "--method", "POST", "repos/leohenon/opengh/releases/generate-notes",
-  "-f", `tag_name=${tag}`, "-f", `target_commitish=${head}`,
-  ...(previous.ok ? ["-f", `previous_tag_name=${previous.out}`] : []),
-], { cwd: root })
+const generated = Bun.spawnSync(
+  [
+    "gh",
+    "api",
+    "--method",
+    "POST",
+    "repos/leohenon/opengh/releases/generate-notes",
+    "-f",
+    `tag_name=${tag}`,
+    "-f",
+    `target_commitish=${head}`,
+    ...(previous.ok ? ["-f", `previous_tag_name=${previous.out}`] : []),
+  ],
+  { cwd: root },
+)
 if (generated.exitCode !== 0) fail(`could not generate new contributors: ${generated.stderr.toString().trim()}`)
 let generatedNotes: unknown
-try { generatedNotes = JSON.parse(generated.stdout.toString()) }
-catch { fail("invalid generated release notes response.") }
+try {
+  generatedNotes = JSON.parse(generated.stdout.toString())
+} catch {
+  fail("invalid generated release notes response.")
+}
 if (!generatedNotes || typeof generatedNotes !== "object" || !("body" in generatedNotes) || typeof generatedNotes.body !== "string") {
   fail("invalid generated release notes response.")
 }
 const contributorLines: string[] = []
 let inContributors = false
 for (const line of generatedNotes.body.split(/\r?\n/)) {
-  if (/^## New Contributors\s*$/i.test(line)) { inContributors = true; continue }
+  if (/^## New Contributors\s*$/i.test(line)) {
+    inContributors = true
+    continue
+  }
   if (inContributors && (/^#{1,6} /.test(line) || /^\*\*Full Changelog\b/i.test(line))) break
   if (inContributors) contributorLines.push(line)
 }
@@ -124,7 +149,7 @@ const edited = Bun.spawnSync(["sh", "-c", `${editor} "$1"`, "sh", notesPath], { 
 if (edited.exitCode !== 0) fail(`the editor did not exit cleanly; nothing was released.\nYour notes are kept in ${notesPath}`)
 const saved = readFileSync(notesPath, "utf8")
 // Remove only our exact prefix (also allowing an editor's CRLF line endings), not authored Markdown or comments.
-const prefix = [instructions, instructions.replaceAll("\n", "\r\n")].find(value => saved.startsWith(value))
+const prefix = [instructions, instructions.replaceAll("\n", "\r\n")].find((value) => saved.startsWith(value))
 const notes = prefix ? saved.slice(prefix.length).replace(/^\r?\n\r?\n/, "") : saved
 if (!notes.trim()) {
   rmSync(scratch, { recursive: true, force: true })
@@ -146,7 +171,8 @@ if (!/^y(es)?$/i.test(prompt(`Tag and push ${tag}? [y/N]`)?.trim() ?? "")) stop(
 // The notes may have been open for a while. Release only the commit that was checked above.
 if (mustGit("rev-parse", "HEAD") !== head || mustGit("branch", "--show-current") !== "main") stop("main changed while the notes were open.")
 if (!git("diff", "--quiet", head, "--", "package.json").ok) stop("package.json changed while preparing the release.")
-if (mustGit("ls-files", "--stage", "--", "package.json") !== manifestIndex) stop("the staged package.json changed while the notes were open.")
+if (mustGit("ls-files", "--stage", "--", "package.json") !== manifestIndex)
+  stop("the staged package.json changed while the notes were open.")
 let writtenManifest: string | undefined
 let releaseCommit: string | undefined
 let tagObject: string | undefined
@@ -169,7 +195,14 @@ try {
     const parent = git("rev-parse", `${committed.out}^@`)
     const changed = git("diff-tree", "--no-commit-id", "--name-only", "-r", head, committed.out)
     const committedIndex = git("ls-tree", "--format=%(objectmode) %(objectname) 0\t%(path)", committed.out, "--", "package.json")
-    if (!parent.ok || parent.out !== head || !changed.ok || changed.out !== "package.json" || !committedIndex.ok || committedIndex.out !== expectedIndex) {
+    if (
+      !parent.ok ||
+      parent.out !== head ||
+      !changed.ok ||
+      changed.out !== "package.json" ||
+      !committedIndex.ok ||
+      committedIndex.out !== expectedIndex
+    ) {
       stop("Could not verify the release commit; local state needs manual recovery. Inspect HEAD and package.json before retrying.")
     }
     releaseCommit = committed.out
@@ -191,18 +224,34 @@ try {
   // Atomic: the selected commit and annotated tag arrive together or not at all.
   console.log("Pushing release commit and tag; release-tag CI will verify this release.")
   // Inherit output so Git and pre-push checks are visible while they run.
-  const pushed = Bun.spawnSync(["git", "push", "--progress", "--atomic", "--no-follow-tags", "origin",
-    `${releaseHead}:refs/heads/main`, `${tagObject}:refs/tags/${tag}`,
-  ], { cwd: root, stdin: "inherit", stdout: "inherit", stderr: "inherit",
-    // The base commit already passed CI; the tag workflow tests the release again.
-    env: { ...process.env, OPENGH_RELEASE_PUSH: "1" },
-  })
+  const pushed = Bun.spawnSync(
+    [
+      "git",
+      "push",
+      "--progress",
+      "--atomic",
+      "--no-follow-tags",
+      "origin",
+      `${releaseHead}:refs/heads/main`,
+      `${tagObject}:refs/tags/${tag}`,
+    ],
+    {
+      cwd: root,
+      stdin: "inherit",
+      stdout: "inherit",
+      stderr: "inherit",
+      // The base commit already passed CI; the tag workflow tests the release again.
+      env: { ...process.env, OPENGH_RELEASE_PUSH: "1" },
+    },
+  )
   // An error can mean the acknowledgement was lost. Only our exact annotated tag proves success;
   // another maintainer's tag with the same name does not. Exit 2 means a successful lookup found no tag.
   if (pushed.exitCode !== 0) {
     const remote = git("ls-remote", "--exit-code", "--refs", "origin", `refs/tags/${tag}`)
     if (!remote.ok && remote.code !== 2) {
-      fail(`Push failed and we could not verify its outcome: ${remote.error}\nThe release may already be running. The local commit and tag have been kept; check GitHub before retrying.\nYour notes are kept in ${notesPath}`)
+      fail(
+        `Push failed and we could not verify its outcome: ${remote.error}\nThe release may already be running. The local commit and tag have been kept; check GitHub before retrying.\nYour notes are kept in ${notesPath}`,
+      )
     }
     if (!remote.ok) throw new Error(`push failed (exit ${pushed.exitCode}); see Git output above.`)
     if (remote.out.split(/\s+/)[0] !== tagObject) throw new Error(`origin has a different tag named ${tag}; our release was not pushed.`)

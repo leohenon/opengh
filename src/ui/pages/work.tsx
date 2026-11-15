@@ -30,9 +30,8 @@ export function WorkScreen(props: {
 }) {
   const { colors } = useTheme()
   const icons = useIcons()
-  const dots = useLoadingDots(() => props.active
-    && (props.counts.open === "…" || props.counts.closed === "…"))
-  const count = (value: string) => value === "…" ? dots() : value
+  const dots = useLoadingDots(() => props.active && (props.counts.open === "…" || props.counts.closed === "…"))
+  const count = (value: string) => (value === "…" ? dots() : value)
   const merged = (entry: IssueSummary | PullRequestSummary) => props.kind === "pull" && "merged" in entry && entry.merged
   const entryColor = (entry: IssueSummary | PullRequestSummary) => {
     if (merged(entry)) return colors.purple
@@ -47,13 +46,16 @@ export function WorkScreen(props: {
 
   return (
     <PageShell
-      header={(
+      header={
         <box flexDirection="row" alignItems="center" gap={2}>
           <text
             fg={props.state === "open" ? colors.openState : colors.muted}
             attributes={props.state === "open" ? TextAttributes.BOLD : TextAttributes.NONE}
             selectable={false}
-            {...mouseClick(() => props.onStateChange?.("open"), () => props.active && props.interactive && Boolean(props.onStateChange))}
+            {...mouseClick(
+              () => props.onStateChange?.("open"),
+              () => props.active && props.interactive && Boolean(props.onStateChange),
+            )}
           >
             Open ({count(props.counts.open)})
           </text>
@@ -61,12 +63,15 @@ export function WorkScreen(props: {
             fg={props.state === "closed" ? colors.closedState : colors.muted}
             attributes={props.state === "closed" ? TextAttributes.BOLD : TextAttributes.NONE}
             selectable={false}
-            {...mouseClick(() => props.onStateChange?.("closed"), () => props.active && props.interactive && Boolean(props.onStateChange))}
+            {...mouseClick(
+              () => props.onStateChange?.("closed"),
+              () => props.active && props.interactive && Boolean(props.onStateChange),
+            )}
           >
             Closed ({count(props.counts.closed)})
           </text>
         </box>
-      )}
+      }
     >
       <ResourceStateView resource={props.resource}>
         {(page) => (
@@ -90,10 +95,7 @@ export function WorkScreen(props: {
                   <text fg={entryColor(entry())}>{entryIcon(entry())}</text>
                 </box>
                 <box height={2} flexGrow={1} flexBasis={0} minWidth={0} flexDirection="column" overflow="hidden">
-                  <ListLine
-                    fg={colors.text}
-                    attributes={active() ? TextAttributes.BOLD : TextAttributes.NONE}
-                  >
+                  <ListLine fg={colors.text} attributes={active() ? TextAttributes.BOLD : TextAttributes.NONE}>
                     {(width) => fitText(entry().title, width)}
                   </ListLine>
                   <ListLine fg={colors.muted}>

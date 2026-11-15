@@ -7,10 +7,47 @@ import { DiffViewerSetupDialog } from "./components/diff-viewer-setup"
 import { defaultConfig, type Config } from "../config"
 import type { HintEntry } from "../keybindings"
 import { KeybindingsBoundary, useKeyActions, useKeybindings } from "./keybindings"
-import { cloneCommand, cloneDestination, matchesLocalRepository, type LocalRepository, type CommandSpec, type CommandTask } from "../command-actions"
+import {
+  cloneCommand,
+  cloneDestination,
+  matchesLocalRepository,
+  type LocalRepository,
+  type CommandSpec,
+  type CommandTask,
+} from "../command-actions"
 import { CommandDialog, type CommandAction } from "./components/command-dialog"
-import type { AssignableUser, IssueReference, CommitDetail, DiffContent, DiffTarget, IssueActionKind, IssueActionParent, IssueActionResult, Paginated, ListState, PullMergeDraft, PullMergeMessage, PullMergeMethod, PullRequestDetail, PullReviewThread, ReactionKind, ReactionState, ReactionTarget } from "../models"
-import { atRepositoryEntry, back, navigate, openDetail, openDiff, openPage, type DetailTarget, type InitialNavigation, type NavigationState, type Page } from "../navigation"
+import type {
+  AssignableUser,
+  IssueReference,
+  CommitDetail,
+  DiffContent,
+  DiffTarget,
+  IssueActionKind,
+  IssueActionParent,
+  IssueActionResult,
+  Paginated,
+  ListState,
+  PullMergeDraft,
+  PullMergeMessage,
+  PullMergeMethod,
+  PullRequestDetail,
+  PullReviewThread,
+  ReactionKind,
+  ReactionState,
+  ReactionTarget,
+} from "../models"
+import {
+  atRepositoryEntry,
+  back,
+  navigate,
+  openDetail,
+  openDiff,
+  openPage,
+  type DetailTarget,
+  type InitialNavigation,
+  type NavigationState,
+  type Page,
+} from "../navigation"
 import type {
   CommitDetailState,
   RunDetailState,
@@ -71,10 +108,28 @@ import { SearchProvider } from "./search-context"
 import { StatusPromptBar, StatusPromptProvider } from "./status-prompt"
 import { SearchSurface } from "./components/search-surface"
 
-type Overlay = "context-menu" | "reactions" | "help" | "branch-picker" | "settings" | "issue-references" | "issue-actions" | "issue-action" | "pull-merge" | "pull-draft" | "pull-review" | "review-comment" | "inline-confirm" | "inline-retry" | "command" | "switch-repo" | "diff-viewer-setup"
+type Overlay =
+  | "context-menu"
+  | "reactions"
+  | "help"
+  | "branch-picker"
+  | "settings"
+  | "issue-references"
+  | "issue-actions"
+  | "issue-action"
+  | "pull-merge"
+  | "pull-draft"
+  | "pull-review"
+  | "review-comment"
+  | "inline-confirm"
+  | "inline-retry"
+  | "command"
+  | "switch-repo"
+  | "diff-viewer-setup"
 type ToastState = { id: number; title: string; message: string; duration?: number; tone?: "error" | "success" | "info" }
 type ConversationCommentTarget = { repository: string; number: number; parent?: IssueActionParent }
-const conversationCommentKey = (target: ConversationCommentTarget) => JSON.stringify([target.repository, target.parent ?? "issue", target.number])
+const conversationCommentKey = (target: ConversationCommentTarget) =>
+  JSON.stringify([target.repository, target.parent ?? "issue", target.number])
 
 export type AppProps = {
   data: RepositoryData | (() => RepositoryData)
@@ -137,7 +192,11 @@ export type AppProps = {
   onReloadAssignableUsers?: () => Promise<void>
   onSearchMentionUsers?: MentionSearch
   onPrepareIssueAction?: (number: number, kind: IssueActionKind, parent?: IssueActionParent) => void
-  onIssueDraftChange?: (number: number, draft: Partial<Pick<IssueActionState, "body" | "reason" | "duplicateTarget" | "selectedAssignees">>, parent?: IssueActionParent) => void
+  onIssueDraftChange?: (
+    number: number,
+    draft: Partial<Pick<IssueActionState, "body" | "reason" | "duplicateTarget" | "selectedAssignees">>,
+    parent?: IssueActionParent,
+  ) => void
   onDiscardIssueDraft?: (number: number, parent?: IssueActionParent) => void
   onSubmitIssueAction?: (number: number, kind: IssueActionKind, parent?: IssueActionParent) => Promise<IssueActionResult>
   reviews?: PullReviewSession
@@ -161,7 +220,11 @@ export type AppProps = {
 }
 
 export function App(props: AppProps) {
-  return <KeybindingsBoundary overrides={props.config?.keybindings}><AppContent {...props} /></KeybindingsBoundary>
+  return (
+    <KeybindingsBoundary overrides={props.config?.keybindings}>
+      <AppContent {...props} />
+    </KeybindingsBoundary>
+  )
 }
 
 function AppContent(props: AppProps) {
@@ -188,7 +251,11 @@ function AppContent(props: AppProps) {
   const initialNavigation = props.initialNavigation
   const initialDetail = initialNavigation?.detail
   const initialPage = initialNavigation?.page ?? props.initialPage ?? "overview"
-  const requestedActions = props.initialState?.page === "actions" || !!props.initialState?.details?.actions || initialNavigation?.page === "actions" || initialDetail?.kind === "run"
+  const requestedActions =
+    props.initialState?.page === "actions" ||
+    !!props.initialState?.details?.actions ||
+    initialNavigation?.page === "actions" ||
+    initialDetail?.kind === "run"
   let initialPagePending = !focus() && !props.initialState && !initialNavigation && initialPage === "actions"
   const initialState: NavigationState = { page: initialPagePending ? "overview" : initialPage }
   let startingState = props.initialState ?? (initialDetail ? openDetail(initialState, initialDetail) : initialState)
@@ -231,22 +298,27 @@ function AppContent(props: AppProps) {
   const [conversationCommentHint, setConversationCommentHint] = createSignal<string>()
   const [localCommentDrafts, setLocalCommentDrafts] = createSignal(new Map<string, string>())
   const [commentConfirmOnly, setCommentConfirmOnly] = createSignal(false)
-  const [pendingIssueActions, setPendingIssueActions] = createSignal<Array<NonNullable<ReturnType<typeof issueAction>> & { repository: string }>>([])
+  const [pendingIssueActions, setPendingIssueActions] = createSignal<
+    Array<NonNullable<ReturnType<typeof issueAction>> & { repository: string }>
+  >([])
   const [reviewTarget, setReviewTarget] = createSignal<{ repository: string; number: number }>()
   const [inlineContext, setInlineContext] = createSignal<Omit<InlineCommentInput, "body">>()
   // Contexts are built in a stable order below, including the exact diff and anchor.
   const [inlineDrafts, setInlineDrafts] = createSignal(new Map<string, InlineCommentInput>())
-  const saveInlineDraft = (context: Omit<InlineCommentInput, "body">, body: string) => setInlineDrafts(current => {
-    const id = JSON.stringify(context)
-    return current.get(id)?.body === body ? current : new Map(current).set(id, { ...context, body })
-  })
+  const saveInlineDraft = (context: Omit<InlineCommentInput, "body">, body: string) =>
+    setInlineDrafts((current) => {
+      const id = JSON.stringify(context)
+      return current.get(id)?.body === body ? current : new Map(current).set(id, { ...context, body })
+    })
   // The inline composer for inlineContext stays open until posted or cancelled.
   const [inlineDraftOpen, setInlineDraftOpen] = createSignal(false)
   const [inlineDraftFocused, setInlineDraftFocused] = createSignal<Partial<Record<Page, boolean>>>({})
   const [inlineConfirm, setInlineConfirm] = createSignal<InlineCommentInput>()
   const [postingInline, setPostingInline] = createSignal<InlineCommentInput>()
   const [inlineRetry, setInlineRetry] = createSignal<InlineCommentInput>()
-  const [postedInlineThreads, setPostedInlineThreads] = createSignal<Array<{ repository: string; number: number; headSha: string; thread: PullReviewThread }>>([])
+  const [postedInlineThreads, setPostedInlineThreads] = createSignal<
+    Array<{ repository: string; number: number; headSha: string; thread: PullReviewThread }>
+  >([])
   const [reviewJump, setReviewJump] = createSignal<ReviewAnchor & { id: number }>()
   const [reviewSubmitting, setReviewSubmitting] = createSignal<{ repository: string; number: number }>()
   let reviewJumpId = 0
@@ -258,16 +330,22 @@ function AppContent(props: AppProps) {
   const [issueEditorExpanded, setIssueEditorExpanded] = createSignal(false)
   const [reviewEditorActive, setReviewEditorActive] = createSignal(false)
   const [issueEditorActive, setIssueEditorActive] = createSignal(false)
-  const fullscreenEditorOpen = () => issueEditorExpanded() && (
-    overlay() === "pull-review" && reviewEditorActive() || overlay() === "review-comment"
-    || overlay() === "issue-action" && issueEditorActive())
+  const fullscreenEditorOpen = () =>
+    issueEditorExpanded() &&
+    ((overlay() === "pull-review" && reviewEditorActive()) ||
+      overlay() === "review-comment" ||
+      (overlay() === "issue-action" && issueEditorActive()))
   const [commandHint, setCommandHint] = createSignal<string>()
   const [settingsHint, setSettingsHint] = createSignal<string>()
   const [revealActivity, setRevealActivity] = createSignal<{ number: number; id: number; parent?: IssueActionParent }>()
   const emptyIssueAction: IssueActionState = { body: "", reason: "completed", operation: { status: "idle" } }
   let revealId = 0
-  const canClone = () => Boolean(props.onRunCommand && props.cwd && !matchesLocalRepository(props.localRepository, data().repo.nameWithOwner))
-  const openCommand = (action: CommandAction) => { setCommandAction(action); setOverlay("command") }
+  const canClone = () =>
+    Boolean(props.onRunCommand && props.cwd && !matchesLocalRepository(props.localRepository, data().repo.nameWithOwner))
+  const openCommand = (action: CommandAction) => {
+    setCommandAction(action)
+    setOverlay("command")
+  }
   let toastId = 0
   let disposed = false
   let overviewScroll: ScrollBoxRenderable | undefined
@@ -276,11 +354,14 @@ function AppContent(props: AppProps) {
   let pullDefaultResolved = false
 
   const config = () => props.config ?? defaultConfig
-  const data = () => typeof props.data === "function" ? props.data() : props.data
-  const operations = () => typeof props.operations === "function" ? props.operations() : props.operations
+  const data = () => (typeof props.data === "function" ? props.data() : props.data)
+  const operations = () => (typeof props.operations === "function" ? props.operations() : props.operations)
   const page = createMemo(() => navigation().page)
   const diffTarget = () => navigation().diffs?.[page()]
-  const configuredDiffLayout = () => { const layout = config().diffLayout; return layout === "auto" ? undefined : layout }
+  const configuredDiffLayout = () => {
+    const layout = config().diffLayout
+    return layout === "auto" ? undefined : layout
+  }
   const resourceScope = createMemo<RepositoryScope>(() => {
     const current = navigation()
     return !focus() ? "full" : current.details?.[current.page] || current.diffs?.[current.page] ? "detail" : current.page
@@ -290,12 +371,14 @@ function AppContent(props: AppProps) {
     // Retry an ensure deferred during metadata revalidation.
     if (operations().refresh.status !== "loading") props.onEnsureResources?.(scope)
   })
-  const mountList = (target: Page) => !focus() || page() === target && !navigation().details?.[target] && !diffTarget()
-  const mountDetail = (target: Page) => !focus() || page() === target && !diffTarget()
+  const mountList = (target: Page) => !focus() || (page() === target && !navigation().details?.[target] && !diffTarget())
+  const mountDetail = (target: Page) => !focus() || (page() === target && !diffTarget())
   const resourceForDiff = (target?: DiffTarget): ResourceState<DiffContent> => {
     const loaded = target && props.diffs?.[target.kind]
-    const matches = target?.kind === "commit" ? loaded?.target.kind === "commit" && loaded.target.sha === target.sha
-      : target?.kind === "pull" && loaded?.target.kind === "pull" && loaded.target.number === target.number
+    const matches =
+      target?.kind === "commit"
+        ? loaded?.target.kind === "commit" && loaded.target.sha === target.sha
+        : target?.kind === "pull" && loaded?.target.kind === "pull" && loaded.target.number === target.number
     return matches && loaded ? loaded.resource : { status: "loading", phase: "load" }
   }
   const diffResource = createMemo(() => resourceForDiff(diffTarget()))
@@ -326,10 +409,11 @@ function AppContent(props: AppProps) {
   }
   const openReference = (reference: IssueReference) => {
     setOverlay()
-    const detail: DetailTarget = reference.kind === "commit" ? { kind: "commit", sha: reference.sha }
-      : { kind: reference.kind, number: reference.number }
+    const detail: DetailTarget =
+      reference.kind === "commit" ? { kind: "commit", sha: reference.sha } : { kind: reference.kind, number: reference.number }
     if (reference.repository.toLowerCase() !== data().repo.nameWithOwner.toLowerCase()) {
-      if (props.onOpenLocation) props.onOpenLocation(reference.repository, { detail }, navigation(), props.onReturnToRepository ? repositoryEntry : undefined)
+      if (props.onOpenLocation)
+        props.onOpenLocation(reference.repository, { detail }, navigation(), props.onReturnToRepository ? repositoryEntry : undefined)
       else props.onOpenReference?.(reference.repository, detail)
       return
     }
@@ -338,9 +422,9 @@ function AppContent(props: AppProps) {
     else if (detail.kind === "issue") openIssue(detail.number)
   }
   const openRun = (id: number) => {
-    setNavigation((state) => openDetail(state, { kind: "run", id }));
-    void props.onLoadRun?.(id);
-  };
+    setNavigation((state) => openDetail(state, { kind: "run", id }))
+    void props.onLoadRun?.(id)
+  }
   const closeDiff = () => {
     const target = diffTarget()
     setNavigation(back)
@@ -350,33 +434,43 @@ function AppContent(props: AppProps) {
     const detail = navigation().details?.actions
     return detail?.kind === "run" ? detail.id : undefined
   })
-  const activeRunId = () => page() === "actions" ? runId() : undefined
-  const runDetail = createMemo<RunDetailState>(() => props.runDetail?.id === runId() && props.runDetail
-    ? props.runDetail
-    : { id: runId() ?? 0, resource: { status: "loading", phase: "load" }, jobs: { status: "loading", phase: "load" } })
-  const runDetailPart = () => runDetail().resource.status !== "ready" ? "resource" : "jobs"
+  const activeRunId = () => (page() === "actions" ? runId() : undefined)
+  const runDetail = createMemo<RunDetailState>(() =>
+    props.runDetail?.id === runId() && props.runDetail
+      ? props.runDetail
+      : { id: runId() ?? 0, resource: { status: "loading", phase: "load" }, jobs: { status: "loading", phase: "load" } },
+  )
+  const runDetailPart = () => (runDetail().resource.status !== "ready" ? "resource" : "jobs")
   const runUrl = (id: number) => `${data().repo.url}/actions/runs/${id}`
   const commitSha = createMemo(() => {
     const detail = navigation().details?.commits
     return detail?.kind === "commit" ? detail.sha : undefined
   })
-  const activeCommitSha = () => page() === "commits" ? commitSha() : undefined
-  const commitResource = createMemo<ResourceState<CommitDetail>>(() => props.commitDetail && props.commitDetail.sha === commitSha()
-    ? props.commitDetail.resource
-    : { status: "loading", phase: "load" })
+  const activeCommitSha = () => (page() === "commits" ? commitSha() : undefined)
+  const commitResource = createMemo<ResourceState<CommitDetail>>(() =>
+    props.commitDetail && props.commitDetail.sha === commitSha() ? props.commitDetail.resource : { status: "loading", phase: "load" },
+  )
   const issueNumber = createMemo(() => {
     const detail = navigation().details?.issues
     return detail?.kind === "issue" ? detail.number : undefined
   })
-  const activeIssueNumber = () => page() === "issues" ? issueNumber() : undefined
-  const issueDetail = createMemo<IssueDetailState>(() => props.issueDetail && props.issueDetail.number === issueNumber()
-    ? props.issueDetail
-    : { number: issueNumber() ?? 0, resource: { status: "loading", phase: "load" }, comments: { status: "loading", phase: "load" }, references: { status: "loading", phase: "load" } })
-  const issueMenuItems = createMemo(() => referencedItems([
-    ...(issueDetail().references.value ?? []), ...(issueDetail().resource.value?.references ?? []),
-  ], {
-    repository: data().repo.nameWithOwner, number: issueNumber() ?? 0,
-  }))
+  const activeIssueNumber = () => (page() === "issues" ? issueNumber() : undefined)
+  const issueDetail = createMemo<IssueDetailState>(() =>
+    props.issueDetail && props.issueDetail.number === issueNumber()
+      ? props.issueDetail
+      : {
+          number: issueNumber() ?? 0,
+          resource: { status: "loading", phase: "load" },
+          comments: { status: "loading", phase: "load" },
+          references: { status: "loading", phase: "load" },
+        },
+  )
+  const issueMenuItems = createMemo(() =>
+    referencedItems([...(issueDetail().references.value ?? []), ...(issueDetail().resource.value?.references ?? [])], {
+      repository: data().repo.nameWithOwner,
+      number: issueNumber() ?? 0,
+    }),
+  )
   const issueDetailPart = () => {
     const detail = issueDetail()
     if (detail.resource.status !== "ready") return "issue"
@@ -384,17 +478,30 @@ function AppContent(props: AppProps) {
     if (detail.references.status !== "ready") return "references"
     return "issue"
   }
-  const issueUrl = (number: number) => props.issueDetail?.number === number && props.issueDetail.resource.value
-    ? props.issueDetail.resource.value.url : `${data().repo.url}/issues/${number}`
+  const issueUrl = (number: number) =>
+    props.issueDetail?.number === number && props.issueDetail.resource.value
+      ? props.issueDetail.resource.value.url
+      : `${data().repo.url}/issues/${number}`
   const canActOnIssue = (kind: IssueActionKind) => {
     const number = activeIssueNumber()
-    return Boolean(number && props.onSubmitIssueAction && issueDetail().resource.value?.permissions?.[kind]
-      && issueDetail().resource.status !== "loading"
-      && props.getIssueAction?.(number).operation.status !== "loading")
+    return Boolean(
+      number &&
+      props.onSubmitIssueAction &&
+      issueDetail().resource.value?.permissions?.[kind] &&
+      issueDetail().resource.status !== "loading" &&
+      props.getIssueAction?.(number).operation.status !== "loading",
+    )
   }
-  const actionDetail = () => activePullNumber() ? pullDetail().resource.value : issueDetail().resource.value
-  const canAct = (kind: IssueActionKind) => activePullNumber() ? canActOnPull(kind) : canActOnIssue(kind)
-  const hasIssueActions = () => canAct(actionDetail()?.state === "closed" ? "reopen" : "close") || canAct("duplicate") || canAct("assignees") || canOfferMerge() || canChangeDraft(true) || canChangeDraft(false) || canOfferReview()
+  const actionDetail = () => (activePullNumber() ? pullDetail().resource.value : issueDetail().resource.value)
+  const canAct = (kind: IssueActionKind) => (activePullNumber() ? canActOnPull(kind) : canActOnIssue(kind))
+  const hasIssueActions = () =>
+    canAct(actionDetail()?.state === "closed" ? "reopen" : "close") ||
+    canAct("duplicate") ||
+    canAct("assignees") ||
+    canOfferMerge() ||
+    canChangeDraft(true) ||
+    canChangeDraft(false) ||
+    canOfferReview()
   const openIssueAction = (kind: IssueActionKind) => {
     const number = activePullNumber() ?? activeIssueNumber()
     const parent = activePullNumber() ? "pull" : undefined
@@ -409,13 +516,20 @@ function AppContent(props: AppProps) {
   const submitIssueAction = async () => {
     const action = issueAction()
     if (!action || !props.onSubmitIssueAction) return
-    if (action.parent === "pull" ? action.number !== activePullNumber() || !canActOnPull(action.kind)
-      : action.number !== activeIssueNumber() || !canActOnIssue(action.kind)) return
+    if (
+      action.parent === "pull"
+        ? action.number !== activePullNumber() || !canActOnPull(action.kind)
+        : action.number !== activeIssueNumber() || !canActOnIssue(action.kind)
+    )
+      return
     const repository = data().repo.nameWithOwner
     const retry = props.getIssueAction?.(action.number, action.parent).retry
     const pendingAction = { ...action, repository }
     setPendingIssueActions((current) => [...current, pendingAction])
-    if (action.kind === "comment") { setConversationCommentOpen(false); setConversationCommentFocused(false) }
+    if (action.kind === "comment") {
+      setConversationCommentOpen(false)
+      setConversationCommentFocused(false)
+    }
     setOverlay()
     setIssueAction()
     setCommentConfirmOnly(false)
@@ -425,15 +539,28 @@ function AppContent(props: AppProps) {
       if (action.kind === "comment") rememberLocalCommentDraft({ repository, number: action.number, parent: action.parent }, "")
       if ((result.comment || retry) && (action.parent === "pull" ? activePullNumber() : activeIssueNumber()) === action.number)
         setRevealActivity({ number: action.number, id: ++revealId, parent: action.parent })
-      setToast({ id: ++toastId, title: action.kind === "comment" ? "Comment posted"
-        : action.kind === "assignees" ? `${action.parent === "pull" ? "PR" : "Issue"} assignees updated`
-        : action.kind === "duplicate" ? "Issue marked as duplicate" : `${action.parent === "pull" ? "PR" : "Issue"} ${action.kind === "close" ? "closed" : "reopened"}`,
-        message: result.duplicateOf ? `#${action.number} → #${result.duplicateOf}` : `#${action.number}`, duration: 2000, tone: "success" })
+      setToast({
+        id: ++toastId,
+        title:
+          action.kind === "comment"
+            ? "Comment posted"
+            : action.kind === "assignees"
+              ? `${action.parent === "pull" ? "PR" : "Issue"} assignees updated`
+              : action.kind === "duplicate"
+                ? "Issue marked as duplicate"
+                : `${action.parent === "pull" ? "PR" : "Issue"} ${action.kind === "close" ? "closed" : "reopened"}`,
+        message: result.duplicateOf ? `#${action.number} → #${result.duplicateOf}` : `#${action.number}`,
+        duration: 2000,
+        tone: "success",
+      })
     } catch (error) {
       if (!disposed && !renderer.isDestroyed && data().repo.nameWithOwner === repository) {
         const operation = props.getIssueAction?.(action.number, action.parent).operation
-        setToast({ id: ++toastId, title: action.parent === "pull" ? "PR action failed" : "Issue action failed",
-          message: operation?.status === "error" ? operation.message : error instanceof Error ? error.message : "Unknown error" })
+        setToast({
+          id: ++toastId,
+          title: action.parent === "pull" ? "PR action failed" : "Issue action failed",
+          message: operation?.status === "error" ? operation.message : error instanceof Error ? error.message : "Unknown error",
+        })
       }
     } finally {
       setPendingIssueActions((current) => current.filter((pending) => pending !== pendingAction))
@@ -441,53 +568,82 @@ function AppContent(props: AppProps) {
   }
   const refreshIssue = async (number: number) => {
     const detail = issueDetail()
-    if (issueRefresh()?.number === number
-      || [detail.resource, detail.comments, detail.references].some((resource) => resource.status === "loading")) return
+    if (
+      issueRefresh()?.number === number ||
+      [detail.resource, detail.comments, detail.references].some((resource) => resource.status === "loading")
+    )
+      return
     const request = { number }
     setIssueRefresh(request)
     try {
-      if (detail.resource.status === "ready" && detail.comments.status === "error")
-        await props.onLoadMoreIssueComments?.()
-      else if (detail.resource.status === "ready" && detail.references.status === "error")
-        await props.onRetryIssueReferences?.()
+      if (detail.resource.status === "ready" && detail.comments.status === "error") await props.onLoadMoreIssueComments?.()
+      else if (detail.resource.status === "ready" && detail.references.status === "error") await props.onRetryIssueReferences?.()
       else await props.onLoadIssue?.(number, { force: true })
     } finally {
-      setIssueRefresh((current) => current === request ? undefined : current)
+      setIssueRefresh((current) => (current === request ? undefined : current))
     }
   }
   const pullNumber = createMemo(() => {
     const detail = navigation().details?.pulls
     return detail?.kind === "pull" ? detail.number : undefined
   })
-  const activePullNumber = () => page() === "pulls" ? pullNumber() : undefined
-  const pullDetail = createMemo<PullDetailState>(() => props.pullDetail && props.pullDetail.number === pullNumber()
-    ? props.pullDetail
-    : { number: pullNumber() ?? 0, resource: { status: "loading", phase: "load" }, commits: { status: "loading", phase: "load" }, context: { status: "loading", phase: "load" }, comments: { status: "loading", phase: "load" }, references: { status: "loading", phase: "load" } })
+  const activePullNumber = () => (page() === "pulls" ? pullNumber() : undefined)
+  const pullDetail = createMemo<PullDetailState>(() =>
+    props.pullDetail && props.pullDetail.number === pullNumber()
+      ? props.pullDetail
+      : {
+          number: pullNumber() ?? 0,
+          resource: { status: "loading", phase: "load" },
+          commits: { status: "loading", phase: "load" },
+          context: { status: "loading", phase: "load" },
+          comments: { status: "loading", phase: "load" },
+          references: { status: "loading", phase: "load" },
+        },
+  )
   const canActOnPull = (kind: IssueActionKind) => {
     const number = activePullNumber()
     const pull = pullDetail().resource.value
     if (kind === "duplicate" || ((kind === "close" || kind === "reopen") && pull?.merged)) return false
-    return Boolean(number && props.onSubmitIssueAction && pull?.permissions?.[kind]
-      && pullDetail().resource.status !== "loading"
-      && props.getIssueAction?.(number, "pull").operation.status !== "loading")
+    return Boolean(
+      number &&
+      props.onSubmitIssueAction &&
+      pull?.permissions?.[kind] &&
+      pullDetail().resource.status !== "loading" &&
+      props.getIssueAction?.(number, "pull").operation.status !== "loading",
+    )
   }
   const canChangeDraft = (draft: boolean) => {
     const number = activePullNumber()
     const pull = pullDetail().resource.value
-    return !!(number && props.onUpdatePullDraft && pull?.state === "open" && !pull.merged && pull.draft === !draft
-      && pull.permissions?.[draft ? "markDraft" : "markReady"] && pullDetail().resource.status === "ready"
-      && props.getIssueAction?.(number, "pull").operation.status !== "loading")
+    return !!(
+      number &&
+      props.onUpdatePullDraft &&
+      pull?.state === "open" &&
+      !pull.merged &&
+      pull.draft === !draft &&
+      pull.permissions?.[draft ? "markDraft" : "markReady"] &&
+      pullDetail().resource.status === "ready" &&
+      props.getIssueAction?.(number, "pull").operation.status !== "loading"
+    )
   }
   const draftChangeAvailable = () => {
     const target = draftTarget()
-    return !!(target && target.repository === data().repo.nameWithOwner && target.number === activePullNumber() && canChangeDraft(target.draft))
+    return !!(
+      target &&
+      target.repository === data().repo.nameWithOwner &&
+      target.number === activePullNumber() &&
+      canChangeDraft(target.draft)
+    )
   }
   const openDraftChange = (draft: boolean) => {
     if (!canChangeDraft(draft)) return
     setDraftTarget({ repository: data().repo.nameWithOwner, number: activePullNumber()!, draft })
     setOverlay("pull-draft")
   }
-  const closeDraftChange = () => { setOverlay(); setDraftTarget() }
+  const closeDraftChange = () => {
+    setOverlay()
+    setDraftTarget()
+  }
   const submitDraftChange = async () => {
     const target = draftTarget()
     if (!target || !props.onUpdatePullDraft || !draftChangeAvailable()) return
@@ -496,21 +652,36 @@ function AppContent(props: AppProps) {
     try {
       await props.onUpdatePullDraft(target.number, target.draft)
       if (disposed || renderer.isDestroyed || data().repo.nameWithOwner !== target.repository) return
-      setToast({ id: ++toastId, title: target.draft ? "PR marked as draft" : "PR ready for review", message: `#${target.number}`, duration: 2000, tone: "success" })
+      setToast({
+        id: ++toastId,
+        title: target.draft ? "PR marked as draft" : "PR ready for review",
+        message: `#${target.number}`,
+        duration: 2000,
+        tone: "success",
+      })
     } catch (error) {
       if (!disposed && !renderer.isDestroyed && data().repo.nameWithOwner === target.repository)
-        setToast({ id: ++toastId, title: "PR stage change failed", message: error instanceof Error ? error.message : "Check the PR on GitHub before retrying." })
+        setToast({
+          id: ++toastId,
+          title: "PR stage change failed",
+          message: error instanceof Error ? error.message : "Check the PR on GitHub before retrying.",
+        })
     } finally {
       setPendingDraftUpdates((current) => current.filter((pending) => pending !== target))
     }
   }
-  createEffect(on(() => [data().repo.nameWithOwner, activePullNumber(), props.reviews] as const, ([repository, number, reviews]) => {
-    if (!number || !reviews) return
-    void reviews.open(repository, number).catch((error) => {
-      if (!disposed && !renderer.isDestroyed && data().repo.nameWithOwner === repository && activePullNumber() === number)
-        setToast({ id: ++toastId, title: "Review unavailable", message: String(error) })
-    })
-  }))
+  createEffect(
+    on(
+      () => [data().repo.nameWithOwner, activePullNumber(), props.reviews] as const,
+      ([repository, number, reviews]) => {
+        if (!number || !reviews) return
+        void reviews.open(repository, number).catch((error) => {
+          if (!disposed && !renderer.isDestroyed && data().repo.nameWithOwner === repository && activePullNumber() === number)
+            setToast({ id: ++toastId, title: "Review unavailable", message: String(error) })
+        })
+      },
+    ),
+  )
   const canOfferReview = () => {
     const pull = pullDetail().resource.value
     return !!(props.reviews && activePullNumber() && pull?.permissions?.comment && pull.state === "open" && !pull.merged)
@@ -520,8 +691,9 @@ function AppContent(props: AppProps) {
     const target = { repository: data().repo.nameWithOwner, number }
     setReviewTarget(target)
     setOverlay("pull-review")
-    try { await props.reviews.open(target.repository, number) }
-    catch (error) {
+    try {
+      await props.reviews.open(target.repository, number)
+    } catch (error) {
       if (!disposed && reviewTarget() === target) setToast({ id: ++toastId, title: "Review unavailable", message: String(error) })
     }
   }
@@ -531,9 +703,16 @@ function AppContent(props: AppProps) {
     if (value?.kind !== "patch" || !value.headSha) return []
     const context = props.pullDetail?.number === target.number ? props.pullDetail.context.value : undefined
     const remote = context?.readiness.headSha === value.headSha ? context.threads : []
-    const urls = new Set(remote.flatMap(thread => thread.comments.map(comment => comment.url)))
-    const posted = postedInlineThreads().filter(item => item.repository === data().repo.nameWithOwner && item.number === target.number
-      && item.headSha === value.headSha && !item.thread.comments.some(comment => urls.has(comment.url))).map(item => item.thread)
+    const urls = new Set(remote.flatMap((thread) => thread.comments.map((comment) => comment.url)))
+    const posted = postedInlineThreads()
+      .filter(
+        (item) =>
+          item.repository === data().repo.nameWithOwner &&
+          item.number === target.number &&
+          item.headSha === value.headSha &&
+          !item.thread.comments.some((comment) => urls.has(comment.url)),
+      )
+      .map((item) => item.thread)
     return [...remote, ...posted]
   }
   // Reopening reviews clears eligibility while loading. Holding the last answer, which is checked
@@ -548,29 +727,54 @@ function AppContent(props: AppProps) {
     if (target.kind !== "pull" || !props.reviews || !props.onPostInlineComment) return undefined
     const eligible = reviewEligibility()
     const value = resourceForDiff(target).value
-    if (!eligible || !(eligible.canInlineComment ?? eligible.canComment)
-      || eligible.repository.toLowerCase() !== data().repo.nameWithOwner.toLowerCase() || eligible.number !== target.number
-      || value?.kind !== "patch" || !value.headSha || value.headSha !== eligible.headSha
-      || !value.baseSha || value.baseSha !== eligible.baseSha) return undefined
+    if (
+      !eligible ||
+      !(eligible.canInlineComment ?? eligible.canComment) ||
+      eligible.repository.toLowerCase() !== data().repo.nameWithOwner.toLowerCase() ||
+      eligible.number !== target.number ||
+      value?.kind !== "patch" ||
+      !value.headSha ||
+      value.headSha !== eligible.headSha ||
+      !value.baseSha ||
+      value.baseSha !== eligible.baseSha
+    )
+      return undefined
     return { eligible, headSha: value.headSha, baseSha: value.baseSha }
   }
   // Hidden while the full editor has it; closing that editor by any route returns it inline.
   const draftForDiff = (target: DiffTarget) => {
     const commentable = commentableDiff(target)
     const context = inlineContext()
-    if (target.kind !== "pull" || !commentable || !inlineDraftOpen() || overlay() === "review-comment" || !context || context.accountId !== commentable.eligible.accountId
-      || context.repository !== data().repo.nameWithOwner || context.number !== target.number
-      || context.headSha !== commentable.headSha || context.baseSha !== commentable.baseSha) return undefined
+    if (
+      target.kind !== "pull" ||
+      !commentable ||
+      !inlineDraftOpen() ||
+      overlay() === "review-comment" ||
+      !context ||
+      context.accountId !== commentable.eligible.accountId ||
+      context.repository !== data().repo.nameWithOwner ||
+      context.number !== target.number ||
+      context.headSha !== commentable.headSha ||
+      context.baseSha !== commentable.baseSha
+    )
+      return undefined
     return { anchor: context.anchor, body: inlineDrafts().get(JSON.stringify(context))?.body ?? "" }
   }
   const savedDraftsForDiff = (target: DiffTarget) => {
     const commentable = commentableDiff(target)
     if (target.kind !== "pull" || !commentable) return []
     const open = inlineDraftOpen() ? JSON.stringify(inlineContext()) : undefined
-    return [...inlineDrafts()].flatMap(([id, draft]) => id !== open && draft.body.trim()
-      && draft.accountId === commentable.eligible.accountId && draft.repository === data().repo.nameWithOwner
-      && draft.number === target.number && draft.headSha === commentable.headSha && draft.baseSha === commentable.baseSha
-      ? [{ id, anchor: draft.anchor }] : [])
+    return [...inlineDrafts()].flatMap(([id, draft]) =>
+      id !== open &&
+      draft.body.trim() &&
+      draft.accountId === commentable.eligible.accountId &&
+      draft.repository === data().repo.nameWithOwner &&
+      draft.number === target.number &&
+      draft.headSha === commentable.headSha &&
+      draft.baseSha === commentable.baseSha
+        ? [{ id, anchor: draft.anchor }]
+        : [],
+    )
   }
   // A refreshed diff of a new PR revision invalidates an open draft's anchor. Say so, and carry its
   // text to the same line of the new revision if it is reopened there; closed drafts stay per revision.
@@ -581,33 +785,61 @@ function AppContent(props: AppProps) {
     const context = inlineContext()
     if (!inlineDraftOpen() || !context || context.repository !== data().repo.nameWithOwner) return
     const value = resourceForDiff({ kind: "pull", number: context.number }).value
-    if (value?.kind !== "patch" || !value.headSha || value.headSha === context.headSha && value.baseSha === context.baseSha) return
+    if (value?.kind !== "patch" || !value.headSha || (value.headSha === context.headSha && value.baseSha === context.baseSha)) return
     untrack(() => {
       setInlineDraftOpen(false)
       const body = inlineDrafts().get(JSON.stringify(context))?.body
       if (!body?.trim()) return
       carriedDraft = { anchor: anchorKey(context), body }
-      setToast({ id: ++toastId, title: "Pull request updated", message: "Your comment draft was kept. Reopen it on its line to continue.", tone: "info" })
+      setToast({
+        id: ++toastId,
+        title: "Pull request updated",
+        message: "Your comment draft was kept. Reopen it on its line to continue.",
+        tone: "info",
+      })
     })
   })
   const reviewForDiff = (target: DiffTarget) => {
     const commentable = commentableDiff(target)
     const status = props.reviews?.state().status
-    if (target.kind !== "pull" || !commentable || resourceForDiff(target).status !== "ready"
-      || status === "loading" || status === "submitting" || postingInline()) return undefined
+    if (
+      target.kind !== "pull" ||
+      !commentable ||
+      resourceForDiff(target).status !== "ready" ||
+      status === "loading" ||
+      status === "submitting" ||
+      postingInline()
+    )
+      return undefined
     const { eligible, headSha, baseSha } = commentable
     return {
-      headSha, comments: [], jump: reviewJump(),
+      headSha,
+      comments: [],
+      jump: reviewJump(),
       onComment: (anchor: ReviewAnchor) => {
-        const context = { accountId: eligible.accountId, repositoryId: eligible.repositoryId, repository: data().repo.nameWithOwner, number: target.number,
-          headSha, baseSha, anchor: { path: anchor.path, line: anchor.line, side: anchor.side,
-            ...(anchor.startLine === undefined ? {} : { startLine: anchor.startLine, startSide: anchor.startSide }) } }
+        const context = {
+          accountId: eligible.accountId,
+          repositoryId: eligible.repositoryId,
+          repository: data().repo.nameWithOwner,
+          number: target.number,
+          headSha,
+          baseSha,
+          anchor: {
+            path: anchor.path,
+            line: anchor.line,
+            side: anchor.side,
+            ...(anchor.startLine === undefined ? {} : { startLine: anchor.startLine, startSide: anchor.startSide }),
+          },
+        }
         if (carriedDraft?.anchor === anchorKey(context)) {
           const key = JSON.stringify(context)
           if (!inlineDrafts().get(key)?.body.trim()) saveInlineDraft(context, carriedDraft.body)
           carriedDraft = undefined
         }
-        batch(() => { setInlineContext(context); setInlineDraftOpen(true) })
+        batch(() => {
+          setInlineContext(context)
+          setInlineDraftOpen(true)
+        })
       },
       onDraftSave: (body: string) => {
         const context = inlineContext()
@@ -623,7 +855,9 @@ function AppContent(props: AppProps) {
         setIssueEditorExpanded(true)
         setOverlay("review-comment")
       },
-      onOpenReview: () => { void openReview(target.number) },
+      onOpenReview: () => {
+        void openReview(target.number)
+      },
     }
   }
   const submitInlineComment = async (body: string, retryUnconfirmed = false) => {
@@ -638,26 +872,55 @@ function AppContent(props: AppProps) {
     setOverlay()
     try {
       const posted = await props.onPostInlineComment(input, retryUnconfirmed ? { retryUnconfirmed: true } : undefined)
-      setInlineDrafts(current => { const next = new Map(current); next.delete(draftKey); return next })
+      setInlineDrafts((current) => {
+        const next = new Map(current)
+        next.delete(draftKey)
+        return next
+      })
       if (inlineContext() === context) setInlineDraftOpen(false)
       if (disposed || renderer.isDestroyed || data().repo.nameWithOwner !== context.repository) return
       const now = new Date().toISOString()
-      const thread: PullReviewThread = { kind: "review-thread", id: `posted-${posted.id}`, path: posted.path,
-        line: posted.line, originalLine: posted.line, diffSide: posted.side, startLine: posted.startLine,
-        isResolved: false, isOutdated: false, createdAt: now,
-        comments: [{ id: `posted-${posted.id}`, author, authorAssociation: "", body: posted.body,
-          createdAt: now, updatedAt: now, url: posted.url }] }
-      setPostedInlineThreads(current => [...current.filter(item => item.thread.id !== thread.id || item.repository !== context.repository),
-        { repository: context.repository, number: context.number, headSha: context.headSha, thread }])
-      setToast({ id: ++toastId, title: "Inline comment posted", message: `${context.anchor.path}:${context.anchor.line}`, duration: 2000, tone: "success" })
+      const thread: PullReviewThread = {
+        kind: "review-thread",
+        id: `posted-${posted.id}`,
+        path: posted.path,
+        line: posted.line,
+        originalLine: posted.line,
+        diffSide: posted.side,
+        startLine: posted.startLine,
+        isResolved: false,
+        isOutdated: false,
+        createdAt: now,
+        comments: [
+          { id: `posted-${posted.id}`, author, authorAssociation: "", body: posted.body, createdAt: now, updatedAt: now, url: posted.url },
+        ],
+      }
+      setPostedInlineThreads((current) => [
+        ...current.filter((item) => item.thread.id !== thread.id || item.repository !== context.repository),
+        { repository: context.repository, number: context.number, headSha: context.headSha, thread },
+      ])
+      setToast({
+        id: ++toastId,
+        title: "Inline comment posted",
+        message: `${context.anchor.path}:${context.anchor.line}`,
+        duration: 2000,
+        tone: "success",
+      })
       const target = diffTarget()
-      if (activePullNumber() === context.number || target?.kind === "pull" && target.number === context.number) void props.onLoadPull?.(context.number, { force: true })
+      if (activePullNumber() === context.number || (target?.kind === "pull" && target.number === context.number))
+        void props.onLoadPull?.(context.number, { force: true })
     } catch (error) {
       if (!disposed && !renderer.isDestroyed && data().repo.nameWithOwner === context.repository) {
         setToast({ id: ++toastId, title: "Inline comment not confirmed", message: error instanceof Error ? error.message : String(error) })
         const target = diffTarget()
-        if (error instanceof InlineCommentUncertainError && error.retryAllowed && !overlay()
-          && inlineContext() === context && target?.kind === "pull" && target.number === context.number) {
+        if (
+          error instanceof InlineCommentUncertainError &&
+          error.retryAllowed &&
+          !overlay() &&
+          inlineContext() === context &&
+          target?.kind === "pull" &&
+          target.number === context.number
+        ) {
           setInlineRetry(input)
           setOverlay("inline-retry")
         }
@@ -681,7 +944,11 @@ function AppContent(props: AppProps) {
     if (!target || !props.reviews || reviewSubmitting()) return
     const draft = props.reviews.state().draft
     if (!draft || draft.number !== target.number || draft.repository.toLowerCase() !== target.repository.toLowerCase()) {
-      setToast({ id: ++toastId, title: "Review not submitted", message: "Review draft does not match this PR. Resolve the draft error and reopen Review." })
+      setToast({
+        id: ++toastId,
+        title: "Review not submitted",
+        message: "Review draft does not match this PR. Resolve the draft error and reopen Review.",
+      })
       return
     }
     setReviewSubmitting(target)
@@ -692,7 +959,12 @@ function AppContent(props: AppProps) {
       if (succeeded) {
         setToast({ id: ++toastId, title: "Review submitted", message: `PR #${target.number}`, duration: 2000, tone: "success" })
         if (activePullNumber() === target.number) void props.onLoadPull?.(target.number, { force: true })
-      } else setToast({ id: ++toastId, title: "Review not submitted", message: props.reviews.state().message ?? "Open the pending review to check its status." })
+      } else
+        setToast({
+          id: ++toastId,
+          title: "Review not submitted",
+          message: props.reviews.state().message ?? "Open the pending review to check its status.",
+        })
     } catch (error) {
       if (!disposed && !renderer.isDestroyed && data().repo.nameWithOwner === target.repository)
         setToast({ id: ++toastId, title: "Review not submitted", message: String(error) })
@@ -704,7 +976,14 @@ function AppContent(props: AppProps) {
   }
   const canOfferMerge = () => {
     const pull = pullDetail().resource.value
-    return !!(activePullNumber() && props.onMergePull && pull?.permissions?.merge && pull.state === "open" && pull.draft === false && !pull.merged)
+    return !!(
+      activePullNumber() &&
+      props.onMergePull &&
+      pull?.permissions?.merge &&
+      pull.state === "open" &&
+      pull.draft === false &&
+      !pull.merged
+    )
   }
   const checkingMerge = () => pullDetail().resource.status === "loading" || pullDetail().context.status === "loading"
   const mergeBlocker = () => {
@@ -717,7 +996,8 @@ function AppContent(props: AppProps) {
   }
   const mergeDialogBlocker = () => {
     const target = mergeTarget()
-    if (!target || target.repository !== data().repo.nameWithOwner || target.number !== activePullNumber()) return "The PR changed; reopen the merge dialog."
+    if (!target || target.repository !== data().repo.nameWithOwner || target.number !== activePullNumber())
+      return "The PR changed; reopen the merge dialog."
     if (target.headSha !== pullDetail().resource.value?.headSha) return "New commits detected; reopen the merge dialog to review them."
     return mergeBlocker()
   }
@@ -727,7 +1007,10 @@ function AppContent(props: AppProps) {
     setMergeTarget({ repository: data().repo.nameWithOwner, number: pull.number, headSha: pull.headSha })
     setOverlay("pull-merge")
   }
-  const closeMerge = () => { setOverlay(); setMergeTarget() }
+  const closeMerge = () => {
+    setOverlay()
+    setMergeTarget()
+  }
   const submitMerge = async (method: PullMergeMethod, headSha: string, message?: PullMergeMessage) => {
     const target = mergeTarget()
     if (!target || !props.onMergePull || mergeDialogBlocker() || headSha !== target.headSha) return
@@ -739,12 +1022,18 @@ function AppContent(props: AppProps) {
       setToast({ id: ++toastId, title: "PR merged", message: `#${target.number}`, duration: 2000, tone: "success" })
     } catch (error) {
       if (!disposed && !renderer.isDestroyed && data().repo.nameWithOwner === target.repository)
-        setToast({ id: ++toastId, title: "Merge failed", message: error instanceof Error ? error.message : "Check the PR on GitHub before retrying." })
+        setToast({
+          id: ++toastId,
+          title: "Merge failed",
+          message: error instanceof Error ? error.message : "Check the PR on GitHub before retrying.",
+        })
     } finally {
       setPendingMerges((current) => current.filter((pending) => pending !== target))
     }
   }
-  createEffect(() => { if (overlay() === "issue-actions" && !hasIssueActions()) setOverlay() })
+  createEffect(() => {
+    if (overlay() === "issue-actions" && !hasIssueActions()) setOverlay()
+  })
   const canCommentOnPull = () => canActOnPull("comment")
   const activeConversationCommentTarget = (): ConversationCommentTarget | undefined => {
     const number = activePullNumber() ?? activeIssueNumber()
@@ -764,17 +1053,22 @@ function AppContent(props: AppProps) {
     if (props.getCommentDraft) return
     const key = conversationCommentKey(target)
     const value = props.getIssueAction?.(target.number, target.parent).body ?? body
-    setLocalCommentDrafts(current => (current.get(key) ?? "") === value ? current : new Map(current).set(key, value))
+    setLocalCommentDrafts((current) => ((current.get(key) ?? "") === value ? current : new Map(current).set(key, value)))
   }
-  const conversationCommentPending = (target: ConversationCommentTarget) => props.getIssueAction?.(target.number, target.parent).operation.status === "loading"
-    || pendingIssueActions().some(action => conversationCommentKey(action) === conversationCommentKey(target))
-  const conversationCommentEditable = (target: ConversationCommentTarget) => target.repository === data().repo.nameWithOwner
-    && target.number === (target.parent === "pull" ? activePullNumber() : activeIssueNumber()) && !conversationCommentPending(target)
-  const conversationCommentAvailable = (target: ConversationCommentTarget) => conversationCommentEditable(target)
-    && (target.parent === "pull" ? canCommentOnPull() : canActOnIssue("comment"))
-  const canOpenConversationComment = (target: ConversationCommentTarget) => conversationCommentEditable(target)
-    && (conversationCommentAvailable(target) || sameConversationComment(target) && conversationCommentOpen()
-      || !!conversationDraft(target).trim())
+  const conversationCommentPending = (target: ConversationCommentTarget) =>
+    props.getIssueAction?.(target.number, target.parent).operation.status === "loading" ||
+    pendingIssueActions().some((action) => conversationCommentKey(action) === conversationCommentKey(target))
+  const conversationCommentEditable = (target: ConversationCommentTarget) =>
+    target.repository === data().repo.nameWithOwner &&
+    target.number === (target.parent === "pull" ? activePullNumber() : activeIssueNumber()) &&
+    !conversationCommentPending(target)
+  const conversationCommentAvailable = (target: ConversationCommentTarget) =>
+    conversationCommentEditable(target) && (target.parent === "pull" ? canCommentOnPull() : canActOnIssue("comment"))
+  const canOpenConversationComment = (target: ConversationCommentTarget) =>
+    conversationCommentEditable(target) &&
+    (conversationCommentAvailable(target) ||
+      (sameConversationComment(target) && conversationCommentOpen()) ||
+      !!conversationDraft(target).trim())
   const changeConversationDraft = (target: ConversationCommentTarget, body: string) => {
     // Local drafts remain editable if permission changes; only posting needs current permission.
     if (!sameConversationComment(target) || target.repository !== data().repo.nameWithOwner || conversationCommentPending(target)) return
@@ -789,7 +1083,11 @@ function AppContent(props: AppProps) {
       props.onPrepareIssueAction?.(target.number, "comment", target.parent)
       rememberLocalCommentDraft(target, conversationDraft(target))
     }
-    batch(() => { setConversationComment(target); setConversationCommentOpen(true); setConversationCommentFocused(true) })
+    batch(() => {
+      setConversationComment(target)
+      setConversationCommentOpen(true)
+      setConversationCommentFocused(true)
+    })
     revealConversationComment(target)
   }
   const openComment = () => {
@@ -797,9 +1095,14 @@ function AppContent(props: AppProps) {
     if (target) openConversationComment(target)
   }
   const closeConversationCommentDialog = () => {
-    setOverlay(); setIssueAction(); setCommentConfirmOnly(false)
+    setOverlay()
+    setIssueAction()
+    setCommentConfirmOnly(false)
     const target = conversationComment()
-    if (target && conversationCommentOpen()) { setConversationCommentFocused(true); revealConversationComment(target) }
+    if (target && conversationCommentOpen()) {
+      setConversationCommentFocused(true)
+      revealConversationComment(target)
+    }
   }
   const activityCommentFor = (number: number, parent?: IssueActionParent): ActivityComment => {
     const target = { repository: data().repo.nameWithOwner, number, parent }
@@ -807,28 +1110,52 @@ function AppContent(props: AppProps) {
     const expanded = selected && overlay() === "issue-action" && issueAction()?.kind === "comment" && !commentConfirmOnly()
     const open = selected && conversationCommentOpen() && !expanded
     return {
-      open, body: conversationDraft(target),
+      open,
+      body: conversationDraft(target),
       saved: !expanded && !open && !!conversationDraft(target).trim(),
-      focused: selected && conversationCommentFocused(), enabled: conversationCommentEditable(target), canPost: conversationCommentAvailable(target),
+      focused: selected && conversationCommentFocused(),
+      enabled: conversationCommentEditable(target),
+      canPost: conversationCommentAvailable(target),
       onOpen: () => openConversationComment(target),
-      onInput: body => changeConversationDraft(target, body),
-      onPost: body => {
+      onInput: (body) => changeConversationDraft(target, body),
+      onPost: (body) => {
         if (!sameConversationComment(target) || !conversationCommentAvailable(target) || !body.trim()) return
         changeConversationDraft(target, body)
-        setIssueAction({ number, parent, kind: "comment" }); setCommentConfirmOnly(true); setOverlay("issue-action")
+        setIssueAction({ number, parent, kind: "comment" })
+        setCommentConfirmOnly(true)
+        setOverlay("issue-action")
       },
-      onClose: () => { if (selected) { setConversationCommentOpen(false); setConversationCommentFocused(false) } },
+      onClose: () => {
+        if (selected) {
+          setConversationCommentOpen(false)
+          setConversationCommentFocused(false)
+        }
+      },
       onExpand: () => {
         if (!sameConversationComment(target) || !conversationCommentEditable(target)) return
-        setIssueAction({ number, parent, kind: "comment" }); setCommentConfirmOnly(false); setIssueEditorExpanded(true); setOverlay("issue-action")
+        setIssueAction({ number, parent, kind: "comment" })
+        setCommentConfirmOnly(false)
+        setIssueEditorExpanded(true)
+        setOverlay("issue-action")
       },
-      onFocusChange: focused => { if (sameConversationComment(target)) setConversationCommentFocused(focused) },
-      onHintChange: hint => { if (sameConversationComment(target)) setConversationCommentHint(hint) },
+      onFocusChange: (focused) => {
+        if (sameConversationComment(target)) setConversationCommentFocused(focused)
+      },
+      onHintChange: (hint) => {
+        if (sameConversationComment(target)) setConversationCommentHint(hint)
+      },
     }
   }
   const editingConversationComment = () => {
     const target = conversationComment()
-    return !!target && conversationCommentOpen() && conversationCommentFocused() && !overlay() && !diffTarget() && conversationCommentEditable(target)
+    return (
+      !!target &&
+      conversationCommentOpen() &&
+      conversationCommentFocused() &&
+      !overlay() &&
+      !diffTarget() &&
+      conversationCommentEditable(target)
+    )
   }
   const pullResource = () => pullDetail().resource
   const pullDetailPart = () => {
@@ -840,11 +1167,12 @@ function AppContent(props: AppProps) {
     if (detail.references.status !== "ready") return "references"
     return "pull"
   }
-  const pullMenuItems = createMemo(() => referencedItems([
-    ...(pullDetail().references.value ?? []), ...(pullDetail().resource.value?.references ?? []),
-  ], {
-    repository: data().repo.nameWithOwner, number: pullNumber() ?? 0,
-  }))
+  const pullMenuItems = createMemo(() =>
+    referencedItems([...(pullDetail().references.value ?? []), ...(pullDetail().resource.value?.references ?? [])], {
+      repository: data().repo.nameWithOwner,
+      number: pullNumber() ?? 0,
+    }),
+  )
   const reactionMessages = createMemo<ReactionMessage[]>(() => {
     if (diffTarget() || !props.onAddReaction || !props.getReactionAction) return []
     const parent = activeIssueNumber() ? "issue" : "pull"
@@ -853,75 +1181,108 @@ function AppContent(props: AppProps) {
     if (!detail || !body) return []
     const number = detail.number
     const messages: ReactionMessage[] = [{ target: { kind: parent, number, nodeId: body.nodeId }, state: body }]
-    for (const comment of detail.comments.value?.items ?? []) messages.push({
-      target: { kind: "comment", parent, number, id: comment.id, nodeId: comment.nodeId }, state: comment,
-    })
-    if (parent === "pull") for (const thread of pullDetail().context.value?.threads ?? []) for (const comment of thread.comments) messages.push({
-      target: { kind: "review-comment", number, id: comment.id, nodeId: comment.id }, state: comment,
-    })
+    for (const comment of detail.comments.value?.items ?? [])
+      messages.push({
+        target: { kind: "comment", parent, number, id: comment.id, nodeId: comment.nodeId },
+        state: comment,
+      })
+    if (parent === "pull")
+      for (const thread of pullDetail().context.value?.threads ?? [])
+        for (const comment of thread.comments)
+          messages.push({
+            target: { kind: "review-comment", number, id: comment.id, nodeId: comment.id },
+            state: comment,
+          })
     return messages
   })
   const [reactionPicker, setReactionPicker] = createSignal<{ origin: NavigationState; repository: string; target: ReactionTarget }>()
-  const sameReactionTarget = (left: ReactionTarget, right: ReactionTarget) => reactionKey(left) === reactionKey(right) && left.nodeId === right.nodeId
+  const sameReactionTarget = (left: ReactionTarget, right: ReactionTarget) =>
+    reactionKey(left) === reactionKey(right) && left.nodeId === right.nodeId
   const selectedReactionMessage = () => {
     const target = reactionPicker()?.target
     return target && reactionMessages().find((message) => sameReactionTarget(message.target, target))
   }
   const openReactions = (target: ReactionTarget) => {
     const message = reactionMessages().find((message) => sameReactionTarget(message.target, target))
-    if (overlay() || !message || message.state.canReact === false || props.getReactionAction?.(target).operation.status === "loading") return
+    if (overlay() || !message || message.state.canReact === false || props.getReactionAction?.(target).operation.status === "loading")
+      return
     setReactionPicker({ origin: navigation(), repository: data().repo.nameWithOwner, target })
     setOverlay("reactions")
   }
-  const closeReactions = () => { setOverlay(); setReactionPicker() }
+  const closeReactions = () => {
+    setOverlay()
+    setReactionPicker()
+  }
   createEffect(() => {
     const picker = reactionPicker()
     if (overlay() !== "reactions" || !picker) return
-    if (navigation() !== picker.origin || data().repo.nameWithOwner !== picker.repository
-      || !reactionMessages().length || picker.target && !selectedReactionMessage()) closeReactions()
+    if (
+      navigation() !== picker.origin ||
+      data().repo.nameWithOwner !== picker.repository ||
+      !reactionMessages().length ||
+      (picker.target && !selectedReactionMessage())
+    )
+      closeReactions()
   })
   const addReaction = (target: ReactionTarget, kind: ReactionKind, fromPicker = false) => {
-    if (fromPicker ? overlay() !== "reactions" || !selectedReactionMessage()
-      || !sameReactionTarget(selectedReactionMessage()!.target, target) : overlay() !== undefined) return
+    if (
+      fromPicker
+        ? overlay() !== "reactions" || !selectedReactionMessage() || !sameReactionTarget(selectedReactionMessage()!.target, target)
+        : overlay() !== undefined
+    )
+      return
     const message = reactionMessages().find((message) => sameReactionTarget(message.target, target))
-    if (!message || message.state.canReact === false || message.state.viewerReactions?.includes(kind)
-      || props.getReactionAction?.(target).operation.status === "loading") return
+    if (
+      !message ||
+      message.state.canReact === false ||
+      message.state.viewerReactions?.includes(kind) ||
+      props.getReactionAction?.(target).operation.status === "loading"
+    )
+      return
     // Session owns confirmation/error publication. No async popup, toast or focus effects can outlive this view.
     void props.onAddReaction?.(target, kind).catch(() => {})
   }
-  const reactionControls = (): ReactionControls | undefined => props.onAddReaction && props.getReactionAction ? {
-    action: props.getReactionAction, add: (target, kind) => addReaction(target, kind), open: openReactions,
-    context: openMessageContext,
-  } : undefined
+  const reactionControls = (): ReactionControls | undefined =>
+    props.onAddReaction && props.getReactionAction
+      ? {
+          action: props.getReactionAction,
+          add: (target, kind) => addReaction(target, kind),
+          open: openReactions,
+          context: openMessageContext,
+        }
+      : undefined
   const commitMenuItems = createMemo(() => referencedItems(commitResource().value?.references ?? []))
-  const activeMenuItems = () => activeCommitSha() ? commitMenuItems() : activePullNumber() ? pullMenuItems() : issueMenuItems()
+  const activeMenuItems = () => (activeCommitSha() ? commitMenuItems() : activePullNumber() ? pullMenuItems() : issueMenuItems())
   const refreshPull = async (number: number) => {
     const detail = pullDetail()
-    if (pullRefresh()?.number === number
-      || [detail.resource, detail.commits, detail.context, detail.comments, detail.references].some((resource) => resource.status === "loading")) return
+    if (
+      pullRefresh()?.number === number ||
+      [detail.resource, detail.commits, detail.context, detail.comments, detail.references].some(
+        (resource) => resource.status === "loading",
+      )
+    )
+      return
     const request = { number }
     setPullRefresh(request)
     try {
-      if (detail.resource.status === "ready" && detail.commits.status === "error")
-        await props.onRetryPullCommits?.()
-      else if (detail.resource.status === "ready" && detail.context.status === "error")
-        await props.onRetryPullContext?.()
-      else if (detail.resource.status === "ready" && detail.comments.status === "error")
-        await props.onLoadMorePullComments?.()
-      else if (detail.resource.status === "ready" && detail.references.status === "error")
-        await props.onRetryPullReferences?.()
+      if (detail.resource.status === "ready" && detail.commits.status === "error") await props.onRetryPullCommits?.()
+      else if (detail.resource.status === "ready" && detail.context.status === "error") await props.onRetryPullContext?.()
+      else if (detail.resource.status === "ready" && detail.comments.status === "error") await props.onLoadMorePullComments?.()
+      else if (detail.resource.status === "ready" && detail.references.status === "error") await props.onRetryPullReferences?.()
       else await props.onLoadPull?.(number, { force: true })
     } finally {
-      setPullRefresh((current) => current === request ? undefined : current)
+      setPullRefresh((current) => (current === request ? undefined : current))
     }
   }
-  const pullUrl = (number: number) => props.pullDetail?.number === number && props.pullDetail.resource.value
-    ? props.pullDetail.resource.value.url : `${data().repo.url}/pull/${number}`
+  const pullUrl = (number: number) =>
+    props.pullDetail?.number === number && props.pullDetail.resource.value
+      ? props.pullDetail.resource.value.url
+      : `${data().repo.url}/pull/${number}`
   const issues = () => data().issues[issueState()]
   const pulls = () => data().pulls[pullState()]
   // Open totals share the header tabs' source. GitHub gives no closed total, so closed shows loaded rows ("30+" when more exist).
-  const loadedCount = (resource: ResourceState<Paginated<unknown>>) => resource.value
-    ? `${resource.value.items.length}${resource.value.hasMore ? "+" : ""}` : resource.status === "error" ? "—" : "…"
+  const loadedCount = (resource: ResourceState<Paginated<unknown>>) =>
+    resource.value ? `${resource.value.items.length}${resource.value.hasMore ? "+" : ""}` : resource.status === "error" ? "—" : "…"
   const openCount = (kind: "issues" | "pulls") => {
     const totals = data().workCounts
     if (totals.value) return String(totals.value[kind])
@@ -937,32 +1298,43 @@ function AppContent(props: AppProps) {
   const commitSummary = createMemo(() => listed([data().commits], (item) => item.sha === commitSha()))
   const runSummary = createMemo(() => listed([data().runs], (item) => item.id === runId()))
   const baseTabs = requestedActions || focus() ? tabs : tabs.filter((tab) => tab.page !== "actions")
-  const sectionAvailable = (...resources: ResourceState<{ items: readonly unknown[]; hasMore: boolean }>[]) => resources.some((resource) =>
-    resource.status === "error" || Boolean(resource.value && (resource.value.items.length > 0 || resource.value.hasMore)),
+  const sectionAvailable = (...resources: ResourceState<{ items: readonly unknown[]; hasMore: boolean }>[]) =>
+    resources.some(
+      (resource) => resource.status === "error" || Boolean(resource.value && (resource.value.items.length > 0 || resource.value.hasMore)),
+    )
+  const navigationTabs = createMemo<{ repository: string; tabs: typeof tabs; resolved: boolean }>(
+    (previous) => {
+      const current = data()
+      const repository = current.repo.nameWithOwner
+      const conditional = [current.issues.open, current.issues.closed, current.pulls.open, current.pulls.closed, current.runs]
+      const pending = operations().refresh.status === "loading" || conditional.some((resource) => resource.status === "loading")
+      // Freeze availability across partial refresh responses; unknown initial tabs stay hidden until availability is known.
+      if (pending && previous.repository === repository && previous.resolved) return previous
+      if (pending && conditional.some((resource) => resource.value === undefined)) return { repository, tabs: baseTabs, resolved: false }
+      const available = tabs.filter((tab) => {
+        if (tab.page === "actions")
+          return requestedActions || (focusLaunch && navigation().page === "actions") || sectionAvailable(current.runs)
+        return true
+      })
+      if (
+        previous.repository === repository &&
+        previous.resolved &&
+        available.length === previous.tabs.length &&
+        available.every((tab, index) => tab.page === previous.tabs[index]?.page)
+      )
+        return previous
+      return { repository, tabs: available, resolved: true }
+    },
+    { repository: "", tabs: baseTabs, resolved: false },
   )
-  const navigationTabs = createMemo<{ repository: string; tabs: typeof tabs; resolved: boolean }>((previous) => {
-    const current = data()
-    const repository = current.repo.nameWithOwner
-    const conditional = [current.issues.open, current.issues.closed, current.pulls.open, current.pulls.closed, current.runs]
-    const pending = operations().refresh.status === "loading" || conditional.some((resource) => resource.status === "loading")
-    // Freeze availability across partial refresh responses; unknown initial tabs stay hidden until availability is known.
-    if (pending && previous.repository === repository && previous.resolved) return previous
-    if (pending && conditional.some((resource) => resource.value === undefined)) return { repository, tabs: baseTabs, resolved: false }
-    const available = tabs.filter((tab) => {
-      if (tab.page === "actions") return requestedActions || focusLaunch && navigation().page === "actions" || sectionAvailable(current.runs)
-      return true
-    })
-    if (previous.repository === repository && previous.resolved && available.length === previous.tabs.length
-      && available.every((tab, index) => tab.page === previous.tabs[index]?.page)) return previous
-    return { repository, tabs: available, resolved: true }
-  }, { repository: "", tabs: baseTabs, resolved: false })
   const visibleTabs = () => navigationTabs().tabs
   const overviewDocuments = () => data().documents.value ?? []
   // The About sidebar follows the terminal width until toggled; the choice is not persisted.
   const [aboutSidebar, setAboutSidebar] = createSignal<AboutSidebar>("auto")
   const toggleAboutSidebar = () => setAboutSidebar(aboutSidebarVisible(aboutSidebar(), dimensions().width) ? "hide" : "show")
-  const currentOverviewDocument = createMemo(() => overviewDocuments().find((document) => document.id === overviewDocument())
-    ?? overviewDocuments()[0])
+  const currentOverviewDocument = createMemo(
+    () => overviewDocuments().find((document) => document.id === overviewDocument()) ?? overviewDocuments()[0],
+  )
   const activeResource = (): ResourceState<unknown> | undefined => {
     if (diffTarget()) return diffResource()
     if (activeRunId()) return runDetail()[runDetailPart()]
@@ -975,8 +1347,8 @@ function AppContent(props: AppProps) {
       const part = issueDetailPart()
       return part === "issue" ? issueDetail().resource : issueDetail()[part]
     }
-    if (page() === "overview") return data().documents.status !== "ready"
-      ? data().documents : currentOverviewDocument()?.resource ?? data().documents
+    if (page() === "overview")
+      return data().documents.status !== "ready" ? data().documents : (currentOverviewDocument()?.resource ?? data().documents)
     if (page() === "commits") return data().commits
     if (page() === "issues") return issues()
     if (page() === "pulls") return pulls()
@@ -987,17 +1359,25 @@ function AppContent(props: AppProps) {
   createEffect(() => {
     if (!resuming) return
     const current = navigation()
-    if (current.page !== startingState.page
-      || current.details?.[current.page] !== startingState.details?.[startingState.page]
-      || current.diffs?.[current.page] !== startingState.diffs?.[startingState.page]) {
+    if (
+      current.page !== startingState.page ||
+      current.details?.[current.page] !== startingState.details?.[startingState.page] ||
+      current.diffs?.[current.page] !== startingState.diffs?.[startingState.page]
+    ) {
       resuming = false
       return
     }
-    const resource = diffTarget() ? diffResource()
-      : activeRunId() ? runDetail().resource
-      : activeCommitSha() ? commitResource()
-      : activePullNumber() ? pullResource()
-      : activeIssueNumber() ? issueDetail().resource : activeResource()
+    const resource = diffTarget()
+      ? diffResource()
+      : activeRunId()
+        ? runDetail().resource
+        : activeCommitSha()
+          ? commitResource()
+          : activePullNumber()
+            ? pullResource()
+            : activeIssueNumber()
+              ? issueDetail().resource
+              : activeResource()
     if (!resource || resource.status === "loading") return
     resuming = false
     if (resource.status !== "error") return
@@ -1007,8 +1387,7 @@ function AppContent(props: AppProps) {
   const retryTarget = (): RepositoryResource | undefined => {
     if (page() === "overview") {
       const document = currentOverviewDocument()
-      return data().documents.status === "ready" && document
-        ? { kind: "document", id: document.id } : { kind: "documents" }
+      return data().documents.status === "ready" && document ? { kind: "document", id: document.id } : { kind: "documents" }
     }
     if (page() === "commits") return { kind: "commits" }
     if (page() === "issues") return { kind: "issues", state: issueState() }
@@ -1024,17 +1403,35 @@ function AppContent(props: AppProps) {
     if (pendingMerges().some((pending) => pending.repository === data().repo.nameWithOwner)) return "merging-pull"
     const pendingAction = pendingIssueActions().find((action) => action.repository === data().repo.nameWithOwner)
     if (pendingAction)
-      return pendingAction.kind === "assignees" ? "updating-issue"
-        : pendingAction.kind === "duplicate" ? "marking-duplicate" : pendingAction.kind === "comment" ? "posting-comment"
-        : pendingAction.kind === "close" ? pendingAction.parent === "pull" ? "closing-pull" : "closing-issue"
-          : pendingAction.parent === "pull" ? "reopening-pull" : "reopening-issue"
+      return pendingAction.kind === "assignees"
+        ? "updating-issue"
+        : pendingAction.kind === "duplicate"
+          ? "marking-duplicate"
+          : pendingAction.kind === "comment"
+            ? "posting-comment"
+            : pendingAction.kind === "close"
+              ? pendingAction.parent === "pull"
+                ? "closing-pull"
+                : "closing-issue"
+              : pendingAction.parent === "pull"
+                ? "reopening-pull"
+                : "reopening-issue"
     if (overlay() === "issue-action") {
       const action = issueAction()
       if (action && props.getIssueAction?.(action.number, action.parent).operation.status === "loading")
-        return action.kind === "assignees" ? "updating-issue"
-          : action.kind === "duplicate" ? "marking-duplicate" : action.kind === "comment" ? "posting-comment"
-          : action.kind === "close" ? action.parent === "pull" ? "closing-pull" : "closing-issue"
-            : action.parent === "pull" ? "reopening-pull" : "reopening-issue"
+        return action.kind === "assignees"
+          ? "updating-issue"
+          : action.kind === "duplicate"
+            ? "marking-duplicate"
+            : action.kind === "comment"
+              ? "posting-comment"
+              : action.kind === "close"
+                ? action.parent === "pull"
+                  ? "closing-pull"
+                  : "closing-issue"
+                : action.parent === "pull"
+                  ? "reopening-pull"
+                  : "reopening-issue"
       return undefined
     }
     if (overlay() === "issue-actions") return undefined
@@ -1063,10 +1460,11 @@ function AppContent(props: AppProps) {
     if (diffTarget()) return "diff"
     if (activeRunId()) return "workflow run"
     if (activeCommitSha()) return "commit"
-    if (activePullNumber()) return pullDetailPart() === "pull" ? "pull request" : pullDetailPart() === "context" ? "merge readiness" : pullDetailPart()
+    if (activePullNumber())
+      return pullDetailPart() === "pull" ? "pull request" : pullDetailPart() === "context" ? "merge readiness" : pullDetailPart()
     if (activeIssueNumber()) return issueDetailPart()
     if (page() === "overview")
-      return data().documents.status === "ready" ? currentOverviewDocument()?.label ?? "documentation" : "documentation"
+      return data().documents.status === "ready" ? (currentOverviewDocument()?.label ?? "documentation") : "documentation"
     if (page() === "commits") return "commits"
     if (page() === "issues") return `${issueState()} issues`
     if (page() === "pulls") return `${pullState()} pull requests`
@@ -1100,7 +1498,8 @@ function AppContent(props: AppProps) {
     if (activeCommitSha()) return `resource:commit:${commitSha()}`
     if (activePullNumber()) return `resource:pull:${pullNumber()}:${pullDetailPart()}`
     if (activeIssueNumber()) return `resource:issue:${issueNumber()}:${issueDetailPart()}`
-    if (page() === "overview") return `resource:overview:${data().documents.status === "ready" ? currentOverviewDocument()?.id : "documents"}`
+    if (page() === "overview")
+      return `resource:overview:${data().documents.status === "ready" ? currentOverviewDocument()?.id : "documents"}`
     if (page() === "commits") return "resource:commits"
     if (page() === "issues") return `resource:issues:${issueState()}`
     if (page() === "pulls") return `resource:pulls:${pullState()}`
@@ -1169,27 +1568,32 @@ function AppContent(props: AppProps) {
       setPullState("open")
     }
 
-    if (!issueDefaultResolved && current.issues.open.status === "ready" && current.issues.closed.status === "ready"
-      && (current.issues.open.value.items.length > 0 || current.issues.closed.value.items.length > 0)
-      && (current.issues.open.value.items.length > 0 || !current.issues.open.value.hasMore)) {
+    if (
+      !issueDefaultResolved &&
+      current.issues.open.status === "ready" &&
+      current.issues.closed.status === "ready" &&
+      (current.issues.open.value.items.length > 0 || current.issues.closed.value.items.length > 0) &&
+      (current.issues.open.value.items.length > 0 || !current.issues.open.value.hasMore)
+    ) {
       issueDefaultResolved = true
-      if (current.issues.open.value.items.length === 0 && current.issues.closed.value.items.length > 0)
-        setIssueState("closed")
+      if (current.issues.open.value.items.length === 0 && current.issues.closed.value.items.length > 0) setIssueState("closed")
     }
 
-    if (!pullDefaultResolved && current.pulls.open.status === "ready" && current.pulls.closed.status === "ready"
-      && (current.pulls.open.value.items.length > 0 || current.pulls.closed.value.items.length > 0)) {
+    if (
+      !pullDefaultResolved &&
+      current.pulls.open.status === "ready" &&
+      current.pulls.closed.status === "ready" &&
+      (current.pulls.open.value.items.length > 0 || current.pulls.closed.value.items.length > 0)
+    ) {
       pullDefaultResolved = true
-      if (current.pulls.open.value.items.length === 0 && current.pulls.closed.value.items.length > 0)
-        setPullState("closed")
+      if (current.pulls.open.value.items.length === 0 && current.pulls.closed.value.items.length > 0) setPullState("closed")
     }
   })
 
   createEffect(() => {
     if (!initialPagePending || !navigationTabs().resolved) return
     initialPagePending = false
-    if (visibleTabs().some((tab) => tab.page === initialPage))
-      setNavigation((state) => navigate(state, initialPage))
+    if (visibleTabs().some((tab) => tab.page === initialPage)) setNavigation((state) => navigate(state, initialPage))
   })
 
   createEffect(on(page, (current) => props.onPageChange?.(current), { defer: true }))
@@ -1197,7 +1601,24 @@ function AppContent(props: AppProps) {
   createEffect(() => {
     if (visibleTabs().some((tab) => tab.page === page())) return
     setNavigation((state) => navigate(back(state), "overview"))
-    if (overlay() === "issue-references" || overlay() === "issue-actions" || overlay() === "issue-action" || overlay() === "pull-merge" || overlay() === "pull-draft" || overlay() === "pull-review" || overlay() === "review-comment" || overlay() === "inline-confirm" || overlay() === "inline-retry") { setInlineRetry(); setInlineConfirm(); setOverlay(); setIssueAction(); setMergeTarget(); setDraftTarget() }
+    if (
+      overlay() === "issue-references" ||
+      overlay() === "issue-actions" ||
+      overlay() === "issue-action" ||
+      overlay() === "pull-merge" ||
+      overlay() === "pull-draft" ||
+      overlay() === "pull-review" ||
+      overlay() === "review-comment" ||
+      overlay() === "inline-confirm" ||
+      overlay() === "inline-retry"
+    ) {
+      setInlineRetry()
+      setInlineConfirm()
+      setOverlay()
+      setIssueAction()
+      setMergeTarget()
+      setDraftTarget()
+    }
   })
 
   createEffect(() => {
@@ -1208,35 +1629,52 @@ function AppContent(props: AppProps) {
     }
   })
 
-  onCleanup(() => { disposed = true; props.onCloseDiff?.(); props.onCloseRun?.(); props.onCloseCommit?.(); props.onCloseIssue?.(); props.onClosePull?.() })
-
-  const closeDetail = () => batch(() => {
-    const detail = navigation().details?.[page()]
-    const next = back(navigation())
-    setNavigation(next)
-    if (detail?.kind === "run") props.onCloseRun?.()
-    if (detail?.kind === "commit") props.onCloseCommit?.()
-    if (detail?.kind === "issue") { props.onCloseIssue?.(); setRevealActivity() }
-    if (detail?.kind === "pull") { props.onClosePull?.(); setRevealActivity() }
-    ensureDetail(next.details?.[next.page])
+  onCleanup(() => {
+    disposed = true
+    props.onCloseDiff?.()
+    props.onCloseRun?.()
+    props.onCloseCommit?.()
+    props.onCloseIssue?.()
+    props.onClosePull?.()
   })
+
+  const closeDetail = () =>
+    batch(() => {
+      const detail = navigation().details?.[page()]
+      const next = back(navigation())
+      setNavigation(next)
+      if (detail?.kind === "run") props.onCloseRun?.()
+      if (detail?.kind === "commit") props.onCloseCommit?.()
+      if (detail?.kind === "issue") {
+        props.onCloseIssue?.()
+        setRevealActivity()
+      }
+      if (detail?.kind === "pull") {
+        props.onClosePull?.()
+        setRevealActivity()
+      }
+      ensureDetail(next.details?.[next.page])
+    })
   const ensureDetail = (restored?: DetailTarget) => {
     if (restored?.kind === "run" && props.runDetail?.id !== restored.id) void props.onLoadRun?.(restored.id)
     if (restored?.kind === "commit" && props.commitDetail?.sha !== restored.sha) void props.onLoadCommit?.(restored.sha)
     if (restored?.kind === "issue" && props.issueDetail?.number !== restored.number) void props.onLoadIssue?.(restored.number)
     if (restored?.kind === "pull" && props.pullDetail?.number !== restored.number) void props.onLoadPull?.(restored.number)
   }
-  const restoreNavigation = (next: NavigationState) => batch(() => {
-    setNavigation(next)
-    ensureDetail(next.details?.[next.page])
-    const diff = next.diffs?.[next.page]
-    if (diff) {
-      const loaded = props.diffs?.[diff.kind]?.target
-      const matches = diff.kind === "commit" ? loaded?.kind === "commit" && loaded.sha === diff.sha
-        : loaded?.kind === "pull" && loaded.number === diff.number
-      if (!matches) void props.onLoadDiff?.(diff)
-    }
-  })
+  const restoreNavigation = (next: NavigationState) =>
+    batch(() => {
+      setNavigation(next)
+      ensureDetail(next.details?.[next.page])
+      const diff = next.diffs?.[next.page]
+      if (diff) {
+        const loaded = props.diffs?.[diff.kind]?.target
+        const matches =
+          diff.kind === "commit"
+            ? loaded?.kind === "commit" && loaded.sha === diff.sha
+            : loaded?.kind === "pull" && loaded.number === diff.number
+        if (!matches) void props.onLoadDiff?.(diff)
+      }
+    })
   const selectPage = (next: Page) => {
     initialPagePending = false
     restoreNavigation(navigate(navigation(), next))
@@ -1251,12 +1689,15 @@ function AppContent(props: AppProps) {
   }
   const selectHeaderPage = (next: Page) => {
     initialPagePending = false
-    if (next !== page()) return selectPage(next);
-    goBack();
-  };
+    if (next !== page()) return selectPage(next)
+    goBack()
+  }
   const movePage = (delta: number) => {
     const available = visibleTabs()
-    const current = Math.max(0, available.findIndex((tab) => tab.page === page()))
+    const current = Math.max(
+      0,
+      available.findIndex((tab) => tab.page === page()),
+    )
     selectPage(available[(current + delta + available.length) % available.length]!.page)
   }
   const selectOverviewDocument = (id: string) => {
@@ -1268,7 +1709,10 @@ function AppContent(props: AppProps) {
   const moveOverviewDocument = (delta: number) => {
     const available = overviewDocuments()
     if (!available.length) return
-    const current = Math.max(0, available.findIndex((document) => document.id === overviewDocument()))
+    const current = Math.max(
+      0,
+      available.findIndex((document) => document.id === overviewDocument()),
+    )
     selectOverviewDocument(available[(current + delta + available.length) % available.length]!.id)
   }
   const openRepositoryPicker = () => {
@@ -1282,13 +1726,14 @@ function AppContent(props: AppProps) {
     if (branches.status === "error" && branches.phase === "load") props.onRetryResource?.({ kind: "branches" })
     if (branches.value) setOverlay("branch-picker")
   }
-  const quit = () => props.onQuit ? props.onQuit() : renderer.destroy()
+  const quit = () => (props.onQuit ? props.onQuit() : renderer.destroy())
   let openingBrowser = false
   const openInBrowser = async (target?: string | number, repository?: string, view?: "diff") => {
     if (openingBrowser || !props.onOpenInBrowser) return
     openingBrowser = true
     const origin = navigation()
-    const label = typeof target === "number" ? `${repository ? repository + "#" : "#"}${target}` : target?.slice(0, 7) ?? data().repo.nameWithOwner
+    const label =
+      typeof target === "number" ? `${repository ? repository + "#" : "#"}${target}` : (target?.slice(0, 7) ?? data().repo.nameWithOwner)
     try {
       await props.onOpenInBrowser(target, repository, view)
       if (!renderer.isDestroyed && navigation() === origin)
@@ -1306,12 +1751,17 @@ function AppContent(props: AppProps) {
   const openDiffTool = async (target: DiffTarget) => {
     const origin = navigation()
     try {
-      await openExternalDiff({ terminal: renderer, command: config().diffViewerCommand,
-        content: resourceForDiff(target).value })
+      await openExternalDiff({ terminal: renderer, command: config().diffViewerCommand, content: resourceForDiff(target).value })
     } catch (error) {
       if (!disposed && !renderer.isDestroyed && navigation() === origin) {
         if (error instanceof DiffViewerSetupRequiredError) setOverlay("diff-viewer-setup")
-        else setToast({ id: ++toastId, title: "External tool unavailable", message: error instanceof Error ? error.message : String(error), tone: "error" })
+        else
+          setToast({
+            id: ++toastId,
+            title: "External tool unavailable",
+            message: error instanceof Error ? error.message : String(error),
+            tone: "error",
+          })
       }
     }
   }
@@ -1334,14 +1784,25 @@ function AppContent(props: AppProps) {
   const cloneRepository = () => {
     if (!canClone()) return
     const repository = data().repo.nameWithOwner
-    openCommand({ title: `Clone ${repository}`, destination: cloneDestination(repository.split("/")[1]!, props.cwd!), command: (destination) => cloneCommand(repository, destination, props.cwd!) })
+    openCommand({
+      title: `Clone ${repository}`,
+      destination: cloneDestination(repository.split("/")[1]!, props.cwd!),
+      command: (destination) => cloneCommand(repository, destination, props.cwd!),
+    })
   }
   const [contextMenu, setContextMenu] = createSignal<{
-    origin: NavigationState; repository: string; position: MousePosition; items: ContextMenuItem[]; valid: () => boolean
+    origin: NavigationState
+    repository: string
+    position: MousePosition
+    items: ContextMenuItem[]
+    valid: () => boolean
   }>()
-  const closeContextMenu = () => { setOverlay(); setContextMenu() }
-  const ownsContextMenu = (menu: NonNullable<ReturnType<typeof contextMenu>>) => navigation() === menu.origin
-    && data().repo.nameWithOwner === menu.repository && menu.valid()
+  const closeContextMenu = () => {
+    setOverlay()
+    setContextMenu()
+  }
+  const ownsContextMenu = (menu: NonNullable<ReturnType<typeof contextMenu>>) =>
+    navigation() === menu.origin && data().repo.nameWithOwner === menu.repository && menu.valid()
   const openContextMenu = (position: MousePosition, items: ContextMenuItem[], valid: () => boolean) => {
     if (overlay() || !valid()) return
     setContextMenu({ origin: navigation(), repository: data().repo.nameWithOwner, position, items, valid })
@@ -1351,113 +1812,171 @@ function AppContent(props: AppProps) {
     const menu = contextMenu()
     if (overlay() === "context-menu" && menu && !ownsContextMenu(menu)) closeContextMenu()
   })
-  const backContextItems = (): ContextMenuItem[] =>
-    canGoBack() ? [{ label: "Back", run: goBack }] : [];
+  const backContextItems = (): ContextMenuItem[] => (canGoBack() ? [{ label: "Back", run: goBack }] : [])
   const commentContextItems = (): ContextMenuItem[] =>
-    canComment() ? [{
-      label: "Add comment",
-      run: openComment,
-      get disabled() { return !canComment(); },
-    }] : [];
+    canComment()
+      ? [
+          {
+            label: "Add comment",
+            run: openComment,
+            get disabled() {
+              return !canComment()
+            },
+          },
+        ]
+      : []
   const issueActionsContextItems = (): ContextMenuItem[] =>
-    (activeIssueNumber() || activePullNumber()) && !diffTarget() && hasIssueActions() ? [{
-      label: "Actions…",
-      run: () => { if (hasIssueActions()) setOverlay("issue-actions"); },
-      get disabled() { return !hasIssueActions(); },
-    }] : [];
+    (activeIssueNumber() || activePullNumber()) && !diffTarget() && hasIssueActions()
+      ? [
+          {
+            label: "Actions…",
+            run: () => {
+              if (hasIssueActions()) setOverlay("issue-actions")
+            },
+            get disabled() {
+              return !hasIssueActions()
+            },
+          },
+        ]
+      : []
   const referencesContextItems = (): ContextMenuItem[] =>
-    (activeIssueNumber() || activePullNumber() || activeCommitSha()) && !diffTarget() && activeMenuItems().length ? [{
-      label: "References…",
-      run: () => { if (activeMenuItems().length) setOverlay("issue-references") },
-      get disabled() { return !activeMenuItems().length },
-    }] : []
+    (activeIssueNumber() || activePullNumber() || activeCommitSha()) && !diffTarget() && activeMenuItems().length
+      ? [
+          {
+            label: "References…",
+            run: () => {
+              if (activeMenuItems().length) setOverlay("issue-references")
+            },
+            get disabled() {
+              return !activeMenuItems().length
+            },
+          },
+        ]
+      : []
   const timelineContextItems = (): ContextMenuItem[] =>
-    (activeIssueNumber() || activePullNumber()) && !diffTarget() ? [{
-      label: timelineCollapsed() ? "Expand" : "Collapse",
-      run: () => setTimelineCollapsed((collapsed) => !collapsed),
-    }] : [];
+    (activeIssueNumber() || activePullNumber()) && !diffTarget()
+      ? [
+          {
+            label: timelineCollapsed() ? "Expand" : "Collapse",
+            run: () => setTimelineCollapsed((collapsed) => !collapsed),
+          },
+        ]
+      : []
   const openMessageContext = (target: ReactionTarget, body: string, position: MousePosition) => {
     const message = () => reactionMessages().find((message) => sameReactionTarget(message.target, target))
     const current = message()
     if (!current) return
-    openContextMenu(position, [
-      { label: "React", run: () => openReactions(target), get disabled() { return message()?.state.canReact === false || props.getReactionAction?.(target).operation.status === "loading" } },
-      { label: "Copy text", run: () => void copyToClipboard(body, "Text"), disabled: !body },
-      ...commentContextItems(),
-      ...issueActionsContextItems(),
-      ...referencesContextItems(),
-      ...timelineContextItems(),
-      ...backContextItems(),
-    ], () => !!message())
+    openContextMenu(
+      position,
+      [
+        {
+          label: "React",
+          run: () => openReactions(target),
+          get disabled() {
+            return message()?.state.canReact === false || props.getReactionAction?.(target).operation.status === "loading"
+          },
+        },
+        { label: "Copy text", run: () => void copyToClipboard(body, "Text"), disabled: !body },
+        ...commentContextItems(),
+        ...issueActionsContextItems(),
+        ...referencesContextItems(),
+        ...timelineContextItems(),
+        ...backContextItems(),
+      ],
+      () => !!message(),
+    )
   }
   const openRowContext = (kind: "commit" | "issue" | "pull" | "run", id: string | number, position: MousePosition) => {
     const valid = () => {
-      if (kind === "commit") return page() === "commits" && !activeCommitSha() && !!data().commits.value?.items.some((commit) => commit.sha === id);
-      if (kind === "issue") return page() === "issues" && !activeIssueNumber() && !!issues().value?.items.some((issue) => issue.number === id);
-      if (kind === "pull") return page() === "pulls" && !activePullNumber() && !!pulls().value?.items.some((pull) => pull.number === id);
-      return page() === "actions" && !activeRunId() && !!data().runs.value?.items.some((run) => run.id === id);
-    };
+      if (kind === "commit")
+        return page() === "commits" && !activeCommitSha() && !!data().commits.value?.items.some((commit) => commit.sha === id)
+      if (kind === "issue")
+        return page() === "issues" && !activeIssueNumber() && !!issues().value?.items.some((issue) => issue.number === id)
+      if (kind === "pull") return page() === "pulls" && !activePullNumber() && !!pulls().value?.items.some((pull) => pull.number === id)
+      return page() === "actions" && !activeRunId() && !!data().runs.value?.items.some((run) => run.id === id)
+    }
     const open = () => {
-      if (kind === "commit") openCommit(String(id));
-      else if (kind === "issue") openIssue(Number(id));
-      else if (kind === "pull") openPull(Number(id));
-      else openRun(Number(id));
-    };
-    const items: ContextMenuItem[] = [{ label: "Open", run: open }];
-    if (kind === "commit" || kind === "pull") items.push({
-      label: "View diff", disabled: !props.onLoadDiff,
-      run: () => viewDiff(kind === "commit" ? { kind, sha: String(id) } : { kind, number: Number(id) }),
-    });
-    const copy = kind === "commit" ? String(id) : kind === "issue" ? issueUrl(Number(id)) : kind === "pull" ? pullUrl(Number(id)) : runUrl(Number(id));
+      if (kind === "commit") openCommit(String(id))
+      else if (kind === "issue") openIssue(Number(id))
+      else if (kind === "pull") openPull(Number(id))
+      else openRun(Number(id))
+    }
+    const items: ContextMenuItem[] = [{ label: "Open", run: open }]
+    if (kind === "commit" || kind === "pull")
+      items.push({
+        label: "View diff",
+        disabled: !props.onLoadDiff,
+        run: () => viewDiff(kind === "commit" ? { kind, sha: String(id) } : { kind, number: Number(id) }),
+      })
+    const copy =
+      kind === "commit" ? String(id) : kind === "issue" ? issueUrl(Number(id)) : kind === "pull" ? pullUrl(Number(id)) : runUrl(Number(id))
     items.push(
       { label: "Copy " + (kind === "commit" ? "SHA" : "URL"), run: () => void copyToClipboard(copy, kind === "commit" ? "SHA" : "URL") },
-      { label: "Open on GitHub", run: () => void openInBrowser(kind === "run" ? `actions/runs/${id}` : id), disabled: !props.onOpenInBrowser },
-    );
-    openContextMenu(position, items, valid);
-  };
+      {
+        label: "Open on GitHub",
+        run: () => void openInBrowser(kind === "run" ? `actions/runs/${id}` : id),
+        disabled: !props.onOpenInBrowser,
+      },
+    )
+    openContextMenu(position, items, valid)
+  }
   const openPageContext = (position: MousePosition) => {
     if (diffTarget()) {
-      openContextMenu(position, backContextItems(), canGoBack);
-      return;
+      openContextMenu(position, backContextItems(), canGoBack)
+      return
     }
-    const sha = activeCommitSha();
-    const issue = activeIssueNumber();
-    const pull = activePullNumber();
-    const run = activeRunId();
-    const items: ContextMenuItem[] = [];
+    const sha = activeCommitSha()
+    const issue = activeIssueNumber()
+    const pull = activePullNumber()
+    const run = activeRunId()
+    const items: ContextMenuItem[] = []
     if (sha) {
       items.push(
         { label: "View diff", run: () => viewDiff({ kind: "commit", sha }), disabled: !props.onLoadDiff },
         { label: "Open on GitHub", run: () => void openInBrowser(sha), disabled: !props.onOpenInBrowser },
         { label: "Copy SHA", run: () => void copyToClipboard(sha, "SHA") },
-      );
+      )
     } else if (issue || pull) {
-      const number = (issue ?? pull)!;
-      if (pull) items.push({ label: "View diff", run: () => viewDiff({ kind: "pull", number }), disabled: !props.onLoadDiff });
+      const number = (issue ?? pull)!
+      if (pull) items.push({ label: "View diff", run: () => viewDiff({ kind: "pull", number }), disabled: !props.onLoadDiff })
       items.push(
         { label: "Open on GitHub", run: () => void openInBrowser(number), disabled: !props.onOpenInBrowser },
         { label: "Copy URL", run: () => void copyToClipboard(issue ? issueUrl(number) : pullUrl(number), "URL") },
-      );
+      )
     } else if (run) {
       items.push(
         { label: "Open on GitHub", run: () => void openInBrowser(`actions/runs/${run}`), disabled: !props.onOpenInBrowser },
         { label: "Copy URL", run: () => void copyToClipboard(runUrl(run), "URL") },
-      );
+      )
     } else if (page() === "overview") {
       items.push(
         { label: "Open on GitHub", run: () => void openInBrowser(), disabled: !props.onOpenInBrowser },
         { label: "Copy repository URL", run: () => void copyToClipboard(data().repo.url, "URL") },
-      );
-      if (canClone()) items.push({
-        label: "Clone repository", run: cloneRepository,
-        get disabled() { return !canClone(); },
-      });
+      )
+      if (canClone())
+        items.push({
+          label: "Clone repository",
+          run: cloneRepository,
+          get disabled() {
+            return !canClone()
+          },
+        })
     }
-    items.push(...commentContextItems(), ...issueActionsContextItems(), ...referencesContextItems(), ...timelineContextItems(), ...backContextItems());
-    if (items.length) openContextMenu(position, items, () => true);
-  };
+    items.push(
+      ...commentContextItems(),
+      ...issueActionsContextItems(),
+      ...referencesContextItems(),
+      ...timelineContextItems(),
+      ...backContextItems(),
+    )
+    if (items.length) openContextMenu(position, items, () => true)
+  }
   const pageMouse = mouseContextMenu(openPageContext, () => overlay() === undefined, navigation)
-  createEffect(() => { navigation(); overlay(); pageMouse.onMouseDrag() })
+  createEffect(() => {
+    navigation()
+    overlay()
+    pageMouse.onMouseDrag()
+  })
   const shortcutHint = () => {
     if (!config().showStatusBarHints) return undefined
     const hint = (...entries: HintEntry[]) => keys.hints(...entries)
@@ -1472,7 +1991,16 @@ function AppContent(props: AppProps) {
     const picker: HintEntry[] = [["picker.accept", "open"], close]
     if (overlay() === "context-menu") return undefined
     if (overlay() === "reactions") return hint(["navigation.activate", "add"], close)
-    if (overlay() === "issue-action" || overlay() === "pull-merge" || overlay() === "pull-draft" || overlay() === "pull-review" || overlay() === "review-comment" || overlay() === "inline-confirm" || overlay() === "inline-retry") return issueActionHint()
+    if (
+      overlay() === "issue-action" ||
+      overlay() === "pull-merge" ||
+      overlay() === "pull-draft" ||
+      overlay() === "pull-review" ||
+      overlay() === "review-comment" ||
+      overlay() === "inline-confirm" ||
+      overlay() === "inline-retry"
+    )
+      return issueActionHint()
     if (overlay() === "issue-actions") return hint(open, close)
     if (overlay() === "help") return hint(close)
     if (overlay() === "diff-viewer-setup") return issueActionHint()
@@ -1483,7 +2011,12 @@ function AppContent(props: AppProps) {
     if (editingConversationComment()) return conversationCommentHint()
     // Arrays are priority lists, identical at every terminal width. The footer
     // fits whole hints without hiding recovery/primary actions behind copy/open.
-    const common: HintEntry[] = [...(focus() ? [["global.openFullApp", "full app"] as const] : []), ["search.start", "search"], help, ...(props.onSwitchRepository ? [["global.switchRepository", "switch repo"] as const] : [])]
+    const common: HintEntry[] = [
+      ...(focus() ? [["global.openFullApp", "full app"] as const] : []),
+      ["search.start", "search"],
+      help,
+      ...(props.onSwitchRepository ? [["global.switchRepository", "switch repo"] as const] : []),
+    ]
     const resource = activeResource()
     if (resource?.status === "loading" && resource.value === undefined) {
       const detail = diffTarget() || activeRunId() || activeCommitSha() || activeIssueNumber() || activePullNumber()
@@ -1492,73 +2025,160 @@ function AppContent(props: AppProps) {
     const canRefresh = operations().refresh.status !== "loading" && resource?.status !== "loading"
     const retry: HintEntry[] = canRefresh && resource?.status === "error" ? [["view.refresh", "retry"]] : []
     const refresh: HintEntry[] = canRefresh && resource?.status !== "error" ? [["view.refresh", "refresh"]] : []
-    const more = (available: boolean | undefined): HintEntry[] => available ? [["navigation.activate", "load more"]] : []
-    const list = (hasItems: boolean): HintEntry[] => hasItems ? [open] : []
+    const more = (available: boolean | undefined): HintEntry[] => (available ? [["navigation.activate", "load more"]] : [])
+    const list = (hasItems: boolean): HintEntry[] => (hasItems ? [open] : [])
     if (diffTarget()) {
-      if (inlineDraftFocused()[page()]) return hint(["dialog.submit", "post"], ["dialog.close", "cancel"], ["dialog.togglePreview", "preview"],
-        ["dialog.toggleExpanded", "expand"], ["dialog.discard", "clear"], ["dialog.externalEditor", "editor"])
+      if (inlineDraftFocused()[page()])
+        return hint(
+          ["dialog.submit", "post"],
+          ["dialog.close", "cancel"],
+          ["dialog.togglePreview", "preview"],
+          ["dialog.toggleExpanded", "expand"],
+          ["dialog.discard", "clear"],
+          ["dialog.externalEditor", "editor"],
+        )
       const failed = resource?.status === "error"
-      const recovery: HintEntry[] = failed ? [...retry, ["navigation.activate", "file list"]]
-        : canRefresh && diffResource().value?.kind === "files" ? [["view.refresh", "retry full diff"]] : []
+      const recovery: HintEntry[] = failed
+        ? [...retry, ["navigation.activate", "file list"]]
+        : canRefresh && diffResource().value?.kind === "files"
+          ? [["view.refresh", "retry full diff"]]
+          : []
       const comments: HintEntry[] = threadsForDiff(diffTarget()!).length
-        ? [["diff.toggleComments", diffCommentsCollapsed()[page()] ? "expand" : "collapse"]] : []
-      return hint(back, ...recovery,
+        ? [["diff.toggleComments", diffCommentsCollapsed()[page()] ? "expand" : "collapse"]]
+        : []
+      return hint(
+        back,
+        ...recovery,
         [["diff.previousFile", "diff.nextFile"], "files"],
         [["diff.previousHunk", "diff.nextHunk"], "hunks"],
         ...common,
-        ["diff.toggleFiles", "toggle files"], ["diff.filterFiles", "filter files"],
+        ["diff.toggleFiles", "toggle files"],
+        ["diff.filterFiles", "filter files"],
         ...comments,
-        ...(failed ? [] : [["diff.toggleLayout", "layout"], ["diff.toggleWrap", "wrap"]] as const),
-        ...refresh, github, ["diff.openViewer", "viewer"])
+        ...(failed
+          ? []
+          : ([
+              ["diff.toggleLayout", "layout"],
+              ["diff.toggleWrap", "wrap"],
+            ] as const)),
+        ...refresh,
+        github,
+        ["diff.openViewer", "viewer"],
+      )
     }
-    if (activeRunId()) return hint(back, ...retry,
-      ...more(runDetail().jobs.status !== "loading" && runDetail().jobs.value?.hasMore), ...refresh, ...common, github, copy)
-    if (activeCommitSha()) return hint(back, ...retry,
-      diff, ...more(commitResource().status !== "loading" && commitResource().value?.files.hasMore),
-      ...(commitMenuItems().length ? [["detail.references", "references"] as const] : []), ...refresh, ...common, github, copy)
-    if (activeIssueNumber()) return hint(back, ...retry,
-      ...(canComment() ? [["issue.comment", "comment"] as const] : []),
-      ...(hasIssueActions() ? [["issue.actions", "actions"] as const] : []),
-      ...more(issueDetail().comments.status !== "loading" && issueDetail().comments.value?.hasMore),
-      timeline, ...(issueMenuItems().length ? [["detail.references", "references"] as const] : []),
-      ...refresh, ...common, github, copy)
-    if (activePullNumber()) return hint(back, ...retry,
-      diff, ...(canComment() ? [["issue.comment", "comment"] as const] : []),
-      ...(hasIssueActions() ? [["issue.actions", "actions"] as const] : []),
-      ...more(pullDetail().comments.status !== "loading" && pullDetail().comments.value?.hasMore),
-      timeline, ...(pullMenuItems().length ? [["detail.references", "references"] as const] : []),
-      ...refresh, ...common, github, copy)
+    if (activeRunId())
+      return hint(
+        back,
+        ...retry,
+        ...more(runDetail().jobs.status !== "loading" && runDetail().jobs.value?.hasMore),
+        ...refresh,
+        ...common,
+        github,
+        copy,
+      )
+    if (activeCommitSha())
+      return hint(
+        back,
+        ...retry,
+        diff,
+        ...more(commitResource().status !== "loading" && commitResource().value?.files.hasMore),
+        ...(commitMenuItems().length ? [["detail.references", "references"] as const] : []),
+        ...refresh,
+        ...common,
+        github,
+        copy,
+      )
+    if (activeIssueNumber())
+      return hint(
+        back,
+        ...retry,
+        ...(canComment() ? [["issue.comment", "comment"] as const] : []),
+        ...(hasIssueActions() ? [["issue.actions", "actions"] as const] : []),
+        ...more(issueDetail().comments.status !== "loading" && issueDetail().comments.value?.hasMore),
+        timeline,
+        ...(issueMenuItems().length ? [["detail.references", "references"] as const] : []),
+        ...refresh,
+        ...common,
+        github,
+        copy,
+      )
+    if (activePullNumber())
+      return hint(
+        back,
+        ...retry,
+        diff,
+        ...(canComment() ? [["issue.comment", "comment"] as const] : []),
+        ...(hasIssueActions() ? [["issue.actions", "actions"] as const] : []),
+        ...more(pullDetail().comments.status !== "loading" && pullDetail().comments.value?.hasMore),
+        timeline,
+        ...(pullMenuItems().length ? [["detail.references", "references"] as const] : []),
+        ...refresh,
+        ...common,
+        github,
+        copy,
+      )
     if (page() === "actions") {
       const hasItems = !!data().runs.value?.items.length
       return hint(...retry, ...list(hasItems), ...refresh, ...common, github, ...(hasItems ? [copy] : []))
     }
     if (page() === "pulls" || page() === "issues") {
       const hasItems = !!(page() === "pulls" ? pulls() : issues()).value?.items.length
-      return hint(...retry, ...list(hasItems), ["work.toggleState", "open/closed"],
-        ...(page() === "pulls" && hasItems ? [diff] : []), ...refresh, ...common, github, ...(hasItems ? [copy] : []))
+      return hint(
+        ...retry,
+        ...list(hasItems),
+        ["work.toggleState", "open/closed"],
+        ...(page() === "pulls" && hasItems ? [diff] : []),
+        ...refresh,
+        ...common,
+        github,
+        ...(hasItems ? [copy] : []),
+      )
     }
     if (page() === "commits") {
       const hasItems = !!data().commits.value?.items.length
-      return hint(...retry, ...list(hasItems), ["commits.chooseBranch", "branch"], ...(hasItems ? [diff] : []),
-        ...refresh, ...common, github, ...(hasItems ? [copy] : []))
+      return hint(
+        ...retry,
+        ...list(hasItems),
+        ["commits.chooseBranch", "branch"],
+        ...(hasItems ? [diff] : []),
+        ...refresh,
+        ...common,
+        github,
+        ...(hasItems ? [copy] : []),
+      )
     }
-    if (page() === "overview") return hint(...retry,
-      ...(overviewDocuments().length > 1 ? [["overview.nextDocument", "documents"] as const] : []),
-      ["overview.toggleSidebar", "sidebar"],
-      ...(canClone() ? [["command.clone", "clone"] as const] : []), ...refresh, ...common, github, copy)
+    if (page() === "overview")
+      return hint(
+        ...retry,
+        ...(overviewDocuments().length > 1 ? [["overview.nextDocument", "documents"] as const] : []),
+        ["overview.toggleSidebar", "sidebar"],
+        ...(canClone() ? [["command.clone", "clone"] as const] : []),
+        ...refresh,
+        ...common,
+        github,
+        copy,
+      )
     return hint(...common)
   }
 
-  useKeyActions({
-    "dialog.close": () => setOverlay(),
-    "global.help": () => setOverlay(),
-    "global.quit": quit,
-  }, { when: () => overlay() === "help", priority: 100, modal: true })
+  useKeyActions(
+    {
+      "dialog.close": () => setOverlay(),
+      "global.help": () => setOverlay(),
+      "global.quit": quit,
+    },
+    { when: () => overlay() === "help", priority: 100, modal: true },
+  )
   // References use an ordinary list (priority 0). Block ambient keys below it,
   // including Root's quit fallback, without intercepting selection or copy/open.
-  useKeyActions({ "dialog.close": () => setOverlay() }, {
-    when: () => overlay() === "issue-references", priority: -1, modal: true,
-  })
+  useKeyActions(
+    { "dialog.close": () => setOverlay() },
+    {
+      when: () => overlay() === "issue-references",
+      priority: -1,
+      modal: true,
+    },
+  )
 
   const selectTab = (index: number) => {
     if (focus()) return false
@@ -1567,146 +2187,190 @@ function AppContent(props: AppProps) {
     selectPage(tab.page)
   }
   // Page/list handlers run before this ambient layer. Every matched key is consumed once.
-  useKeyActions({
-    "global.quit": quit,
-    "global.help": () => setOverlay("help"),
-    "global.settings": () => { if (diffTarget()) return false; setOverlay("settings") },
-    "global.openFullApp": openFullApp,
-    "global.switchRepository": () => {
-      if (!props.onSwitchRepository) return false
-      setOverlay("switch-repo")
-      void props.onRefreshRecentRepositories?.().catch(() => {})
-    },
-    "navigation.back": () => {
-      if (!canGoBack()) return false
-      goBack()
-    },
-    "navigation.tab1": () => selectTab(0),
-    "navigation.tab2": () => selectTab(1),
-    "navigation.tab3": () => selectTab(2),
-    "navigation.tab4": () => selectTab(3),
-    "navigation.tab5": () => selectTab(4),
-    "navigation.previousTab": () => { if (diffTarget() || focus()) return false; movePage(-1) },
-    "navigation.nextTab": () => { if (diffTarget() || focus()) return false; movePage(1) },
-    "item.open": () => {
-      const diff = diffTarget()
-      if (diff) openCurrentDiffGitHub(diff)
-      else if (activeRunId()) void openInBrowser(`actions/runs/${activeRunId()}`)
-      else if (activeCommitSha()) void openInBrowser(activeCommitSha())
-      else if (activeIssueNumber() || activePullNumber()) void openInBrowser(activeIssueNumber() ?? activePullNumber())
-      else if (page() === "overview") void openInBrowser()
-      else return false
-    },
-    "item.copy": () => {
-      if (diffTarget()) return false
-      if (activeRunId()) void copyToClipboard(runUrl(activeRunId()!), "URL")
-      else if (activeCommitSha()) void copyToClipboard(commitResource().value?.sha ?? activeCommitSha()!, "SHA")
-      else if (activeIssueNumber()) void copyToClipboard(issueUrl(activeIssueNumber()!), "URL")
-      else if (activePullNumber()) void copyToClipboard(pullUrl(activePullNumber()!), "URL")
-      else if (page() === "overview") void copyToClipboard(data().repo.url, "URL")
-      else return false
-    },
-    "item.diff": () => {
-      if (diffTarget()) return false
-      if (activeCommitSha()) viewDiff({ kind: "commit", sha: activeCommitSha()! })
-      else if (activePullNumber()) viewDiff({ kind: "pull", number: activePullNumber()! })
-      else return false
-    },
-    "navigation.activate": () => {
-      const diff = diffTarget()
-      if (diff) {
-        if (diffResource().status !== "error") return false
-        void props.onLoadDiff?.(diff, true)
-      } else if (activeRunId()) { clearRunFailures(activeRunId()!); void props.onLoadMoreRunJobs?.() }
-      else if (activeCommitSha()) void props.onLoadMoreCommitFiles?.()
-      else if (activeIssueNumber()) void props.onLoadMoreIssueComments?.()
-      else if (activePullNumber()) void props.onLoadMorePullComments?.()
-      else return false
-    },
-    "view.refresh": () => {
-      const diff = diffTarget()
-      if (diff) {
-        if (diffResource().status !== "loading") {
-          void props.onLoadDiff?.(diff, false, { force: true })
-          if (diff.kind === "pull") void props.onLoadPull?.(diff.number, { force: true })
+  useKeyActions(
+    {
+      "global.quit": quit,
+      "global.help": () => setOverlay("help"),
+      "global.settings": () => {
+        if (diffTarget()) return false
+        setOverlay("settings")
+      },
+      "global.openFullApp": openFullApp,
+      "global.switchRepository": () => {
+        if (!props.onSwitchRepository) return false
+        setOverlay("switch-repo")
+        void props.onRefreshRecentRepositories?.().catch(() => {})
+      },
+      "navigation.back": () => {
+        if (!canGoBack()) return false
+        goBack()
+      },
+      "navigation.tab1": () => selectTab(0),
+      "navigation.tab2": () => selectTab(1),
+      "navigation.tab3": () => selectTab(2),
+      "navigation.tab4": () => selectTab(3),
+      "navigation.tab5": () => selectTab(4),
+      "navigation.previousTab": () => {
+        if (diffTarget() || focus()) return false
+        movePage(-1)
+      },
+      "navigation.nextTab": () => {
+        if (diffTarget() || focus()) return false
+        movePage(1)
+      },
+      "item.open": () => {
+        const diff = diffTarget()
+        if (diff) openCurrentDiffGitHub(diff)
+        else if (activeRunId()) void openInBrowser(`actions/runs/${activeRunId()}`)
+        else if (activeCommitSha()) void openInBrowser(activeCommitSha())
+        else if (activeIssueNumber() || activePullNumber()) void openInBrowser(activeIssueNumber() ?? activePullNumber())
+        else if (page() === "overview") void openInBrowser()
+        else return false
+      },
+      "item.copy": () => {
+        if (diffTarget()) return false
+        if (activeRunId()) void copyToClipboard(runUrl(activeRunId()!), "URL")
+        else if (activeCommitSha()) void copyToClipboard(commitResource().value?.sha ?? activeCommitSha()!, "SHA")
+        else if (activeIssueNumber()) void copyToClipboard(issueUrl(activeIssueNumber()!), "URL")
+        else if (activePullNumber()) void copyToClipboard(pullUrl(activePullNumber()!), "URL")
+        else if (page() === "overview") void copyToClipboard(data().repo.url, "URL")
+        else return false
+      },
+      "item.diff": () => {
+        if (diffTarget()) return false
+        if (activeCommitSha()) viewDiff({ kind: "commit", sha: activeCommitSha()! })
+        else if (activePullNumber()) viewDiff({ kind: "pull", number: activePullNumber()! })
+        else return false
+      },
+      "navigation.activate": () => {
+        const diff = diffTarget()
+        if (diff) {
+          if (diffResource().status !== "error") return false
+          void props.onLoadDiff?.(diff, true)
+        } else if (activeRunId()) {
+          clearRunFailures(activeRunId()!)
+          void props.onLoadMoreRunJobs?.()
+        } else if (activeCommitSha()) void props.onLoadMoreCommitFiles?.()
+        else if (activeIssueNumber()) void props.onLoadMoreIssueComments?.()
+        else if (activePullNumber()) void props.onLoadMorePullComments?.()
+        else return false
+      },
+      "view.refresh": () => {
+        const diff = diffTarget()
+        if (diff) {
+          if (diffResource().status !== "loading") {
+            void props.onLoadDiff?.(diff, false, { force: true })
+            if (diff.kind === "pull") void props.onLoadPull?.(diff.number, { force: true })
+          }
+          return
         }
-        return
-      }
-      const run = activeRunId()
-      if (run) {
-        clearRunFailures(run)
-        const jobs = runDetail().jobs
-        if (runDetail().resource.status === "ready" && jobs.status === "error" && jobs.phase === "pagination") void props.onLoadMoreRunJobs?.()
-        else void props.onLoadRun?.(run, { force: true })
-      } else if (activeCommitSha()) {
-        const resource = commitResource()
-        if (resource.status === "loading") return
-        if (resource.status === "error" && resource.phase === "pagination") void props.onLoadMoreCommitFiles?.()
-        else void props.onLoadCommit?.(activeCommitSha()!, { force: true })
-      } else if (activeIssueNumber()) void refreshIssue(activeIssueNumber()!)
-      else if (activePullNumber()) void refreshPull(activePullNumber()!)
-      else {
-        const resource = activeResource()
-        const target = retryTarget()
-        if (resource?.status === "error" && target) props.onRetryResource?.(target)
-        else props.onRefresh?.()
-      }
+        const run = activeRunId()
+        if (run) {
+          clearRunFailures(run)
+          const jobs = runDetail().jobs
+          if (runDetail().resource.status === "ready" && jobs.status === "error" && jobs.phase === "pagination")
+            void props.onLoadMoreRunJobs?.()
+          else void props.onLoadRun?.(run, { force: true })
+        } else if (activeCommitSha()) {
+          const resource = commitResource()
+          if (resource.status === "loading") return
+          if (resource.status === "error" && resource.phase === "pagination") void props.onLoadMoreCommitFiles?.()
+          else void props.onLoadCommit?.(activeCommitSha()!, { force: true })
+        } else if (activeIssueNumber()) void refreshIssue(activeIssueNumber()!)
+        else if (activePullNumber()) void refreshPull(activePullNumber()!)
+        else {
+          const resource = activeResource()
+          const target = retryTarget()
+          if (resource?.status === "error" && target) props.onRetryResource?.(target)
+          else props.onRefresh?.()
+        }
+      },
+      "issue.comment": () => {
+        if (diffTarget() || !canComment()) return false
+        openComment()
+      },
+      "issue.actions": () => {
+        if (!(activeIssueNumber() || activePullNumber()) || diffTarget() || !hasIssueActions()) return false
+        setOverlay("issue-actions")
+      },
+      "detail.toggleTimeline": () => {
+        if (diffTarget() || !(activeIssueNumber() || activePullNumber())) return false
+        setTimelineCollapsed((collapsed) => !collapsed)
+      },
+      "detail.references": () => {
+        if (diffTarget() || !(activeIssueNumber() || activePullNumber() || activeCommitSha()) || !activeMenuItems().length) return false
+        setOverlay("issue-references")
+      },
+      "command.clone": () => {
+        if (page() !== "overview" || !canClone()) return false
+        const repository = data().repo.nameWithOwner
+        openCommand({
+          title: `Clone ${repository}`,
+          destination: cloneDestination(repository.split("/")[1]!, props.cwd!),
+          command: (destination) => cloneCommand(repository, destination, props.cwd!),
+        })
+      },
+      "commits.chooseBranch": () => {
+        if (page() !== "commits" || activeCommitSha() || diffTarget()) return false
+        const branches = data().branches
+        if (branches.status === "error" && branches.phase === "load") props.onRetryResource?.({ kind: "branches" })
+        if (branches.value) setOverlay("branch-picker")
+      },
+      "work.toggleState": () => {
+        if (diffTarget() || activeIssueNumber() || activePullNumber()) return false
+        if (page() === "issues") setIssueState((value) => (value === "open" ? "closed" : "open"))
+        else if (page() === "pulls") setPullState((value) => (value === "open" ? "closed" : "open"))
+        else return false
+      },
+      "overview.nextDocument": () => {
+        if (page() !== "overview") return false
+        moveOverviewDocument(1)
+      },
+      "overview.previousDocument": () => {
+        if (page() !== "overview") return false
+        moveOverviewDocument(-1)
+      },
+      "overview.toggleSidebar": () => {
+        if (page() !== "overview") return false
+        toggleAboutSidebar()
+      },
     },
-    "issue.comment": () => { if (diffTarget() || !canComment()) return false; openComment() },
-    "issue.actions": () => { if (!(activeIssueNumber() || activePullNumber()) || diffTarget() || !hasIssueActions()) return false; setOverlay("issue-actions") },
-    "detail.toggleTimeline": () => {
-      if (diffTarget() || !(activeIssueNumber() || activePullNumber())) return false
-      setTimelineCollapsed((collapsed) => !collapsed)
-    },
-    "detail.references": () => { if (diffTarget() || !(activeIssueNumber() || activePullNumber() || activeCommitSha()) || !activeMenuItems().length) return false; setOverlay("issue-references") },
-    "command.clone": () => {
-      if (page() !== "overview" || !canClone()) return false
-      const repository = data().repo.nameWithOwner
-      openCommand({ title: `Clone ${repository}`, destination: cloneDestination(repository.split("/")[1]!, props.cwd!), command: (destination) => cloneCommand(repository, destination, props.cwd!) })
-    },
-    "commits.chooseBranch": () => {
-      if (page() !== "commits" || activeCommitSha() || diffTarget()) return false
-      const branches = data().branches
-      if (branches.status === "error" && branches.phase === "load") props.onRetryResource?.({ kind: "branches" })
-      if (branches.value) setOverlay("branch-picker")
-    },
-    "work.toggleState": () => {
-      if (diffTarget() || activeIssueNumber() || activePullNumber()) return false
-      if (page() === "issues") setIssueState((value) => value === "open" ? "closed" : "open")
-      else if (page() === "pulls") setPullState((value) => value === "open" ? "closed" : "open")
-      else return false
-    },
-    "overview.nextDocument": () => { if (page() !== "overview") return false; moveOverviewDocument(1) },
-    "overview.previousDocument": () => { if (page() !== "overview") return false; moveOverviewDocument(-1) },
-    "overview.toggleSidebar": () => { if (page() !== "overview") return false; toggleAboutSidebar() },
-  }, { when: () => overlay() === undefined, priority: -10 })
+    { when: () => overlay() === undefined, priority: -10 },
+  )
 
-  useKeyActions({
-    "navigation.up": () => overviewScroll?.scrollBy(-1),
-    "navigation.down": () => overviewScroll?.scrollBy(1),
-    "navigation.halfPageUp": () => overviewScroll?.scrollBy(-Math.max(1, Math.floor((overviewScroll.viewport.height ?? 1) / 2))),
-    "navigation.halfPageDown": () => overviewScroll?.scrollBy(Math.max(1, Math.floor((overviewScroll.viewport.height ?? 1) / 2))),
-    "navigation.pageUp": () => overviewScroll?.scrollBy(-(overviewScroll.viewport.height ?? 1)),
-    "navigation.pageDown": () => overviewScroll?.scrollBy(overviewScroll.viewport.height ?? 1),
-    "navigation.first": () => overviewScroll?.scrollTo(0),
-    "navigation.last": () => overviewScroll?.scrollTo(Math.max(0, overviewScroll.scrollHeight - overviewScroll.viewport.height)),
-  }, { when: () => page() === "overview" && overlay() === undefined })
+  useKeyActions(
+    {
+      "navigation.up": () => overviewScroll?.scrollBy(-1),
+      "navigation.down": () => overviewScroll?.scrollBy(1),
+      "navigation.halfPageUp": () => overviewScroll?.scrollBy(-Math.max(1, Math.floor((overviewScroll.viewport.height ?? 1) / 2))),
+      "navigation.halfPageDown": () => overviewScroll?.scrollBy(Math.max(1, Math.floor((overviewScroll.viewport.height ?? 1) / 2))),
+      "navigation.pageUp": () => overviewScroll?.scrollBy(-(overviewScroll.viewport.height ?? 1)),
+      "navigation.pageDown": () => overviewScroll?.scrollBy(overviewScroll.viewport.height ?? 1),
+      "navigation.first": () => overviewScroll?.scrollTo(0),
+      "navigation.last": () => overviewScroll?.scrollTo(Math.max(0, overviewScroll.scrollHeight - overviewScroll.viewport.height)),
+    },
+    { when: () => page() === "overview" && overlay() === undefined },
+  )
 
   let linkRequest = 0
   const activateLink = async (url: string) => {
     const request = ++linkRequest
     const origin = navigation()
     const originOverlay = overlay()
-    const current = () => !disposed && !renderer.isDestroyed && request === linkRequest
-      && navigation() === origin && overlay() === originOverlay
+    const current = () =>
+      !disposed && !renderer.isDestroyed && request === linkRequest && navigation() === origin && overlay() === originOverlay
     try {
       const target = resolveLinkTarget(url)
       if (!target) throw new Error("This link uses an unsupported or unsafe URL.")
       const location = new URL(url)
       const documentUrl = new URL(location.href)
       documentUrl.hash = ""
-      const document = overviewDocuments().find((item) => item.resource.value !== undefined
-        && documentUrl.href === `https://github.com/${item.repository}/blob/${encodeURIComponent(item.ref)}/${item.path.split("/").map(encodeURIComponent).join("/")}`)
+      const document = overviewDocuments().find(
+        (item) =>
+          item.resource.value !== undefined &&
+          documentUrl.href ===
+            `https://github.com/${item.repository}/blob/${encodeURIComponent(item.ref)}/${item.path.split("/").map(encodeURIComponent).join("/")}`,
+      )
       if (document) {
         initialPagePending = false
         batch(() => {
@@ -1730,10 +2394,10 @@ function AppContent(props: AppProps) {
         if (target.detail.kind === "number") {
           const number = target.detail.number
           const repository = target.repository.toLowerCase()
-          const known = [...issueMenuItems(), ...pullMenuItems(), ...commitMenuItems()].find((reference) =>
-            reference.kind !== "commit" && reference.number === number && reference.repository.toLowerCase() === repository)
-          const kind = known && known.kind !== "commit" ? known.kind
-            : await props.onResolveIssueKind?.(target.repository, number)
+          const known = [...issueMenuItems(), ...pullMenuItems(), ...commitMenuItems()].find(
+            (reference) => reference.kind !== "commit" && reference.number === number && reference.repository.toLowerCase() === repository,
+          )
+          const kind = known && known.kind !== "commit" ? known.kind : await props.onResolveIssueKind?.(target.repository, number)
           if (!kind) throw new Error("Could not determine whether this reference is an issue or pull request.")
           detail = { kind, number }
         } else detail = target.detail
@@ -1743,7 +2407,8 @@ function AppContent(props: AppProps) {
       initialPagePending = false
       setOverlay()
       if (target.repository.toLowerCase() !== data().repo.nameWithOwner.toLowerCase()) {
-        if (props.onOpenLocation) props.onOpenLocation(target.repository, initial, origin, props.onReturnToRepository ? repositoryEntry : undefined)
+        if (props.onOpenLocation)
+          props.onOpenLocation(target.repository, initial, origin, props.onReturnToRepository ? repositoryEntry : undefined)
         else if (initial.detail && props.onOpenReference) props.onOpenReference(target.repository, initial.detail)
         else throw new Error("Opening another repository is unavailable.")
         return
@@ -1758,14 +2423,21 @@ function AppContent(props: AppProps) {
         if (initial.diff) viewDiff(initial.diff)
       })
     } catch (error) {
-      if (current()) setToast({ id: ++toastId, title: "Could not open link", message: error instanceof Error ? error.message : String(error) })
+      if (current())
+        setToast({ id: ++toastId, title: "Could not open link", message: error instanceof Error ? error.message : String(error) })
     }
   }
   const linkIdentity = createMemo(() => ({ navigation: navigation(), overlay: overlay() }))
   const mentionUsers = createMemo(() => {
     const target = diffTarget()
-    const pull = target?.kind === "pull" ? props.pullDetail?.number === target.number ? props.pullDetail : undefined
-      : activePullNumber() ? pullDetail() : undefined
+    const pull =
+      target?.kind === "pull"
+        ? props.pullDetail?.number === target.number
+          ? props.pullDetail
+          : undefined
+        : activePullNumber()
+          ? pullDetail()
+          : undefined
     const issue = activeIssueNumber() ? issueDetail() : undefined
     const subject = pull ?? issue
     const detail = subject?.resource.value
@@ -1773,476 +2445,749 @@ function AppContent(props: AppProps) {
     return [
       ...(detail ? [detail.author, ...detail.assignees] : []),
       ...(pull?.resource.value?.reviewers ?? []),
-      ...(subject?.comments.value?.items.map(comment => comment.author) ?? []),
-      ...(subject?.events?.flatMap(event => "actor" in event ? [event.actor] : "author" in event ? [event.author] : []) ?? []),
-      ...(pull?.context.value?.threads.flatMap(thread => thread.comments.map(comment => comment.author)) ?? []),
+      ...(subject?.comments.value?.items.map((comment) => comment.author) ?? []),
+      ...(subject?.events?.flatMap((event) => ("actor" in event ? [event.actor] : "author" in event ? [event.author] : [])) ?? []),
+      ...(pull?.context.value?.threads.flatMap((thread) => thread.comments.map((comment) => comment.author)) ?? []),
       ...(viewer?.repository.toLowerCase() === data().repo.nameWithOwner.toLowerCase() ? [viewer.login] : []),
       ...(props.assignableUsers?.value?.items.map((user) => user.login) ?? []),
     ]
   })
 
   return (
-    <HyperlinkProvider identity={linkIdentity()} onOpen={(url) => { void activateLink(url) }}>
-    <HyperlinkSurface enabled={overlay() === undefined}>
-    <IconProvider style={config().iconStyle}>
-    <MotionProvider reduced={config().reducedMotion}>
-    <MarkdownProvider style={config().markdownStyle}>
-    <MentionProvider identity={`${data().repo.id}:${data().repo.nameWithOwner}`} users={mentionUsers()} search={props.onSearchMentionUsers}>
-    <box width={dimensions().width} height={dimensions().height} flexDirection="column" backgroundColor={colors.canvas}>
-      <StatusPromptProvider>
-      <SearchProvider enabled={overlay() === undefined || overlay() === "settings"} scope={overlay() === "settings" ? "settings" : undefined}
-        footer={<StatusPromptBar fallback={<StatusBar kind={diffTarget() && (status() === "loading-resource" || status() === "refreshing" || status() === "loading-more") ? undefined : status()} detail={statusDetail()} error={statusError()}
-          hint={statusError() ? keys.hint("view.refresh", "retry") : shortcutHint()}
-          zIndex={overlay() && (config().showStatusBarHints || ((status() || statusError()) && !fullscreenEditorOpen())) ? 350 : 0} />} />}
-        identity={JSON.stringify([
-        data().repo.nameWithOwner, page(), navigation().details?.[page()], diffTarget(),
-        page() === "commits" ? data().currentBranch : page() === "issues" ? issueState() : page() === "pulls" ? pullState()
-          : page() === "overview" ? [overviewDocument() === overviewDocuments()[0]?.id ? undefined : overviewDocument(), data().currentBranch] : undefined,
-      ])}>
-      <Show when={config().diffFullscreen ? diffTarget() : undefined} keyed fallback={
-        <Show when={!focus()}>
-          <Header repo={data().repo} page={page()} tabs={visibleTabs()} workCounts={data().workCounts} compact={config().compactHeader} showTabCounts={config().showTabCounts} showTabShortcuts={config().showTabShortcuts}
-            interactive={overlay() === undefined} onSelect={selectHeaderPage}
-            onOpenRepository={props.onSwitchRepository ? openRepositoryPicker : undefined} />
-        </Show>
-      }>
-        {(target) => <ReviewHeader repo={data().repo} target={target}
-          totals={diffTotals()[page()]?.target === target ? diffTotals()[page()] : undefined} />}
-      </Show>
-      <box {...pageMouse} flexGrow={1} minHeight={0} flexDirection="column">
-      <SearchSurface active={!diffTarget()}>
-      <Show when={mountList("overview")}>
-      <box visible={page() === "overview"} flexGrow={1} minHeight={0}>
-          <OverviewScreen
-            repo={data().repo}
-            documents={data().documents}
-            currentDocument={overviewDocument()}
-            documentAnchor={documentAnchor()}
-            interactive={page() === "overview" && !diffTarget() && overlay() === undefined}
-            onSelectDocument={selectOverviewDocument}
-            onMoveDocument={moveOverviewDocument}
-            compactHeader={config().compactHeader}
-            hideDocumentsTab={config().hideDocumentsTab}
-            showScrollbar={config().showScrollbars}
-            aboutSidebar={aboutSidebar()}
-            detailLayout={config().detailLayout}
-            scrollRef={(value) => (overviewScroll = value)}
-          />
-        </box>
-        </Show>
-        <Show when={mountList("commits")}>
-        <box visible={page() === "commits" && !commitSha()} flexGrow={1} minHeight={0}>
-          <CommitsScreen
-            commits={data().commits}
-            commitCount={data().commitCount}
-            currentBranch={data().currentBranch}
-            canOpenBranches={props.canSwitchBranch !== false && (data().branches.value !== undefined || data().branches.status === "error")}
-            onOpenBranches={openBranchPicker}
-            active={page() === "commits" && !commitSha()}
-            interactive={!diffTarget() && overlay() === undefined}
-            showScrollbar={config().showScrollbars}
-            onContextMenu={(commit, position) => openRowContext("commit", commit.sha, position)}
-            onOpenCommit={(commit) => openCommit(commit.sha)}
-            onOpenCommitInBrowser={(commit) => void openInBrowser(commit.sha)}
-            onCopyCommitSha={(commit) => void copyToClipboard(commit.sha, "SHA")}
-            onDiff={(commit) => viewDiff({ kind: "commit", sha: commit.sha })}
-            onEndReached={() => {
-              const commits = data().commits
-              if (commits.status === "ready" && commits.value.hasMore) void props.onLoadMoreCommits?.()
-            }}
-          />
-        </box>
-        </Show>
-        <Show when={mountList("issues")}>
-        <box visible={page() === "issues" && !issueNumber()} flexGrow={1} minHeight={0}>
-          <WorkScreen
-            kind="issue"
-            state={issueState()}
-            onStateChange={setIssueState}
-            counts={issueCounts()}
-            resource={issues()}
-            active={page() === "issues" && !issueNumber()}
-            interactive={!diffTarget() && overlay() === undefined}
-            showScrollbar={config().showScrollbars}
-            onContextMenu={(issue, position) => openRowContext("issue", issue.number, position)}
-            onOpen={(issue) => openIssue(issue.number)}
-            onOpenInBrowser={(issue) => void openInBrowser(issue.number)}
-            onCopy={(issue) => void copyToClipboard(issueUrl(issue.number), "URL")}
-            onEndReached={() => {
-              const resource = issues()
-              if (resource.status === "ready" && resource.value.hasMore) void props.onLoadMoreIssues?.(issueState())
-            }}
-          />
-        </box>
-        </Show>
-        <Show when={mountList("pulls")}>
-        <box visible={page() === "pulls" && !pullNumber()} flexGrow={1} minHeight={0}>
-          <WorkScreen
-            kind="pull"
-            state={pullState()}
-            onStateChange={setPullState}
-            counts={pullCounts()}
-            resource={pulls()}
-            active={page() === "pulls" && !pullNumber()}
-            interactive={!diffTarget() && overlay() === undefined}
-            showScrollbar={config().showScrollbars}
-            onContextMenu={(pull, position) => openRowContext("pull", pull.number, position)}
-            onOpen={(pull) => openPull(pull.number)}
-            onOpenInBrowser={(pull) => void openInBrowser(pull.number)}
-            onCopy={(pull) => void copyToClipboard(pullUrl(pull.number), "URL")}
-            onDiff={(pull) => viewDiff({ kind: "pull", number: pull.number })}
-            onEndReached={() => {
-              const resource = pulls()
-              if (resource.status === "ready" && resource.value.hasMore) void props.onLoadMorePulls?.(pullState())
-            }}
-          />
-        </box>
-        </Show>
-        <Show when={mountList("actions") && visibleTabs().some((tab) => tab.page === "actions")}>
-          <box visible={page() === "actions" && !runId()} flexGrow={1} minHeight={0}>
-            <ActionsScreen
-              runs={data().runs}
-              onOpenRun={(run) => openRun(run.id)}
-              onContextMenu={(run, position) => openRowContext("run", run.id, position)}
-              onOpenRunInBrowser={(run) => void openInBrowser(`actions/runs/${run.id}`)}
-              onCopyRunUrl={(run) => void copyToClipboard(runUrl(run.id), "URL")}
-              active={page() === "actions" && !runId()}
-              interactive={!diffTarget() && overlay() === undefined}
-              showScrollbar={config().showScrollbars}
-              onEndReached={() => {
-                const runs = data().runs
-                if (runs.status === "ready" && runs.value.hasMore) void props.onLoadMoreRuns?.()
-              }}
-            />
-          </box>
-        </Show>
-      <Show when={mountDetail("actions") && runId()} keyed>
-        {(id) => (
-          <box visible={page() === "actions"} flexGrow={1} minHeight={0}>
-            <RunScreen
-              id={id}
-              summary={runSummary()}
-              detail={runDetail()}
-              active={page() === "actions"}
-              onRefresh={props.onLoadRun ? () => props.onLoadRun!(id) : undefined}
-              interactive={page() === "actions" && overlay() === undefined}
-              showScrollbar={config().showScrollbars}
-              detailLayout={config().detailLayout}
-            />
-          </box>
-        )}
-      </Show>
-      <Show when={mountDetail("commits") && commitSha()} keyed>
-        {(sha) => (
-          <box visible={page() === "commits"} flexGrow={1} minHeight={0}>
-            <CommitScreen
-              sha={sha}
-              summary={commitSummary()}
-              repositoryUrl={data().repo.url}
-              resource={commitResource()}
-              interactive={!diffTarget() && page() === "commits" && overlay() === undefined}
-              showScrollbar={config().showScrollbars}
-              detailLayout={config().detailLayout}
-            />
-          </box>
-        )}
-      </Show>
-      <Show when={mountDetail("issues") && issueNumber()} keyed>
-        {(number) => (
-          <box visible={page() === "issues"} flexGrow={1} minHeight={0}>
-            <IssueScreen
-              inlineMetadata={config().detailsPlacement === "inline"}
-              number={number}
-              summary={issueSummary()}
-              detail={issueDetail()}
-              comment={activityCommentFor(number)}
-              onOpenReference={openReference}
-              timelineCollapsed={timelineCollapsed()}
-              reactionControls={reactionControls()}
-              revealActivity={revealActivity()?.parent !== "pull" && revealActivity()?.number === number ? revealActivity()?.id : undefined}
-              defaultBranch={data().repo.defaultBranch}
-              interactive={!diffTarget() && page() === "issues" && overlay() === undefined}
-              showScrollbar={config().showScrollbars}
-              detailLayout={config().detailLayout}
-            />
-          </box>
-        )}
-      </Show>
-      <Show when={mountDetail("pulls") && pullNumber()} keyed>
-        {(number) => (
-          <box visible={page() === "pulls"} flexGrow={1} minHeight={0}>
-            <PullScreen
-              inlineMetadata={config().detailsPlacement === "inline"}
-              number={number}
-              summary={pullSummary()}
-              detail={pullDetail()}
-              comment={activityCommentFor(number, "pull")}
-              onOpenReference={openReference}
-              timelineCollapsed={timelineCollapsed()}
-              revealActivity={revealActivity()?.parent === "pull" && revealActivity()?.number === number ? revealActivity()?.id : undefined}
-              reactionControls={reactionControls()}
-              defaultBranch={data().repo.defaultBranch}
-              interactive={!diffTarget() && page() === "pulls" && overlay() === undefined}
-              showScrollbar={config().showScrollbars}
-              detailLayout={config().detailLayout}
-            />
-          </box>
-        )}
-      </Show>
-      </SearchSurface>
-      <For each={["commits", "pulls"] as const}>
-        {(owner) => <Show when={(!focus() || page() === owner) && navigation().diffs?.[owner]} keyed>
-          {(target) => <box id={`diff-view-${owner}`} visible={page() === owner} flexGrow={1} minHeight={0} flexDirection="column">
-            <DiffScreen target={target} resource={resourceForDiff(target)} active={page() === owner} hideHeader={config().diffFullscreen}
-              defaultLayout={configuredDiffLayout()} defaultWrap={config().diffWrap}
-              review={reviewForDiff(target)} commentable={!!commentableDiff(target)} draft={draftForDiff(target)} savedDrafts={savedDraftsForDiff(target)}
-              onDraftInput={(body) => { const context = inlineContext(); if (context) saveInlineDraft(context, body) }}
-              threads={threadsForDiff(target)} repositoryUrl={data().repo.url}
-              interactive={page() === owner && overlay() === undefined}
-              onOpenGitHub={() => openCurrentDiffGitHub(target)}
-              onOpenExternal={() => { void openDiffTool(target) }}
-              onContextMenu={(position, items) =>
-                openContextMenu(
-                  position,
-                  [...items, { label: "Settings", run: () => setOverlay("settings") }, ...backContextItems()],
-                  () => page() === owner && navigation().diffs?.[owner] === target,
-                )
-              }
-              onDraftFocusChange={(focused) => setInlineDraftFocused((current) => ({ ...current, [owner]: focused }))}
-              onTotalsChange={(totals) => setDiffTotals((current) => ({ ...current, [owner]: totals ? { target, ...totals } : undefined }))}
-              onCommentsCollapsedChange={(collapsed) => setDiffCommentsCollapsed((current) => ({ ...current, [owner]: collapsed }))}
-              showScrollbar={config().showScrollbars} onLoadFiles={() => void props.onLoadDiff?.(target, true)} />
-          </box>}
-        </Show>}
-      </For>
-      </box>
-      <Show when={toast()} keyed>
-        {(current) => (
-          <Toast
-            title={current.title}
-            message={current.message}
-            duration={current.duration}
-            tone={current.tone}
-            onDismiss={() => setToast((value) => value?.id === current.id ? undefined : value)}
-          />
-        )}
-      </Show>
-      <Show when={overlay() === "context-menu" ? contextMenu() : undefined} keyed>
-        {(menu) => <ContextMenu position={menu.position} items={menu.items} onClose={closeContextMenu}
-          onSelect={(item) => { if (ownsContextMenu(menu)) { closeContextMenu(); item.run() } }} />}
-      </Show>
-      <Show when={overlay() === "reactions" ? selectedReactionMessage() : undefined}>
-        {(message) => <ReactionPicker message={message()}
-          action={props.getReactionAction!} onClose={closeReactions} showScrollbar={config().showScrollbars}
-          onAdd={(target, kind) => addReaction(target, kind, true)} />}
-      </Show>
-      <Show when={overlay() === "switch-repo"}>
-        <SwitchRepositoryScreen
-          current={data().repo.nameWithOwner}
-          renderStatusBar={false}
-          recent={props.recentRepositories ?? []}
-          showStatusBarHints={config().showStatusBarHints}
-          showScrollbar={config().showScrollbars}
-          onClose={() => setOverlay()}
-          onOpen={(repository) => {
-            setOverlay()
-            if (repository.toLowerCase() !== data().repo.nameWithOwner.toLowerCase()) props.onSwitchRepository?.(repository)
-          }}
-        />
-      </Show>
-      <Show when={overlay() === "command" && commandAction()} keyed>
-        {(action) => <CommandDialog
-          action={action}
-          onHintChange={setCommandHint}
-          onRun={props.onRunCommand!}
-          onCaptureCancel={props.onCommandCaptureCancel}
-          onCopy={props.onCopyToClipboard}
-          onClose={() => { setOverlay(); setCommandAction() }}
-        />}
-      </Show>
-      <Show when={overlay() === "help"}>
-        <Help
-          onClose={() => setOverlay()}
-          focus={focus()}
-          view={diffTarget() ? "diff" : activeRunId() ? "run" : activeCommitSha() ? "commit" : activeIssueNumber() ? "issue" : activePullNumber() ? "pull" : page()}
-          hasDocumentTabs={overviewDocuments().length > 1}
-          hasMoreFiles={commitResource().value?.files.hasMore}
-          hasMoreComments={activePullNumber() ? pullDetail().comments.value?.hasMore : issueDetail().comments.value?.hasMore}
-          hasReferences={activeMenuItems().length > 0}
-          canComment={canComment()}
-          hasIssueActions={hasIssueActions()}
-          command={page() === "overview" && canClone() ? "clone repository" : undefined}
-        />
-      </Show>
-      <Show when={overlay() === "issue-actions" && (activeIssueNumber() || activePullNumber()) && hasIssueActions()}>
-        <IssueActionsMenu
-          number={(activePullNumber() ?? activeIssueNumber())!}
-          parent={activePullNumber() ? "pull" : "issue"}
-          state={actionDetail()?.state ?? "open"}
-          permissions={{ close: canAct("close"), reopen: canAct("reopen"), duplicate: canAct("duplicate"), assignees: canAct("assignees") }}
-          merge={canOfferMerge() ? { reason: mergeBlocker(), checking: checkingMerge() } : undefined}
-          onMerge={openMerge}
-          draftAction={canChangeDraft(true) ? "draft" : canChangeDraft(false) ? "ready" : undefined}
-          onChangeDraft={openDraftChange}
-          onReview={canOfferReview() ? () => { void openReview() } : undefined}
-          onOpenGitHub={props.onOpenInBrowser ? () => { setOverlay(); void openInBrowser(activePullNumber()) } : undefined}
-          onSelect={openIssueAction}
-          onClose={() => setOverlay()}
-        />
-      </Show>
-      <Show when={overlay() === "pull-draft" ? draftTarget() : undefined} keyed>
-        {(target) => <PullDraftDialog number={target.number} draft={target.draft} disabled={!draftChangeAvailable()}
-          onSubmit={() => void submitDraftChange()} onClose={closeDraftChange} onHintChange={setIssueActionHint} />}
-      </Show>
-      <Show when={overlay() === "pull-review" && props.reviews && reviewTarget()}>
-        <PullReviewDialog onEditorActiveChange={setReviewEditorActive} number={reviewTarget()?.number} session={props.reviews!} repositoryUrl={data().repo.url} showScrollbar={config().showScrollbars}
-          expanded={issueEditorExpanded()} onExpandedChange={setIssueEditorExpanded} showStatusBarHints={config().showStatusBarHints}
-          onSubmit={() => { void submitReview() }} onClose={() => setOverlay()} onJump={jumpReview}
-          onOpenGitHub={() => { void openInBrowser(reviewTarget()?.number) }} onHintChange={setIssueActionHint} />
-      </Show>
-      <Show when={overlay() === "inline-retry" ? inlineRetry() : undefined} keyed>
-        {(input) => <InlineCommentRetryDialog input={input} onHintChange={setIssueActionHint}
-          onClose={() => { setInlineRetry(); setOverlay() }}
-          onOpenGitHub={() => { void openInBrowser(input.number, input.repository) }}
-          onConfirm={() => {
-            const context = inlineContext()
-            if (context && data().repo.nameWithOwner === input.repository && JSON.stringify({ ...context, body: input.body }) === JSON.stringify(input)) {
-              setInlineRetry()
-              void submitInlineComment(input.body, true)
-            } else { setInlineRetry(); setOverlay() }
-          }} />}
-      </Show>
-      <Show when={overlay() === "inline-confirm" ? inlineConfirm() : undefined} keyed>
-        {(input) => <InlineCommentConfirmDialog input={input} onHintChange={setIssueActionHint}
-          onClose={() => { setInlineConfirm(); setOverlay() }}
-          onConfirm={() => {
-            setInlineConfirm()
-            setOverlay()
-            const context = inlineContext()
-            if (context && JSON.stringify({ ...context, body: input.body }) === JSON.stringify(input)) void submitInlineComment(input.body)
-          }} />}
-      </Show>
-      <Show when={overlay() === "review-comment" ? inlineContext() : undefined} keyed>
-        {(context) => <ReviewCommentDialog anchor={context.anchor} body={inlineDrafts().get(JSON.stringify(context))?.body ?? ""} headSha={context.headSha}
-          repositoryUrl={data().repo.url} showScrollbar={config().showScrollbars}
-          expanded={issueEditorExpanded()} onExpandedChange={expanded => {
-            setIssueEditorExpanded(expanded)
-            if (!expanded) setOverlay()
-          }} showStatusBarHints={config().showStatusBarHints}
-          onChange={(body) => { saveInlineDraft(context, body) }}
-          onSave={(body) => { void submitInlineComment(body) }} onClose={() => setOverlay()} onHintChange={setIssueActionHint} />}
-      </Show>
-      <Show when={overlay() === "pull-merge" ? mergeTarget() : undefined} keyed>
-        {(target) => <PullMergeDialog number={target.number} headSha={target.headSha}
-          methods={pullDetail().resource.value?.merge?.methods ?? []}
-          reason={mergeDialogBlocker()} checking={checkingMerge()}
-          onLoadMessage={async () => {
-            if (!props.onLoadPullMergeMessage) throw new Error("Loading GitHub's commit message is unavailable.")
-            return props.onLoadPullMergeMessage(target.number, target.headSha)
-          }}
-          onSubmit={(method, headSha, message) => void submitMerge(method, headSha, message)}
-          onHintChange={setIssueActionHint} onClose={closeMerge} />}
-      </Show>
-      <Show when={overlay() === "issue-action" ? issueAction() : undefined} keyed>
-        {(action) => <Show when={action.kind === "assignees"}
-          fallback={<IssueActionDialog
-            number={action.number}
-            kind={action.kind}
-            confirmOnly={action.kind === "comment" && commentConfirmOnly()}
-            submissionAllowed={action.parent === "pull"
-              ? action.number === activePullNumber() && canActOnPull(action.kind)
-              : action.number === activeIssueNumber() && canActOnIssue(action.kind)}
-            onEditorActiveChange={setIssueEditorActive}
-            parent={action.parent}
-            state={props.getIssueAction?.(action.number, action.parent) ?? (action.kind === "comment" ? { ...emptyIssueAction,
-              body: conversationDraft({ repository: data().repo.nameWithOwner, number: action.number, parent: action.parent }),
-            } : emptyIssueAction)}
-            showScrollbar={config().showScrollbars}
-            showStatusBarHints={config().showStatusBarHints}
-            expanded={action.kind !== "duplicate" && issueEditorExpanded()}
-            onExpandedChange={expanded => {
-              setIssueEditorExpanded(expanded)
-              if (!expanded && action.kind === "comment" && conversationCommentOpen()) closeConversationCommentDialog()
-            }}
-            locked={action.parent === "pull" ? pullDetail().resource.value?.locked : issueDetail().resource.value?.locked}
-            repositoryUrl={data().repo.url}
-            defaultBranch={data().repo.defaultBranch}
-            onBodyChange={body => action.kind === "comment"
-              ? changeConversationDraft({ repository: data().repo.nameWithOwner, number: action.number, parent: action.parent }, body)
-              : props.onIssueDraftChange?.(action.number, { body }, action.parent)}
-            onReasonChange={(reason) => props.onIssueDraftChange?.(action.number, { reason }, action.parent)}
-            onDuplicateTargetChange={(duplicateTarget) => props.onIssueDraftChange?.(action.number, { duplicateTarget }, action.parent)}
-            onSubmit={() => void submitIssueAction()}
-            onDiscard={() => {
-              props.onDiscardIssueDraft?.(action.number, action.parent)
-              if (action.kind === "comment") rememberLocalCommentDraft({ repository: data().repo.nameWithOwner, number: action.number, parent: action.parent }, "")
-            }}
-            onHintChange={setIssueActionHint}
-            onClose={action.kind === "comment" && conversationCommentOpen() ? closeConversationCommentDialog : () => { setOverlay(); setIssueAction() }}
-          />}>
-          <IssueAssigneesPicker
-            number={action.number}
-            state={props.getIssueAction?.(action.number, action.parent) ?? emptyIssueAction}
-            users={props.assignableUsers}
-            showScrollbar={config().showScrollbars}
-            onLoadMore={() => void props.onLoadAssignableUsers?.()}
-            onReload={() => void props.onReloadAssignableUsers?.()}
-            onChange={(selectedAssignees) => props.onIssueDraftChange?.(action.number, { selectedAssignees }, action.parent)}
-            onSubmit={() => void submitIssueAction()}
-            onHintChange={setIssueActionHint}
-            onClose={() => { setOverlay(); setIssueAction() }}
-          />
-        </Show>}
-      </Show>
-      <Show when={overlay() === "issue-references" && (activeIssueNumber() || activePullNumber() || activeCommitSha())}>
-        <IssueReferencesPicker
-          references={activeMenuItems()}
-          currentIssue={activeCommitSha() ? undefined : { repository: data().repo.nameWithOwner, number: (activeIssueNumber() ?? activePullNumber())! }}
-          showScrollbar={config().showScrollbars}
-          onOpen={openReference}
-          onCopy={(reference) => { setOverlay(); void copyToClipboard(reference.url, "URL") }}
-          onClose={() => setOverlay()}
-        />
-      </Show>
-      <Show when={overlay() === "diff-viewer-setup"}>
-        <DiffViewerSetupDialog showScrollbar={config().showScrollbars} onClose={() => setOverlay()} onHintChange={setIssueActionHint} />
-      </Show>
-      <Show when={overlay() === "settings"}>
-        <Settings
-          onHintChange={setSettingsHint}
-          config={config()}
-          saving={props.configSaving}
-          loadError={props.configError}
-          onChange={(config) => props.onConfigChange?.(config) ?? Promise.resolve()}
-          onClose={() => setOverlay()}
-        />
-      </Show>
-      <Show when={overlay() === "branch-picker" && data().branches.value}>
-        <BranchPicker
-          branches={data().branches}
-          current={data().currentBranch}
-          canSwitch={props.canSwitchBranch}
-          showScrollbar={config().showScrollbars}
-          onLoadMore={props.onLoadMoreBranches ?? (() => Promise.resolve())}
-          onRetry={() => props.onRetryResource?.({ kind: "branches" })}
-          onClose={() => setOverlay()}
-          onSelect={(branch) => {
-            if (props.canSwitchBranch === false) return
-            setOverlay()
-            if (branch === data().currentBranch) return
-            props.onBranchChange?.(branch)
-            overviewScroll?.scrollTo(0)
-          }}
-        />
-      </Show>
-      </SearchProvider>
-      </StatusPromptProvider>
-    </box>
-    </MentionProvider>
-    </MarkdownProvider>
-    </MotionProvider>
-    </IconProvider>
-    </HyperlinkSurface>
+    <HyperlinkProvider
+      identity={linkIdentity()}
+      onOpen={(url) => {
+        void activateLink(url)
+      }}
+    >
+      <HyperlinkSurface enabled={overlay() === undefined}>
+        <IconProvider style={config().iconStyle}>
+          <MotionProvider reduced={config().reducedMotion}>
+            <MarkdownProvider style={config().markdownStyle}>
+              <MentionProvider
+                identity={`${data().repo.id}:${data().repo.nameWithOwner}`}
+                users={mentionUsers()}
+                search={props.onSearchMentionUsers}
+              >
+                <box width={dimensions().width} height={dimensions().height} flexDirection="column" backgroundColor={colors.canvas}>
+                  <StatusPromptProvider>
+                    <SearchProvider
+                      enabled={overlay() === undefined || overlay() === "settings"}
+                      scope={overlay() === "settings" ? "settings" : undefined}
+                      footer={
+                        <StatusPromptBar
+                          fallback={
+                            <StatusBar
+                              kind={
+                                diffTarget() &&
+                                (status() === "loading-resource" || status() === "refreshing" || status() === "loading-more")
+                                  ? undefined
+                                  : status()
+                              }
+                              detail={statusDetail()}
+                              error={statusError()}
+                              hint={statusError() ? keys.hint("view.refresh", "retry") : shortcutHint()}
+                              zIndex={
+                                overlay() && (config().showStatusBarHints || ((status() || statusError()) && !fullscreenEditorOpen()))
+                                  ? 350
+                                  : 0
+                              }
+                            />
+                          }
+                        />
+                      }
+                      identity={JSON.stringify([
+                        data().repo.nameWithOwner,
+                        page(),
+                        navigation().details?.[page()],
+                        diffTarget(),
+                        page() === "commits"
+                          ? data().currentBranch
+                          : page() === "issues"
+                            ? issueState()
+                            : page() === "pulls"
+                              ? pullState()
+                              : page() === "overview"
+                                ? [overviewDocument() === overviewDocuments()[0]?.id ? undefined : overviewDocument(), data().currentBranch]
+                                : undefined,
+                      ])}
+                    >
+                      <Show
+                        when={config().diffFullscreen ? diffTarget() : undefined}
+                        keyed
+                        fallback={
+                          <Show when={!focus()}>
+                            <Header
+                              repo={data().repo}
+                              page={page()}
+                              tabs={visibleTabs()}
+                              workCounts={data().workCounts}
+                              compact={config().compactHeader}
+                              showTabCounts={config().showTabCounts}
+                              showTabShortcuts={config().showTabShortcuts}
+                              interactive={overlay() === undefined}
+                              onSelect={selectHeaderPage}
+                              onOpenRepository={props.onSwitchRepository ? openRepositoryPicker : undefined}
+                            />
+                          </Show>
+                        }
+                      >
+                        {(target) => (
+                          <ReviewHeader
+                            repo={data().repo}
+                            target={target}
+                            totals={diffTotals()[page()]?.target === target ? diffTotals()[page()] : undefined}
+                          />
+                        )}
+                      </Show>
+                      <box {...pageMouse} flexGrow={1} minHeight={0} flexDirection="column">
+                        <SearchSurface active={!diffTarget()}>
+                          <Show when={mountList("overview")}>
+                            <box visible={page() === "overview"} flexGrow={1} minHeight={0}>
+                              <OverviewScreen
+                                repo={data().repo}
+                                documents={data().documents}
+                                currentDocument={overviewDocument()}
+                                documentAnchor={documentAnchor()}
+                                interactive={page() === "overview" && !diffTarget() && overlay() === undefined}
+                                onSelectDocument={selectOverviewDocument}
+                                onMoveDocument={moveOverviewDocument}
+                                compactHeader={config().compactHeader}
+                                hideDocumentsTab={config().hideDocumentsTab}
+                                showScrollbar={config().showScrollbars}
+                                aboutSidebar={aboutSidebar()}
+                                detailLayout={config().detailLayout}
+                                scrollRef={(value) => (overviewScroll = value)}
+                              />
+                            </box>
+                          </Show>
+                          <Show when={mountList("commits")}>
+                            <box visible={page() === "commits" && !commitSha()} flexGrow={1} minHeight={0}>
+                              <CommitsScreen
+                                commits={data().commits}
+                                commitCount={data().commitCount}
+                                currentBranch={data().currentBranch}
+                                canOpenBranches={
+                                  props.canSwitchBranch !== false &&
+                                  (data().branches.value !== undefined || data().branches.status === "error")
+                                }
+                                onOpenBranches={openBranchPicker}
+                                active={page() === "commits" && !commitSha()}
+                                interactive={!diffTarget() && overlay() === undefined}
+                                showScrollbar={config().showScrollbars}
+                                onContextMenu={(commit, position) => openRowContext("commit", commit.sha, position)}
+                                onOpenCommit={(commit) => openCommit(commit.sha)}
+                                onOpenCommitInBrowser={(commit) => void openInBrowser(commit.sha)}
+                                onCopyCommitSha={(commit) => void copyToClipboard(commit.sha, "SHA")}
+                                onDiff={(commit) => viewDiff({ kind: "commit", sha: commit.sha })}
+                                onEndReached={() => {
+                                  const commits = data().commits
+                                  if (commits.status === "ready" && commits.value.hasMore) void props.onLoadMoreCommits?.()
+                                }}
+                              />
+                            </box>
+                          </Show>
+                          <Show when={mountList("issues")}>
+                            <box visible={page() === "issues" && !issueNumber()} flexGrow={1} minHeight={0}>
+                              <WorkScreen
+                                kind="issue"
+                                state={issueState()}
+                                onStateChange={setIssueState}
+                                counts={issueCounts()}
+                                resource={issues()}
+                                active={page() === "issues" && !issueNumber()}
+                                interactive={!diffTarget() && overlay() === undefined}
+                                showScrollbar={config().showScrollbars}
+                                onContextMenu={(issue, position) => openRowContext("issue", issue.number, position)}
+                                onOpen={(issue) => openIssue(issue.number)}
+                                onOpenInBrowser={(issue) => void openInBrowser(issue.number)}
+                                onCopy={(issue) => void copyToClipboard(issueUrl(issue.number), "URL")}
+                                onEndReached={() => {
+                                  const resource = issues()
+                                  if (resource.status === "ready" && resource.value.hasMore) void props.onLoadMoreIssues?.(issueState())
+                                }}
+                              />
+                            </box>
+                          </Show>
+                          <Show when={mountList("pulls")}>
+                            <box visible={page() === "pulls" && !pullNumber()} flexGrow={1} minHeight={0}>
+                              <WorkScreen
+                                kind="pull"
+                                state={pullState()}
+                                onStateChange={setPullState}
+                                counts={pullCounts()}
+                                resource={pulls()}
+                                active={page() === "pulls" && !pullNumber()}
+                                interactive={!diffTarget() && overlay() === undefined}
+                                showScrollbar={config().showScrollbars}
+                                onContextMenu={(pull, position) => openRowContext("pull", pull.number, position)}
+                                onOpen={(pull) => openPull(pull.number)}
+                                onOpenInBrowser={(pull) => void openInBrowser(pull.number)}
+                                onCopy={(pull) => void copyToClipboard(pullUrl(pull.number), "URL")}
+                                onDiff={(pull) => viewDiff({ kind: "pull", number: pull.number })}
+                                onEndReached={() => {
+                                  const resource = pulls()
+                                  if (resource.status === "ready" && resource.value.hasMore) void props.onLoadMorePulls?.(pullState())
+                                }}
+                              />
+                            </box>
+                          </Show>
+                          <Show when={mountList("actions") && visibleTabs().some((tab) => tab.page === "actions")}>
+                            <box visible={page() === "actions" && !runId()} flexGrow={1} minHeight={0}>
+                              <ActionsScreen
+                                runs={data().runs}
+                                onOpenRun={(run) => openRun(run.id)}
+                                onContextMenu={(run, position) => openRowContext("run", run.id, position)}
+                                onOpenRunInBrowser={(run) => void openInBrowser(`actions/runs/${run.id}`)}
+                                onCopyRunUrl={(run) => void copyToClipboard(runUrl(run.id), "URL")}
+                                active={page() === "actions" && !runId()}
+                                interactive={!diffTarget() && overlay() === undefined}
+                                showScrollbar={config().showScrollbars}
+                                onEndReached={() => {
+                                  const runs = data().runs
+                                  if (runs.status === "ready" && runs.value.hasMore) void props.onLoadMoreRuns?.()
+                                }}
+                              />
+                            </box>
+                          </Show>
+                          <Show when={mountDetail("actions") && runId()} keyed>
+                            {(id) => (
+                              <box visible={page() === "actions"} flexGrow={1} minHeight={0}>
+                                <RunScreen
+                                  id={id}
+                                  summary={runSummary()}
+                                  detail={runDetail()}
+                                  active={page() === "actions"}
+                                  onRefresh={props.onLoadRun ? () => props.onLoadRun!(id) : undefined}
+                                  interactive={page() === "actions" && overlay() === undefined}
+                                  showScrollbar={config().showScrollbars}
+                                  detailLayout={config().detailLayout}
+                                />
+                              </box>
+                            )}
+                          </Show>
+                          <Show when={mountDetail("commits") && commitSha()} keyed>
+                            {(sha) => (
+                              <box visible={page() === "commits"} flexGrow={1} minHeight={0}>
+                                <CommitScreen
+                                  sha={sha}
+                                  summary={commitSummary()}
+                                  repositoryUrl={data().repo.url}
+                                  resource={commitResource()}
+                                  interactive={!diffTarget() && page() === "commits" && overlay() === undefined}
+                                  showScrollbar={config().showScrollbars}
+                                  detailLayout={config().detailLayout}
+                                />
+                              </box>
+                            )}
+                          </Show>
+                          <Show when={mountDetail("issues") && issueNumber()} keyed>
+                            {(number) => (
+                              <box visible={page() === "issues"} flexGrow={1} minHeight={0}>
+                                <IssueScreen
+                                  inlineMetadata={config().detailsPlacement === "inline"}
+                                  number={number}
+                                  summary={issueSummary()}
+                                  detail={issueDetail()}
+                                  comment={activityCommentFor(number)}
+                                  onOpenReference={openReference}
+                                  timelineCollapsed={timelineCollapsed()}
+                                  reactionControls={reactionControls()}
+                                  revealActivity={
+                                    revealActivity()?.parent !== "pull" && revealActivity()?.number === number
+                                      ? revealActivity()?.id
+                                      : undefined
+                                  }
+                                  defaultBranch={data().repo.defaultBranch}
+                                  interactive={!diffTarget() && page() === "issues" && overlay() === undefined}
+                                  showScrollbar={config().showScrollbars}
+                                  detailLayout={config().detailLayout}
+                                />
+                              </box>
+                            )}
+                          </Show>
+                          <Show when={mountDetail("pulls") && pullNumber()} keyed>
+                            {(number) => (
+                              <box visible={page() === "pulls"} flexGrow={1} minHeight={0}>
+                                <PullScreen
+                                  inlineMetadata={config().detailsPlacement === "inline"}
+                                  number={number}
+                                  summary={pullSummary()}
+                                  detail={pullDetail()}
+                                  comment={activityCommentFor(number, "pull")}
+                                  onOpenReference={openReference}
+                                  timelineCollapsed={timelineCollapsed()}
+                                  revealActivity={
+                                    revealActivity()?.parent === "pull" && revealActivity()?.number === number
+                                      ? revealActivity()?.id
+                                      : undefined
+                                  }
+                                  reactionControls={reactionControls()}
+                                  defaultBranch={data().repo.defaultBranch}
+                                  interactive={!diffTarget() && page() === "pulls" && overlay() === undefined}
+                                  showScrollbar={config().showScrollbars}
+                                  detailLayout={config().detailLayout}
+                                />
+                              </box>
+                            )}
+                          </Show>
+                        </SearchSurface>
+                        <For each={["commits", "pulls"] as const}>
+                          {(owner) => (
+                            <Show when={(!focus() || page() === owner) && navigation().diffs?.[owner]} keyed>
+                              {(target) => (
+                                <box id={`diff-view-${owner}`} visible={page() === owner} flexGrow={1} minHeight={0} flexDirection="column">
+                                  <DiffScreen
+                                    target={target}
+                                    resource={resourceForDiff(target)}
+                                    active={page() === owner}
+                                    hideHeader={config().diffFullscreen}
+                                    defaultLayout={configuredDiffLayout()}
+                                    defaultWrap={config().diffWrap}
+                                    review={reviewForDiff(target)}
+                                    commentable={!!commentableDiff(target)}
+                                    draft={draftForDiff(target)}
+                                    savedDrafts={savedDraftsForDiff(target)}
+                                    onDraftInput={(body) => {
+                                      const context = inlineContext()
+                                      if (context) saveInlineDraft(context, body)
+                                    }}
+                                    threads={threadsForDiff(target)}
+                                    repositoryUrl={data().repo.url}
+                                    interactive={page() === owner && overlay() === undefined}
+                                    onOpenGitHub={() => openCurrentDiffGitHub(target)}
+                                    onOpenExternal={() => {
+                                      void openDiffTool(target)
+                                    }}
+                                    onContextMenu={(position, items) =>
+                                      openContextMenu(
+                                        position,
+                                        [...items, { label: "Settings", run: () => setOverlay("settings") }, ...backContextItems()],
+                                        () => page() === owner && navigation().diffs?.[owner] === target,
+                                      )
+                                    }
+                                    onDraftFocusChange={(focused) => setInlineDraftFocused((current) => ({ ...current, [owner]: focused }))}
+                                    onTotalsChange={(totals) =>
+                                      setDiffTotals((current) => ({ ...current, [owner]: totals ? { target, ...totals } : undefined }))
+                                    }
+                                    onCommentsCollapsedChange={(collapsed) =>
+                                      setDiffCommentsCollapsed((current) => ({ ...current, [owner]: collapsed }))
+                                    }
+                                    showScrollbar={config().showScrollbars}
+                                    onLoadFiles={() => void props.onLoadDiff?.(target, true)}
+                                  />
+                                </box>
+                              )}
+                            </Show>
+                          )}
+                        </For>
+                      </box>
+                      <Show when={toast()} keyed>
+                        {(current) => (
+                          <Toast
+                            title={current.title}
+                            message={current.message}
+                            duration={current.duration}
+                            tone={current.tone}
+                            onDismiss={() => setToast((value) => (value?.id === current.id ? undefined : value))}
+                          />
+                        )}
+                      </Show>
+                      <Show when={overlay() === "context-menu" ? contextMenu() : undefined} keyed>
+                        {(menu) => (
+                          <ContextMenu
+                            position={menu.position}
+                            items={menu.items}
+                            onClose={closeContextMenu}
+                            onSelect={(item) => {
+                              if (ownsContextMenu(menu)) {
+                                closeContextMenu()
+                                item.run()
+                              }
+                            }}
+                          />
+                        )}
+                      </Show>
+                      <Show when={overlay() === "reactions" ? selectedReactionMessage() : undefined}>
+                        {(message) => (
+                          <ReactionPicker
+                            message={message()}
+                            action={props.getReactionAction!}
+                            onClose={closeReactions}
+                            showScrollbar={config().showScrollbars}
+                            onAdd={(target, kind) => addReaction(target, kind, true)}
+                          />
+                        )}
+                      </Show>
+                      <Show when={overlay() === "switch-repo"}>
+                        <SwitchRepositoryScreen
+                          current={data().repo.nameWithOwner}
+                          renderStatusBar={false}
+                          recent={props.recentRepositories ?? []}
+                          showStatusBarHints={config().showStatusBarHints}
+                          showScrollbar={config().showScrollbars}
+                          onClose={() => setOverlay()}
+                          onOpen={(repository) => {
+                            setOverlay()
+                            if (repository.toLowerCase() !== data().repo.nameWithOwner.toLowerCase()) props.onSwitchRepository?.(repository)
+                          }}
+                        />
+                      </Show>
+                      <Show when={overlay() === "command" && commandAction()} keyed>
+                        {(action) => (
+                          <CommandDialog
+                            action={action}
+                            onHintChange={setCommandHint}
+                            onRun={props.onRunCommand!}
+                            onCaptureCancel={props.onCommandCaptureCancel}
+                            onCopy={props.onCopyToClipboard}
+                            onClose={() => {
+                              setOverlay()
+                              setCommandAction()
+                            }}
+                          />
+                        )}
+                      </Show>
+                      <Show when={overlay() === "help"}>
+                        <Help
+                          onClose={() => setOverlay()}
+                          focus={focus()}
+                          view={
+                            diffTarget()
+                              ? "diff"
+                              : activeRunId()
+                                ? "run"
+                                : activeCommitSha()
+                                  ? "commit"
+                                  : activeIssueNumber()
+                                    ? "issue"
+                                    : activePullNumber()
+                                      ? "pull"
+                                      : page()
+                          }
+                          hasDocumentTabs={overviewDocuments().length > 1}
+                          hasMoreFiles={commitResource().value?.files.hasMore}
+                          hasMoreComments={
+                            activePullNumber() ? pullDetail().comments.value?.hasMore : issueDetail().comments.value?.hasMore
+                          }
+                          hasReferences={activeMenuItems().length > 0}
+                          canComment={canComment()}
+                          hasIssueActions={hasIssueActions()}
+                          command={page() === "overview" && canClone() ? "clone repository" : undefined}
+                        />
+                      </Show>
+                      <Show when={overlay() === "issue-actions" && (activeIssueNumber() || activePullNumber()) && hasIssueActions()}>
+                        <IssueActionsMenu
+                          number={(activePullNumber() ?? activeIssueNumber())!}
+                          parent={activePullNumber() ? "pull" : "issue"}
+                          state={actionDetail()?.state ?? "open"}
+                          permissions={{
+                            close: canAct("close"),
+                            reopen: canAct("reopen"),
+                            duplicate: canAct("duplicate"),
+                            assignees: canAct("assignees"),
+                          }}
+                          merge={canOfferMerge() ? { reason: mergeBlocker(), checking: checkingMerge() } : undefined}
+                          onMerge={openMerge}
+                          draftAction={canChangeDraft(true) ? "draft" : canChangeDraft(false) ? "ready" : undefined}
+                          onChangeDraft={openDraftChange}
+                          onReview={
+                            canOfferReview()
+                              ? () => {
+                                  void openReview()
+                                }
+                              : undefined
+                          }
+                          onOpenGitHub={
+                            props.onOpenInBrowser
+                              ? () => {
+                                  setOverlay()
+                                  void openInBrowser(activePullNumber())
+                                }
+                              : undefined
+                          }
+                          onSelect={openIssueAction}
+                          onClose={() => setOverlay()}
+                        />
+                      </Show>
+                      <Show when={overlay() === "pull-draft" ? draftTarget() : undefined} keyed>
+                        {(target) => (
+                          <PullDraftDialog
+                            number={target.number}
+                            draft={target.draft}
+                            disabled={!draftChangeAvailable()}
+                            onSubmit={() => void submitDraftChange()}
+                            onClose={closeDraftChange}
+                            onHintChange={setIssueActionHint}
+                          />
+                        )}
+                      </Show>
+                      <Show when={overlay() === "pull-review" && props.reviews && reviewTarget()}>
+                        <PullReviewDialog
+                          onEditorActiveChange={setReviewEditorActive}
+                          number={reviewTarget()?.number}
+                          session={props.reviews!}
+                          repositoryUrl={data().repo.url}
+                          showScrollbar={config().showScrollbars}
+                          expanded={issueEditorExpanded()}
+                          onExpandedChange={setIssueEditorExpanded}
+                          showStatusBarHints={config().showStatusBarHints}
+                          onSubmit={() => {
+                            void submitReview()
+                          }}
+                          onClose={() => setOverlay()}
+                          onJump={jumpReview}
+                          onOpenGitHub={() => {
+                            void openInBrowser(reviewTarget()?.number)
+                          }}
+                          onHintChange={setIssueActionHint}
+                        />
+                      </Show>
+                      <Show when={overlay() === "inline-retry" ? inlineRetry() : undefined} keyed>
+                        {(input) => (
+                          <InlineCommentRetryDialog
+                            input={input}
+                            onHintChange={setIssueActionHint}
+                            onClose={() => {
+                              setInlineRetry()
+                              setOverlay()
+                            }}
+                            onOpenGitHub={() => {
+                              void openInBrowser(input.number, input.repository)
+                            }}
+                            onConfirm={() => {
+                              const context = inlineContext()
+                              if (
+                                context &&
+                                data().repo.nameWithOwner === input.repository &&
+                                JSON.stringify({ ...context, body: input.body }) === JSON.stringify(input)
+                              ) {
+                                setInlineRetry()
+                                void submitInlineComment(input.body, true)
+                              } else {
+                                setInlineRetry()
+                                setOverlay()
+                              }
+                            }}
+                          />
+                        )}
+                      </Show>
+                      <Show when={overlay() === "inline-confirm" ? inlineConfirm() : undefined} keyed>
+                        {(input) => (
+                          <InlineCommentConfirmDialog
+                            input={input}
+                            onHintChange={setIssueActionHint}
+                            onClose={() => {
+                              setInlineConfirm()
+                              setOverlay()
+                            }}
+                            onConfirm={() => {
+                              setInlineConfirm()
+                              setOverlay()
+                              const context = inlineContext()
+                              if (context && JSON.stringify({ ...context, body: input.body }) === JSON.stringify(input))
+                                void submitInlineComment(input.body)
+                            }}
+                          />
+                        )}
+                      </Show>
+                      <Show when={overlay() === "review-comment" ? inlineContext() : undefined} keyed>
+                        {(context) => (
+                          <ReviewCommentDialog
+                            anchor={context.anchor}
+                            body={inlineDrafts().get(JSON.stringify(context))?.body ?? ""}
+                            headSha={context.headSha}
+                            repositoryUrl={data().repo.url}
+                            showScrollbar={config().showScrollbars}
+                            expanded={issueEditorExpanded()}
+                            onExpandedChange={(expanded) => {
+                              setIssueEditorExpanded(expanded)
+                              if (!expanded) setOverlay()
+                            }}
+                            showStatusBarHints={config().showStatusBarHints}
+                            onChange={(body) => {
+                              saveInlineDraft(context, body)
+                            }}
+                            onSave={(body) => {
+                              void submitInlineComment(body)
+                            }}
+                            onClose={() => setOverlay()}
+                            onHintChange={setIssueActionHint}
+                          />
+                        )}
+                      </Show>
+                      <Show when={overlay() === "pull-merge" ? mergeTarget() : undefined} keyed>
+                        {(target) => (
+                          <PullMergeDialog
+                            number={target.number}
+                            headSha={target.headSha}
+                            methods={pullDetail().resource.value?.merge?.methods ?? []}
+                            reason={mergeDialogBlocker()}
+                            checking={checkingMerge()}
+                            onLoadMessage={async () => {
+                              if (!props.onLoadPullMergeMessage) throw new Error("Loading GitHub's commit message is unavailable.")
+                              return props.onLoadPullMergeMessage(target.number, target.headSha)
+                            }}
+                            onSubmit={(method, headSha, message) => void submitMerge(method, headSha, message)}
+                            onHintChange={setIssueActionHint}
+                            onClose={closeMerge}
+                          />
+                        )}
+                      </Show>
+                      <Show when={overlay() === "issue-action" ? issueAction() : undefined} keyed>
+                        {(action) => (
+                          <Show
+                            when={action.kind === "assignees"}
+                            fallback={
+                              <IssueActionDialog
+                                number={action.number}
+                                kind={action.kind}
+                                confirmOnly={action.kind === "comment" && commentConfirmOnly()}
+                                submissionAllowed={
+                                  action.parent === "pull"
+                                    ? action.number === activePullNumber() && canActOnPull(action.kind)
+                                    : action.number === activeIssueNumber() && canActOnIssue(action.kind)
+                                }
+                                onEditorActiveChange={setIssueEditorActive}
+                                parent={action.parent}
+                                state={
+                                  props.getIssueAction?.(action.number, action.parent) ??
+                                  (action.kind === "comment"
+                                    ? {
+                                        ...emptyIssueAction,
+                                        body: conversationDraft({
+                                          repository: data().repo.nameWithOwner,
+                                          number: action.number,
+                                          parent: action.parent,
+                                        }),
+                                      }
+                                    : emptyIssueAction)
+                                }
+                                showScrollbar={config().showScrollbars}
+                                showStatusBarHints={config().showStatusBarHints}
+                                expanded={action.kind !== "duplicate" && issueEditorExpanded()}
+                                onExpandedChange={(expanded) => {
+                                  setIssueEditorExpanded(expanded)
+                                  if (!expanded && action.kind === "comment" && conversationCommentOpen()) closeConversationCommentDialog()
+                                }}
+                                locked={
+                                  action.parent === "pull" ? pullDetail().resource.value?.locked : issueDetail().resource.value?.locked
+                                }
+                                repositoryUrl={data().repo.url}
+                                defaultBranch={data().repo.defaultBranch}
+                                onBodyChange={(body) =>
+                                  action.kind === "comment"
+                                    ? changeConversationDraft(
+                                        { repository: data().repo.nameWithOwner, number: action.number, parent: action.parent },
+                                        body,
+                                      )
+                                    : props.onIssueDraftChange?.(action.number, { body }, action.parent)
+                                }
+                                onReasonChange={(reason) => props.onIssueDraftChange?.(action.number, { reason }, action.parent)}
+                                onDuplicateTargetChange={(duplicateTarget) =>
+                                  props.onIssueDraftChange?.(action.number, { duplicateTarget }, action.parent)
+                                }
+                                onSubmit={() => void submitIssueAction()}
+                                onDiscard={() => {
+                                  props.onDiscardIssueDraft?.(action.number, action.parent)
+                                  if (action.kind === "comment")
+                                    rememberLocalCommentDraft(
+                                      { repository: data().repo.nameWithOwner, number: action.number, parent: action.parent },
+                                      "",
+                                    )
+                                }}
+                                onHintChange={setIssueActionHint}
+                                onClose={
+                                  action.kind === "comment" && conversationCommentOpen()
+                                    ? closeConversationCommentDialog
+                                    : () => {
+                                        setOverlay()
+                                        setIssueAction()
+                                      }
+                                }
+                              />
+                            }
+                          >
+                            <IssueAssigneesPicker
+                              number={action.number}
+                              state={props.getIssueAction?.(action.number, action.parent) ?? emptyIssueAction}
+                              users={props.assignableUsers}
+                              showScrollbar={config().showScrollbars}
+                              onLoadMore={() => void props.onLoadAssignableUsers?.()}
+                              onReload={() => void props.onReloadAssignableUsers?.()}
+                              onChange={(selectedAssignees) =>
+                                props.onIssueDraftChange?.(action.number, { selectedAssignees }, action.parent)
+                              }
+                              onSubmit={() => void submitIssueAction()}
+                              onHintChange={setIssueActionHint}
+                              onClose={() => {
+                                setOverlay()
+                                setIssueAction()
+                              }}
+                            />
+                          </Show>
+                        )}
+                      </Show>
+                      <Show when={overlay() === "issue-references" && (activeIssueNumber() || activePullNumber() || activeCommitSha())}>
+                        <IssueReferencesPicker
+                          references={activeMenuItems()}
+                          currentIssue={
+                            activeCommitSha()
+                              ? undefined
+                              : { repository: data().repo.nameWithOwner, number: (activeIssueNumber() ?? activePullNumber())! }
+                          }
+                          showScrollbar={config().showScrollbars}
+                          onOpen={openReference}
+                          onCopy={(reference) => {
+                            setOverlay()
+                            void copyToClipboard(reference.url, "URL")
+                          }}
+                          onClose={() => setOverlay()}
+                        />
+                      </Show>
+                      <Show when={overlay() === "diff-viewer-setup"}>
+                        <DiffViewerSetupDialog
+                          showScrollbar={config().showScrollbars}
+                          onClose={() => setOverlay()}
+                          onHintChange={setIssueActionHint}
+                        />
+                      </Show>
+                      <Show when={overlay() === "settings"}>
+                        <Settings
+                          onHintChange={setSettingsHint}
+                          config={config()}
+                          saving={props.configSaving}
+                          loadError={props.configError}
+                          onChange={(config) => props.onConfigChange?.(config) ?? Promise.resolve()}
+                          onClose={() => setOverlay()}
+                        />
+                      </Show>
+                      <Show when={overlay() === "branch-picker" && data().branches.value}>
+                        <BranchPicker
+                          branches={data().branches}
+                          current={data().currentBranch}
+                          canSwitch={props.canSwitchBranch}
+                          showScrollbar={config().showScrollbars}
+                          onLoadMore={props.onLoadMoreBranches ?? (() => Promise.resolve())}
+                          onRetry={() => props.onRetryResource?.({ kind: "branches" })}
+                          onClose={() => setOverlay()}
+                          onSelect={(branch) => {
+                            if (props.canSwitchBranch === false) return
+                            setOverlay()
+                            if (branch === data().currentBranch) return
+                            props.onBranchChange?.(branch)
+                            overviewScroll?.scrollTo(0)
+                          }}
+                        />
+                      </Show>
+                    </SearchProvider>
+                  </StatusPromptProvider>
+                </box>
+              </MentionProvider>
+            </MarkdownProvider>
+          </MotionProvider>
+        </IconProvider>
+      </HyperlinkSurface>
     </HyperlinkProvider>
   )
 }

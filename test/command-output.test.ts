@@ -23,7 +23,8 @@ test("leading blank lines are preserved until the actual line limit is exceeded"
   }
   const buffer = createCommandOutputBuffer()
   expect(buffer.append("\n".repeat(MAX_COMMAND_OUTPUT_LINES))).toBe(
-    "[Earlier command output omitted]\n" + "\n".repeat(MAX_COMMAND_OUTPUT_LINES - 1))
+    "[Earlier command output omitted]\n" + "\n".repeat(MAX_COMMAND_OUTPUT_LINES - 1),
+  )
 })
 
 test("newline-heavy chunks batch retained-tail copies instead of copying per control", () => {
@@ -36,8 +37,11 @@ test("newline-heavy chunks batch retained-tail copies instead of copying per con
     if (this.length > MAX_COMMAND_OUTPUT_CHARS && start === -MAX_COMMAND_OUTPUT_CHARS) tailCopies++
     return original.call(this, start, end)
   }
-  try { output = createCommandOutputBuffer().append("x\n".repeat(100_000)) }
-  finally { String.prototype.slice = original }
+  try {
+    output = createCommandOutputBuffer().append("x\n".repeat(100_000))
+  } finally {
+    String.prototype.slice = original
+  }
   expect(tailCopies).toBeGreaterThan(0)
   expect(tailCopies).toBeLessThan(100)
   expect(output).toStartWith("[Earlier command output omitted]\n")

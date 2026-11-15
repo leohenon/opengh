@@ -3,11 +3,13 @@ import { mkdtemp, realpath, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
-test.skipIf(process.platform === "win32")("durable directories sync checked parents on first use, failure, retry, and symlink traversal", async () => {
-  const directory = await realpath(await mkdtemp(join(tmpdir(), "opengh-directory-durability-")))
-  const filesystem = new URL("../src/filesystem.ts", import.meta.url).pathname
-  // Keep the fs mock isolated from other tests; mkdir/open/stat use real temporary paths.
-  const script = `
+test.skipIf(process.platform === "win32")(
+  "durable directories sync checked parents on first use, failure, retry, and symlink traversal",
+  async () => {
+    const directory = await realpath(await mkdtemp(join(tmpdir(), "opengh-directory-durability-")))
+    const filesystem = new URL("../src/filesystem.ts", import.meta.url).pathname
+    // Keep the fs mock isolated from other tests; mkdir/open/stat use real temporary paths.
+    const script = `
     import { expect, mock } from "bun:test"
     import { dirname, join } from "node:path"
     const fs = { ...await import("node:fs/promises") }
@@ -102,17 +104,18 @@ test.skipIf(process.platform === "win32")("durable directories sync checked pare
       .rejects.toThrow("Untrusted writable directory")
     expect(await fs.lstat(join(target, "unsafe")).catch(error => error.code)).toBe("ENOENT")
   `
-  const child = Bun.spawn([process.execPath, "--eval", script], { stdout: "pipe", stderr: "pipe" })
-  const timeout = setTimeout(() => child.kill("SIGKILL"), 10_000)
-  const output = new Response(child.stdout).text()
-  const errors = new Response(child.stderr).text()
-  try {
-    expect({ code: await child.exited, stdout: await output, stderr: await errors })
-      .toEqual({ code: 0, stdout: "", stderr: "" })
-  } finally {
-    clearTimeout(timeout)
-    if (child.exitCode === null) child.kill("SIGKILL")
-    await child.exited
-    await rm(directory, { recursive: true, force: true })
-  }
-}, 15_000)
+    const child = Bun.spawn([process.execPath, "--eval", script], { stdout: "pipe", stderr: "pipe" })
+    const timeout = setTimeout(() => child.kill("SIGKILL"), 10_000)
+    const output = new Response(child.stdout).text()
+    const errors = new Response(child.stderr).text()
+    try {
+      expect({ code: await child.exited, stdout: await output, stderr: await errors }).toEqual({ code: 0, stdout: "", stderr: "" })
+    } finally {
+      clearTimeout(timeout)
+      if (child.exitCode === null) child.kill("SIGKILL")
+      await child.exited
+      await rm(directory, { recursive: true, force: true })
+    }
+  },
+  15_000,
+)

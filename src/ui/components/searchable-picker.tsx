@@ -89,25 +89,24 @@ export function SearchablePicker<T>(props: {
     if (props.onSubmit) props.onSubmit(query(), item)
     else if (item) props.onSelect(item)
   }
-  useKeyActions({
-    "dialog.close": () => props.onClose(),
-    "picker.up": () => move(-1),
-    "picker.down": () => move(1),
-    "picker.accept": submit,
-  }, { priority: 100, modal: true })
+  useKeyActions(
+    {
+      "dialog.close": () => props.onClose(),
+      "picker.up": () => move(-1),
+      "picker.down": () => move(1),
+      "picker.accept": submit,
+    },
+    { priority: 100, modal: true },
+  )
 
   return (
-    <Popup
-      width={props.width ?? 64}
-      height={props.height}
-      placement={props.placement}
-      zIndex={100}
-      onClose={props.onClose}
-    >
+    <Popup width={props.width ?? 64} height={props.height} placement={props.placement} zIndex={100} onClose={props.onClose}>
       <box flexGrow={1} minHeight={0} flexDirection="column" gap={1} paddingBottom={1}>
         <box flexShrink={0} paddingLeft={4} paddingRight={4}>
           <box height={1} flexDirection="row" justifyContent="space-between">
-            <text fg={colors.text} attributes={TextAttributes.BOLD}>{props.title}</text>
+            <text fg={colors.text} attributes={TextAttributes.BOLD}>
+              {props.title}
+            </text>
             <text fg={colors.muted}>{props.titleMeta}</text>
           </box>
           <box height={2} flexShrink={0} paddingTop={1}>
@@ -130,7 +129,11 @@ export function SearchablePicker<T>(props: {
             />
           </box>
           <Show when={props.error}>
-            {(message) => <text flexShrink={0} fg={colors.red} wrapMode="word">× {message()}</text>}
+            {(message) => (
+              <text flexShrink={0} fg={colors.red} wrapMode="word">
+                × {message()}
+              </text>
+            )}
           </Show>
         </box>
         <Show when={items().length > 0 || props.empty}>
@@ -138,7 +141,9 @@ export function SearchablePicker<T>(props: {
             <Show when={props.listTitle}>
               {(title) => (
                 <box height={1} flexShrink={0} paddingLeft={4}>
-                  <text fg={colors.text} attributes={TextAttributes.BOLD}>{title()}</text>
+                  <text fg={colors.text} attributes={TextAttributes.BOLD}>
+                    {title()}
+                  </text>
                 </box>
               )}
             </Show>
@@ -157,7 +162,11 @@ export function SearchablePicker<T>(props: {
             >
               <Show
                 when={items().length > 0}
-                fallback={<box height={1} paddingLeft={3}><text fg={colors.muted}>{props.empty}</text></box>}
+                fallback={
+                  <box height={1} paddingLeft={3}>
+                    <text fg={colors.muted}>{props.empty}</text>
+                  </box>
+                }
               >
                 <Index each={items()}>
                   {(item, index) => {
@@ -177,7 +186,9 @@ export function SearchablePicker<T>(props: {
                         backgroundColor={active() || hover.hovered() ? colors.panelHover : colors.panel}
                         {...mouseClick(() => activate(index), enabled, identity, hover)}
                       >
-                        <text width={2} fg={colors.blue}>{active() ? "›" : " "}</text>
+                        <text width={2} fg={colors.blue}>
+                          {active() ? "›" : " "}
+                        </text>
                         {props.children(item(), active, rowIndex)}
                       </box>
                     )

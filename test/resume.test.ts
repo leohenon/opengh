@@ -18,14 +18,22 @@ test("resume storage keeps only the active route and ignores missing, corrupt, u
       { page: "actions", details: { actions: { kind: "run", id: 123 } } },
     ]
     for (const state of states) {
-      await saveResume(resumeLocation("owner/repo", { ...state,
-        history: { issues: [{ kind: "issue", number: 1 }] }, pageOrigin: { page: "overview", state: { page: "overview" } },
-        details: { ...state.details, ...(state.page !== "commits" ? { commits: { kind: "commit", sha: "def5678" } } : {}) },
-      }), path)
+      await saveResume(
+        resumeLocation("owner/repo", {
+          ...state,
+          history: { issues: [{ kind: "issue", number: 1 }] },
+          pageOrigin: { page: "overview", state: { page: "overview" } },
+          details: { ...state.details, ...(state.page !== "commits" ? { commits: { kind: "commit", sha: "def5678" } } : {}) },
+        }),
+        path,
+      )
       expect(await loadResume(path)).toEqual({ repository: "owner/repo", state })
       expect((await lstat(path)).mode & 0o777).toBe(0o600)
     }
-    for (const value of ["{broken", "x".repeat(4097), JSON.stringify({ repository: "../bad", state: { page: "overview" } }),
+    for (const value of [
+      "{broken",
+      "x".repeat(4097),
+      JSON.stringify({ repository: "../bad", state: { page: "overview" } }),
       JSON.stringify({ repository: "owner/repo", state: { page: "constructor" } }),
       JSON.stringify({ repository: "owner/repo", state: { page: "issues", details: { issues: { kind: "issue", number: -1 } } } }),
       JSON.stringify({ repository: "owner/repo", state: { page: "pulls", diffs: { pulls: { kind: "commit", sha: "not-a-hash" } } } }),
@@ -41,13 +49,17 @@ test("resume storage keeps only the active route and ignores missing, corrupt, u
     expect(await loadResume(path)).toBeUndefined()
     await expect(saveResume(resumeLocation("owner/repo", { page: "overview" }), path)).rejects.toThrow()
     expect(await readFile(target, "utf8")).toBe(original)
-  } finally { await rm(directory, { recursive: true, force: true }) }
+  } finally {
+    await rm(directory, { recursive: true, force: true })
+  }
 })
 
 test("resume writes coalesce navigation, serialize in-flight updates, and retry failed saves on flush", async () => {
   const saved: ResumeLocation[] = []
   let release!: () => void
-  const first = new Promise<void>((resolve) => { release = resolve })
+  const first = new Promise<void>((resolve) => {
+    release = resolve
+  })
   let fail = false
   const writer = createResumeWriter(async (location) => {
     if (!saved.length) await first

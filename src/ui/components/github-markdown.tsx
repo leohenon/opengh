@@ -1,4 +1,16 @@
-import { BoxRenderable, CodeRenderable, MarkdownRenderable, measureEditText, StyledText, TextRenderable, TextTableRenderable, Yoga, type MarkdownOptions, type Renderable, type SyntaxStyle } from "@opentui/core"
+import {
+  BoxRenderable,
+  CodeRenderable,
+  MarkdownRenderable,
+  measureEditText,
+  StyledText,
+  TextRenderable,
+  TextTableRenderable,
+  Yoga,
+  type MarkdownOptions,
+  type Renderable,
+  type SyntaxStyle,
+} from "@opentui/core"
 import { useRenderer } from "@opentui/solid"
 import { createMemo, onCleanup, onMount, Show } from "solid-js"
 import { assertGitHubMarkdownSource, gitHubMarkdownFallback, normalizeGitHubMarkdown, type GitHubMarkdownContext } from "../github-markdown"
@@ -10,10 +22,30 @@ import { READING_WIDTH } from "../detail-layout"
 import { useMarkdownPreference } from "../markdown-preferences"
 import { useHyperlinkMouse } from "../hyperlinks"
 import { LinkedText } from "./linked-text"
-import { anchorMarkers, stripAnchorMarkers, anchorVisualRow, tableAnchorRow, sourceLineAnchor, type MarkdownCodeSource, type MarkdownSourceMap, type MarkdownRenderedAnchor, type MarkdownAnchorResolver } from "../markdown-anchors"
+import {
+  anchorMarkers,
+  stripAnchorMarkers,
+  anchorVisualRow,
+  tableAnchorRow,
+  sourceLineAnchor,
+  type MarkdownCodeSource,
+  type MarkdownSourceMap,
+  type MarkdownRenderedAnchor,
+  type MarkdownAnchorResolver,
+} from "../markdown-anchors"
 
 // One prose renderer for repository documents, issue descriptions, and comments.
-export function GitHubMarkdown(props: { content: string; syntaxStyle: SyntaxStyle; preserveImages?: boolean; codePanels?: boolean; backgroundColor?: string; context?: GitHubMarkdownContext; plainText?: boolean; wide?: boolean; anchorRef?: (resolver: MarkdownAnchorResolver | undefined) => void }) {
+export function GitHubMarkdown(props: {
+  content: string
+  syntaxStyle: SyntaxStyle
+  preserveImages?: boolean
+  codePanels?: boolean
+  backgroundColor?: string
+  context?: GitHubMarkdownContext
+  plainText?: boolean
+  wide?: boolean
+  anchorRef?: (resolver: MarkdownAnchorResolver | undefined) => void
+}) {
   const renderer = useRenderer()
   const links = useHyperlinkMouse()
   const { colors, theme } = useTheme()
@@ -24,10 +56,21 @@ export function GitHubMarkdown(props: { content: string; syntaxStyle: SyntaxStyl
       // Bound input before allocating a source map, including plain-text documents.
       assertGitHubMarkdownSource(props.content)
       const sourceMap: MarkdownSourceMap | undefined = props.anchorRef
-        ? { lineCount: props.content.split(/\r\n?|\n/).length, code: [] } : undefined
-      return { sourceMap, markdown: !props.plainText, content: props.plainText ? props.content : normalizeGitHubMarkdown(props.content, {
-        preserveImages: props.preserveImages, codePanels: props.codePanels, context: props.context, anchors: !!props.anchorRef, sourceMap,
-      }) }
+        ? { lineCount: props.content.split(/\r\n?|\n/).length, code: [] }
+        : undefined
+      return {
+        sourceMap,
+        markdown: !props.plainText,
+        content: props.plainText
+          ? props.content
+          : normalizeGitHubMarkdown(props.content, {
+              preserveImages: props.preserveImages,
+              codePanels: props.codePanels,
+              context: props.context,
+              anchors: !!props.anchorRef,
+              sourceMap,
+            }),
+      }
     } catch (error) {
       return { sourceMap: undefined, content: gitHubMarkdownFallback(props.content, error), markdown: false }
     }
@@ -35,10 +78,13 @@ export function GitHubMarkdown(props: { content: string; syntaxStyle: SyntaxStyl
   const content = () => prepared().content
   let markdown: MarkdownRenderable | undefined
   let plain: TextRenderable | undefined
-  const codeNodes = (node: Renderable | undefined = markdown): CodeRenderable[] => node && !node.isDestroyed ? [
-    ...(node instanceof CodeRenderable && !node.conceal && !node.isDestroyed ? [node] : []),
-    ...node.getChildren().flatMap((child) => codeNodes(child)),
-  ] : []
+  const codeNodes = (node: Renderable | undefined = markdown): CodeRenderable[] =>
+    node && !node.isDestroyed
+      ? [
+          ...(node instanceof CodeRenderable && !node.conceal && !node.isDestroyed ? [node] : []),
+          ...node.getChildren().flatMap((child) => codeNodes(child)),
+        ]
+      : []
   let targets = new Map<string, MarkdownRenderedAnchor>()
   let prose = new Set<CodeRenderable>()
   let disposed = false
@@ -49,7 +95,11 @@ export function GitHubMarkdown(props: { content: string; syntaxStyle: SyntaxStyl
     if (disposed || document !== prepared()) return
     const rawId = fragment.replace(/^#/, "")
     let id: string
-    try { id = decodeURIComponent(rawId) } catch { return }
+    try {
+      id = decodeURIComponent(rawId)
+    } catch {
+      return
+    }
     const sourceMap = prepared().sourceMap
     const range = id.match(/^L([1-9]\d*)(?:-L([1-9]\d*))?$/i)
     let target: MarkdownRenderedAnchor | undefined
@@ -60,10 +110,12 @@ export function GitHubMarkdown(props: { content: string; syntaxStyle: SyntaxStyl
       let line = Math.min(first, sourceMap.lineCount)
       if (props.plainText && plain) target = { node: plain, position: { line: line - 1, column: 0 } }
       else {
-        const available = [...new Set([
-          ...[...targets.keys()].flatMap((key) => /^opengh-source-L([1-9]\d*)$/.exec(key)?.slice(1).map(Number) ?? []),
-          ...sourceMap.code.flatMap((code) => [code.start, code.end]),
-        ])].sort((left, right) => left - right)
+        const available = [
+          ...new Set([
+            ...[...targets.keys()].flatMap((key) => /^opengh-source-L([1-9]\d*)$/.exec(key)?.slice(1).map(Number) ?? []),
+            ...sourceMap.code.flatMap((code) => [code.start, code.end]),
+          ]),
+        ].sort((left, right) => left - right)
         let code = sourceMap.code.find((code) => line >= code.start && line <= code.end)
         if (!code && !targets.has(sourceLineAnchor(line))) {
           line = available.find((candidate) => candidate >= line) ?? available.at(-1) ?? line
@@ -73,12 +125,15 @@ export function GitHubMarkdown(props: { content: string; syntaxStyle: SyntaxStyl
           const sameCode = (entry: MarkdownCodeSource) => entry.content === code!.content
           const occurrence = sourceMap.code.filter(sameCode).indexOf(code)
           const node = codeNodes().filter((node) => node.content.replace(/\n+$/, "") === code!.content)[occurrence]
-          if (node) target = { node, position: { line: Math.max(0, Math.min(line - code.bodyStart, node.content.split("\n").length - 1)), column: 0 } }
+          if (node)
+            target = {
+              node,
+              position: { line: Math.max(0, Math.min(line - code.bodyStart, node.content.split("\n").length - 1)), column: 0 },
+            }
         } else target = targets.get(sourceLineAnchor(line))
       }
     } else {
-      target = targets.get(rawId) ?? targets.get(id)
-        ?? targets.get(id.replace(/^user-content-/, "")) ?? targets.get(`user-content-${id}`)
+      target = targets.get(rawId) ?? targets.get(id) ?? targets.get(id.replace(/^user-content-/, "")) ?? targets.get(`user-content-${id}`)
       if (!target && sourceMap) {
         const code = sourceMap.code.find((code) => code.anchors.includes(id))
         if (code) {
@@ -90,7 +145,8 @@ export function GitHubMarkdown(props: { content: string; syntaxStyle: SyntaxStyl
     }
     if (!target || target.node.isDestroyed) return
     let row = 0
-    if ((target.node instanceof CodeRenderable || target.node instanceof TextRenderable) && target.position) row = anchorVisualRow(target.node.lineInfo, target.position)
+    if ((target.node instanceof CodeRenderable || target.node instanceof TextRenderable) && target.position)
+      row = anchorVisualRow(target.node.lineInfo, target.position)
     if (target.node instanceof TextTableRenderable && target.cell && target.position) {
       const cellRow = tableAnchorRow(target.node, target.cell, target.position)
       if (cellRow === undefined) return
@@ -99,7 +155,10 @@ export function GitHubMarkdown(props: { content: string; syntaxStyle: SyntaxStyl
     return { node: target.node, row }
   }
   onMount(() => props.anchorRef?.(resolveAnchor))
-  onCleanup(() => { disposed = true; props.anchorRef?.(undefined) })
+  onCleanup(() => {
+    disposed = true
+    props.anchorRef?.(undefined)
+  })
   const tableOptions = createMemo<MarkdownOptions["tableOptions"]>(() => ({
     style: minimal() ? "columns" : "grid",
     widthMode: "full",
@@ -137,18 +196,30 @@ export function GitHubMarkdown(props: { content: string; syntaxStyle: SyntaxStyl
       const parent = source.parent
       const index = parent?.getChildren().indexOf(source)
       const panel = new BoxRenderable(renderer, {
-        width: "100%", minWidth: 0, flexShrink: 0, flexDirection: "column",
-        paddingX: codePadding, paddingY: simple || short ? 0 : 1, backgroundColor: background,
+        width: "100%",
+        minWidth: 0,
+        flexShrink: 0,
+        flexDirection: "column",
+        paddingX: codePadding,
+        paddingY: simple || short ? 0 : 1,
+        backgroundColor: background,
       })
       // Preserve authored margins, including percentages and auto, before reparenting.
       for (const [edge, property] of [
-        [Yoga.Edge.Top, "marginTop"], [Yoga.Edge.Right, "marginRight"],
-        [Yoga.Edge.Bottom, "marginBottom"], [Yoga.Edge.Left, "marginLeft"],
+        [Yoga.Edge.Top, "marginTop"],
+        [Yoga.Edge.Right, "marginRight"],
+        [Yoga.Edge.Bottom, "marginBottom"],
+        [Yoga.Edge.Left, "marginLeft"],
       ] as const) {
         const margin = source.getMargin(edge)
-        panel[property] = margin.unit === Yoga.Unit.Auto ? "auto"
-          : margin.unit === Yoga.Unit.Percent ? `${margin.value}%`
-          : margin.unit === Yoga.Unit.Point ? margin.value : 0
+        panel[property] =
+          margin.unit === Yoga.Unit.Auto
+            ? "auto"
+            : margin.unit === Yoga.Unit.Percent
+              ? `${margin.value}%`
+              : margin.unit === Yoga.Unit.Point
+                ? margin.value
+                : 0
       }
       source.marginTop = 0
       source.marginRight = 0
@@ -165,10 +236,15 @@ export function GitHubMarkdown(props: { content: string; syntaxStyle: SyntaxStyl
       source.bg = background
       source.fg = foreground
       source.wrapMode = "word"
-      if (!simple && !short) panel.add(new TextRenderable(renderer, {
-        content: language.trim().split(/\s+/)[0] || "text",
-        height: 1, fg: muted, bg: background,
-      }))
+      if (!simple && !short)
+        panel.add(
+          new TextRenderable(renderer, {
+            content: language.trim().split(/\s+/)[0] || "text",
+            height: 1,
+            fg: muted,
+            bg: background,
+          }),
+        )
       // Keep the native source, including its plain-code content and concealment.
       panel.add(source)
       if (parent) parent.add(panel, index)
@@ -176,15 +252,35 @@ export function GitHubMarkdown(props: { content: string; syntaxStyle: SyntaxStyl
       return panel
     }
     const quoteColor = (text: string) => {
-      const alert = stripAnchorMarkers(text).trimStart().match(/^\*\*(Note|Tip|Important|Warning|Caution)\*\*(?:\s|$)/)?.[1]
-      return alert === "Warning" ? yellow : alert === "Caution" ? red
-        : alert === "Tip" ? green : alert === "Important" ? colors.purple : alert ? blue : border
+      const alert = stripAnchorMarkers(text)
+        .trimStart()
+        .match(/^\*\*(Note|Tip|Important|Warning|Caution)\*\*(?:\s|$)/)?.[1]
+      return alert === "Warning"
+        ? yellow
+        : alert === "Caution"
+          ? red
+          : alert === "Tip"
+            ? green
+            : alert === "Important"
+              ? colors.purple
+              : alert
+                ? blue
+                : border
     }
-    const quoteContent = (text: string) => new MarkdownRenderable(renderer, {
-      content: text, syntaxStyle, fg: foreground, bg: canvas, conceal: true,
-      renderNode: renderBlock, internalBlockMode: "top-level", tableOptions: tables,
-      width: "100%", minWidth: 0, flexShrink: 0,
-    })
+    const quoteContent = (text: string) =>
+      new MarkdownRenderable(renderer, {
+        content: text,
+        syntaxStyle,
+        fg: foreground,
+        bg: canvas,
+        conceal: true,
+        renderNode: renderBlock,
+        internalBlockMode: "top-level",
+        tableOptions: tables,
+        width: "100%",
+        minWidth: 0,
+        flexShrink: 0,
+      })
     const decorateProse = (node: Renderable, list = false) => {
       // Nested Markdown owns its own decorated blocks. Never revisit inserted panels.
       if (codePanels.has(node) || node instanceof MarkdownRenderable) return
@@ -192,12 +288,14 @@ export function GitHubMarkdown(props: { content: string; syntaxStyle: SyntaxStyl
         node.syntaxStyle = syntaxStyle
         if (node.filetype === "markdown" && node.conceal) {
           proseNodes.add(node)
-          compactMarkdownLinks(node, { padInlineCode: !simple, onAnchors: (positions) => {
-            for (const [id, target] of anchorTargets) if (target.node === node) anchorTargets.delete(id)
-            for (const [id, position] of positions) anchorTargets.set(id, { node, position })
-          } })
-        }
-        else if (panels && node.parent) {
+          compactMarkdownLinks(node, {
+            padInlineCode: !simple,
+            onAnchors: (positions) => {
+              for (const [id, target] of anchorTargets) if (target.node === node) anchorTargets.delete(id)
+              for (const [id, position] of positions) anchorTargets.set(id, { node, position })
+            },
+          })
+        } else if (panels && node.parent) {
           codePanel(node)
           return
         }
@@ -216,10 +314,16 @@ export function GitHubMarkdown(props: { content: string; syntaxStyle: SyntaxStyl
         }
       }
       if (node instanceof TextTableRenderable)
-        node.content = node.content.map((row, rowIndex) => row.map((cell, column) => cell ? compactLinkChunks(cell, {
-          linkColor: syntaxStyle.mergeStyles("markup.link").fg,
-          onAnchor: (id, position) => anchorTargets.set(id, { node, position, cell: { row: rowIndex, column } }),
-        }) : cell))
+        node.content = node.content.map((row, rowIndex) =>
+          row.map((cell, column) =>
+            cell
+              ? compactLinkChunks(cell, {
+                  linkColor: syntaxStyle.mergeStyles("markup.link").fg,
+                  onAnchor: (id, position) => anchorTargets.set(id, { node, position, cell: { row: rowIndex, column } }),
+                })
+              : cell,
+          ),
+        )
       if (list && node instanceof TextRenderable && node.chunks.length === 1) {
         const marker = node.chunks[0]!.text
         if (/^\s*[-*+]\s$/.test(marker)) {
@@ -237,13 +341,20 @@ export function GitHubMarkdown(props: { content: string; syntaxStyle: SyntaxStyl
         for (const { id } of markers) anchorTargets.set(id, { node: marker })
         return marker
       }
-      const inline = token.type === "paragraph" ? token.tokens?.filter((child) =>
-        child.type !== "text" || stripAnchorMarkers(child.raw).trim()) : undefined
+      const inline =
+        token.type === "paragraph"
+          ? token.tokens?.filter((child) => child.type !== "text" || stripAnchorMarkers(child.raw).trim())
+          : undefined
       const image = inline?.length === 1 && inline[0]?.type === "image" ? inline[0] : undefined
       if (image) {
         const panel = new BoxRenderable(renderer, {
-          width: "100%", minWidth: 0, flexShrink: 0, flexDirection: "column",
-          border: ["left"], borderColor: border, paddingLeft: 1,
+          width: "100%",
+          minWidth: 0,
+          flexShrink: 0,
+          flexDirection: "column",
+          border: ["left"],
+          borderColor: border,
+          paddingLeft: 1,
         })
         panel.add(new TextRenderable(renderer, { content: "image", fg: muted, height: 1 }))
         const description = stripAnchorMarkers(image.text).trim()
@@ -251,20 +362,33 @@ export function GitHubMarkdown(props: { content: string; syntaxStyle: SyntaxStyl
         const linked = (text: string) => new StyledText([{ __isChunk: true, text, link: { url: image.href } }])
         const caption = new TextRenderable(renderer, {
           content: linked(description || filename),
-          fg: foreground, wrapMode: description ? "word" : "none", width: "100%", minWidth: 0, flexShrink: 0,
+          fg: foreground,
+          wrapMode: description ? "word" : "none",
+          width: "100%",
+          minWidth: 0,
+          flexShrink: 0,
           ...(!description ? { height: 1 } : {}),
         })
-        if (!description) panel.onSizeChange = () => {
-          caption.content = linked(fitImageFilename(filename, Math.max(0, panel.width - 2),
-            (text) => measureEditText(text, { widthMethod: renderer.widthMethod })))
-        }
+        if (!description)
+          panel.onSizeChange = () => {
+            caption.content = linked(
+              fitImageFilename(filename, Math.max(0, panel.width - 2), (text) =>
+                measureEditText(text, { widthMethod: renderer.widthMethod }),
+              ),
+            )
+          }
         panel.add(caption)
         for (const { id } of markers) anchorTargets.set(id, { node: caption, position: { line: 0, column: 0 } })
         block = panel
       } else if (token.type === "blockquote") {
         const quote = new BoxRenderable(renderer, {
-          width: "100%", minWidth: 0, flexShrink: 0, flexDirection: "column",
-          border: simple ? [] : ["left"], borderColor: quoteColor(token.text), paddingLeft: 1,
+          width: "100%",
+          minWidth: 0,
+          flexShrink: 0,
+          flexDirection: "column",
+          border: simple ? [] : ["left"],
+          borderColor: quoteColor(token.text),
+          paddingLeft: 1,
         })
         quote.add(quoteContent(token.text))
         block = quote
@@ -295,8 +419,7 @@ export function GitHubMarkdown(props: { content: string; syntaxStyle: SyntaxStyl
         }
         decorateTasks(token as Extract<typeof token, { type: "list" }>, block)
       }
-      if (token.type === "heading" && block instanceof CodeRenderable)
-        block.baseHighlight = `markup.heading.${token.depth}`
+      if (token.type === "heading" && block instanceof CodeRenderable) block.baseHighlight = `markup.heading.${token.depth}`
       block.marginTop = 0
       block.marginBottom = 0
       if (token.type === "code" && panels && block instanceof CodeRenderable) block = codePanel(block, token.lang ?? "text")
@@ -305,7 +428,11 @@ export function GitHubMarkdown(props: { content: string; syntaxStyle: SyntaxStyl
       const readable = token.type !== "table" && token.type !== "hr"
       const section = token.type === "heading" && token.depth === 1
       const wrapper = new BoxRenderable(renderer, {
-        width: "100%", minWidth: 0, flexShrink: 0, flexDirection: "column", marginTop: 0,
+        width: "100%",
+        minWidth: 0,
+        flexShrink: 0,
+        flexDirection: "column",
+        marginTop: 0,
         ...(readable ? { maxWidth: contentWidth, alignSelf: "flex-start" } : {}),
         ...(section && !simple ? { border: ["bottom"], borderColor: border } : {}),
       })
@@ -334,21 +461,30 @@ export function GitHubMarkdown(props: { content: string; syntaxStyle: SyntaxStyl
   })
 
   return (
-    <Show when={prepared().markdown} fallback={
-      <text
-        ref={(value) => { plain = value }}
-        {...links}
-        fg={colors.text}
-        bg={props.backgroundColor ?? colors.canvas}
-        wrapMode="word"
-        width="100%"
-        maxWidth={props.wide ? "100%" : READING_WIDTH}
-        minWidth={0}
-        flexShrink={0}
-      ><LinkedText text={content()} repositoryUrl={props.context?.repositoryUrl} /></text>
-    }>
+    <Show
+      when={prepared().markdown}
+      fallback={
+        <text
+          ref={(value) => {
+            plain = value
+          }}
+          {...links}
+          fg={colors.text}
+          bg={props.backgroundColor ?? colors.canvas}
+          wrapMode="word"
+          width="100%"
+          maxWidth={props.wide ? "100%" : READING_WIDTH}
+          minWidth={0}
+          flexShrink={0}
+        >
+          <LinkedText text={content()} repositoryUrl={props.context?.repositoryUrl} />
+        </text>
+      }
+    >
       <markdown
-        ref={(value) => { markdown = value }}
+        ref={(value) => {
+          markdown = value
+        }}
         {...links}
         content={content()}
         syntaxStyle={props.syntaxStyle}

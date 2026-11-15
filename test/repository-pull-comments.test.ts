@@ -2,37 +2,69 @@ import { describe, expect, test } from "bun:test"
 import type { IssueComment, PullRequestDetail } from "../src/models"
 import { createRepositorySession, type RepositoryLoaders } from "../src/repository-session"
 import type { AssigneeChanges } from "../src/github/client"
-import { commitDetailFixture, githubDataFixture, issueCommentsFixture, issueDetailFixture, pullContextFixture } from "./fixtures/github-data"
+import {
+  commitDetailFixture,
+  githubDataFixture,
+  issueCommentsFixture,
+  issueDetailFixture,
+  pullContextFixture,
+} from "./fixtures/github-data"
 
 function deferred<T>() {
   let resolve!: (value: T) => void
   let reject!: (error: unknown) => void
-  const promise = new Promise<T>((yes, no) => { resolve = yes; reject = no })
+  const promise = new Promise<T>((yes, no) => {
+    resolve = yes
+    reject = no
+  })
   return { promise, resolve, reject }
 }
 const pull = (number = 421): PullRequestDetail => ({
-  ...githubDataFixture.pulls.open.value!.items[0]!, number,
-  url: `https://github.com/owner/repo/pull/${number}`, body: "PR body",
-  updatedAt: "2026-01-01T00:00:00Z", baseBranch: "main", headBranch: "next",
-  additions: 1, deletions: 0, changedFiles: 1, commitCount: 1, commentCount: 1,
+  ...githubDataFixture.pulls.open.value!.items[0]!,
+  number,
+  url: `https://github.com/owner/repo/pull/${number}`,
+  body: "PR body",
+  updatedAt: "2026-01-01T00:00:00Z",
+  baseBranch: "main",
+  headBranch: "next",
+  additions: 1,
+  deletions: 0,
+  changedFiles: 1,
+  commitCount: 1,
+  commentCount: 1,
   permissions: { comment: true },
-  labels: [], assignees: [], reviewers: [], mergeable: true,
+  labels: [],
+  assignees: [],
+  reviewers: [],
+  mergeable: true,
 })
-const comment: IssueComment = { ...issueCommentsFixture[0]!, id: 98765, body: "New conversation comment", createdAt: "2026-06-01T00:00:00Z" }
+const comment: IssueComment = {
+  ...issueCommentsFixture[0]!,
+  id: 98765,
+  body: "New conversation comment",
+  createdAt: "2026-06-01T00:00:00Z",
+}
 function loaders(overrides: Partial<RepositoryLoaders> = {}): RepositoryLoaders {
   return {
     metadata: async (repository) => ({ ...githubDataFixture.repo, nameWithOwner: repository }),
     workCounts: async () => ({ issues: 1, pulls: 1 }),
-    documents: async () => [], document: async () => "", branches: async () => ({ items: ["main"], hasMore: false }),
-    commits: async () => ({ items: [], hasMore: false }), commitCount: async () => 0,
+    documents: async () => [],
+    document: async () => "",
+    branches: async () => ({ items: ["main"], hasMore: false }),
+    commits: async () => ({ items: [], hasMore: false }),
+    commitCount: async () => 0,
     commit: async () => structuredClone(commitDetailFixture),
     issue: async (_repository, number) => ({ ...structuredClone(issueDetailFixture), number }),
     issueComments: async () => ({ items: structuredClone(issueCommentsFixture), hasMore: false }),
-    issueReferences: async () => [], issues: async () => ({ items: [], hasMore: false }),
-    pulls: async () => ({ items: [], hasMore: false }), pull: async (_repository, number) => pull(number),
+    issueReferences: async () => [],
+    issues: async () => ({ items: [], hasMore: false }),
+    pulls: async () => ({ items: [], hasMore: false }),
+    pull: async (_repository, number) => pull(number),
     pullCommits: async () => structuredClone(githubDataFixture.commits.value!.items),
-    pullContext: async () => structuredClone(pullContextFixture), runs: async () => ({ items: [], hasMore: false }),
-    createIssueComment: async () => structuredClone(comment), ...overrides,
+    pullContext: async () => structuredClone(pullContextFixture),
+    runs: async () => ({ items: [], hasMore: false }),
+    createIssueComment: async () => structuredClone(comment),
+    ...overrides,
   }
 }
 async function setup(overrides: Partial<RepositoryLoaders> = {}) {
@@ -52,7 +84,10 @@ describe("pull request conversation comments", () => {
       pull: async () => ({ ...current, reactions: { heart: 2 }, viewerReactions: ["heart"], canReact: true }),
       pulls: async (_repo, state) => ({ items: current.state === state ? [current] : [], hasMore: false }),
       workCounts: async () => ({ issues: 1, pulls: current.state === "open" ? 1 : 0 }),
-      createIssueComment: async () => { comments++; return comment },
+      createIssueComment: async () => {
+        comments++
+        return comment
+      },
       updatePullState: async (_repo, _number, state) => {
         if (++writes === 1) throw new Error("Offline")
         current = { ...current, state }
@@ -64,8 +99,13 @@ describe("pull request conversation comments", () => {
     session.updateIssueDraft(421, { body: "must not post" }, "pull")
     await expect(session.submitIssueAction(421, "comment", "pull")).rejects.toThrow("pending action")
     expect((await session.submitIssueAction(421, "close", "pull")).pull?.state).toBe("closed")
-    expect(session.pullDetail()?.resource.value).toMatchObject({ state: "closed", commentCount: 2,
-      reactions: { heart: 2 }, viewerReactions: ["heart"], canReact: true })
+    expect(session.pullDetail()?.resource.value).toMatchObject({
+      state: "closed",
+      commentCount: 2,
+      reactions: { heart: 2 },
+      viewerReactions: ["heart"],
+      canReact: true,
+    })
     await Bun.sleep(0)
     const state = session.state()
     expect(state.status === "ready" && state.data.pulls.closed.value?.items[0]?.number).toBe(421)
@@ -78,11 +118,20 @@ describe("pull request conversation comments", () => {
   test("assignees initialize from PR, validate suggestions, preserve merged PR fields and never post drafts", async () => {
     let comments = 0
     const calls: AssigneeChanges[] = []
-    const original = { ...pull(), merged: true, state: "closed" as const, assignees: ["alice"], permissions: { comment: true, close: true, reopen: true, assignees: true } }
+    const original = {
+      ...pull(),
+      merged: true,
+      state: "closed" as const,
+      assignees: ["alice"],
+      permissions: { comment: true, close: true, reopen: true, assignees: true },
+    }
     const session = await setup({
       pull: async () => original,
       assignableUsers: async () => ({ items: [{ login: "bob" }], hasMore: false }),
-      createIssueComment: async () => { comments++; return comment },
+      createIssueComment: async () => {
+        comments++
+        return comment
+      },
       updateIssueAssignees: async (_repo, number, changes) => {
         calls.push(changes)
         return { ...issueDetailFixture, number, assignees: ["bob"], commentCount: 999 }
@@ -108,8 +157,12 @@ describe("pull request conversation comments", () => {
     const read = deferred<PullRequestDetail>()
     let reads = 0
     const session = await setup({
-      pull: async () => ++reads === 1 ? { ...pull(), permissions: { comment: true, close: true } }
-        : reads === 2 ? read.promise : { ...pull(), state: "closed" },
+      pull: async () =>
+        ++reads === 1
+          ? { ...pull(), permissions: { comment: true, close: true } }
+          : reads === 2
+            ? read.promise
+            : { ...pull(), state: "closed" },
       updatePullState: async () => write.promise,
     })
     session.updateIssueDraft(421, { body: "" }, "pull")
@@ -125,7 +178,10 @@ describe("pull request conversation comments", () => {
 
   test("late PR state writes cannot mutate another repository", async () => {
     const pending = deferred<PullRequestDetail>()
-    const session = await setup({ pull: async () => ({ ...pull(), permissions: { comment: true, close: true } }), updatePullState: async () => pending.promise })
+    const session = await setup({
+      pull: async () => ({ ...pull(), permissions: { comment: true, close: true } }),
+      updatePullState: async () => pending.promise,
+    })
     session.updateIssueDraft(421, { body: "" }, "pull")
     const writing = session.submitIssueAction(421, "close", "pull")
     await expect(session.submitIssueAction(421, "close", "pull")).rejects.toThrow("already in progress")
@@ -140,7 +196,12 @@ describe("pull request conversation comments", () => {
   test("posts via issue comment loader once, guards pending drafts, and preserves PR context", async () => {
     const pending = deferred<IssueComment>()
     const calls: unknown[][] = []
-    const session = await setup({ createIssueComment: async (...args) => { calls.push(args); return pending.promise } })
+    const session = await setup({
+      createIssueComment: async (...args) => {
+        calls.push(args)
+        return pending.promise
+      },
+    })
     const before = session.pullDetail()!
     const posting = session.submitIssueAction(421, "comment", "pull")
     expect(session.issueAction(421, "pull").operation.status).toBe("loading")
@@ -150,7 +211,15 @@ describe("pull request conversation comments", () => {
     await expect(session.submitIssueAction(421, "comment", "pull")).rejects.toThrow("already in progress")
     pending.resolve(comment)
     expect(await posting).toEqual({ comment })
-    expect(calls).toEqual([[expect.objectContaining({ nameWithOwner: "owner/repo", id: githubDataFixture.repo.id, nodeId: githubDataFixture.repo.nodeId }), 421, comment.body, expect.any(Function), `owner/repo@${githubDataFixture.repo.id}#421:pull:comment`]])
+    expect(calls).toEqual([
+      [
+        expect.objectContaining({ nameWithOwner: "owner/repo", id: githubDataFixture.repo.id, nodeId: githubDataFixture.repo.nodeId }),
+        421,
+        comment.body,
+        expect.any(Function),
+        `owner/repo@${githubDataFixture.repo.id}#421:pull:comment`,
+      ],
+    ])
     expect(session.issueAction(421, "pull").body).toBe("")
     expect(session.pullDetail()?.resource.value).toMatchObject({ commentCount: 2, updatedAt: comment.createdAt })
     expect(session.pullDetail()?.comments.value?.items.at(-1)).toEqual(comment)
@@ -160,13 +229,24 @@ describe("pull request conversation comments", () => {
 
   test("errors retain draft; blank, missing loader and denied permission never write", async () => {
     let calls = 0
-    const session = await setup({ createIssueComment: async () => { calls++; throw new Error("Offline") } })
+    const session = await setup({
+      createIssueComment: async () => {
+        calls++
+        throw new Error("Offline")
+      },
+    })
     await expect(session.submitIssueAction(421, "comment", "pull")).rejects.toThrow("Offline")
     expect(session.issueAction(421, "pull")).toMatchObject({ body: comment.body, operation: { status: "error" } })
     session.updateIssueDraft(421, { body: "  \n " }, "pull")
     await expect(session.submitIssueAction(421, "comment", "pull")).rejects.toThrow("Write a comment")
     expect(calls).toBe(1)
-    const denied = await setup({ pull: async () => ({ ...pull(), permissions: { comment: false } }), createIssueComment: async () => { calls++; return comment } })
+    const denied = await setup({
+      pull: async () => ({ ...pull(), permissions: { comment: false } }),
+      createIssueComment: async () => {
+        calls++
+        return comment
+      },
+    })
     await expect(denied.submitIssueAction(421, "comment", "pull")).rejects.toThrow("permission")
     expect(denied.issueAction(421, "pull").body).toBe(comment.body)
     expect(calls).toBe(1)
@@ -179,8 +259,11 @@ describe("pull request conversation comments", () => {
     let calls = 0
     let refreshing = false
     const session = await setup({
-      pull: async () => refreshing ? header.promise : pull(),
-      createIssueComment: async () => { calls++; return comment },
+      pull: async () => (refreshing ? header.promise : pull()),
+      createIssueComment: async () => {
+        calls++
+        return comment
+      },
     })
     await expect(session.submitIssueAction(422, "comment", "pull")).rejects.toThrow("Wait for the pull request")
     refreshing = true
@@ -197,8 +280,14 @@ describe("pull request conversation comments", () => {
     let failReload = false
     let calls = 0
     const session = await setup({
-      pull: async () => { if (failReload) throw new Error("Access revoked"); return pull() },
-      createIssueComment: async () => { calls++; return comment },
+      pull: async () => {
+        if (failReload) throw new Error("Access revoked")
+        return pull()
+      },
+      createIssueComment: async () => {
+        calls++
+        return comment
+      },
     })
     failReload = true
     await session.loadPull(421)
@@ -232,7 +321,9 @@ describe("pull request conversation comments", () => {
 
   test("pending pagination retains confirmed comments, deduplicates server entries and sorts chronologically", async () => {
     const next = deferred<{ items: IssueComment[]; hasMore: boolean }>()
-    const session = await setup({ issueComments: async (_repo, _number, page = 1) => page === 2 ? next.promise : { items: [issueCommentsFixture[0]!], hasMore: true } })
+    const session = await setup({
+      issueComments: async (_repo, _number, page = 1) => (page === 2 ? next.promise : { items: [issueCommentsFixture[0]!], hasMore: true }),
+    })
     const pagination = session.loadMorePullComments()
     await session.submitIssueAction(421, "comment", "pull")
     next.resolve({ items: [comment, issueCommentsFixture[0]!], hasMore: false })
@@ -245,7 +336,7 @@ describe("pull request conversation comments", () => {
     let phase = "initial"
     const session = await setup({
       pull: async () => ({ ...pull(), commentCount: phase === "zero" ? 0 : 1 }),
-      issueComments: async () => phase === "reading" ? read.promise : { items: phase === "server" ? [comment] : [], hasMore: false },
+      issueComments: async () => (phase === "reading" ? read.promise : { items: phase === "server" ? [comment] : [], hasMore: false }),
     })
     phase = "reading"
     const refresh = session.loadPull(421)
@@ -270,7 +361,7 @@ describe("pull request conversation comments", () => {
     const write = deferred<IssueComment>()
     const header = deferred<PullRequestDetail>()
     let refresh = false
-    const session = await setup({ pull: async () => refresh ? header.promise : pull(), createIssueComment: async () => write.promise })
+    const session = await setup({ pull: async () => (refresh ? header.promise : pull()), createIssueComment: async () => write.promise })
     const posting = session.submitIssueAction(421, "comment", "pull")
     refresh = true
     const reloading = session.loadPull(421)
@@ -287,7 +378,10 @@ describe("pull request conversation comments", () => {
       const write = deferred<IssueComment>()
       const header = deferred<PullRequestDetail>()
       let refreshing = false
-      const session = await setup({ pull: async () => refreshing ? header.promise : pull(), createIssueComment: async () => write.promise })
+      const session = await setup({
+        pull: async () => (refreshing ? header.promise : pull()),
+        createIssueComment: async () => write.promise,
+      })
       const posting = session.submitIssueAction(421, "comment", "pull")
       refreshing = true
       const refresh = session.loadPull(421)
@@ -296,10 +390,20 @@ describe("pull request conversation comments", () => {
       expect(session.pullDetail()?.resource.status).toBe("loading")
       session.updateIssueDraft(421, { body: "Wait for refreshed permission" }, "pull")
       await expect(session.submitIssueAction(421, "comment", "pull")).rejects.toThrow("Wait for the pull request")
-      header.resolve({ ...pull(), state: "closed", title: "Fresh PR title", locked: true,
-        permissions: permission === undefined ? undefined : { comment: permission } })
+      header.resolve({
+        ...pull(),
+        state: "closed",
+        title: "Fresh PR title",
+        locked: true,
+        permissions: permission === undefined ? undefined : { comment: permission },
+      })
       await refresh
-      expect(session.pullDetail()?.resource.value).toMatchObject({ state: "closed", title: "Fresh PR title", locked: true, commentCount: 2 })
+      expect(session.pullDetail()?.resource.value).toMatchObject({
+        state: "closed",
+        title: "Fresh PR title",
+        locked: true,
+        commentCount: 2,
+      })
       expect(session.pullDetail()?.resource.value?.permissions?.comment).toBe(permission)
       session.updateIssueDraft(421, { body: "Do not post with stale permission" }, "pull")
       await expect(session.submitIssueAction(421, "comment", "pull")).rejects.toThrow("permission")
@@ -311,7 +415,7 @@ describe("pull request conversation comments", () => {
     let refreshing = false
     const updatedAt = "2026-06-02T00:00:00Z"
     const session = await setup({
-      pull: async () => refreshing ? { ...pull(), commentCount: 2, updatedAt } : pull(),
+      pull: async () => (refreshing ? { ...pull(), commentCount: 2, updatedAt } : pull()),
       issueComments: async () => ({ items: refreshing ? [issueCommentsFixture[0]!, comment] : [issueCommentsFixture[0]!], hasMore: false }),
       createIssueComment: async () => write.promise,
     })

@@ -27,12 +27,33 @@ test("rendered Hunk row IDs support side-aware clicks, ranges, context actions, 
   const [jump, setJump] = createSignal<ReviewAnchor & { id: number }>()
   const file = parseDiff({ kind: "patch", patch }).files[0]!.body!
   const rows = reviewRows(file, "split")
-  await render(() => <DiffScreen target={{ kind: "pull", number: 1 }}
-    resource={{ status: "ready", value: { kind: "patch", patch } }} interactive showScrollbar={false} onLoadFiles={() => {}}
-    onContextMenu={(_, items) => { menu = items }}
-    review={{ headSha: "head", comments: [{ id: "draft", body: "note", path: "review.txt", side: "RIGHT", line: 21 }],
-      onComment: (anchor) => comments.push(anchor), onOpenReview: () => {}, jump: jump() }} />, setup.renderer)
-  const settle = async () => { await setup.flush(); await setup.renderer.idle(); await setup.flush() }
+  await render(
+    () => (
+      <DiffScreen
+        target={{ kind: "pull", number: 1 }}
+        resource={{ status: "ready", value: { kind: "patch", patch } }}
+        interactive
+        showScrollbar={false}
+        onLoadFiles={() => {}}
+        onContextMenu={(_, items) => {
+          menu = items
+        }}
+        review={{
+          headSha: "head",
+          comments: [{ id: "draft", body: "note", path: "review.txt", side: "RIGHT", line: 21 }],
+          onComment: (anchor) => comments.push(anchor),
+          onOpenReview: () => {},
+          jump: jump(),
+        }}
+      />
+    ),
+    setup.renderer,
+  )
+  const settle = async () => {
+    await setup.flush()
+    await setup.renderer.idle()
+    await setup.flush()
+  }
   try {
     await settle()
     const context = setup.renderer.root.findDescendantById(rows[0]!.id)!
@@ -73,5 +94,7 @@ test("rendered Hunk row IDs support side-aware clicks, ranges, context actions, 
     setup.mockInput.pressKey("c")
     await settle()
     expect(comments).toHaveLength(before)
-  } finally { setup.renderer.destroy() }
+  } finally {
+    setup.renderer.destroy()
+  }
 })

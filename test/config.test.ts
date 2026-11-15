@@ -28,7 +28,24 @@ describe("config", () => {
   })
 
   test("uses defaults when the config file does not exist", async () => {
-    expect(await loadConfig("/path/that/does/not/exist.json")).toEqual({ showScrollbars: false, theme: "opengh", colorMode: "system", reducedMotion: false, markdownStyle: "rich", detailLayout: "centered", detailsPlacement: "auto", diffLayout: "auto", diffWrap: false, diffFullscreen: true, showStatusBarHints: false, showTabShortcuts: true, showTabCounts: true, hideDocumentsTab: false, compactHeader: false, iconStyle: "unicode" })
+    expect(await loadConfig("/path/that/does/not/exist.json")).toEqual({
+      showScrollbars: false,
+      theme: "opengh",
+      colorMode: "system",
+      reducedMotion: false,
+      markdownStyle: "rich",
+      detailLayout: "centered",
+      detailsPlacement: "auto",
+      diffLayout: "auto",
+      diffWrap: false,
+      diffFullscreen: true,
+      showStatusBarHints: false,
+      showTabShortcuts: true,
+      showTabCounts: true,
+      hideDocumentsTab: false,
+      compactHeader: false,
+      iconStyle: "unicode",
+    })
   })
 
   test("bounds config reads, rejects unsafe parents, and never creates missing directories", async () => {
@@ -40,15 +57,19 @@ describe("config", () => {
       await Bun.write(path, JSON.stringify({ unused: "x".repeat(64 * 1024) }))
       await expect(loadConfig(path)).rejects.toThrow("byte limit")
       await Bun.write(path, "private-config-marker")
-      try { await loadConfig(path); throw new Error("Invalid config accepted") }
-      catch (error) {
+      try {
+        await loadConfig(path)
+        throw new Error("Invalid config accepted")
+      } catch (error) {
         expect(error).toBeInstanceOf(ConfigFileError)
         expect((error as Error).message).not.toContain("private-config-marker")
       }
       await Bun.write(path, "{}")
       await chmod(directory, 0o777)
       await expect(loadConfig(path)).rejects.toThrow("Untrusted writable directory")
-    } finally { await rm(directory, { recursive: true, force: true }) }
+    } finally {
+      await rm(directory, { recursive: true, force: true })
+    }
   })
 
   test.skipIf(process.platform === "win32")("rejects FIFO config inputs promptly, including through a settings symlink", async () => {
@@ -64,14 +85,22 @@ describe("config", () => {
     try {
       for (const linked of [true, false]) {
         if (linked) await symlink("input.fifo", path)
-        else { await rm(path); await Bun.$`mkfifo ${path}` }
+        else {
+          await rm(path)
+          await Bun.$`mkfifo ${path}`
+        }
         const child = Bun.spawn([process.execPath, "-e", script], {
-          env: { ...process.env, XDG_CONFIG_HOME: directory }, stdout: "pipe", stderr: "pipe",
+          env: { ...process.env, XDG_CONFIG_HOME: directory },
+          stdout: "pipe",
+          stderr: "pipe",
         })
         const output = new Response(child.stdout).text()
         const error = new Response(child.stderr).text()
         let timedOut = false
-        const timeout = setTimeout(() => { timedOut = true; child.kill("SIGKILL") }, 2000)
+        const timeout = setTimeout(() => {
+          timedOut = true
+          child.kill("SIGKILL")
+        }, 2000)
         try {
           expect(await child.exited).toBe(0)
           expect(timedOut).toBe(false)
@@ -83,18 +112,92 @@ describe("config", () => {
           await child.exited
         }
       }
-    } finally { await rm(directory, { recursive: true, force: true }) }
+    } finally {
+      await rm(directory, { recursive: true, force: true })
+    }
   })
 
   test("loads valid fields and defaults invalid fields", async () => {
     const directory = (await Bun.$`mktemp -d`.text()).trim()
     const enabledPath = join(directory, "enabled.json")
     const invalidPath = join(directory, "invalid.json")
-    await Bun.write(enabledPath, "\ufeff" + JSON.stringify({ showScrollbars: true, theme: "nord", colorMode: "system", reducedMotion: true, markdownStyle: "minimal", showTabShortcuts: false, showTabCounts: false, hideDocumentsTab: true, compactHeader: true, detailsPlacement: "inline", iconStyle: "none", diffLayout: "unified", diffWrap: true, unknown: "ignored" }))
-    await Bun.write(invalidPath, JSON.stringify({ showScrollbars: "yes", theme: "unknown", colorMode: "system", reducedMotion: "yes", markdownStyle: "invalid", detailLayout: "invalid", detailsPlacement: "invalid", showStatusBarHints: "no", iconStyle: "invalid", compactHeader: "yes", showTabShortcuts: "yes", showTabCounts: "yes", hideDocumentsTab: "yes", diffLayout: "stacked", diffWrap: "yes" }))
+    await Bun.write(
+      enabledPath,
+      "\ufeff" +
+        JSON.stringify({
+          showScrollbars: true,
+          theme: "nord",
+          colorMode: "system",
+          reducedMotion: true,
+          markdownStyle: "minimal",
+          showTabShortcuts: false,
+          showTabCounts: false,
+          hideDocumentsTab: true,
+          compactHeader: true,
+          detailsPlacement: "inline",
+          iconStyle: "none",
+          diffLayout: "unified",
+          diffWrap: true,
+          unknown: "ignored",
+        }),
+    )
+    await Bun.write(
+      invalidPath,
+      JSON.stringify({
+        showScrollbars: "yes",
+        theme: "unknown",
+        colorMode: "system",
+        reducedMotion: "yes",
+        markdownStyle: "invalid",
+        detailLayout: "invalid",
+        detailsPlacement: "invalid",
+        showStatusBarHints: "no",
+        iconStyle: "invalid",
+        compactHeader: "yes",
+        showTabShortcuts: "yes",
+        showTabCounts: "yes",
+        hideDocumentsTab: "yes",
+        diffLayout: "stacked",
+        diffWrap: "yes",
+      }),
+    )
 
-    expect(await loadConfig(enabledPath)).toEqual({ showScrollbars: true, theme: "nord", colorMode: "system", reducedMotion: true, markdownStyle: "minimal", detailLayout: "centered", detailsPlacement: "inline", diffLayout: "unified", diffWrap: true, diffFullscreen: true, showStatusBarHints: false, showTabShortcuts: false, showTabCounts: false, hideDocumentsTab: true, compactHeader: true, iconStyle: "none" })
-    expect(await loadConfig(invalidPath)).toEqual({ showScrollbars: false, theme: "opengh", colorMode: "system", reducedMotion: false, markdownStyle: "rich", detailLayout: "centered", detailsPlacement: "auto", diffLayout: "auto", diffWrap: false, diffFullscreen: true, showStatusBarHints: false, showTabShortcuts: true, showTabCounts: true, hideDocumentsTab: false, compactHeader: false, iconStyle: "unicode" })
+    expect(await loadConfig(enabledPath)).toEqual({
+      showScrollbars: true,
+      theme: "nord",
+      colorMode: "system",
+      reducedMotion: true,
+      markdownStyle: "minimal",
+      detailLayout: "centered",
+      detailsPlacement: "inline",
+      diffLayout: "unified",
+      diffWrap: true,
+      diffFullscreen: true,
+      showStatusBarHints: false,
+      showTabShortcuts: false,
+      showTabCounts: false,
+      hideDocumentsTab: true,
+      compactHeader: true,
+      iconStyle: "none",
+    })
+    expect(await loadConfig(invalidPath)).toEqual({
+      showScrollbars: false,
+      theme: "opengh",
+      colorMode: "system",
+      reducedMotion: false,
+      markdownStyle: "rich",
+      detailLayout: "centered",
+      detailsPlacement: "auto",
+      diffLayout: "auto",
+      diffWrap: false,
+      diffFullscreen: true,
+      showStatusBarHints: false,
+      showTabShortcuts: true,
+      showTabCounts: true,
+      hideDocumentsTab: false,
+      compactHeader: false,
+      iconStyle: "unicode",
+    })
   })
 
   test("icon styles default to Unicode and preserve explicit choices", async () => {
@@ -109,7 +212,9 @@ describe("config", () => {
         await saveConfig({ ...defaultConfig, iconStyle }, path)
         expect((await loadConfig(path)).iconStyle).toBe(iconStyle)
       }
-    } finally { await rm(directory, { recursive: true, force: true }) }
+    } finally {
+      await rm(directory, { recursive: true, force: true })
+    }
   })
 
   test("fullscreen diffs default on, reject non-boolean values, and preserve an explicit off value on save", async () => {
@@ -128,7 +233,9 @@ describe("config", () => {
         expect((await loadConfig(path)).diffFullscreen).toBe(diffFullscreen)
         expect((await Bun.file(path).json()).diffFullscreen).toBe(diffFullscreen)
       }
-    } finally { await rm(directory, { recursive: true, force: true }) }
+    } finally {
+      await rm(directory, { recursive: true, force: true })
+    }
   })
 
   test("migrates github-light and persists explicit color modes", async () => {
@@ -138,7 +245,7 @@ describe("config", () => {
       await Bun.write(path, JSON.stringify({ theme: "github-light" }))
       expect(await loadConfig(path)).toMatchObject({ theme: "github", colorMode: "light" })
       for (const colorMode of ["system", "dark", "light"] as const) {
-        const config = { ...await loadConfig(path), colorMode }
+        const config = { ...(await loadConfig(path)), colorMode }
         await saveConfig(config, path)
         expect(await loadConfig(path)).toEqual(config)
       }
@@ -165,21 +272,85 @@ describe("config", () => {
     const directory = (await Bun.$`mktemp -d`.text()).trim()
     const path = join(directory, "nested", "config.json")
 
-    await saveConfig({ showScrollbars: false, theme: "github", colorMode: "system", reducedMotion: false, markdownStyle: "rich", detailLayout: "centered", detailsPlacement: "auto", diffLayout: "auto", diffWrap: false, diffFullscreen: true, showStatusBarHints: true, showTabShortcuts: true, showTabCounts: true, hideDocumentsTab: false, compactHeader: false, iconStyle: "unicode" }, path)
+    await saveConfig(
+      {
+        showScrollbars: false,
+        theme: "github",
+        colorMode: "system",
+        reducedMotion: false,
+        markdownStyle: "rich",
+        detailLayout: "centered",
+        detailsPlacement: "auto",
+        diffLayout: "auto",
+        diffWrap: false,
+        diffFullscreen: true,
+        showStatusBarHints: true,
+        showTabShortcuts: true,
+        showTabCounts: true,
+        hideDocumentsTab: false,
+        compactHeader: false,
+        iconStyle: "unicode",
+      },
+      path,
+    )
     expect((await stat(path)).mode & 0o777).toBe(0o600)
     expect((await stat(join(directory, "nested"))).mode & 0o777).toBe(0o700)
-    const enabled = { ...await loadConfig(path), reducedMotion: true, markdownStyle: "minimal" as const, detailsPlacement: "inline" as const }
+    const enabled = {
+      ...(await loadConfig(path)),
+      reducedMotion: true,
+      markdownStyle: "minimal" as const,
+      detailsPlacement: "inline" as const,
+    }
     await saveConfig(enabled, path)
     expect(await loadConfig(path)).toEqual(enabled)
     for (const mode of [0o600, 0o660]) {
       await chmod(path, mode)
-      await saveConfig({ showScrollbars: true, theme: "dracula", colorMode: "system", reducedMotion: false, markdownStyle: "rich", detailLayout: "wide", detailsPlacement: "auto", diffLayout: "auto", diffWrap: false, diffFullscreen: true, showStatusBarHints: false, showTabShortcuts: true, showTabCounts: false, hideDocumentsTab: false, compactHeader: false, iconStyle: "nerd" }, path)
+      await saveConfig(
+        {
+          showScrollbars: true,
+          theme: "dracula",
+          colorMode: "system",
+          reducedMotion: false,
+          markdownStyle: "rich",
+          detailLayout: "wide",
+          detailsPlacement: "auto",
+          diffLayout: "auto",
+          diffWrap: false,
+          diffFullscreen: true,
+          showStatusBarHints: false,
+          showTabShortcuts: true,
+          showTabCounts: false,
+          hideDocumentsTab: false,
+          compactHeader: false,
+          iconStyle: "nerd",
+        },
+        path,
+      )
       expect((await stat(path)).mode & 0o777).toBe(mode)
     }
 
     expect(await readdir(join(directory, "nested"))).toEqual(["config.json"])
-    expect(await loadConfig(path)).toEqual({ showScrollbars: true, theme: "dracula", colorMode: "system", reducedMotion: false, markdownStyle: "rich", detailLayout: "wide", detailsPlacement: "auto", diffLayout: "auto", diffWrap: false, diffFullscreen: true, showStatusBarHints: false, showTabShortcuts: true, showTabCounts: false, hideDocumentsTab: false, compactHeader: false, iconStyle: "nerd" })
-    expect(await Bun.file(path).text()).toBe('{\n  "showScrollbars": true,\n  "theme": "dracula",\n  "colorMode": "system",\n  "reducedMotion": false,\n  "markdownStyle": "rich",\n  "detailLayout": "wide",\n  "detailsPlacement": "auto",\n  "diffLayout": "auto",\n  "diffWrap": false,\n  "diffFullscreen": true,\n  "showStatusBarHints": false,\n  "showTabShortcuts": true,\n  "showTabCounts": false,\n  "hideDocumentsTab": false,\n  "compactHeader": false,\n  "iconStyle": "nerd"\n}\n')
+    expect(await loadConfig(path)).toEqual({
+      showScrollbars: true,
+      theme: "dracula",
+      colorMode: "system",
+      reducedMotion: false,
+      markdownStyle: "rich",
+      detailLayout: "wide",
+      detailsPlacement: "auto",
+      diffLayout: "auto",
+      diffWrap: false,
+      diffFullscreen: true,
+      showStatusBarHints: false,
+      showTabShortcuts: true,
+      showTabCounts: false,
+      hideDocumentsTab: false,
+      compactHeader: false,
+      iconStyle: "nerd",
+    })
+    expect(await Bun.file(path).text()).toBe(
+      '{\n  "showScrollbars": true,\n  "theme": "dracula",\n  "colorMode": "system",\n  "reducedMotion": false,\n  "markdownStyle": "rich",\n  "detailLayout": "wide",\n  "detailsPlacement": "auto",\n  "diffLayout": "auto",\n  "diffWrap": false,\n  "diffFullscreen": true,\n  "showStatusBarHints": false,\n  "showTabShortcuts": true,\n  "showTabCounts": false,\n  "hideDocumentsTab": false,\n  "compactHeader": false,\n  "iconStyle": "nerd"\n}\n',
+    )
   })
 
   test("saves through relative symlinks without replacing them", async () => {
@@ -187,11 +358,48 @@ describe("config", () => {
     const target = join(directory, "nested", "config.json")
     const link = join(directory, "config.json")
     try {
-      await saveConfig({ showScrollbars: false, theme: "github", colorMode: "system", reducedMotion: false, markdownStyle: "rich", detailLayout: "centered", detailsPlacement: "auto", diffLayout: "auto", diffWrap: false, diffFullscreen: true, showStatusBarHints: true, showTabShortcuts: true, showTabCounts: true, hideDocumentsTab: false, compactHeader: false, iconStyle: "unicode" }, target)
+      await saveConfig(
+        {
+          showScrollbars: false,
+          theme: "github",
+          colorMode: "system",
+          reducedMotion: false,
+          markdownStyle: "rich",
+          detailLayout: "centered",
+          detailsPlacement: "auto",
+          diffLayout: "auto",
+          diffWrap: false,
+          diffFullscreen: true,
+          showStatusBarHints: true,
+          showTabShortcuts: true,
+          showTabCounts: true,
+          hideDocumentsTab: false,
+          compactHeader: false,
+          iconStyle: "unicode",
+        },
+        target,
+      )
       await chmod(target, 0o600)
       await chmod(join(directory, "nested"), 0o755)
       await symlink(join("nested", "config.json"), link)
-      const config = { showScrollbars: true, theme: "nord" as const, colorMode: "system" as const, reducedMotion: false, markdownStyle: "rich" as const, detailLayout: "centered" as const, detailsPlacement: "auto" as const, diffLayout: "auto" as const, diffWrap: false, diffFullscreen: true, showStatusBarHints: true, showTabShortcuts: true, showTabCounts: true, hideDocumentsTab: false, compactHeader: false, iconStyle: "unicode" as const }
+      const config = {
+        showScrollbars: true,
+        theme: "nord" as const,
+        colorMode: "system" as const,
+        reducedMotion: false,
+        markdownStyle: "rich" as const,
+        detailLayout: "centered" as const,
+        detailsPlacement: "auto" as const,
+        diffLayout: "auto" as const,
+        diffWrap: false,
+        diffFullscreen: true,
+        showStatusBarHints: true,
+        showTabShortcuts: true,
+        showTabCounts: true,
+        hideDocumentsTab: false,
+        compactHeader: false,
+        iconStyle: "unicode" as const,
+      }
       await saveConfig(config, link)
 
       expect((await lstat(link)).isSymbolicLink()).toBe(true)
@@ -214,7 +422,9 @@ describe("config", () => {
       await mkdir(shared)
       await chmod(shared, 0o777)
       await symlink(join(directory, "nested"), join(shared, "trusted-link"))
-      await expect(saveConfig({ ...config, theme: "github" }, join(shared, "trusted-link", "config.json"))).rejects.toBeInstanceOf(ConfigFileError)
+      await expect(saveConfig({ ...config, theme: "github" }, join(shared, "trusted-link", "config.json"))).rejects.toBeInstanceOf(
+        ConfigFileError,
+      )
       const hop = join(shared, "hop.json")
       await symlink(target, hop)
       const chain = join(directory, "chain.json")
@@ -232,22 +442,84 @@ describe("config", () => {
     const path = join(parent, "config.json")
     await Bun.write(parent, "file")
 
-    const save = saveConfig({ showScrollbars: false, theme: "github", colorMode: "system", reducedMotion: false, markdownStyle: "rich", detailLayout: "centered", detailsPlacement: "auto", diffLayout: "auto", diffWrap: false, diffFullscreen: true, showStatusBarHints: true, showTabShortcuts: true, showTabCounts: true, hideDocumentsTab: false, compactHeader: false, iconStyle: "unicode" }, path)
+    const save = saveConfig(
+      {
+        showScrollbars: false,
+        theme: "github",
+        colorMode: "system",
+        reducedMotion: false,
+        markdownStyle: "rich",
+        detailLayout: "centered",
+        detailsPlacement: "auto",
+        diffLayout: "auto",
+        diffWrap: false,
+        diffFullscreen: true,
+        showStatusBarHints: true,
+        showTabShortcuts: true,
+        showTabCounts: true,
+        hideDocumentsTab: false,
+        compactHeader: false,
+        iconStyle: "unicode",
+      },
+      path,
+    )
     await expect(save).rejects.toBeInstanceOf(ConfigFileError)
     await expect(save).rejects.toMatchObject({ operation: "save", path })
 
     const destination = join(directory, "config.json")
     await mkdir(destination)
     await Bun.write(join(destination, "keep"), "untouched")
-    await expect(saveConfig({ showScrollbars: true, theme: "nord", colorMode: "system", reducedMotion: false, markdownStyle: "rich", detailLayout: "centered", detailsPlacement: "auto", diffLayout: "auto", diffWrap: false, diffFullscreen: true, showStatusBarHints: true, showTabShortcuts: true, showTabCounts: true, hideDocumentsTab: false, compactHeader: false, iconStyle: "unicode" }, destination))
-      .rejects.toMatchObject({ operation: "save", path: destination })
+    await expect(
+      saveConfig(
+        {
+          showScrollbars: true,
+          theme: "nord",
+          colorMode: "system",
+          reducedMotion: false,
+          markdownStyle: "rich",
+          detailLayout: "centered",
+          detailsPlacement: "auto",
+          diffLayout: "auto",
+          diffWrap: false,
+          diffFullscreen: true,
+          showStatusBarHints: true,
+          showTabShortcuts: true,
+          showTabCounts: true,
+          hideDocumentsTab: false,
+          compactHeader: false,
+          iconStyle: "unicode",
+        },
+        destination,
+      ),
+    ).rejects.toMatchObject({ operation: "save", path: destination })
     expect(await Bun.file(join(destination, "keep")).text()).toBe("untouched")
     expect((await readdir(directory)).sort()).toEqual(["config.json", "not-a-directory"])
 
     const brokenLink = join(directory, "broken.json")
     await symlink("missing.json", brokenLink)
-    await expect(saveConfig({ showScrollbars: false, theme: "github", colorMode: "system", reducedMotion: false, markdownStyle: "rich", detailLayout: "centered", detailsPlacement: "auto", diffLayout: "auto", diffWrap: false, diffFullscreen: true, showStatusBarHints: true, showTabShortcuts: true, showTabCounts: true, hideDocumentsTab: false, compactHeader: false, iconStyle: "unicode" }, brokenLink))
-      .rejects.toMatchObject({ operation: "save", path: brokenLink })
+    await expect(
+      saveConfig(
+        {
+          showScrollbars: false,
+          theme: "github",
+          colorMode: "system",
+          reducedMotion: false,
+          markdownStyle: "rich",
+          detailLayout: "centered",
+          detailsPlacement: "auto",
+          diffLayout: "auto",
+          diffWrap: false,
+          diffFullscreen: true,
+          showStatusBarHints: true,
+          showTabShortcuts: true,
+          showTabCounts: true,
+          hideDocumentsTab: false,
+          compactHeader: false,
+          iconStyle: "unicode",
+        },
+        brokenLink,
+      ),
+    ).rejects.toMatchObject({ operation: "save", path: brokenLink })
     expect((await lstat(brokenLink)).isSymbolicLink()).toBe(true)
     expect(await readlink(brokenLink)).toBe("missing.json")
     expect((await readdir(directory)).sort()).toEqual(["broken.json", "config.json", "not-a-directory"])

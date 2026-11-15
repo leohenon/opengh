@@ -123,11 +123,37 @@ export type ResolvedKeybindings = Record<KeyAction, string[]>
 export const keyActions = Object.keys(keybindingDefinitions) as KeyAction[]
 
 const aliases: Record<string, string> = {
-  return: "enter", kpenter: "enter", linefeed: "enter", esc: "escape", spacebar: "space",
-  pgup: "pageup", pgdn: "pagedown", del: "delete", plus: "+",
-  arrowup: "up", arrowdown: "down", arrowleft: "left", arrowright: "right",
+  return: "enter",
+  kpenter: "enter",
+  linefeed: "enter",
+  esc: "escape",
+  spacebar: "space",
+  pgup: "pageup",
+  pgdn: "pagedown",
+  del: "delete",
+  plus: "+",
+  arrowup: "up",
+  arrowdown: "down",
+  arrowleft: "left",
+  arrowright: "right",
 }
-const namedKeys = new Set(["enter", "escape", "space", "tab", "backspace", "delete", "insert", "home", "end", "pageup", "pagedown", "up", "down", "left", "right"])
+const namedKeys = new Set([
+  "enter",
+  "escape",
+  "space",
+  "tab",
+  "backspace",
+  "delete",
+  "insert",
+  "home",
+  "end",
+  "pageup",
+  "pagedown",
+  "up",
+  "down",
+  "left",
+  "right",
+])
 const modifiers = ["ctrl", "alt", "super", "hyper", "shift"] as const
 const modifierAliases: Record<string, string> = { control: "ctrl", meta: "alt", option: "alt", cmd: "super", command: "super" }
 export type KeyStroke = { name: string; ctrl: boolean; alt: boolean; super: boolean; hyper: boolean; shift: boolean }
@@ -141,15 +167,19 @@ export function parseKey(key: string): KeyStroke {
   const result: KeyStroke = { name: "", ctrl: false, alt: false, super: false, hyper: false, shift: false }
   for (const raw of parts) {
     const modifier = modifierAliases[raw.toLowerCase()] ?? raw.toLowerCase()
-    if (!modifiers.includes(modifier as typeof modifiers[number]) || result[modifier as typeof modifiers[number]])
+    if (!modifiers.includes(modifier as (typeof modifiers)[number]) || result[modifier as (typeof modifiers)[number]])
       throw new TypeError(`Invalid modifier in key ${JSON.stringify(key)}`)
-    result[modifier as typeof modifiers[number]] = true
+    result[modifier as (typeof modifiers)[number]] = true
   }
   if (Array.from(name).length === 1) {
     if (/[\p{C}\p{Z}]/u.test(name)) throw new TypeError(`Invalid character in key ${JSON.stringify(key)}`)
-    if (/^[A-Z]$/.test(name)) { result.shift = true; name = name.toLowerCase() }
+    if (/^[A-Z]$/.test(name)) {
+      result.shift = true
+      name = name.toLowerCase()
+    }
     // Printable punctuation is bound by its resulting character, not a keyboard layout.
-    if (result.shift && !/^[a-z]$/.test(name)) throw new TypeError(`Use the resulting character (e.g. ?), not Shift+punctuation, in ${JSON.stringify(key)}`)
+    if (result.shift && !/^[a-z]$/.test(name))
+      throw new TypeError(`Use the resulting character (e.g. ?), not Shift+punctuation, in ${JSON.stringify(key)}`)
   } else {
     name = name.toLowerCase()
     if (!namedKeys.has(name) && !/^f([1-9]|1[0-9]|2[0-4])$/.test(name)) throw new TypeError(`Unknown key ${JSON.stringify(rawName)}`)
@@ -164,8 +194,15 @@ export function canonicalKey(key: string): string {
 }
 
 export type KeyInput = {
-  name: string; sequence?: string; ctrl?: boolean; meta?: boolean; option?: boolean;
-  shift?: boolean; super?: boolean; hyper?: boolean; eventType?: string
+  name: string
+  sequence?: string
+  ctrl?: boolean
+  meta?: boolean
+  option?: boolean
+  shift?: boolean
+  super?: boolean
+  hyper?: boolean
+  eventType?: string
 }
 
 export function matchesKey(event: KeyInput, key: string): boolean {
@@ -177,34 +214,70 @@ export function matchesKey(event: KeyInput, key: string): boolean {
   const printable = Array.from(name).length === 1
   const shift = printable && !/^[a-zA-Z]$/.test(name) ? false : Boolean(event.shift || /^[A-Z]$/.test(name))
   const identity = !printable || /^[a-zA-Z]$/.test(name) ? name.toLowerCase() : name
-  return wanted.name === identity && wanted.ctrl === Boolean(event.ctrl)
-    && wanted.alt === Boolean(event.meta || event.option) && wanted.super === Boolean(event.super)
-    && wanted.hyper === Boolean(event.hyper) && wanted.shift === shift
+  return (
+    wanted.name === identity &&
+    wanted.ctrl === Boolean(event.ctrl) &&
+    wanted.alt === Boolean(event.meta || event.option) &&
+    wanted.super === Boolean(event.super) &&
+    wanted.hyper === Boolean(event.hyper) &&
+    wanted.shift === shift
+  )
 }
 
 export function normalizeKeybindings(value: unknown): KeybindingOverrides {
   if (value === undefined) return {}
-  if (!value || typeof value !== "object" || Array.isArray(value)) throw new TypeError("keybindings must be an object of action IDs and key arrays")
+  if (!value || typeof value !== "object" || Array.isArray(value))
+    throw new TypeError("keybindings must be an object of action IDs and key arrays")
   const result: KeybindingOverrides = {}
   for (const [action, keys] of Object.entries(value)) {
     if (!Object.hasOwn(keybindingDefinitions, action)) throw new TypeError(`Unknown keybinding action: ${action}`)
-    if (!Array.isArray(keys) || keys.some((key) => typeof key !== "string")) throw new TypeError(`keybindings.${action} must be an array of keys; use [] to disable`)
-    try { result[action as KeyAction] = [...new Set(keys.map(canonicalKey))] }
-    catch (error) { throw new TypeError(`keybindings.${action}: ${error instanceof Error ? error.message : error}`) }
+    if (!Array.isArray(keys) || keys.some((key) => typeof key !== "string"))
+      throw new TypeError(`keybindings.${action} must be an array of keys; use [] to disable`)
+    try {
+      result[action as KeyAction] = [...new Set(keys.map(canonicalKey))]
+    } catch (error) {
+      throw new TypeError(`keybindings.${action}: ${error instanceof Error ? error.message : error}`)
+    }
   }
   validateKeybindingConflicts(resolveKeybindings(result))
   return result
 }
 
 export function resolveKeybindings(overrides?: KeybindingOverrides): ResolvedKeybindings {
-  return Object.fromEntries(keyActions.map((action) => [action, overrides?.[action] ?? keybindingDefinitions[action].keys])) as ResolvedKeybindings
+  return Object.fromEntries(
+    keyActions.map((action) => [action, overrides?.[action] ?? keybindingDefinitions[action].keys]),
+  ) as ResolvedKeybindings
 }
 
 // Contexts describe simultaneously active application shortcuts. Dialog shortcuts deliberately
 // shadow editor keys (e.g. Ctrl+D discards a draft instead of deleting a character).
-const globalActions: KeyAction[] = ["global.quit", "global.interrupt", "global.reloadConfig", "global.help", "global.settings", "global.switchRepository"]
-const navigationActions: KeyAction[] = ["navigation.up", "navigation.down", "navigation.halfPageUp", "navigation.halfPageDown", "navigation.pageUp", "navigation.pageDown", "navigation.first", "navigation.last"]
-const tabs: KeyAction[] = ["navigation.previousTab", "navigation.nextTab", "navigation.tab1", "navigation.tab2", "navigation.tab3", "navigation.tab4", "navigation.tab5"]
+const globalActions: KeyAction[] = [
+  "global.quit",
+  "global.interrupt",
+  "global.reloadConfig",
+  "global.help",
+  "global.settings",
+  "global.switchRepository",
+]
+const navigationActions: KeyAction[] = [
+  "navigation.up",
+  "navigation.down",
+  "navigation.halfPageUp",
+  "navigation.halfPageDown",
+  "navigation.pageUp",
+  "navigation.pageDown",
+  "navigation.first",
+  "navigation.last",
+]
+const tabs: KeyAction[] = [
+  "navigation.previousTab",
+  "navigation.nextTab",
+  "navigation.tab1",
+  "navigation.tab2",
+  "navigation.tab3",
+  "navigation.tab4",
+  "navigation.tab5",
+]
 const items: KeyAction[] = ["navigation.activate", "item.open", "item.copy", "view.refresh"]
 const searchActions: KeyAction[] = ["search.start", "search.next", "search.previous"]
 const browse: KeyAction[] = [...globalActions, ...navigationActions, ...tabs, ...items, ...searchActions, "navigation.back"]
@@ -213,7 +286,13 @@ const picker: KeyAction[] = [...dialogs, "picker.up", "picker.down", "picker.acc
 const multilineActions: KeyAction[] = ["editor.newline", "editor.indent", "editor.outdent"]
 const editor = keyActions.filter((action) => action.startsWith("editor.") && !multilineActions.includes(action))
 export const keybindingContexts: Record<string, KeyAction[]> = {
-  overview: [...browse.filter((action) => action !== "navigation.activate"), "overview.nextDocument", "overview.previousDocument", "overview.toggleSidebar", "command.clone"],
+  overview: [
+    ...browse.filter((action) => action !== "navigation.activate"),
+    "overview.nextDocument",
+    "overview.previousDocument",
+    "overview.toggleSidebar",
+    "command.clone",
+  ],
   commits: [...browse, "item.diff", "commits.chooseBranch"],
   work: [...browse, "item.diff", "work.toggleState"],
   actions: browse,
@@ -221,25 +300,98 @@ export const keybindingContexts: Record<string, KeyAction[]> = {
   issue: [...browse, "navigation.back", "issue.comment", "issue.actions", "detail.references", "detail.toggleTimeline"],
   pull: [...browse, "navigation.back", "item.diff", "issue.comment", "issue.actions", "detail.references", "detail.toggleTimeline"],
   run: [...browse, "navigation.back"],
-  diffFiles: [...browse.filter((action) => !["global.settings", "navigation.previousTab", "navigation.nextTab", "item.copy"].includes(action)), "diff.openViewer", "navigation.back", "diff.previousFile", "diff.nextFile", "diff.toggleFiles", "diff.filterFiles", "diff.previousHunk", "diff.nextHunk", "diff.toggleLayout", "diff.toggleWrap", "diff.toggleComments", "diff.panLeft", "diff.panRight"],
-  diffBody: [...browse.filter((action) => !["global.settings", "navigation.previousTab", "navigation.nextTab", "item.copy"].includes(action)), "diff.openViewer", "navigation.back", "diff.previousFile", "diff.nextFile", "diff.toggleFiles", "diff.filterFiles", "diff.previousHunk", "diff.nextHunk", "diff.toggleLayout", "diff.toggleWrap", "diff.toggleComments", "diff.panLeft", "diff.panRight"],
+  diffFiles: [
+    ...browse.filter((action) => !["global.settings", "navigation.previousTab", "navigation.nextTab", "item.copy"].includes(action)),
+    "diff.openViewer",
+    "navigation.back",
+    "diff.previousFile",
+    "diff.nextFile",
+    "diff.toggleFiles",
+    "diff.filterFiles",
+    "diff.previousHunk",
+    "diff.nextHunk",
+    "diff.toggleLayout",
+    "diff.toggleWrap",
+    "diff.toggleComments",
+    "diff.panLeft",
+    "diff.panRight",
+  ],
+  diffBody: [
+    ...browse.filter((action) => !["global.settings", "navigation.previousTab", "navigation.nextTab", "item.copy"].includes(action)),
+    "diff.openViewer",
+    "navigation.back",
+    "diff.previousFile",
+    "diff.nextFile",
+    "diff.toggleFiles",
+    "diff.filterFiles",
+    "diff.previousHunk",
+    "diff.nextHunk",
+    "diff.toggleLayout",
+    "diff.toggleWrap",
+    "diff.toggleComments",
+    "diff.panLeft",
+    "diff.panRight",
+  ],
   picker,
   mentions: [...dialogs, "mention.up", "mention.down", "mention.accept"],
   // Ctrl+R reloads the user list here instead of the configuration.
   assignees: [...picker.filter((action) => action !== "global.reloadConfig"), "dialog.submit", "picker.reload"],
-  settings: [...dialogs, ...searchActions, "navigation.up", "navigation.down", "navigation.activate", "settings.previousValue", "settings.nextValue"],
+  settings: [
+    ...dialogs,
+    ...searchActions,
+    "navigation.up",
+    "navigation.down",
+    "navigation.activate",
+    "settings.previousValue",
+    "settings.nextValue",
+  ],
   references: [...dialogs, ...navigationActions, "navigation.activate", "item.open", "item.copy", "references.switchTab"],
   issueMenu: [...dialogs, "navigation.up", "navigation.down", "navigation.activate"],
   mergeMethods: [...dialogs, "navigation.up", "navigation.down", "navigation.activate", "dialog.submit"],
   mergeMessage: [...dialogs, "dialog.submit", "dialog.nextField", "dialog.previousField"],
   mergeConfirmation: [...dialogs, "dialog.confirm", "navigation.up", "navigation.down", "navigation.pageUp", "navigation.pageDown"],
   reviewMenu: [...dialogs, "navigation.up", "navigation.down", "navigation.activate"],
-  reviewWriter: [...dialogs, "dialog.submit", "dialog.discard", "dialog.togglePreview", "dialog.toggleExpanded", "dialog.externalEditor", "editor.indent", "editor.outdent"],
-  writer: [...dialogs, "dialog.submit", "dialog.discard", "dialog.togglePreview", "dialog.toggleExpanded", "dialog.externalEditor", "editor.indent", "editor.outdent"],
+  reviewWriter: [
+    ...dialogs,
+    "dialog.submit",
+    "dialog.discard",
+    "dialog.togglePreview",
+    "dialog.toggleExpanded",
+    "dialog.externalEditor",
+    "editor.indent",
+    "editor.outdent",
+  ],
+  writer: [
+    ...dialogs,
+    "dialog.submit",
+    "dialog.discard",
+    "dialog.togglePreview",
+    "dialog.toggleExpanded",
+    "dialog.externalEditor",
+    "editor.indent",
+    "editor.outdent",
+  ],
   closeReason: [...dialogs, "navigation.up", "navigation.down", "navigation.activate"],
-  closeIssue: [...dialogs, "dialog.submit", "dialog.discard", "dialog.togglePreview", "editor.indent", "editor.outdent", "dialog.toggleExpanded", "dialog.externalEditor"],
+  closeIssue: [
+    ...dialogs,
+    "dialog.submit",
+    "dialog.discard",
+    "dialog.togglePreview",
+    "editor.indent",
+    "editor.outdent",
+    "dialog.toggleExpanded",
+    "dialog.externalEditor",
+  ],
   duplicate: [...dialogs, "dialog.submit", "dialog.discard", "dialog.confirm"],
-  preview: [...dialogs, ...navigationActions, "dialog.submit", "dialog.discard", "dialog.togglePreview", "dialog.toggleExpanded", "dialog.externalEditor"],
+  preview: [
+    ...dialogs,
+    ...navigationActions,
+    "dialog.submit",
+    "dialog.discard",
+    "dialog.togglePreview",
+    "dialog.toggleExpanded",
+    "dialog.externalEditor",
+  ],
   confirmation: [...dialogs, "dialog.confirm"],
   help: [...dialogs, ...navigationActions, "global.quit", "global.help"],
   commandPreview: [...dialogs, "dialog.confirm", "command.editPath"],
@@ -252,19 +404,35 @@ export const keybindingContexts: Record<string, KeyAction[]> = {
 export function validateKeybindingConflicts(bindings: ResolvedKeybindings) {
   for (const [context, actions] of Object.entries(keybindingContexts)) {
     const seen = new Map<string, KeyAction>()
-    for (const action of actions) for (const key of bindings[action]) {
-      const canonical = canonicalKey(key)
-      const previous = seen.get(canonical)
-      if (previous && previous !== action) throw new TypeError(`Key ${formatKey(key)} is assigned to both ${previous} and ${action} in ${context}; remap or disable one`)
-      seen.set(canonical, action)
-    }
+    for (const action of actions)
+      for (const key of bindings[action]) {
+        const canonical = canonicalKey(key)
+        const previous = seen.get(canonical)
+        if (previous && previous !== action)
+          throw new TypeError(`Key ${formatKey(key)} is assigned to both ${previous} and ${action} in ${context}; remap or disable one`)
+        seen.set(canonical, action)
+      }
   }
 }
 
-const keyLabels: Record<string, string> = { escape: "esc", up: "↑", down: "↓", left: "←", right: "→", pageup: "PgUp", pagedown: "PgDn", backspace: "Backspace", delete: "Del", insert: "Ins", home: "Home", end: "End" }
+const keyLabels: Record<string, string> = {
+  escape: "esc",
+  up: "↑",
+  down: "↓",
+  left: "←",
+  right: "→",
+  pageup: "PgUp",
+  pagedown: "PgDn",
+  backspace: "Backspace",
+  delete: "Del",
+  insert: "Ins",
+  home: "Home",
+  end: "End",
+}
 export function formatKey(key: string) {
   const parsed = parseKey(key)
-  if (parsed.shift && /^[a-z]$/.test(parsed.name) && !parsed.ctrl && !parsed.alt && !parsed.super && !parsed.hyper) return parsed.name.toUpperCase()
+  if (parsed.shift && /^[a-z]$/.test(parsed.name) && !parsed.ctrl && !parsed.alt && !parsed.super && !parsed.hyper)
+    return parsed.name.toUpperCase()
   return [...modifiers.filter((modifier) => parsed[modifier]), keyLabels[parsed.name] ?? parsed.name].join("+")
 }
 
@@ -272,14 +440,16 @@ export function formatBinding(bindings: ResolvedKeybindings, action: KeyAction, 
   const keys = bindings[action]
   // Callers may hide self-evident keys (e.g. PgUp) from labels, but never leave an action unlabeled.
   const shown = exclude ? keys.filter((key) => !exclude(key)) : keys
-  return (all ? shown.length ? shown : keys : keys.slice(0, 1)).map(formatKey).join("/")
+  return (all ? (shown.length ? shown : keys) : keys.slice(0, 1)).map(formatKey).join("/")
 }
 
 export type HintEntry = readonly [KeyAction | readonly KeyAction[], string]
 export function formatHints(bindings: ResolvedKeybindings, entries: readonly HintEntry[]) {
-  return entries.flatMap(([action, label]) => {
-    const actions = typeof action === "string" ? [action] : action
-    const keys = [...new Set(actions.map((id) => formatBinding(bindings, id)).filter(Boolean))].join("/")
-    return keys ? [`${keys} ${label}`] : []
-  }).join(" · ")
+  return entries
+    .flatMap(([action, label]) => {
+      const actions = typeof action === "string" ? [action] : action
+      const keys = [...new Set(actions.map((id) => formatBinding(bindings, id)).filter(Boolean))].join("/")
+      return keys ? [`${keys} ${label}`] : []
+    })
+    .join(" · ")
 }

@@ -37,45 +37,108 @@ export function ContextMenu(props: {
   useKeyActions({ "dialog.close": () => props.onClose() }, { priority: 100, modal: true })
 
   return (
-    <box {...mouse} position="absolute" left={0} top={0} width={dimensions().width} height={dimensions().height} zIndex={200}
+    <box
+      {...mouse}
+      position="absolute"
+      left={0}
+      top={0}
+      width={dimensions().width}
+      height={dimensions().height}
+      zIndex={200}
       onMouseMove={(event) => {
         mouse.onMouseMove(event)
         const moved = lastPointer.x !== event.x || lastPointer.y !== event.y
         lastPointer = { x: event.x, y: event.y }
         // Measure the rendered menu, including terminal-edge clamping. Over/out from layout never dismiss.
         if (!moved || !menu?.width || !menu.height || event.isDragging) return
-        if (event.x < menu.x - CLOSE_MARGIN_X || event.x >= menu.x + menu.width + CLOSE_MARGIN_X
-          || event.y < menu.y - CLOSE_MARGIN_Y || event.y >= menu.y + menu.height + CLOSE_MARGIN_Y) {
+        if (
+          event.x < menu.x - CLOSE_MARGIN_X ||
+          event.x >= menu.x + menu.width + CLOSE_MARGIN_X ||
+          event.y < menu.y - CLOSE_MARGIN_Y ||
+          event.y >= menu.y + menu.height + CLOSE_MARGIN_Y
+        ) {
           backdrop = undefined
           props.onClose()
         }
       }}
-      onMouse={(event) => { event.stopPropagation(); if (event.type === "drag" || event.type === "scroll") backdrop = undefined }}
-      onMouseDown={(event) => { event.preventDefault(); backdrop = event.button === MouseButton.LEFT || event.button === MouseButton.RIGHT ? { x: event.x, y: event.y, button: event.button } : undefined }}
-      onMouseUp={(event) => { const start = backdrop; backdrop = undefined; if (start && start.button === event.button && start.x === event.x && start.y === event.y) props.onClose() }}>
-      <box id="context-menu" ref={(value) => { menu = value }} position="absolute" left={Math.max(0, Math.min(props.position.x, dimensions().width - width()))}
+      onMouse={(event) => {
+        event.stopPropagation()
+        if (event.type === "drag" || event.type === "scroll") backdrop = undefined
+      }}
+      onMouseDown={(event) => {
+        event.preventDefault()
+        backdrop =
+          event.button === MouseButton.LEFT || event.button === MouseButton.RIGHT
+            ? { x: event.x, y: event.y, button: event.button }
+            : undefined
+      }}
+      onMouseUp={(event) => {
+        const start = backdrop
+        backdrop = undefined
+        if (start && start.button === event.button && start.x === event.x && start.y === event.y) props.onClose()
+      }}
+    >
+      <box
+        id="context-menu"
+        ref={(value) => {
+          menu = value
+        }}
+        position="absolute"
+        left={Math.max(0, Math.min(props.position.x, dimensions().width - width()))}
         top={Math.max(0, Math.min(props.position.y, dimensions().height - height()))}
-        width={width()} height={height()} backgroundColor={panel()} flexDirection="column" overflow="hidden"
-        onMouseDown={(event) => { backdrop = undefined; event.stopPropagation() }}
-        onMouseUp={(event) => { backdrop = undefined; event.stopPropagation() }}>
+        width={width()}
+        height={height()}
+        backgroundColor={panel()}
+        flexDirection="column"
+        overflow="hidden"
+        onMouseDown={(event) => {
+          backdrop = undefined
+          event.stopPropagation()
+        }}
+        onMouseUp={(event) => {
+          backdrop = undefined
+          event.stopPropagation()
+        }}
+      >
         <scrollbox focusable={false} flexGrow={1} minHeight={0} scrollY scrollX={false} scrollbarOptions={{ visible: false }}>
-          <For each={props.items}>{(item, index) => {
-            const hover = mouseHover(() => !item.disabled, () => item)
-            return (
-              <>
-                <Show when={separateBack() && index() === props.items.length - 1}>
-                  <box height={1} flexShrink={0} />
-                </Show>
-                <box id={`context-menu-row-${index()}`} height={1} flexShrink={0} paddingX={1}
-                  backgroundColor={hover.hovered() ? colors.panelHover : panel()}
-                  {...mouseClick(() => activate(index()), () => !item.disabled, () => item, hover)}>
-                  <text height={1} wrapMode="none" selectable={false}
-                    fg={item.disabled ? colors.muted : hover.hovered() ? colors.blue : colors.text}
-                    attributes={hover.hovered() ? TextAttributes.BOLD : TextAttributes.NONE}>{item.label}</text>
-                </box>
-              </>
-            )
-          }}</For>
+          <For each={props.items}>
+            {(item, index) => {
+              const hover = mouseHover(
+                () => !item.disabled,
+                () => item,
+              )
+              return (
+                <>
+                  <Show when={separateBack() && index() === props.items.length - 1}>
+                    <box height={1} flexShrink={0} />
+                  </Show>
+                  <box
+                    id={`context-menu-row-${index()}`}
+                    height={1}
+                    flexShrink={0}
+                    paddingX={1}
+                    backgroundColor={hover.hovered() ? colors.panelHover : panel()}
+                    {...mouseClick(
+                      () => activate(index()),
+                      () => !item.disabled,
+                      () => item,
+                      hover,
+                    )}
+                  >
+                    <text
+                      height={1}
+                      wrapMode="none"
+                      selectable={false}
+                      fg={item.disabled ? colors.muted : hover.hovered() ? colors.blue : colors.text}
+                      attributes={hover.hovered() ? TextAttributes.BOLD : TextAttributes.NONE}
+                    >
+                      {item.label}
+                    </text>
+                  </box>
+                </>
+              )
+            }}
+          </For>
         </scrollbox>
       </box>
     </box>

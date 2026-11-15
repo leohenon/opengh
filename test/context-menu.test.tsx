@@ -17,11 +17,33 @@ test("context menu is mouse-only, has no initial selection, and keeps wheel and 
   const [open, setOpen] = createSignal(true)
   let selected = ""
   let background = 0
-  const view = await testRender(() => <box width="100%" height="100%" {...mouseClick(() => { background++ })}>
-    <Show when={open()}><ContextMenu position={{ x: 27, y: 11 }} items={[
-      { label: "Unavailable", disabled: true, run: () => {} }, { label: "Copy text", run: () => {} },
-    ]} onClose={() => setOpen(false)} onSelect={(item) => { selected = item.label; setOpen(false) }} /></Show>
-  </box>, { width: 28, height: 12 })
+  const view = await testRender(
+    () => (
+      <box
+        width="100%"
+        height="100%"
+        {...mouseClick(() => {
+          background++
+        })}
+      >
+        <Show when={open()}>
+          <ContextMenu
+            position={{ x: 27, y: 11 }}
+            items={[
+              { label: "Unavailable", disabled: true, run: () => {} },
+              { label: "Copy text", run: () => {} },
+            ]}
+            onClose={() => setOpen(false)}
+            onSelect={(item) => {
+              selected = item.label
+              setOpen(false)
+            }}
+          />
+        </Show>
+      </box>
+    ),
+    { width: 28, height: 12 },
+  )
   try {
     await view.flush()
     const menu = view.renderer.root.findDescendantById("context-menu")!
@@ -72,20 +94,35 @@ test("context menu is mouse-only, has no initial selection, and keeps wheel and 
     await view.mockMouse.click(0, 0)
     expect(open()).toBe(false)
     expect(background).toBe(0)
-  } finally { view.renderer.destroy() }
+  } finally {
+    view.renderer.destroy()
+  }
 })
 
 test("context menus are compact, highlight edge to edge, and separate Back without making the gap clickable", async () => {
   const [name, setName] = createSignal("opengh")
   const [items, setItems] = createSignal([
-    { label: "React", run: () => {} }, { label: "Copy text", run: () => {} },
-    { label: "Add comment", run: () => {} }, { label: "Back", run: () => {} },
+    { label: "React", run: () => {} },
+    { label: "Copy text", run: () => {} },
+    { label: "Add comment", run: () => {} },
+    { label: "Back", run: () => {} },
   ])
   let selected = ""
-  const view = await testRender(() => <ThemeProvider name={name()}>
-    <ContextMenu position={{ x: 3, y: 2 }} items={items()}
-      onClose={() => {}} onSelect={(item) => { selected = item.label }} />
-  </ThemeProvider>, { width: 40, height: 14 })
+  const view = await testRender(
+    () => (
+      <ThemeProvider name={name()}>
+        <ContextMenu
+          position={{ x: 3, y: 2 }}
+          items={items()}
+          onClose={() => {}}
+          onSelect={(item) => {
+            selected = item.label
+          }}
+        />
+      </ThemeProvider>
+    ),
+    { width: 40, height: 14 },
+  )
   try {
     await view.flush()
     const menu = view.renderer.root.findDescendantById("context-menu") as BoxRenderable
@@ -109,7 +146,13 @@ test("context menus are compact, highlight edge to edge, and separate Back witho
     expect(label.fg).toEqual(RGBA.fromHex(appColors(resolveTheme("opengh")).blue))
     expect(selected).toBe("")
     const gapY = row(2).y + 1
-    expect(view.captureCharFrame().split("\n")[gapY]!.slice(menu.x, menu.x + menu.width).trim()).toBe("")
+    expect(
+      view
+        .captureCharFrame()
+        .split("\n")
+        [gapY]!.slice(menu.x, menu.x + menu.width)
+        .trim(),
+    ).toBe("")
     await view.mockMouse.moveTo(menu.x + 1, gapY)
     await view.mockMouse.click(menu.x + 1, gapY)
     await view.flush()
@@ -130,7 +173,9 @@ test("context menus are compact, highlight edge to edge, and separate Back witho
     expect(row(0).y).toBe(menu.y)
     await clickControl(view, "context-menu-row-0")
     expect(selected).toBe("Back")
-  } finally { view.renderer.destroy() }
+  } finally {
+    view.renderer.destroy()
+  }
 })
 
 test("context menus dismiss beyond a movement safe zone, not on keyboard or stationary layout updates", async () => {
@@ -139,11 +184,35 @@ test("context menus dismiss beyond a movement safe zone, not on keyboard or stat
   let closed = 0
   let activated = 0
   let background = 0
-  const view = await testRender(() => <box width="100%" height="100%" {...mouseClick(() => { background++ })}>
-    <Show when={open()}><ContextMenu position={position()} items={[
-      { label: "Open", run: () => {} }, { label: "Copy URL", run: () => {} },
-    ]} onClose={() => { closed++; setOpen(false) }} onSelect={() => { activated++ }} /></Show>
-  </box>, { width: 80, height: 24 })
+  const view = await testRender(
+    () => (
+      <box
+        width="100%"
+        height="100%"
+        {...mouseClick(() => {
+          background++
+        })}
+      >
+        <Show when={open()}>
+          <ContextMenu
+            position={position()}
+            items={[
+              { label: "Open", run: () => {} },
+              { label: "Copy URL", run: () => {} },
+            ]}
+            onClose={() => {
+              closed++
+              setOpen(false)
+            }}
+            onSelect={() => {
+              activated++
+            }}
+          />
+        </Show>
+      </box>
+    ),
+    { width: 80, height: 24 },
+  )
   try {
     await view.flush()
     const menu = view.renderer.root.findDescendantById("context-menu")!
@@ -173,7 +242,9 @@ test("context menus dismiss beyond a movement safe zone, not on keyboard or stat
     expect(closed).toBe(1)
     expect(activated).toBe(0)
     expect(background).toBe(0)
-  } finally { view.renderer.destroy() }
+  } finally {
+    view.renderer.destroy()
+  }
 })
 
 test("row context menus use the clicked subject, preserve left clicks, and reject removed targets", async () => {
@@ -183,13 +254,32 @@ test("row context menus use the clicked subject, preserve left clicks, and rejec
   const loads: number[] = []
   const runLoads: number[] = []
   let commits = 0
-  const view = await testRender(() => <App data={data} operations={repositoryOperationsFixture}
-    config={{ ...defaultConfig, showStatusBarHints: true }}
-    onLoadCommit={async () => { commits++ }} onLoadIssue={async (number) => { loads.push(number) }}
-    onLoadRun={async (id) => { runLoads.push(id) }}
-    onCopyToClipboard={async (value) => { copied.push(value); return true }}
-    onOpenInBrowser={async (target) => { opened.push(target) }}
-  />, { width: 100, height: 30 })
+  const view = await testRender(
+    () => (
+      <App
+        data={data}
+        operations={repositoryOperationsFixture}
+        config={{ ...defaultConfig, showStatusBarHints: true }}
+        onLoadCommit={async () => {
+          commits++
+        }}
+        onLoadIssue={async (number) => {
+          loads.push(number)
+        }}
+        onLoadRun={async (id) => {
+          runLoads.push(id)
+        }}
+        onCopyToClipboard={async (value) => {
+          copied.push(value)
+          return true
+        }}
+        onOpenInBrowser={async (target) => {
+          opened.push(target)
+        }}
+      />
+    ),
+    { width: 100, height: 30 },
+  )
   const point = (text: string) => {
     const rows = view.captureCharFrame().split("\n")
     const y = rows.findIndex((row) => row.includes(text))
@@ -249,7 +339,10 @@ test("row context menus use the clicked subject, preserve left clicks, and rejec
     await clickControl(view, "context-menu-row-2")
     expect(opened.at(-1)).toBe(`actions/runs/${run.id}`)
     await right(run.title)
-    setData((current) => ({ ...current, runs: { status: "ready", value: { ...current.runs.value!, items: current.runs.value!.items.filter((item) => item.id !== run.id) } } }))
+    setData((current) => ({
+      ...current,
+      runs: { status: "ready", value: { ...current.runs.value!, items: current.runs.value!.items.filter((item) => item.id !== run.id) } },
+    }))
     await view.flush()
     expect(view.renderer.root.findDescendantById("context-menu")).toBeUndefined()
     expect(runLoads).toEqual([])
@@ -261,13 +354,21 @@ test("row context menus use the clicked subject, preserve left clicks, and rejec
     view.mockInput.pressEscape()
     await Bun.sleep(30)
     await view.flush()
-    expect(view.captureCharFrame().split("\n").find((row) => row.includes("▌"))).toContain(run.title)
+    expect(
+      view
+        .captureCharFrame()
+        .split("\n")
+        .find((row) => row.includes("▌")),
+    ).toContain(run.title)
     view.mockInput.pressKey("3")
     await view.flush()
     const issue = githubDataFixture.issues.open.value!.items[0]!
     await right(issue.title)
     expect(view.captureCharFrame()).not.toContain("View diff")
-    setData((current) => ({ ...current, issues: { ...current.issues, open: { status: "ready", value: { items: [], page: 1, hasMore: false } } } }))
+    setData((current) => ({
+      ...current,
+      issues: { ...current.issues, open: { status: "ready", value: { items: [], page: 1, hasMore: false } } },
+    }))
     await view.flush()
     expect(view.renderer.root.findDescendantById("context-menu")).toBeUndefined()
     expect(loads).toEqual([])
@@ -277,17 +378,32 @@ test("row context menus use the clicked subject, preserve left clicks, and rejec
     expect(loads).toEqual([issue.number])
     expect(view.renderer.root.findDescendantById("context-menu")).toBeUndefined()
     expect(view.renderer.root.findDescendantById("page-actions")).toBeUndefined()
-  } finally { view.renderer.destroy() }
+  } finally {
+    view.renderer.destroy()
+  }
 })
-
 
 test("repository documents and detail backgrounds expose context menus while existing popups stay isolated", async () => {
   const copied: string[] = []
   const [detail, setDetail] = createSignal<CommitDetailState>()
-  const view = await testRender(() => <App data={githubDataFixture} operations={repositoryOperationsFixture}
-    commitDetail={detail()} onLoadCommit={async (sha) => { setDetail({ sha, resource: { status: "ready", value: { ...commitDetailFixture, sha } } }) }}
-    onCopyToClipboard={async (value) => { copied.push(value); return true }}
-    onOpenInBrowser={async () => {}} />, { width: 110, height: 32 })
+  const view = await testRender(
+    () => (
+      <App
+        data={githubDataFixture}
+        operations={repositoryOperationsFixture}
+        commitDetail={detail()}
+        onLoadCommit={async (sha) => {
+          setDetail({ sha, resource: { status: "ready", value: { ...commitDetailFixture, sha } } })
+        }}
+        onCopyToClipboard={async (value) => {
+          copied.push(value)
+          return true
+        }}
+        onOpenInBrowser={async () => {}}
+      />
+    ),
+    { width: 110, height: 32 },
+  )
   try {
     await view.flush()
     const document = view.renderer.root.findDescendantById("overview-document-scroll")!
@@ -317,9 +433,10 @@ test("repository documents and detail backgrounds expose context menus while exi
     expect(view.renderer.root.findDescendantById("context-menu")).toBeUndefined()
     expect(detail()?.sha).toBe(commitDetailFixture.sha)
     expect(view.renderer.root.findDescendantById("commit-detail-scroll")).toBe(commit)
-  } finally { view.renderer.destroy() }
+  } finally {
+    view.renderer.destroy()
+  }
 })
-
 
 test("repository context Clone previews before running and follows local-repository and command guards", async () => {
   const [local, setLocal] = createSignal<LocalRepository>()
@@ -330,16 +447,28 @@ test("repository context Clone previews before running and follows local-reposit
     commands.push(spec)
     return { cancel: () => {}, result: Promise.resolve({ exitCode: 0, cancelled: false }) }
   }
-  const view = await testRender(() => <App data={githubDataFixture} operations={repositoryOperationsFixture}
-    cwd={cwd()} localRepository={local()} onRunCommand={runner() ? run : undefined} />,
-  { width: 100, height: 32 })
+  const view = await testRender(
+    () => (
+      <App
+        data={githubDataFixture}
+        operations={repositoryOperationsFixture}
+        cwd={cwd()}
+        localRepository={local()}
+        onRunCommand={runner() ? run : undefined}
+      />
+    ),
+    { width: 100, height: 32 },
+  )
   const right = async () => {
     await view.flush()
     const document = view.renderer.root.findDescendantById("overview-document-scroll")!
     await view.mockMouse.click(document.x + 3, document.y + 2, 2)
     await view.flush()
   }
-  const dismiss = async () => { await view.mockMouse.click(0, 0); await view.flush() }
+  const dismiss = async () => {
+    await view.mockMouse.click(0, 0)
+    await view.flush()
+  }
   try {
     await right()
     expect(view.captureCharFrame()).toContain("Clone repository")
@@ -354,9 +483,12 @@ test("repository context Clone previews before running and follows local-reposit
     await right()
     await clickControl(view, "context-menu-row-2")
     await clickControl(view, "command-confirm")
-    expect(commands).toEqual([{
-      args: ["gh", "repo", "clone", `github.com/${githubDataFixture.repo.nameWithOwner}`, "/tmp/opentui", "--", "--progress"], cwd: "/tmp",
-    }])
+    expect(commands).toEqual([
+      {
+        args: ["gh", "repo", "clone", `github.com/${githubDataFixture.repo.nameWithOwner}`, "/tmp/opentui", "--", "--progress"],
+        cwd: "/tmp",
+      },
+    ])
     await dismiss()
     await right()
     setLocal({ directory: "/tmp/opentui", repository: githubDataFixture.repo.nameWithOwner.toUpperCase() })
@@ -379,7 +511,9 @@ test("repository context Clone previews before running and follows local-reposit
     await right()
     expect(view.captureCharFrame()).not.toContain("Clone repository")
     expect(commands).toHaveLength(1)
-  } finally { view.renderer.destroy() }
+  } finally {
+    view.renderer.destroy()
+  }
 })
 
 test("message comment actions follow permission/pending guards and reopen the existing retained draft", async () => {
@@ -387,23 +521,54 @@ test("message comment actions follow permission/pending guards and reopen the ex
   const [action, setAction] = createSignal<IssueActionState>({ body: "Retained draft", reason: "completed", operation: { status: "idle" } })
   const prepared: Array<{ number: number; kind: string }> = []
   let submitted = 0
-  const view = await testRender(() => <App data={githubDataFixture} operations={repositoryOperationsFixture}
-    issueDetail={{ number: issueDetailFixture.number,
-      resource: { status: "ready", value: { ...issueDetailFixture, body: "Description.", nodeId: "I_412", canReact: true, permissions: { ...issueDetailFixture.permissions!, comment: allowed() } } },
-      comments: { status: "ready", value: { items: [], page: 1, hasMore: false } }, references: { status: "ready", value: [] } }}
-    getIssueAction={() => action()} onPrepareIssueAction={(number, kind) => { prepared.push({ number, kind }) }}
-    onIssueDraftChange={(_number, draft) => setAction((current) => ({ ...current, ...draft }))}
-    onSubmitIssueAction={async () => { submitted++; return {} }}
-    getReactionAction={() => ({ operation: { status: "idle" } })}
-    onAddReaction={async () => { throw new Error("Unexpected reaction") }}
-  />, { width: 100, height: 32 })
+  const view = await testRender(
+    () => (
+      <App
+        data={githubDataFixture}
+        operations={repositoryOperationsFixture}
+        issueDetail={{
+          number: issueDetailFixture.number,
+          resource: {
+            status: "ready",
+            value: {
+              ...issueDetailFixture,
+              body: "Description.",
+              nodeId: "I_412",
+              canReact: true,
+              permissions: { ...issueDetailFixture.permissions!, comment: allowed() },
+            },
+          },
+          comments: { status: "ready", value: { items: [], page: 1, hasMore: false } },
+          references: { status: "ready", value: [] },
+        }}
+        getIssueAction={() => action()}
+        onPrepareIssueAction={(number, kind) => {
+          prepared.push({ number, kind })
+        }}
+        onIssueDraftChange={(_number, draft) => setAction((current) => ({ ...current, ...draft }))}
+        onSubmitIssueAction={async () => {
+          submitted++
+          return {}
+        }}
+        getReactionAction={() => ({ operation: { status: "idle" } })}
+        onAddReaction={async () => {
+          throw new Error("Unexpected reaction")
+        }}
+      />
+    ),
+    { width: 100, height: 32 },
+  )
   const right = async (id: string) => {
     await view.flush()
     const target = view.renderer.root.findDescendantById(id)!
     await view.mockMouse.click(target.x + 1, target.y + 1, 2)
     await view.flush()
   }
-  const escape = async () => { view.mockInput.pressEscape(); await Bun.sleep(30); await view.flush() }
+  const escape = async () => {
+    view.mockInput.pressEscape()
+    await Bun.sleep(30)
+    await view.flush()
+  }
   try {
     await view.flush()
     view.mockInput.pressKey("3")
@@ -444,5 +609,7 @@ test("message comment actions follow permission/pending guards and reopen the ex
     expect(view.captureCharFrame()).toContain("Retained draft")
     expect(action().body).toBe("Retained draft")
     expect(submitted).toBe(0)
-  } finally { view.renderer.destroy() }
+  } finally {
+    view.renderer.destroy()
+  }
 })

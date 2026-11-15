@@ -44,7 +44,10 @@ export function InlineCommentComposer(props: {
   const [rows, setRows] = createSignal(MIN_EDITOR_ROWS)
   const [error, setError] = createSignal<string>()
   let editor: TextareaRenderable | undefined
-  const composer = createMarkdownComposer({}, { editor: () => editor, scroll: props.scroll, blocked: () => !!props.disabled, onError: setError })
+  const composer = createMarkdownComposer(
+    {},
+    { editor: () => editor, scroll: props.scroll, blocked: () => !!props.disabled, onError: setError },
+  )
   const measure = () => {
     if (!editor || editor.isDestroyed) return
     const next = Math.max(MIN_EDITOR_ROWS, Math.min(MAX_EDITOR_ROWS, editor.editorView.getTotalVirtualLineCount()))
@@ -53,60 +56,140 @@ export function InlineCommentComposer(props: {
     if (grew) props.onGrow?.()
   }
   const blocked = () => !!props.disabled || composer.externalEditing()
-  const expand = () => { if (!blocked()) props.onExpand() }
+  const expand = () => {
+    if (!blocked()) props.onExpand()
+  }
   const save = () => {
     const text = editor?.plainText ?? body()
     if (!blocked() && props.canPost !== false && text.trim()) props.onSave(text)
   }
-  const clear = () => { if (!blocked() && editor && !editor.isDestroyed) replaceEditorText(editor, "") }
-  const cancel = () => { if (!blocked()) props.onCancel() }
-  createEffect(() => props.onHintChange?.(props.active && !props.disabled ? keys.hints(
-    ...(props.canPost === false ? [] : [["dialog.submit", "post"] as const]), ["dialog.close", "keep draft"], ["dialog.togglePreview", composer.preview() ? "write" : "preview"],
-    ["dialog.toggleExpanded", "expand"], ["dialog.discard", "clear"], ["dialog.externalEditor", "editor"],
-  ) : undefined))
-  onMount(() => { editor?.gotoBufferEnd(); measure() }) // Reopened drafts continue where they left off.
-  createEffect(on(composer.preview, (preview) => { if (preview) props.onGrow?.() }, { defer: true }))
+  const clear = () => {
+    if (!blocked() && editor && !editor.isDestroyed) replaceEditorText(editor, "")
+  }
+  const cancel = () => {
+    if (!blocked()) props.onCancel()
+  }
+  createEffect(() =>
+    props.onHintChange?.(
+      props.active && !props.disabled
+        ? keys.hints(
+            ...(props.canPost === false ? [] : [["dialog.submit", "post"] as const]),
+            ["dialog.close", "keep draft"],
+            ["dialog.togglePreview", composer.preview() ? "write" : "preview"],
+            ["dialog.toggleExpanded", "expand"],
+            ["dialog.discard", "clear"],
+            ["dialog.externalEditor", "editor"],
+          )
+        : undefined,
+    ),
+  )
+  onMount(() => {
+    editor?.gotoBufferEnd()
+    measure()
+  }) // Reopened drafts continue where they left off.
+  createEffect(
+    on(
+      composer.preview,
+      (preview) => {
+        if (preview) props.onGrow?.()
+      },
+      { defer: true },
+    ),
+  )
   // Text goes to the focused composer, never to diff or application shortcuts.
-  useKeyActions({
-    ...composer.actions,
-    "dialog.toggleExpanded": expand,
-    "dialog.close": cancel,
-    "dialog.submit": save,
-    "dialog.discard": clear,
-  }, { when: () => props.active && !props.disabled, priority: 50, modal: true })
+  useKeyActions(
+    {
+      ...composer.actions,
+      "dialog.toggleExpanded": expand,
+      "dialog.close": cancel,
+      "dialog.submit": save,
+      "dialog.discard": clear,
+    },
+    { when: () => props.active && !props.disabled, priority: 50, modal: true },
+  )
   return (
     // While inactive, e.g. posting, a click must not focus the editor natively; the diff focuses it when allowed.
-    <box id={`${id()}-composer-card`} width={props.width} marginLeft={props.marginLeft} flexShrink={0} flexDirection="column"
-      onMouseDown={(event) => { if (!props.active) event.preventDefault() }}>
-      <box id={`${id()}-field`} width="100%" flexShrink={0} flexDirection="column"
-        border borderStyle="rounded" borderColor={props.active && !blocked() ? colors.blue : colors.border}
-        title={` ${props.title}${composer.preview() ? " (preview)" : ""} `} titleColor={colors.muted}
-        paddingLeft={1} paddingRight={1}>
-        <MarkdownTextarea id={`${id()}-editor`} ref={(value) => { editor = value }}
-          initialValue={props.body} visible={!composer.preview()} focused={props.active && !blocked() && !composer.preview()}
-          width="100%" height={rows()} flexShrink={0} wrapMode="word"
-          textColor={colors.text} focusedTextColor={colors.text} backgroundColor="transparent" focusedBackgroundColor="transparent"
-          cursorColor={colors.blue} onSizeChange={measure}
+    <box
+      id={`${id()}-composer-card`}
+      width={props.width}
+      marginLeft={props.marginLeft}
+      flexShrink={0}
+      flexDirection="column"
+      onMouseDown={(event) => {
+        if (!props.active) event.preventDefault()
+      }}
+    >
+      <box
+        id={`${id()}-field`}
+        width="100%"
+        flexShrink={0}
+        flexDirection="column"
+        border
+        borderStyle="rounded"
+        borderColor={props.active && !blocked() ? colors.blue : colors.border}
+        title={` ${props.title}${composer.preview() ? " (preview)" : ""} `}
+        titleColor={colors.muted}
+        paddingLeft={1}
+        paddingRight={1}
+      >
+        <MarkdownTextarea
+          id={`${id()}-editor`}
+          ref={(value) => {
+            editor = value
+          }}
+          initialValue={props.body}
+          visible={!composer.preview()}
+          focused={props.active && !blocked() && !composer.preview()}
+          width="100%"
+          height={rows()}
+          flexShrink={0}
+          wrapMode="word"
+          textColor={colors.text}
+          focusedTextColor={colors.text}
+          backgroundColor="transparent"
+          focusedBackgroundColor="transparent"
+          cursorColor={colors.blue}
+          onSizeChange={measure}
           onContentChange={() => {
             if (!editor) return
             measure()
             if (editor.plainText === body()) return
             setBody(editor.plainText)
             props.onInput(editor.plainText)
-          }} />
+          }}
+        />
         <Show when={composer.preview()}>
           <box minHeight={MIN_EDITOR_ROWS} flexShrink={0} flexDirection="column">
             <Show when={body().trim()}>
-              <GitHubMarkdown content={body()} syntaxStyle={markdownStyle()} backgroundColor="transparent" preserveImages codePanels
-                context={props.repositoryUrl ? { repositoryUrl: props.repositoryUrl, ref: props.headSha, sourceUrl: props.sourceUrl } : undefined} />
+              <GitHubMarkdown
+                content={body()}
+                syntaxStyle={markdownStyle()}
+                backgroundColor="transparent"
+                preserveImages
+                codePanels
+                context={
+                  props.repositoryUrl ? { repositoryUrl: props.repositoryUrl, ref: props.headSha, sourceUrl: props.sourceUrl } : undefined
+                }
+              />
             </Show>
           </box>
         </Show>
-        <Show when={error()}><text flexShrink={0} wrapMode="word" fg={colors.red}>{error()}</text></Show>
+        <Show when={error()}>
+          <text flexShrink={0} wrapMode="word" fg={colors.red}>
+            {error()}
+          </text>
+        </Show>
         <box id={`${id()}-toolbar`} height={1} flexShrink={0} flexDirection="row" justifyContent="flex-end">
-          <Action id={`${id()}-post`} disabled={blocked() || props.canPost === false || !body().trim()} onActivate={save}>Post</Action>
-          <text fg={colors.muted} selectable={false}> · </text>
-          <Action id={`${id()}-cancel`} fg={colors.muted} disabled={blocked()} onActivate={cancel}>Cancel</Action>
+          <Action id={`${id()}-post`} disabled={blocked() || props.canPost === false || !body().trim()} onActivate={save}>
+            Post
+          </Action>
+          <text fg={colors.muted} selectable={false}>
+            {" "}
+            ·{" "}
+          </text>
+          <Action id={`${id()}-cancel`} fg={colors.muted} disabled={blocked()} onActivate={cancel}>
+            Cancel
+          </Action>
         </box>
       </box>
     </box>

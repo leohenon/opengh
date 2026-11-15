@@ -28,19 +28,22 @@ describe("repository tabs", () => {
 
   test("normalizes repository names and ignores invalid names and pages", async () => {
     const path = join(await temporaryDirectory(), "repository-state.json")
-    await writeFile(path, JSON.stringify({
-      " Owner/Repo ": "overview",
-      "https://github.com/Owner/Commits.git": "commits",
-      "Owner/Issues": "issues",
-      "Owner/Pulls": "pulls",
-      "Owner/Actions": "actions",
-      "not-a-repository": "issues",
-      "owner/repo/extra": "pulls",
-      "owner/invalid-page": "documents",
-      "owner/null": null,
-      "owner/number": 1,
-      "owner/object": { page: "issues" },
-    }))
+    await writeFile(
+      path,
+      JSON.stringify({
+        " Owner/Repo ": "overview",
+        "https://github.com/Owner/Commits.git": "commits",
+        "Owner/Issues": "issues",
+        "Owner/Pulls": "pulls",
+        "Owner/Actions": "actions",
+        "not-a-repository": "issues",
+        "owner/repo/extra": "pulls",
+        "owner/invalid-page": "documents",
+        "owner/null": null,
+        "owner/number": 1,
+        "owner/object": { page: "issues" },
+      }),
+    )
     expect(await loadRepositoryTabs(path)).toEqual({
       "owner/repo": "overview",
       "owner/commits": "commits",
@@ -94,19 +97,19 @@ describe("repository tabs", () => {
   })
 })
 
-
 test("concurrent saves retain independent repositories and override legacy history without deleting it", async () => {
   const path = join(await temporaryDirectory(), "repository-state.json")
   await writeFile(path, JSON.stringify({ "owner/a": "overview", "owner/legacy": "commits" }))
-  await Promise.all([
-    saveRepositoryTabs({ "owner/a": "issues" }, path),
-    saveRepositoryTabs({ "owner/b": "pulls" }, path),
-  ])
+  await Promise.all([saveRepositoryTabs({ "owner/a": "issues" }, path), saveRepositoryTabs({ "owner/b": "pulls" }, path)])
   expect(await loadRepositoryTabs(path)).toEqual({
-    "owner/a": "issues", "owner/b": "pulls", "owner/legacy": "commits",
+    "owner/a": "issues",
+    "owner/b": "pulls",
+    "owner/legacy": "commits",
   })
   await saveRepositoryTabs({ "owner/a": "actions" }, path)
   expect(await loadRepositoryTabs(path)).toEqual({
-    "owner/a": "actions", "owner/b": "pulls", "owner/legacy": "commits",
+    "owner/a": "actions",
+    "owner/b": "pulls",
+    "owner/legacy": "commits",
   })
 })

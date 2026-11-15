@@ -1,11 +1,7 @@
 import { afterEach, describe, expect, test } from "bun:test"
 import { testRender } from "@opentui/solid"
 import { clickControl } from "./fixtures/mouse"
-import {
-  LoadingScreen,
-  RepositoryLoadError,
-  RepositoryPicker,
-} from "../src/ui/launcher"
+import { LoadingScreen, RepositoryLoadError, RepositoryPicker } from "../src/ui/launcher"
 
 const active: Array<{ renderer: { destroy(): void; isDestroyed: boolean } }> = []
 afterEach(() => {
@@ -33,14 +29,7 @@ describe("repository launcher", () => {
     let retries = 0
     let quits = 0
     const view = await testRender(
-      () => (
-        <RepositoryLoadError
-          repository="cli/cli"
-          message="API unavailable"
-          onRetry={() => retries++}
-          onQuit={() => quits++}
-        />
-      ),
+      () => <RepositoryLoadError repository="cli/cli" message="API unavailable" onRetry={() => retries++} onQuit={() => quits++} />,
       { width: 80, height: 24 },
     )
     active.push(view)
@@ -68,10 +57,18 @@ describe("repository launcher", () => {
 
   test("load failure has no Back button and keyboard hints only in the opted-in status bar", async () => {
     let backs = 0
-    const view = await testRender(() => (
-      <RepositoryLoadError repository="cli/cli" message="Unavailable" onRetry={() => {}}
-        onSwitchRepository={() => backs++} showStatusBarHints />
-    ), { width: 80, height: 16 })
+    const view = await testRender(
+      () => (
+        <RepositoryLoadError
+          repository="cli/cli"
+          message="Unavailable"
+          onRetry={() => {}}
+          onSwitchRepository={() => backs++}
+          showStatusBarHints
+        />
+      ),
+      { width: 80, height: 16 },
+    )
     active.push(view)
     await view.flush()
     const lines = view.captureCharFrame().trimEnd().split("\n")
@@ -85,10 +82,10 @@ describe("repository launcher", () => {
 
   test("startup picker has no action buttons or inline hints and Escape still quits", async () => {
     let quits = 0
-    const view = await testRender(
-      () => <RepositoryPicker recent={["cli/cli"]} onOpen={() => {}} onQuit={() => quits++} />,
-      { width: 80, height: 24 },
-    )
+    const view = await testRender(() => <RepositoryPicker recent={["cli/cli"]} onOpen={() => {}} onQuit={() => quits++} />, {
+      width: 80,
+      height: 24,
+    })
     active.push(view)
     await view.flush()
     expect(view.renderer.root.findDescendantById("picker-submit")).toBeUndefined()
@@ -103,10 +100,10 @@ describe("repository launcher", () => {
 
   test("opens a repository entered by the user", async () => {
     let opened = ""
-    const view = await testRender(
-      () => <RepositoryPicker recent={[]} onOpen={(repository) => opened = repository} />,
-      { width: 80, height: 24 },
-    )
+    const view = await testRender(() => <RepositoryPicker recent={[]} onOpen={(repository) => (opened = repository)} />, {
+      width: 80,
+      height: 24,
+    })
     active.push(view)
     await view.flush()
     expect(view.captureCharFrame()).toContain("Open a GitHub repository")
@@ -122,10 +119,10 @@ describe("repository launcher", () => {
   test("shows twenty recent repositories and searches beyond the visible list", async () => {
     let opened = ""
     const recent = Array.from({ length: 30 }, (_, index) => `owner/repository-${index + 1}`)
-    const view = await testRender(
-      () => <RepositoryPicker recent={recent} onOpen={(repository) => opened = repository} />,
-      { width: 100, height: 40 },
-    )
+    const view = await testRender(() => <RepositoryPicker recent={recent} onOpen={(repository) => (opened = repository)} />, {
+      width: 100,
+      height: 40,
+    })
     active.push(view)
     await view.flush()
     const frame = view.captureCharFrame()
@@ -140,7 +137,7 @@ describe("repository launcher", () => {
   test("opens a selected recent repository with arrow keys", async () => {
     let opened = ""
     const view = await testRender(
-      () => <RepositoryPicker recent={["anomalyco/opentui", "cli/cli"]} onOpen={(repository) => opened = repository} />,
+      () => <RepositoryPicker recent={["anomalyco/opentui", "cli/cli"]} onOpen={(repository) => (opened = repository)} />,
       { width: 80, height: 24 },
     )
     active.push(view)
@@ -154,12 +151,15 @@ describe("repository launcher", () => {
   test("opens a recent repository by clicking its row", async () => {
     let opened = ""
     const view = await testRender(
-      () => <RepositoryPicker recent={["anomalyco/opentui", "cli/cli"]} onOpen={(repository) => opened = repository} />,
+      () => <RepositoryPicker recent={["anomalyco/opentui", "cli/cli"]} onOpen={(repository) => (opened = repository)} />,
       { width: 80, height: 24 },
     )
     active.push(view)
     await view.flush()
-    const row = view.captureCharFrame().split("\n").findIndex((line) => line.includes("cli / cli"))
+    const row = view
+      .captureCharFrame()
+      .split("\n")
+      .findIndex((line) => line.includes("cli / cli"))
     expect(row).toBeGreaterThan(-1)
     await view.mockMouse.click(40, row)
     await view.flush()
@@ -169,7 +169,7 @@ describe("repository launcher", () => {
   test("typing a number searches instead of opening a repository", async () => {
     let opened = ""
     const view = await testRender(
-      () => <RepositoryPicker recent={["anomalyco/opentui"]} onOpen={(repository) => opened = repository} />,
+      () => <RepositoryPicker recent={["anomalyco/opentui"]} onOpen={(repository) => (opened = repository)} />,
       { width: 80, height: 24 },
     )
     active.push(view)
@@ -181,10 +181,7 @@ describe("repository launcher", () => {
   })
 
   test("shows validation errors directly beneath the input", async () => {
-    const view = await testRender(
-      () => <RepositoryPicker recent={[]} onOpen={() => {}} />,
-      { width: 80, height: 24 },
-    )
+    const view = await testRender(() => <RepositoryPicker recent={[]} onOpen={() => {}} />, { width: 80, height: 24 })
     active.push(view)
     await view.flush()
     await view.mockInput.typeText("invalid")

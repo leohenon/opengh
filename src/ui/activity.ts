@@ -23,12 +23,16 @@ export function buildActivity(props: {
   const seen = new Set<string>()
   const entries: Array<ActivityItem | ActivityCommit> = [...props.comments, ...props.references, ...props.threads]
   const hasTimelineCommits = props.events.some((event) => event.kind === "commit-added")
-  const inlineReviews = new Set(props.threads.flatMap((thread) => thread.comments.flatMap((comment) =>
-    comment.reviewId === undefined ? [] : [comment.reviewId])))
+  const inlineReviews = new Set(
+    props.threads.flatMap((thread) => thread.comments.flatMap((comment) => (comment.reviewId === undefined ? [] : [comment.reviewId]))),
+  )
   for (const event of props.events) {
     // An inline-only COMMENTED review adds no information beyond its visible thread.
     if (event.kind === "review" && event.state === "commented" && !event.body.trim() && inlineReviews.has(event.reviewId)) continue
-    if (event.kind !== "commit-added") { entries.push(event); continue }
+    if (event.kind !== "commit-added") {
+      entries.push(event)
+      continue
+    }
     const sha = event.sha.toLowerCase()
     if (seen.has(sha)) continue
     seen.add(sha)
@@ -40,8 +44,12 @@ export function buildActivity(props: {
     if (seen.has(sha)) continue
     seen.add(sha)
     entries.push({
-      kind: "commit-added", event: "committed", id: `commit:${sha}`, sha,
-      message: commit.message, author: commit.author,
+      kind: "commit-added",
+      event: "committed",
+      id: `commit:${sha}`,
+      sha,
+      message: commit.message,
+      author: commit.author,
       // An authored date does not establish when a commit entered the PR.
       createdAt: commit.committedAt,
       url: `${props.pullUrl ?? ""}/commits/${sha}`,
@@ -51,10 +59,18 @@ export function buildActivity(props: {
   entries.sort((a, b) => timestamp(a.createdAt) - timestamp(b.createdAt))
   const result: ActivityEntry[] = []
   for (const entry of entries) {
-    if (!("kind" in entry) || entry.kind !== "commit-added") { result.push(entry); continue }
+    if (!("kind" in entry) || entry.kind !== "commit-added") {
+      result.push(entry)
+      continue
+    }
     const previous = result.at(-1)
-    if (previous && "kind" in previous && previous.kind === "commit-group"
-      && calendarDay(previous.createdAt) === calendarDay(entry.createdAt)) previous.commits.push(entry)
+    if (
+      previous &&
+      "kind" in previous &&
+      previous.kind === "commit-group" &&
+      calendarDay(previous.createdAt) === calendarDay(entry.createdAt)
+    )
+      previous.commits.push(entry)
     else result.push({ kind: "commit-group", id: `commits:${entry.sha}`, createdAt: entry.createdAt, commits: [entry] })
   }
   for (const entry of result) {

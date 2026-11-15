@@ -31,18 +31,52 @@ test("clicking the current tab backs out of each detail while other tabs and key
   const [issue, setIssue] = createSignal<IssueDetailState>()
   const [pull, setPull] = createSignal<PullDetailState>()
   const [run, setRun] = createSignal<RunDetailState>()
-  const view = await testRender(() => <App data={githubDataFixture} operations={repositoryOperationsFixture}
-    config={{ ...defaultConfig, compactHeader: compact() }}
-    commitDetail={commit()} issueDetail={issue()} pullDetail={pull()} runDetail={run()}
-    onLoadCommit={async (sha) => { loaded.commit++; setCommit({ sha, resource: loading }) }}
-    onCloseCommit={() => { closed.commit++; setCommit() }}
-    onLoadIssue={async (number) => { loaded.issue++; setIssue({ number, resource: loading, comments: loading, references: loading }) }}
-    onCloseIssue={() => { closed.issue++; setIssue() }}
-    onLoadPull={async (number) => { loaded.pull++; setPull({ number, resource: loading, comments: loading, references: loading, commits: loading, context: loading }) }}
-    onClosePull={() => { closed.pull++; setPull() }}
-    onLoadRun={async (id) => { loaded.run++; setRun({ id, resource: loading, jobs: loading }) }}
-    onCloseRun={() => { closed.run++; setRun() }}
-  />, { width: 200, height: 28 }) // Wide enough that centered Help leaves every tab label on its backdrop.
+  const view = await testRender(
+    () => (
+      <App
+        data={githubDataFixture}
+        operations={repositoryOperationsFixture}
+        config={{ ...defaultConfig, compactHeader: compact() }}
+        commitDetail={commit()}
+        issueDetail={issue()}
+        pullDetail={pull()}
+        runDetail={run()}
+        onLoadCommit={async (sha) => {
+          loaded.commit++
+          setCommit({ sha, resource: loading })
+        }}
+        onCloseCommit={() => {
+          closed.commit++
+          setCommit()
+        }}
+        onLoadIssue={async (number) => {
+          loaded.issue++
+          setIssue({ number, resource: loading, comments: loading, references: loading })
+        }}
+        onCloseIssue={() => {
+          closed.issue++
+          setIssue()
+        }}
+        onLoadPull={async (number) => {
+          loaded.pull++
+          setPull({ number, resource: loading, comments: loading, references: loading, commits: loading, context: loading })
+        }}
+        onClosePull={() => {
+          closed.pull++
+          setPull()
+        }}
+        onLoadRun={async (id) => {
+          loaded.run++
+          setRun({ id, resource: loading, jobs: loading })
+        }}
+        onCloseRun={() => {
+          closed.run++
+          setRun()
+        }}
+      />
+    ),
+    { width: 200, height: 28 },
+  ) // Wide enough that centered Help leaves every tab label on its backdrop.
   const cases = [
     { key: "2", label: "2 Commits", kind: "commit", scroll: "commit-detail-scroll", compact: false },
     { key: "3", label: "3 Issues", kind: "issue", scroll: "issue-detail-scroll", compact: true },
@@ -56,7 +90,10 @@ test("clicking the current tab backs out of each detail while other tabs and key
       view.mockInput.pressKey(item.key)
       view.mockInput.pressKey("j")
       await view.flush()
-      const selection = view.captureCharFrame().split("\n").find((row) => row.includes("▌"))
+      const selection = view
+        .captureCharFrame()
+        .split("\n")
+        .find((row) => row.includes("▌"))
       view.mockInput.pressEnter()
       await view.flush()
       const detail = view.renderer.root.findDescendantById(item.scroll)
@@ -77,19 +114,39 @@ test("clicking the current tab backs out of each detail while other tabs and key
       await clickTab(view, item.label, !item.compact)
       expect(closed[item.kind]).toBe(1)
       expect(view.renderer.root.findDescendantById(item.scroll)).toBeUndefined()
-      expect(view.captureCharFrame().split("\n").find((row) => row.includes("▌"))).toBe(selection)
+      expect(
+        view
+          .captureCharFrame()
+          .split("\n")
+          .find((row) => row.includes("▌")),
+      ).toBe(selection)
       expect(loaded[item.kind]).toBe(1)
     }
-  } finally { view.renderer.destroy() }
+  } finally {
+    view.renderer.destroy()
+  }
 })
 
 test("Escape unwinds a diff one level, then the current tab unwinds its detail", async () => {
   let closedCommit = 0
   let closedDiff = 0
-  const view = await testRender(() => <App data={githubDataFixture} operations={repositoryOperationsFixture}
-    onLoadCommit={async () => {}} onCloseCommit={() => { closedCommit++ }}
-    onLoadDiff={async () => {}} onCloseDiff={() => { closedDiff++ }}
-  />, { width: 120, height: 28 })
+  const view = await testRender(
+    () => (
+      <App
+        data={githubDataFixture}
+        operations={repositoryOperationsFixture}
+        onLoadCommit={async () => {}}
+        onCloseCommit={() => {
+          closedCommit++
+        }}
+        onLoadDiff={async () => {}}
+        onCloseDiff={() => {
+          closedDiff++
+        }}
+      />
+    ),
+    { width: 120, height: 28 },
+  )
   try {
     await view.flush()
     view.mockInput.pressKey("2")
@@ -99,7 +156,8 @@ test("Escape unwinds a diff one level, then the current tab unwinds its detail",
     expect(view.renderer.root.findDescendantById("diff-view-commits")).toBeDefined()
     expect(view.captureCharFrame()).not.toContain("2 Commits")
     view.mockInput.pressEscape()
-    await Bun.sleep(30); await view.flush()
+    await Bun.sleep(30)
+    await view.flush()
     expect(closedDiff).toBe(1)
     expect(closedCommit).toBe(0)
     expect(view.renderer.root.findDescendantById("diff-view-commits")).toBeUndefined()
@@ -110,30 +168,62 @@ test("Escape unwinds a diff one level, then the current tab unwinds its detail",
     view.mockInput.pressKey("D") // A diff opened directly from the list returns directly to that list.
     await view.flush()
     view.mockInput.pressEscape()
-    await Bun.sleep(30); await view.flush()
+    await Bun.sleep(30)
+    await view.flush()
     expect(closedDiff).toBe(2)
     expect(closedCommit).toBe(1)
     expect(view.renderer.root.findDescendantById("diff-view-commits")).toBeUndefined()
-  } finally { view.renderer.destroy(); await view.renderer.closed }
+  } finally {
+    view.renderer.destroy()
+    await view.renderer.closed
+  }
 })
-
 
 test("detail and diff menus retain their actions with Back at the bottom", async () => {
   const closed = { commit: 0, issue: 0, pull: 0, run: 0, diff: 0 }
   const [diffs, setDiffs] = createSignal<Partial<Record<"commit" | "pull", DiffState>>>({})
   const view = await createTestRenderer({ width: 120, height: 28 })
   initializeHunk(view.renderer)
-  await render(() => <App data={githubDataFixture} operations={repositoryOperationsFixture} diffs={diffs()}
-    onLoadCommit={async () => {}} onCloseCommit={() => { closed.commit++ }}
-    onLoadIssue={async () => {}} onCloseIssue={() => { closed.issue++ }}
-    onLoadPull={async () => {}} onClosePull={() => { closed.pull++ }}
-    onLoadRun={async () => {}} onCloseRun={() => { closed.run++ }}
-    onLoadDiff={async (target) => { setDiffs((current) => ({ ...current, [target.kind]: { target, resource: { status: "ready", value: { kind: "patch", patch: patchFixture } } } })) }}
-    onCloseDiff={(target) => {
-      closed.diff++
-      setDiffs((current) => { const next = { ...current }; if (target) delete next[target.kind]; return target ? next : {} })
-    }}
-  />, view.renderer)
+  await render(
+    () => (
+      <App
+        data={githubDataFixture}
+        operations={repositoryOperationsFixture}
+        diffs={diffs()}
+        onLoadCommit={async () => {}}
+        onCloseCommit={() => {
+          closed.commit++
+        }}
+        onLoadIssue={async () => {}}
+        onCloseIssue={() => {
+          closed.issue++
+        }}
+        onLoadPull={async () => {}}
+        onClosePull={() => {
+          closed.pull++
+        }}
+        onLoadRun={async () => {}}
+        onCloseRun={() => {
+          closed.run++
+        }}
+        onLoadDiff={async (target) => {
+          setDiffs((current) => ({
+            ...current,
+            [target.kind]: { target, resource: { status: "ready", value: { kind: "patch", patch: patchFixture } } },
+          }))
+        }}
+        onCloseDiff={(target) => {
+          closed.diff++
+          setDiffs((current) => {
+            const next = { ...current }
+            if (target) delete next[target.kind]
+            return target ? next : {}
+          })
+        }}
+      />
+    ),
+    view.renderer,
+  )
   const backMenu = async (id: string, diff = false) => {
     await view.flush()
     const target = view.renderer.root.findDescendantById(id)!
@@ -141,11 +231,15 @@ test("detail and diff menus retain their actions with Back at the bottom", async
     await view.flush()
     expect(view.renderer.root.findDescendantById("context-menu")).toBeDefined()
     expect(view.captureCharFrame()).toContain("Back")
-    const actions = diff ? ["Open diff on GitHub", "Open diff in external viewer", "Change layout", "Toggle files", "Settings", "Back"]
-      : id === "commit-detail-scroll" ? ["View diff", "Open on GitHub", "Copy SHA", "Back"]
-      : id === "pull-detail-scroll" ? ["View diff", "Open on GitHub", "Copy URL", "Collapse", "Back"]
-      : id === "issue-detail-scroll" ? ["Open on GitHub", "Copy URL", "Collapse", "Back"]
-      : ["Open on GitHub", "Copy URL", "Back"]
+    const actions = diff
+      ? ["Open diff on GitHub", "Open diff in external viewer", "Change layout", "Toggle files", "Settings", "Back"]
+      : id === "commit-detail-scroll"
+        ? ["View diff", "Open on GitHub", "Copy SHA", "Back"]
+        : id === "pull-detail-scroll"
+          ? ["View diff", "Open on GitHub", "Copy URL", "Collapse", "Back"]
+          : id === "issue-detail-scroll"
+            ? ["Open on GitHub", "Copy URL", "Collapse", "Back"]
+            : ["Open on GitHub", "Copy URL", "Back"]
     for (const [index, label] of actions.entries()) {
       const row = view.renderer.root.findDescendantById(`context-menu-row-${index}`)!
       expect((row.getChildren()[0] as TextRenderable).plainText).toBe(label)
@@ -191,5 +285,8 @@ test("detail and diff menus retain their actions with Back at the bottom", async
     expect(closed.diff).toBe(2)
     expect(closed.commit).toBe(1)
     expect(view.renderer.root.findDescendantById("diff-view-commits")).toBeUndefined()
-  } finally { view.renderer.destroy(); await view.renderer.closed }
+  } finally {
+    view.renderer.destroy()
+    await view.renderer.closed
+  }
 })

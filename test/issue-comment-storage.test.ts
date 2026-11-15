@@ -6,20 +6,27 @@ import { createIssueCommentStorage, type IssueCommentAttempt } from "../src/gith
 
 const attempt: IssueCommentAttempt = {
   input: { accountId: 7, repositoryId: 71, number: 42, body: "Exact stored comment" },
-  commentIds: [1], nonce: "attempt-a",
+  commentIds: [1],
+  nonce: "attempt-a",
 }
 const directories: string[] = []
 const children: Bun.Subprocess[] = []
 afterEach(async () => {
-  for (const child of children.splice(0)) { child.kill("SIGKILL"); await child.exited }
-  await Promise.all(directories.splice(0).map(path => rm(path, { recursive: true, force: true })))
+  for (const child of children.splice(0)) {
+    child.kill("SIGKILL")
+    await child.exited
+  }
+  await Promise.all(directories.splice(0).map((path) => rm(path, { recursive: true, force: true })))
 })
 async function fixture() {
   const directory = await mkdtemp(join(tmpdir(), "opengh-comment-storage-"))
   directories.push(directory)
   const storage = createIssueCommentStorage(directory)
   await storage.save(attempt)
-  const path = join(directory, (await readdir(directory)).find(name => name.endsWith(".json"))!)
+  const path = join(
+    directory,
+    (await readdir(directory)).find((name) => name.endsWith(".json"))!,
+  )
   return { directory, storage, path }
 }
 
@@ -59,7 +66,8 @@ async function pausedRemoval(directory: string, path: string) {
 test("cross-process locking protects a stale remove and exact updates from deleting a replacement attempt", async () => {
   const { directory, storage, path } = await fixture()
   const { child, errors } = await pausedRemoval(directory, path)
-  const lock = `${path}.lock`, owner = join(lock, (await readdir(lock))[0]!)
+  const lock = `${path}.lock`,
+    owner = join(lock, (await readdir(lock))[0]!)
   expect((await stat(lock)).mode & 0o777).toBe(0o700)
   expect((await stat(owner)).mode & 0o777).toBe(0o600)
   // Old timestamps must never justify stealing a live process's lock.
@@ -79,7 +87,7 @@ test("cross-process locking protects a stale remove and exact updates from delet
   await expect(storage.update(attempt, { ...attempt, phase: "rejected" })).rejects.toThrow("changed")
   await expect(storage.update(replacement, { ...attempt, phase: "rejected" })).rejects.toThrow("preserve its identity")
   expect(await storage.load(attempt.input)).toEqual(replacement)
-  expect((await readdir(directory)).filter(name => name.includes(".lock"))).toEqual([])
+  expect((await readdir(directory)).filter((name) => name.includes(".lock"))).toEqual([])
 })
 
 test("a crashed local owner is recovered without losing the exact marker or a subsequent live lock", async () => {

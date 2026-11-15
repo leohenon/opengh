@@ -15,5 +15,5 @@ export function searchRanges(text: string, query: string, maxResults = Infinity)
 }
 
 export function wrapSearchIndex(index: number, delta: number, count: number) {
-  return count ? ((index + delta) % count + count) % count : -1
+  return count ? (((index + delta) % count) + count) % count : -1
 }

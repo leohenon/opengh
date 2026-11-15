@@ -120,7 +120,10 @@ describe("themes", () => {
   })
 
   test("uses neutral terminal UI with bright status colors and colored Markdown", () => {
-    for (const [foreground, background] of [["#eeeeee", "#111111"], ["#111111", "#eeeeee"]]) {
+    for (const [foreground, background] of [
+      ["#eeeeee", "#111111"],
+      ["#111111", "#eeeeee"],
+    ]) {
       const mode = background === "#eeeeee" ? "light" : "dark"
       const theme = resolveTheme("terminal-minimal", mode, {
         defaultForeground: foreground!,
@@ -146,20 +149,28 @@ describe("themes", () => {
         purple: "#aa55cc",
       })
     }
-    expect(resolveTheme("terminal-minimal", "dark", {
-      defaultForeground: null, defaultBackground: null, palette: [],
-    })).toEqual(resolveTheme("terminal-minimal"))
+    expect(
+      resolveTheme("terminal-minimal", "dark", {
+        defaultForeground: null,
+        defaultBackground: null,
+        palette: [],
+      }),
+    ).toEqual(resolveTheme("terminal-minimal"))
   })
 
   test("reverses detected terminal surfaces when forcing the opposite mode", () => {
     for (const name of ["terminal-minimal", "terminal-native"]) {
       const colors = { defaultForeground: "#eeeeee", defaultBackground: "#111111", palette: [] }
       // OpenTUI detects this mid-gray terminal as light; retain its native surfaces.
-      expect(resolveTheme(name, "light", { ...colors, defaultForeground: "#111111", defaultBackground: "#909090" }))
-        .toMatchObject({ text: "#111111", background: "#909090" })
+      expect(resolveTheme(name, "light", { ...colors, defaultForeground: "#111111", defaultBackground: "#909090" })).toMatchObject({
+        text: "#111111",
+        background: "#909090",
+      })
       expect(resolveTheme(name, "light", colors)).toMatchObject({ text: "#111111", background: "#eeeeee" })
-      expect(resolveTheme(name, "dark", { ...colors, defaultForeground: "#111111", defaultBackground: "#eeeeee" }))
-        .toMatchObject({ text: "#eeeeee", background: "#111111" })
+      expect(resolveTheme(name, "dark", { ...colors, defaultForeground: "#111111", defaultBackground: "#eeeeee" })).toMatchObject({
+        text: "#eeeeee",
+        background: "#111111",
+      })
     }
   })
 
@@ -184,7 +195,9 @@ describe("themes", () => {
   test("uses the full terminal palette for terminal-native", () => {
     const palette = ["#101010", "#cc3333", "#33aa55", "#ccaa33", "#5588ff", "#aa55cc", "#33aaaa"]
     const theme = resolveTheme("terminal-native", "dark", {
-      defaultForeground: "#eeeeee", defaultBackground: "#111111", palette,
+      defaultForeground: "#eeeeee",
+      defaultBackground: "#111111",
+      palette,
     })
     expect(theme.text).toBe("#eeeeee")
     expect(theme.background).toBe("#111111")
@@ -194,7 +207,9 @@ describe("themes", () => {
     expect(theme.markdownHeading).toBe(palette[4]!)
     expect(theme.syntaxKeyword).toBe(palette[5]!)
     expect(appColors(theme)).toMatchObject({
-      openState: palette[2]!, closedState: palette[1]!, purple: palette[5]!,
+      openState: palette[2]!,
+      closedState: palette[1]!,
+      purple: palette[5]!,
     })
   })
 

@@ -5,7 +5,9 @@ import { join } from "node:path"
 import { targets } from "../scripts/targets"
 
 const directories: string[] = []
-afterEach(async () => { await Promise.all(directories.splice(0).map(path => rm(path, { recursive: true, force: true }))) })
+afterEach(async () => {
+  await Promise.all(directories.splice(0).map((path) => rm(path, { recursive: true, force: true })))
+})
 
 test("the scoped npm launcher packs and installs with unscoped platform dependencies", async () => {
   const directory = await mkdtemp(join(tmpdir(), "opengh-npm-package-"))
@@ -37,7 +39,9 @@ test("the scoped npm launcher packs and installs with unscoped platform dependen
   const launcher = JSON.parse(await readFile(join(directory, "dist/npm/opengh/package.json"), "utf8"))
   expect(launcher.name).toBe("@leohenon/opengh")
   expect(launcher.bin).toEqual({ opengh: "bin/opengh.cjs" })
-  expect(launcher.optionalDependencies).toEqual(Object.fromEntries(Object.keys(targets).map(target => [`opengh-${target}`, "0.0.0-beta.2"])))
+  expect(launcher.optionalDependencies).toEqual(
+    Object.fromEntries(Object.keys(targets).map((target) => [`opengh-${target}`, "0.0.0-beta.2"])),
+  )
   for (const target of Object.keys(targets)) {
     const platform = JSON.parse(await readFile(join(directory, "dist/npm", `opengh-${target}`, "package.json"), "utf8"))
     expect(platform.name).toBe(`opengh-${target}`)
@@ -45,10 +49,21 @@ test("the scoped npm launcher packs and installs with unscoped platform dependen
   const report = process.report.getReport() as { header: { glibcVersionRuntime?: string } }
   const musl = process.platform === "linux" && !report.header.glibcVersionRuntime
   const target = `${process.platform}-${process.arch}${musl ? "-musl" : ""}`
-  const packed = JSON.parse(await run(["npm", "pack", `./dist/npm/opengh-${target}`, "./dist/npm/opengh", "--json", "--ignore-scripts"])) as Array<{ filename: string }>
+  const packed = JSON.parse(
+    await run(["npm", "pack", `./dist/npm/opengh-${target}`, "./dist/npm/opengh", "--json", "--ignore-scripts"]),
+  ) as Array<{ filename: string }>
   expect(packed[1]!.filename).toBe("leohenon-opengh-0.0.0-beta.2.tgz")
   // An empty cache and offline mode ensure the installation never reaches the registry.
-  await run(["npm", "install", "--prefix", join(directory, "check"), "--offline", "--ignore-scripts", "--no-audit", "--no-fund",
-    ...packed.map(pkg => join(directory, pkg.filename))])
+  await run([
+    "npm",
+    "install",
+    "--prefix",
+    join(directory, "check"),
+    "--offline",
+    "--ignore-scripts",
+    "--no-audit",
+    "--no-fund",
+    ...packed.map((pkg) => join(directory, pkg.filename)),
+  ])
   expect(await run(["node", join(directory, "check/node_modules/.bin/opengh")])).toBe("fixture opengh\n")
 }, 20_000)

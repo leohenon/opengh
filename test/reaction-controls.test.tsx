@@ -10,38 +10,79 @@ import { Root } from "../src/root"
 import { clickControl } from "./fixtures/mouse"
 import { createTestReviewSession } from "./fixtures/reviews"
 import { waitForText } from "./fixtures/wait"
-import { commitDetailFixture, githubDataFixture, issueCommentsFixture, issueDetailFixture, pullContextFixture } from "./fixtures/github-data"
+import {
+  commitDetailFixture,
+  githubDataFixture,
+  issueCommentsFixture,
+  issueDetailFixture,
+  pullContextFixture,
+} from "./fixtures/github-data"
 
 async function setup(overrides: Partial<RepositoryLoaders> = {}, launcher = false) {
   const session = createRepositorySession({
     metadata: async (repository) => ({ ...githubDataFixture.repo, nameWithOwner: repository }),
     workCounts: async () => ({ issues: 1, pulls: 1 }),
-    documents: async () => [], document: async () => "",
+    documents: async () => [],
+    document: async () => "",
     branches: async () => ({ items: ["main"], hasMore: false }),
-    commits: async () => ({ items: [], hasMore: false }), commitCount: async () => 0,
+    commits: async () => ({ items: [], hasMore: false }),
+    commitCount: async () => 0,
     commit: async () => commitDetailFixture,
     issues: async (_repo, state) => ({ items: githubDataFixture.issues[state].value!.items, hasMore: false }),
     pulls: async (_repo, state) => ({ items: githubDataFixture.pulls[state].value!.items, hasMore: false }),
     runs: async () => ({ items: [], hasMore: false }),
     issue: async () => ({ ...issueDetailFixture, nodeId: "I_body", body: "", reactions: {}, viewerReactions: [], canReact: true }),
-    issueComments: async () => ({ items: [], hasMore: false }), issueReferences: async () => [],
-    pull: async (_repo, number) => ({ ...issueDetailFixture, number, url: `https://github.com/anomalyco/opentui/pull/${number}`,
-      nodeId: "PR_body", body: "", merged: false, baseBranch: "main", headBranch: "next", additions: 0, deletions: 0,
-      changedFiles: 0, commitCount: 0, reviewCommentCount: 1, reviewers: [], mergeable: null, mergeableState: "unknown" }),
-    pullCommits: async () => [], pullContext: async () => pullContextFixture,
+    issueComments: async () => ({ items: [], hasMore: false }),
+    issueReferences: async () => [],
+    pull: async (_repo, number) => ({
+      ...issueDetailFixture,
+      number,
+      url: `https://github.com/anomalyco/opentui/pull/${number}`,
+      nodeId: "PR_body",
+      body: "",
+      merged: false,
+      baseBranch: "main",
+      headBranch: "next",
+      additions: 0,
+      deletions: 0,
+      changedFiles: 0,
+      commitCount: 0,
+      reviewCommentCount: 1,
+      reviewers: [],
+      mergeable: null,
+      mergeableState: "unknown",
+    }),
+    pullCommits: async () => [],
+    pullContext: async () => pullContextFixture,
     ...overrides,
   })
   const copied: string[] = []
   const view = await createTestRenderer({ width: 100, height: 36 })
   if (launcher) initializeHunk(view.renderer)
-  await render(() => <Root cwd="/fixture" services={{
-    resolveRepository: async () => launcher ? undefined : "anomalyco/opentui", resolveLocalRepository: async () => undefined,
-    loadRecentRepositories: async () => ["anomalyco/opentui", "owner/other"], rememberRepository: async () => {},
-    // Defaults would restore the developer's saved tabs from disk and ask the real gh for the viewer.
-    loadRepositoryTabs: async () => ({}), saveRepositoryTabs: async () => {}, createPullReviewSession: createTestReviewSession,
-    copyToHostClipboard: async (value) => { copied.push(value); return true },
-    loadConfig: async () => ({ ...defaultConfig, showScrollbars: false }), createRepositorySession: () => session,
-  }} />, view.renderer)
+  await render(
+    () => (
+      <Root
+        cwd="/fixture"
+        services={{
+          resolveRepository: async () => (launcher ? undefined : "anomalyco/opentui"),
+          resolveLocalRepository: async () => undefined,
+          loadRecentRepositories: async () => ["anomalyco/opentui", "owner/other"],
+          rememberRepository: async () => {},
+          // Defaults would restore the developer's saved tabs from disk and ask the real gh for the viewer.
+          loadRepositoryTabs: async () => ({}),
+          saveRepositoryTabs: async () => {},
+          createPullReviewSession: createTestReviewSession,
+          copyToHostClipboard: async (value) => {
+            copied.push(value)
+            return true
+          },
+          loadConfig: async () => ({ ...defaultConfig, showScrollbars: false }),
+          createRepositorySession: () => session,
+        }}
+      />
+    ),
+    view.renderer,
+  )
   await settle(view)
   return { view, session, copied }
 }
@@ -64,12 +105,21 @@ async function messageGesture(view: Awaited<ReturnType<typeof testRender>>, text
   else await view.mockMouse.doubleClick(x, y)
   await settle(view)
 }
-const confirmed = (kind: ReactionKind, count = 1): ReactionState => ({ reactions: { [kind]: count }, viewerReactions: [kind], canReact: true })
+const confirmed = (kind: ReactionKind, count = 1): ReactionState => ({
+  reactions: { [kind]: count },
+  viewerReactions: [kind],
+  canReact: true,
+})
 
 test("Root/session first reaction uses message double-click, context menu, pending, error/retry and confirmed membership", async () => {
   let pending = Promise.withResolvers<ReactionState>()
   const calls: Array<{ target: ReactionTarget; kind: ReactionKind }> = []
-  const { view, session } = await setup({ addReaction: async (_repo, target, kind) => { calls.push({ target, kind }); return pending.promise } })
+  const { view, session } = await setup({
+    addReaction: async (_repo, target, kind) => {
+      calls.push({ target, kind })
+      return pending.promise
+    },
+  })
   try {
     view.mockInput.pressKey("3")
     view.mockInput.pressEnter()
@@ -134,20 +184,52 @@ test("Root/session first reaction uses message double-click, context menu, pendi
     view.mockInput.pressKey("?")
     await settle(view)
     expect(view.captureCharFrame()).not.toContain("choose message, then kind")
-  } finally { view.renderer.destroy() }
+  } finally {
+    view.renderer.destroy()
+  }
 })
 
 test("ordinary and opaque review comment chips target the right message and retain scroll/renderables", async () => {
   const calls: Array<{ target: ReactionTarget; kind: ReactionKind }> = []
   let pending = Promise.withResolvers<ReactionState>()
-  const comments = Array.from({ length: 14 }, (_, index) => ({ ...issueCommentsFixture[0]!,
-    id: 101 + index, nodeId: `IC_${index}`, body: `Selectable comment ${index}`, reactions: { "+1": 2 }, canReact: index !== 0,
+  const comments = Array.from({ length: 14 }, (_, index) => ({
+    ...issueCommentsFixture[0]!,
+    id: 101 + index,
+    nodeId: `IC_${index}`,
+    body: `Selectable comment ${index}`,
+    reactions: { "+1": 2 },
+    canReact: index !== 0,
   }))
   const { view, session, copied } = await setup({
     issueComments: async () => ({ items: comments, hasMore: false }),
-    pullContext: async () => ({ ...pullContextFixture, threads: [{ kind: "review-thread", id: "thread", path: "src/input.ts", isResolved: false, isOutdated: false,
-      comments: [{ id: "PRRC_opaque", author: "reviewer", authorAssociation: "MEMBER", body: "Selectable review", createdAt: "2026-04-15T00:00:00Z", updatedAt: "2026-04-15T00:00:00Z", url: "https://github.com/review", reactions: { rocket: 3 } }] }] }),
-    addReaction: async (_repo, target, kind) => { calls.push({ target, kind }); return pending.promise },
+    pullContext: async () => ({
+      ...pullContextFixture,
+      threads: [
+        {
+          kind: "review-thread",
+          id: "thread",
+          path: "src/input.ts",
+          isResolved: false,
+          isOutdated: false,
+          comments: [
+            {
+              id: "PRRC_opaque",
+              author: "reviewer",
+              authorAssociation: "MEMBER",
+              body: "Selectable review",
+              createdAt: "2026-04-15T00:00:00Z",
+              updatedAt: "2026-04-15T00:00:00Z",
+              url: "https://github.com/review",
+              reactions: { rocket: 3 },
+            },
+          ],
+        },
+      ],
+    }),
+    addReaction: async (_repo, target, kind) => {
+      calls.push({ target, kind })
+      return pending.promise
+    },
   })
   try {
     view.mockInput.pressKey("3")
@@ -170,7 +252,10 @@ test("ordinary and opaque review comment chips target the right message and reta
     const top = scroll.scrollTop
     const id = "reaction-issue:412:comment:114-+1"
     const chip = view.renderer.root.findDescendantById(id)!
-    const row = view.captureCharFrame().split("\n").findIndex((line) => line.includes("Selectable comment 13"))
+    const row = view
+      .captureCharFrame()
+      .split("\n")
+      .findIndex((line) => line.includes("Selectable comment 13"))
     await view.mockMouse.drag(chip.x, row, chip.x + 8, row)
     expect(view.renderer.getSelection()).toBeNull()
     expect(copied.at(-1)).toBeTruthy()
@@ -206,7 +291,10 @@ test("ordinary and opaque review comment chips target the right message and reta
     const reviewChip = view.renderer.root.findDescendantById(reviewId)!
     pending = Promise.withResolvers<ReactionState>()
     await clickControl(view, reviewId)
-    expect(calls.at(-1)).toEqual({ target: { kind: "review-comment", number: 421, id: "PRRC_opaque", nodeId: "PRRC_opaque" }, kind: "rocket" })
+    expect(calls.at(-1)).toEqual({
+      target: { kind: "review-comment", number: 421, id: "PRRC_opaque", nodeId: "PRRC_opaque" },
+      kind: "rocket",
+    })
     pending.resolve(confirmed("rocket", 4))
     await settle(view)
     expect(view.renderer.root.findDescendantById(reviewId)).toBe(reviewChip)
@@ -220,15 +308,21 @@ test("ordinary and opaque review comment chips target the right message and reta
     expect(calls.at(-1)).toEqual({ target: { kind: "comment", parent: "pull", number: 421, id: 114, nodeId: "IC_13" }, kind: "eyes" })
     pending.resolve(confirmed("eyes"))
     await settle(view)
-  } finally { view.renderer.destroy() }
+  } finally {
+    view.renderer.destroy()
+  }
 })
 
 test("dismissal shields background controls and old completions cannot affect replacement popups or repositories", async () => {
   const pending = Promise.withResolvers<ReactionState>()
   let calls = 0
   let nodeId = "I_body"
-  const { view, session } = await setup({ issue: async () => ({ ...issueDetailFixture, nodeId, body: "", reactions: {} }),
-    addReaction: async () => { calls++; return pending.promise },
+  const { view, session } = await setup({
+    issue: async () => ({ ...issueDetailFixture, nodeId, body: "", reactions: {} }),
+    addReaction: async () => {
+      calls++
+      return pending.promise
+    },
   })
   try {
     view.mockInput.pressKey("3")
@@ -259,23 +353,32 @@ test("dismissal shields background controls and old completions cannot affect re
     await settle(view)
     expect(view.renderer.root.findDescendantById("reaction-picker")).toBeUndefined()
     expect(calls).toBe(1)
-  } finally { view.renderer.destroy() }
+  } finally {
+    view.renderer.destroy()
+  }
 })
-
 
 test("fixture route crosses launcher, repository, tabs, branches, documents, Hunk, reactions and dismissal", async () => {
   const writes: ReactionTarget[] = []
-  const patch = "diff --git a/route.txt b/route.txt\n--- a/route.txt\n+++ b/route.txt\n@@ -1,60 +1,60 @@\n"
-    + Array.from({ length: 60 }, (_, index) => `-old-${index}\n`).join("")
-    + Array.from({ length: 60 }, (_, index) => `+new-${index}\n`).join("")
-  const { view, session } = await setup({
-    documents: async (repo, ref) => ["README", "Security"].map((label) => ({ id: label, path: `${label}.md`, label, repository: repo.nameWithOwner, ref })),
-    document: async (_repository, source) => Array.from({ length: 60 }, (_, index) => `${source.label} line ${index}\n\n`).join(""),
-    commits: async () => ({ items: githubDataFixture.commits.value!.items, hasMore: false }),
-    branches: async () => ({ items: ["main", "next"], hasMore: false }),
-    diff: async () => ({ kind: "patch", patch }),
-    addReaction: async (_repo, target, kind) => { writes.push(target); return confirmed(kind) },
-  }, true)
+  const patch =
+    "diff --git a/route.txt b/route.txt\n--- a/route.txt\n+++ b/route.txt\n@@ -1,60 +1,60 @@\n" +
+    Array.from({ length: 60 }, (_, index) => `-old-${index}\n`).join("") +
+    Array.from({ length: 60 }, (_, index) => `+new-${index}\n`).join("")
+  const { view, session } = await setup(
+    {
+      documents: async (repo, ref) =>
+        ["README", "Security"].map((label) => ({ id: label, path: `${label}.md`, label, repository: repo.nameWithOwner, ref })),
+      document: async (_repository, source) => Array.from({ length: 60 }, (_, index) => `${source.label} line ${index}\n\n`).join(""),
+      commits: async () => ({ items: githubDataFixture.commits.value!.items, hasMore: false }),
+      branches: async () => ({ items: ["main", "next"], hasMore: false }),
+      diff: async () => ({ kind: "patch", patch }),
+      addReaction: async (_repo, target, kind) => {
+        writes.push(target)
+        return confirmed(kind)
+      },
+    },
+    true,
+  )
   const clickText = async (label: string, right = false) => {
     await view.flush()
     const rows = view.captureCharFrame().split("\n")
@@ -346,5 +449,7 @@ test("fixture route crosses launcher, repository, tabs, branches, documents, Hun
     // Finish with a keyboard scroll after the uninterrupted mouse route.
     view.mockInput.pressKey("j")
     expect(session.issueDetail()?.number).toBe(412)
-  } finally { view.renderer.destroy() }
+  } finally {
+    view.renderer.destroy()
+  }
 })

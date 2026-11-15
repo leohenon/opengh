@@ -72,7 +72,10 @@ export function createCommandOutputBuffer() {
         position = position > 0 ? output.lastIndexOf("\n", position - 1) : -1
         if (position < 0) break
       }
-      if (position >= 0) { output = output.slice(position + 1); truncated = true }
+      if (position >= 0) {
+        output = output.slice(position + 1)
+        truncated = true
+      }
       // Do not expose a low surrogate if the character limit split a pair.
       if (output.charCodeAt(0) >= 0xdc00 && output.charCodeAt(0) <= 0xdfff) output = output.slice(1)
       return (truncated ? TRUNCATED : "") + output

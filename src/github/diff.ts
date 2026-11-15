@@ -11,19 +11,32 @@ export function diffPath(repository: RepositoryReference, target: DiffTarget) {
 }
 
 export function createGitHubDiff(transport: GitHubTransport) {
-  return async (repository: RepositoryReference, target: DiffTarget, signal: AbortSignal, filesOnly = false, shared?: RequestBudget): Promise<DiffContent> => {
+  return async (
+    repository: RepositoryReference,
+    target: DiffTarget,
+    signal: AbortSignal,
+    filesOnly = false,
+    shared?: RequestBudget,
+  ): Promise<DiffContent> => {
     const path = diffPath(repository, target)
     signal.throwIfAborted()
     const ownedBudget = shared ? undefined : createRequestBudget(signal)
     const budget = shared ?? ownedBudget!
     try {
-      const options = { signal: shared ? AbortSignal.any([signal, budget.signal]) : budget.signal, budget, maxBytes: MAX_DIFF_BYTES,
-        limitMessage: "Diff exceeds the 4 MiB viewing limit. Load the file list or open it on GitHub." }
+      const options = {
+        signal: shared ? AbortSignal.any([signal, budget.signal]) : budget.signal,
+        budget,
+        maxBytes: MAX_DIFF_BYTES,
+        limitMessage: "Diff exceeds the 4 MiB viewing limit. Load the file list or open it on GitHub.",
+      }
       if (!filesOnly) {
         const revision = async () => {
-          const value = JSON.parse(await transport.text(path, "application/vnd.github+json", {
-            ...options, jq: "{head: .head.sha, base: .base.sha}",
-          }))
+          const value = JSON.parse(
+            await transport.text(path, "application/vnd.github+json", {
+              ...options,
+              jq: "{head: .head.sha, base: .base.sha}",
+            }),
+          )
           options.signal.throwIfAborted()
           if (!/^[a-f\d]{40}$/i.test(value?.head ?? "") || !/^[a-f\d]{40}$/i.test(value?.base ?? ""))
             throw new Error("GitHub did not identify the PR diff commits. Refresh before reviewing.")
@@ -33,7 +46,8 @@ export function createGitHubDiff(transport: GitHubTransport) {
         const before = target.kind === "pull" ? await revision() : undefined
         const patch = await transport.text(path, "application/vnd.github.diff", options)
         options.signal.throwIfAborted()
-        if (Buffer.byteLength(patch) > MAX_DIFF_BYTES) throw new Error("Diff exceeds the 4 MiB viewing limit. Load the file list or open it on GitHub.")
+        if (Buffer.byteLength(patch) > MAX_DIFF_BYTES)
+          throw new Error("Diff exceeds the 4 MiB viewing limit. Load the file list or open it on GitHub.")
         if (before) {
           const after = await revision()
           options.signal.throwIfAborted()
@@ -60,8 +74,13 @@ export function createGitHubDiff(transport: GitHubTransport) {
         for (const entry of entries) {
           if (seen.has(entry.filename)) continue
           seen.add(entry.filename)
-          files.push({ path: entry.filename, previousPath: entry.previous_filename, status: entry.status,
-            additions: entry.additions, deletions: entry.deletions })
+          files.push({
+            path: entry.filename,
+            previousPath: entry.previous_filename,
+            status: entry.status,
+            additions: entry.additions,
+            deletions: entry.deletions,
+          })
         }
         if (entries.length < 100) return { kind: "files", files, truncated: false }
       }

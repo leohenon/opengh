@@ -28,7 +28,10 @@ test("editor offsets measure linear grapheme input with native tabs, controls an
     expect(offsets.starts[emoji + 2]).toBe(offsets.starts[emoji]!)
     expect(offsets.ends[emoji + 2]).toBe(offsets.ends[emoji + "👩‍💻".length]!)
     expect(offsets.starts[text.length]).toBe(editor.editBuffer.measureText(text.replaceAll("\n", "")))
-  } finally { editor.destroy(); view.renderer.destroy() }
+  } finally {
+    editor.destroy()
+    view.renderer.destroy()
+  }
 })
 
 test("Markdown source is colored by the real parser without changing text, cursor, selection or history", async () => {
@@ -36,17 +39,36 @@ test("Markdown source is colored by the real parser without changing text, curso
   const [theme, setTheme] = createSignal("opengh")
   let editor!: TextareaRenderable
   let changes = 0
-  const view = await testRender(() => <ThemeProvider name={theme()} mode="dark">
-    <KeybindingsProvider>
-      <MarkdownTextarea ref={(value) => { editor = value }} initialValue={source}
-        width={80} height={10} focused textColor="#ffffff" backgroundColor="#101010"
-        onContentChange={() => { changes++ }} historyKey="draft" />
-    </KeybindingsProvider>
-  </ThemeProvider>, { width: 80, height: 10 })
+  const view = await testRender(
+    () => (
+      <ThemeProvider name={theme()} mode="dark">
+        <KeybindingsProvider>
+          <MarkdownTextarea
+            ref={(value) => {
+              editor = value
+            }}
+            initialValue={source}
+            width={80}
+            height={10}
+            focused
+            textColor="#ffffff"
+            backgroundColor="#101010"
+            onContentChange={() => {
+              changes++
+            }}
+            historyKey="draft"
+          />
+        </KeybindingsProvider>
+      </ThemeProvider>
+    ),
+    { width: 80, height: 10 },
+  )
 
   const isColored = (text: string, scope: string) => {
     const expected = editor.syntaxStyle!.getStyle(scope)!.fg!
-    return view.captureSpans().lines.flatMap((line) => line.spans)
+    return view
+      .captureSpans()
+      .lines.flatMap((line) => line.spans)
       .some((span) => span.text.includes(text) && span.fg.equals(expected))
   }
   const assertColored = (text: string, scope: string) => expect(isColored(text, scope)).toBe(true)

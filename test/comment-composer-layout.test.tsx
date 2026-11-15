@@ -11,11 +11,29 @@ test("comment editors have a blank three-line field and labelled actions inside 
   const [width, setWidth] = createSignal(90)
   const [disabled, setDisabled] = createSignal(false)
   const [bindings, setBindings] = createSignal({ "dialog.togglePreview": ["ctrl+t"], "dialog.toggleExpanded": ["ctrl+e"] })
-  let saves = 0, expands = 0, cancels = 0
-  const view = await testRender(() => <KeybindingsProvider overrides={bindings()}>
-    <InlineCommentComposer title="Comment" body="" width={width()} marginLeft={0} active disabled={disabled()}
-      scroll={() => undefined} onInput={() => {}} onSave={() => saves++} onExpand={() => expands++} onCancel={() => cancels++} />
-  </KeybindingsProvider>, { width: 100, height: 20 })
+  let saves = 0,
+    expands = 0,
+    cancels = 0
+  const view = await testRender(
+    () => (
+      <KeybindingsProvider overrides={bindings()}>
+        <InlineCommentComposer
+          title="Comment"
+          body=""
+          width={width()}
+          marginLeft={0}
+          active
+          disabled={disabled()}
+          scroll={() => undefined}
+          onInput={() => {}}
+          onSave={() => saves++}
+          onExpand={() => expands++}
+          onCancel={() => cancels++}
+        />
+      </KeybindingsProvider>
+    ),
+    { width: 100, height: 20 },
+  )
   const find = (id: string) => view.renderer.root.findDescendantById(`inline-comment-${id}`)!
   try {
     await view.flush()
@@ -81,17 +99,34 @@ test("comment editors have a blank three-line field and labelled actions inside 
     await view.flush()
     await clickControl(view, "inline-comment-cancel")
     expect(cancels).toBe(1)
-  } finally { view.renderer.destroy() }
+  } finally {
+    view.renderer.destroy()
+  }
 })
 
 test("comment boxes inherit their surrounding surface while editing, blurred and previewing", async () => {
   const [background, setBackground] = createSignal("#26384a")
   const [active, setActive] = createSignal(true)
   const body = "Blend with the page."
-  const view = await testRender(() => <box width="100%" height="100%" backgroundColor={background()}>
-    <InlineCommentComposer title="Comment" body={body} width={70} marginLeft={0} active={active()}
-      scroll={() => undefined} onInput={() => {}} onSave={() => {}} onExpand={() => {}} onCancel={() => {}} />
-  </box>, { width: 80, height: 16 })
+  const view = await testRender(
+    () => (
+      <box width="100%" height="100%" backgroundColor={background()}>
+        <InlineCommentComposer
+          title="Comment"
+          body={body}
+          width={70}
+          marginLeft={0}
+          active={active()}
+          scroll={() => undefined}
+          onInput={() => {}}
+          onSave={() => {}}
+          onExpand={() => {}}
+          onCancel={() => {}}
+        />
+      </box>
+    ),
+    { width: 80, height: 16 },
+  )
   const find = (id: string) => view.renderer.root.findDescendantById(`inline-comment-${id}`)!
   const backgroundAt = (x: number, y: number) => {
     let column = 0
@@ -132,5 +167,7 @@ test("comment boxes inherit their surrounding surface while editing, blurred and
     await view.flush()
     expect(editor.plainText).toBe(body)
     checkBackground()
-  } finally { view.renderer.destroy() }
+  } finally {
+    view.renderer.destroy()
+  }
 })

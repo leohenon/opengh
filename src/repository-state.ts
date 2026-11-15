@@ -69,10 +69,7 @@ export type IssueDetailState = {
   events?: IssueTimelineEvent[]
 }
 
-export type OperationState =
-  | { status: "idle" }
-  | { status: "loading" }
-  | { status: "error"; message: string }
+export type OperationState = { status: "idle" } | { status: "loading" } | { status: "error"; message: string }
 
 export type ReactionActionState = { kind?: ReactionKind; operation: OperationState }
 

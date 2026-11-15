@@ -10,7 +10,7 @@ const pages: readonly Page[] = ["overview", "commits", "issues", "pulls", "actio
 const detailPages = { commit: "commits", issue: "issues", pull: "pulls", run: "actions" } as const
 const resumePath = () => join(configDirectory(), "resume.json")
 const record = (value: unknown): Record<string, unknown> | undefined =>
-  value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : undefined
+  value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : undefined
 const positiveNumber = (value: unknown): value is number => typeof value === "number" && Number.isSafeInteger(value) && value > 0
 
 function detailTarget(value: unknown): DetailTarget | undefined {
@@ -27,12 +27,15 @@ export function resumeLocation(repository: string, navigation: NavigationState):
   const { page } = navigation
   const detail = navigation.details?.[page]
   const diff = navigation.diffs?.[page]
-  return { repository, state: {
-    page,
-    ...(detail ? { details: { [page]: detail } } : {}),
-    ...(diff ? { diffs: { [page]: diff } } : {}),
-    ...(page === "overview" && navigation.document ? { document: navigation.document } : {}),
-  } }
+  return {
+    repository,
+    state: {
+      page,
+      ...(detail ? { details: { [page]: detail } } : {}),
+      ...(diff ? { diffs: { [page]: diff } } : {}),
+      ...(page === "overview" && navigation.document ? { document: navigation.document } : {}),
+    },
+  }
 }
 
 function normalizeLocation(value: unknown): ResumeLocation | undefined {
@@ -48,9 +51,12 @@ function normalizeLocation(value: unknown): ResumeLocation | undefined {
   const diff = target?.kind === "commit" || target?.kind === "pull" ? target : undefined
   if (rawDetail !== undefined && (!detail || detailPages[detail.kind] !== page)) return
   if (rawDiff !== undefined && (!diff || detailPages[diff.kind] !== page)) return
-  const document = typeof state.document === "string" && state.document.length <= 1024 && !/[\x00-\x1f\x7f]/.test(state.document)
-    ? state.document : undefined
-  return resumeLocation(repository, { page,
+  const document =
+    typeof state.document === "string" && state.document.length <= 1024 && !/[\x00-\x1f\x7f]/.test(state.document)
+      ? state.document
+      : undefined
+  return resumeLocation(repository, {
+    page,
     ...(detail ? { details: { [page]: detail } } : {}),
     ...(diff ? { diffs: { [page]: diff } } : {}),
     document,
@@ -82,9 +88,15 @@ export function createResumeWriter(save: (location: ResumeLocation) => Promise<v
     if (pending) return pending.then(flush)
     if (!dirty) return
     const snapshot = dirty
-    pending = Promise.resolve().then(() => save(snapshot)).then(() => {
-      if (dirty === snapshot) dirty = undefined
-    }).catch(() => {}).finally(() => { pending = undefined })
+    pending = Promise.resolve()
+      .then(() => save(snapshot))
+      .then(() => {
+        if (dirty === snapshot) dirty = undefined
+      })
+      .catch(() => {})
+      .finally(() => {
+        pending = undefined
+      })
     return pending
   }
   return {
@@ -95,7 +107,9 @@ export function createResumeWriter(save: (location: ResumeLocation) => Promise<v
       previous = key
       dirty = snapshot
       clearTimeout(timer)
-      timer = setTimeout(() => { void flush() }, delay)
+      timer = setTimeout(() => {
+        void flush()
+      }, delay)
     },
     flush,
   }

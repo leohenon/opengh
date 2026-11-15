@@ -20,8 +20,22 @@ test("mouse tabs include their underline, respect disabled/drag guards, and reve
   const [interactive, setInteractive] = createSignal(true)
   let repositories = 0
   const [repo, setRepo] = createSignal(githubDataFixture.repo)
-  const view = await testRender(() => <Header repo={repo()} page={page()} tabs={tabs}
-    compact={compact()} interactive={interactive()} onSelect={setPage} onOpenRepository={() => { repositories++ }} />, { width: 140, height: 8 })
+  const view = await testRender(
+    () => (
+      <Header
+        repo={repo()}
+        page={page()}
+        tabs={tabs}
+        compact={compact()}
+        interactive={interactive()}
+        onSelect={setPage}
+        onOpenRepository={() => {
+          repositories++
+        }}
+      />
+    ),
+    { width: 140, height: 8 },
+  )
   const click = async (label: string, offset = 0, button: 0 | 1 | 2 = 0) => {
     const lines = view.captureCharFrame().split("\n")
     const row = lines.findIndex((line) => line.includes(label))
@@ -73,7 +87,9 @@ test("mouse tabs include their underline, respect disabled/drag guards, and reve
     expect(view.captureCharFrame()).not.toContain("▾")
     await clickControl(view, "repository-dropdown")
     expect(repositories).toBe(3)
-  } finally { view.renderer.destroy() }
+  } finally {
+    view.renderer.destroy()
+  }
 })
 
 test("header prioritizes tabs over repository identity and counts, then reveals whole tabs on navigation", async () => {
@@ -82,12 +98,22 @@ test("header prioritizes tabs over repository identity and counts, then reveals 
   const [compact, setCompact] = createSignal(true)
   const [issues, setIssues] = createSignal(61)
   const [showTabCounts, setShowTabCounts] = createSignal(true)
-  const view = await testRender(() => <Header repo={repo} page={page()} tabs={tabs} compact={compact()}
-    showTabCounts={showTabCounts()} workCounts={{ status: "ready", value: { issues: issues(), pulls: 24 } }}
-  />, { width: 160, height: 8 })
+  const view = await testRender(
+    () => (
+      <Header
+        repo={repo}
+        page={page()}
+        tabs={tabs}
+        compact={compact()}
+        showTabCounts={showTabCounts()}
+        workCounts={{ status: "ready", value: { issues: issues(), pulls: 24 } }}
+      />
+    ),
+    { width: 160, height: 8 },
+  )
   const row = () => view.captureCharFrame().split("\n")[compact() ? 0 : 3]!
   const bare = tabs.map((tab, index) => `${index + 1} ${tab.label}`)
-  const counted = bare.map((label, index) => index === 2 ? `${label} (61)` : index === 3 ? `${label} (24)` : label)
+  const counted = bare.map((label, index) => (index === 2 ? `${label} (61)` : index === 3 ? `${label} (24)` : label))
   const width = (labels: string[]) => Bun.stringWidth(labels.join("   "))
   try {
     await view.flush()

@@ -7,7 +7,13 @@ import type { IssueActionParent, IssueActionResult, IssueComment } from "../src/
 import type { IssueActionState, IssueDetailState, PullDetailState } from "../src/repository-state"
 import { App } from "../src/ui/app"
 import { clickControl } from "./fixtures/mouse"
-import { githubDataFixture, issueCommentsFixture, issueDetailFixture, pullContextFixture, repositoryOperationsFixture } from "./fixtures/github-data"
+import {
+  githubDataFixture,
+  issueCommentsFixture,
+  issueDetailFixture,
+  pullContextFixture,
+  repositoryOperationsFixture,
+} from "./fixtures/github-data"
 
 for (const parent of ["issue", "pull"] as const) {
   test(`${parent} comments compose in activity, preserve drafts, expand, confirm and retry with configured shortcuts`, async () => {
@@ -16,44 +22,99 @@ for (const parent of ["issue", "pull"] as const) {
     const prefix = `${parent}-comment`
     const empty: IssueActionState = { body: "", reason: "completed", operation: { status: "idle" } }
     const [action, setAction] = createSignal(empty)
-    const [config, setConfig] = createSignal({ ...defaultConfig, showStatusBarHints: true,
-      keybindings: { "dialog.togglePreview": ["ctrl+t"] } })
-    const comments = Array.from({ length: 12 }, (_, index) => ({ ...issueCommentsFixture[0]!, id: 1000 + index, body: `Earlier comment ${index}` }))
-    const [issue, setIssue] = createSignal<IssueDetailState>({ number: issueDetailFixture.number,
+    const [config, setConfig] = createSignal({
+      ...defaultConfig,
+      showStatusBarHints: true,
+      keybindings: { "dialog.togglePreview": ["ctrl+t"] },
+    })
+    const comments = Array.from({ length: 12 }, (_, index) => ({
+      ...issueCommentsFixture[0]!,
+      id: 1000 + index,
+      body: `Earlier comment ${index}`,
+    }))
+    const [issue, setIssue] = createSignal<IssueDetailState>({
+      number: issueDetailFixture.number,
       resource: { status: "ready", value: issueDetailFixture },
-      comments: { status: "ready", value: { items: comments, page: 1, hasMore: false } }, references: { status: "ready", value: [] } })
-    const [pull, setPull] = createSignal<PullDetailState>({ number: summary.number,
-      resource: { status: "ready", value: { ...summary, url: `${githubDataFixture.repo.url}/pull/${summary.number}`, body: "PR description",
-        updatedAt: summary.createdAt, baseBranch: "main", headBranch: "feature", additions: 1, deletions: 0, changedFiles: 1,
-        commitCount: 0, commentCount: comments.length, labels: [], assignees: [], reviewers: [], mergeable: null, permissions: { comment: true } } },
-      comments: { status: "ready", value: { items: comments, page: 1, hasMore: false } }, references: { status: "ready", value: [] },
-      commits: { status: "ready", value: [] }, context: { status: "ready", value: pullContextFixture } })
+      comments: { status: "ready", value: { items: comments, page: 1, hasMore: false } },
+      references: { status: "ready", value: [] },
+    })
+    const [pull, setPull] = createSignal<PullDetailState>({
+      number: summary.number,
+      resource: {
+        status: "ready",
+        value: {
+          ...summary,
+          url: `${githubDataFixture.repo.url}/pull/${summary.number}`,
+          body: "PR description",
+          updatedAt: summary.createdAt,
+          baseBranch: "main",
+          headBranch: "feature",
+          additions: 1,
+          deletions: 0,
+          changedFiles: 1,
+          commitCount: 0,
+          commentCount: comments.length,
+          labels: [],
+          assignees: [],
+          reviewers: [],
+          mergeable: null,
+          permissions: { comment: true },
+        },
+      },
+      comments: { status: "ready", value: { items: comments, page: 1, hasMore: false } },
+      references: { status: "ready", value: [] },
+      commits: { status: "ready", value: [] },
+      context: { status: "ready", value: pullContextFixture },
+    })
     let pending = Promise.withResolvers<IssueActionResult>()
     const calls: Array<{ number: number; parent?: IssueActionParent; body: string }> = []
-    const view = await testRender(() => <App data={githubDataFixture} operations={repositoryOperationsFixture}
-      config={config()} issueDetail={issue()} pullDetail={pull()}
-      initialNavigation={{ detail: { kind: parent, number } }} getIssueAction={() => action()}
-      onPrepareIssueAction={() => setAction(current => ({ ...current, operation: { status: "idle" } }))}
-      onIssueDraftChange={(_number, draft) => setAction(current => ({ ...current, ...draft }))}
-      onDiscardIssueDraft={() => setAction(empty)}
-      onSubmitIssueAction={async (target, kind, subject) => {
-        expect(kind).toBe("comment")
-        calls.push({ number: target, parent: subject, body: action().body })
-        setAction(current => ({ ...current, operation: { status: "loading" } }))
-        try {
-          const result = await pending.promise
-          if (result.comment) {
-            if (parent === "issue") setIssue(current => ({ ...current, comments: { status: "ready", value: { items: [...comments, result.comment!], page: 1, hasMore: false } } }))
-            else setPull(current => ({ ...current, comments: { status: "ready", value: { items: [...comments, result.comment!], page: 1, hasMore: false } } }))
-          }
-          setAction(empty)
-          return result
-        } catch (error) {
-          setAction(current => ({ ...current, operation: { status: "error", message: String(error) } }))
-          throw error
-        }
-      }} />, { width: 120, height: 30 })
-    const settle = async () => { await view.flush(); await Bun.sleep(35); await view.flush() }
+    const view = await testRender(
+      () => (
+        <App
+          data={githubDataFixture}
+          operations={repositoryOperationsFixture}
+          config={config()}
+          issueDetail={issue()}
+          pullDetail={pull()}
+          initialNavigation={{ detail: { kind: parent, number } }}
+          getIssueAction={() => action()}
+          onPrepareIssueAction={() => setAction((current) => ({ ...current, operation: { status: "idle" } }))}
+          onIssueDraftChange={(_number, draft) => setAction((current) => ({ ...current, ...draft }))}
+          onDiscardIssueDraft={() => setAction(empty)}
+          onSubmitIssueAction={async (target, kind, subject) => {
+            expect(kind).toBe("comment")
+            calls.push({ number: target, parent: subject, body: action().body })
+            setAction((current) => ({ ...current, operation: { status: "loading" } }))
+            try {
+              const result = await pending.promise
+              if (result.comment) {
+                if (parent === "issue")
+                  setIssue((current) => ({
+                    ...current,
+                    comments: { status: "ready", value: { items: [...comments, result.comment!], page: 1, hasMore: false } },
+                  }))
+                else
+                  setPull((current) => ({
+                    ...current,
+                    comments: { status: "ready", value: { items: [...comments, result.comment!], page: 1, hasMore: false } },
+                  }))
+              }
+              setAction(empty)
+              return result
+            } catch (error) {
+              setAction((current) => ({ ...current, operation: { status: "error", message: String(error) } }))
+              throw error
+            }
+          }}
+        />
+      ),
+      { width: 120, height: 30 },
+    )
+    const settle = async () => {
+      await view.flush()
+      await Bun.sleep(35)
+      await view.flush()
+    }
     const editor = () => view.renderer.root.findDescendantById(`${prefix}-editor`) as TextareaRenderable | undefined
     const footer = () => view.captureCharFrame().split("\n")[29]!.trim()
     const scroll = () => view.renderer.root.findDescendantById(`${parent}-detail-scroll`) as ScrollBoxRenderable
@@ -81,9 +142,11 @@ for (const parent of ["issue", "pull"] as const) {
       await settle()
       expect(view.renderer.root.findDescendantById("mention-completions")).toBeUndefined()
       expect(view.renderer.root.findDescendantById("issue-action-confirm")).toBeDefined()
-      view.mockInput.pressEscape(); await settle()
+      view.mockInput.pressEscape()
+      await settle()
       expect(calls).toHaveLength(0)
-      await view.mockInput.typeText("r"); await settle()
+      await view.mockInput.typeText("r")
+      await settle()
       view.mockInput.pressEnter()
       await settle()
       expect(action().body).toBe("@maria-dev ")
@@ -102,10 +165,10 @@ for (const parent of ["issue", "pull"] as const) {
       expect(view.captureCharFrame()).toContain("Saved draft q?hc")
       expect(footer()).toContain("ctrl+t write")
       view.mockInput.pressKey("t", { ctrl: true })
-      setConfig(current => ({ ...current, showStatusBarHints: false }))
+      setConfig((current) => ({ ...current, showStatusBarHints: false }))
       await settle()
       expect(footer()).toBe("")
-      setConfig(current => ({ ...current, showStatusBarHints: true }))
+      setConfig((current) => ({ ...current, showStatusBarHints: true }))
       await settle()
 
       view.mockInput.pressKey("o", { ctrl: true })
@@ -130,59 +193,112 @@ for (const parent of ["issue", "pull"] as const) {
       await view.mockInput.typeText(" @ma")
       await settle()
       expect(view.renderer.root.findDescendantById("mention-option:max")).toBeDefined()
-      view.mockInput.pressEscape(); await settle()
+      view.mockInput.pressEscape()
+      await settle()
       expect(view.renderer.root.findDescendantById("issue-comment-writer")).toBe(expanded)
       expect(view.renderer.root.findDescendantById("mention-completions")).toBeUndefined()
-      view.mockInput.pressKey("z", { ctrl: true }); await settle()
+      view.mockInput.pressKey("z", { ctrl: true })
+      await settle()
       expect(action().body).toBe("Saved **draft** q?hc")
       await view.mockInput.typeText(" expanded")
-      const expandedIssue = issue(), expandedPull = pull()
-      if (parent === "issue") setIssue({ ...expandedIssue, resource: { status: "ready", value: { ...expandedIssue.resource.value!,
-        permissions: { ...expandedIssue.resource.value!.permissions!, comment: false } } } })
-      else setPull({ ...expandedPull, resource: { status: "ready", value: { ...expandedPull.resource.value!,
-        permissions: { ...expandedPull.resource.value!.permissions, comment: false } } } })
+      const expandedIssue = issue(),
+        expandedPull = pull()
+      if (parent === "issue")
+        setIssue({
+          ...expandedIssue,
+          resource: {
+            status: "ready",
+            value: { ...expandedIssue.resource.value!, permissions: { ...expandedIssue.resource.value!.permissions!, comment: false } },
+          },
+        })
+      else
+        setPull({
+          ...expandedPull,
+          resource: {
+            status: "ready",
+            value: { ...expandedPull.resource.value!, permissions: { ...expandedPull.resource.value!.permissions, comment: false } },
+          },
+        })
       await settle()
-      await view.mockInput.typeText("!"); await settle()
+      await view.mockInput.typeText("!")
+      await settle()
       expect(action().body).toBe("Saved **draft** q?hc expanded!")
-      view.mockInput.pressKey("s", { ctrl: true }); await settle()
+      view.mockInput.pressKey("s", { ctrl: true })
+      await settle()
       expect(view.renderer.root.findDescendantById("issue-action-confirm")).toBeUndefined()
       expect(calls).toHaveLength(0)
-      view.mockInput.pressBackspace(); await settle()
-      setIssue(expandedIssue); setPull(expandedPull); await settle()
+      view.mockInput.pressBackspace()
+      await settle()
+      setIssue(expandedIssue)
+      setPull(expandedPull)
+      await settle()
       view.mockInput.pressKey("o", { ctrl: true })
       await settle()
       expect(view.renderer.root.findDescendantById("issue-comment-writer")).toBeUndefined()
       expect(editor()?.plainText).toBe("Saved **draft** q?hc expanded")
       expect(editor()?.focused).toBe(true)
-      const inlineReadyIssue = issue(), inlineReadyPull = pull()
+      const inlineReadyIssue = issue(),
+        inlineReadyPull = pull()
       for (const unavailable of ["loading", "permission"] as const) {
-        if (parent === "issue") setIssue({ ...inlineReadyIssue, resource: unavailable === "loading"
-          ? { status: "loading", phase: "load", value: inlineReadyIssue.resource.value }
-          : { status: "ready", value: { ...inlineReadyIssue.resource.value!, permissions: { ...inlineReadyIssue.resource.value!.permissions!, comment: false } } } })
-        else setPull({ ...inlineReadyPull, resource: unavailable === "loading"
-          ? { status: "loading", phase: "load", value: inlineReadyPull.resource.value }
-          : { status: "ready", value: { ...inlineReadyPull.resource.value!, permissions: { ...inlineReadyPull.resource.value!.permissions, comment: false } } } })
+        if (parent === "issue")
+          setIssue({
+            ...inlineReadyIssue,
+            resource:
+              unavailable === "loading"
+                ? { status: "loading", phase: "load", value: inlineReadyIssue.resource.value }
+                : {
+                    status: "ready",
+                    value: {
+                      ...inlineReadyIssue.resource.value!,
+                      permissions: { ...inlineReadyIssue.resource.value!.permissions!, comment: false },
+                    },
+                  },
+          })
+        else
+          setPull({
+            ...inlineReadyPull,
+            resource:
+              unavailable === "loading"
+                ? { status: "loading", phase: "load", value: inlineReadyPull.resource.value }
+                : {
+                    status: "ready",
+                    value: {
+                      ...inlineReadyPull.resource.value!,
+                      permissions: { ...inlineReadyPull.resource.value!.permissions, comment: false },
+                    },
+                  },
+          })
         await settle()
         expect(editor()?.focused).toBe(true)
-        await view.mockInput.typeText("!"); await settle()
+        await view.mockInput.typeText("!")
+        await settle()
         expect(action().body).toBe("Saved **draft** q?hc expanded!")
-        view.mockInput.pressKey("s", { ctrl: true }); await settle()
-        await clickControl(view, `${prefix}-post`); await settle()
+        view.mockInput.pressKey("s", { ctrl: true })
+        await settle()
+        await clickControl(view, `${prefix}-post`)
+        await settle()
         expect(view.renderer.root.findDescendantById("issue-action-confirm")).toBeUndefined()
         expect(calls).toHaveLength(0)
-        view.mockInput.pressKey("o", { ctrl: true }); await settle()
+        view.mockInput.pressKey("o", { ctrl: true })
+        await settle()
         expect(view.renderer.root.findDescendantById("issue-comment-writer")).toBeDefined()
-        view.mockInput.pressKey("o", { ctrl: true }); await settle()
+        view.mockInput.pressKey("o", { ctrl: true })
+        await settle()
         expect(editor()?.focused).toBe(true)
-        view.mockInput.pressEscape(); await settle()
+        view.mockInput.pressEscape()
+        await settle()
         expect(editor()).toBeUndefined()
         expect(scroll()).toBeDefined()
         expect(view.captureCharFrame()).toContain("Draft saved · Resume")
-        view.mockInput.pressKey("c"); await settle()
+        view.mockInput.pressKey("c")
+        await settle()
         expect(editor()?.plainText).toBe("Saved **draft** q?hc expanded!")
         expect(editor()?.focused).toBe(true)
-        view.mockInput.pressBackspace(); await settle()
-        setIssue(inlineReadyIssue); setPull(inlineReadyPull); await settle()
+        view.mockInput.pressBackspace()
+        await settle()
+        setIssue(inlineReadyIssue)
+        setPull(inlineReadyPull)
+        await settle()
       }
 
       view.mockInput.pressEscape()
@@ -199,7 +315,10 @@ for (const parent of ["issue", "pull"] as const) {
       if (parent === "issue") {
         scroll().scrollTo(scroll().scrollHeight)
         await settle()
-        const dueRow = view.captureCharFrame().split("\n").findIndex(row => row.trim().startsWith("Due "))
+        const dueRow = view
+          .captureCharFrame()
+          .split("\n")
+          .findIndex((row) => row.trim().startsWith("Due "))
         expect(dueRow).toBeGreaterThanOrEqual(0)
         expect(view.renderer.root.findDescendantById("issue-comment-area")!.y).toBeGreaterThan(dueRow)
       }
@@ -226,14 +345,31 @@ for (const parent of ["issue", "pull"] as const) {
       expect(editor()).toBe(confirmedInstance)
       expect(footer()).toBe("enter confirm · esc back")
       expect(calls).toHaveLength(0)
-      const readyIssue = issue(), readyPull = pull()
+      const readyIssue = issue(),
+        readyPull = pull()
       for (const unavailable of ["loading", "permission"] as const) {
-        if (parent === "issue") setIssue({ ...readyIssue, resource: unavailable === "loading"
-          ? { status: "loading", phase: "load", value: readyIssue.resource.value }
-          : { status: "ready", value: { ...readyIssue.resource.value!, permissions: { ...readyIssue.resource.value!.permissions!, comment: false } } } })
-        else setPull({ ...readyPull, resource: unavailable === "loading"
-          ? { status: "loading", phase: "load", value: readyPull.resource.value }
-          : { status: "ready", value: { ...readyPull.resource.value!, permissions: { ...readyPull.resource.value!.permissions, comment: false } } } })
+        if (parent === "issue")
+          setIssue({
+            ...readyIssue,
+            resource:
+              unavailable === "loading"
+                ? { status: "loading", phase: "load", value: readyIssue.resource.value }
+                : {
+                    status: "ready",
+                    value: { ...readyIssue.resource.value!, permissions: { ...readyIssue.resource.value!.permissions!, comment: false } },
+                  },
+          })
+        else
+          setPull({
+            ...readyPull,
+            resource:
+              unavailable === "loading"
+                ? { status: "loading", phase: "load", value: readyPull.resource.value }
+                : {
+                    status: "ready",
+                    value: { ...readyPull.resource.value!, permissions: { ...readyPull.resource.value!.permissions, comment: false } },
+                  },
+          })
         await settle()
         view.mockInput.pressEnter()
         await settle()
@@ -243,7 +379,8 @@ for (const parent of ["issue", "pull"] as const) {
         await settle()
         expect(calls).toHaveLength(0)
         expect(view.renderer.root.findDescendantById("issue-action-confirm")).toBeDefined()
-        setIssue(readyIssue); setPull(readyPull)
+        setIssue(readyIssue)
+        setPull(readyPull)
         await settle()
       }
       view.mockInput.pressEscape()
@@ -282,7 +419,9 @@ for (const parent of ["issue", "pull"] as const) {
       expect(view.renderer.root.findDescendantById(`${prefix}-resume`)).toBeUndefined()
       expect(view.captureCharFrame()).toContain("Comment posted")
       expect(view.captureCharFrame()).toContain("Saved draft q?hc expanded")
-    } finally { view.renderer.destroy() }
+    } finally {
+      view.renderer.destroy()
+    }
   }, 15_000)
 }
 
@@ -290,15 +429,39 @@ test("inline comments retain and confirm text without an injected action-state g
   const number = issueDetailFixture.number
   const pending = Promise.withResolvers<IssueActionResult>()
   const [allowed, setAllowed] = createSignal(true)
-  let body = "", submissions = 0
-  const view = await testRender(() => <App data={githubDataFixture} operations={repositoryOperationsFixture}
-    initialNavigation={{ detail: { kind: "issue", number } }}
-    issueDetail={{ number, resource: { status: "ready", value: { ...issueDetailFixture,
-      permissions: { ...issueDetailFixture.permissions!, comment: allowed() } } },
-      comments: { status: "ready", value: { items: [], page: 1, hasMore: false } }, references: { status: "ready", value: [] } }}
-    onIssueDraftChange={(_number, draft) => { if (draft.body !== undefined) body = draft.body }}
-    onSubmitIssueAction={async () => { submissions++; return pending.promise }} />, { width: 100, height: 30 })
-  const settle = async () => { await view.flush(); await Bun.sleep(35); await view.flush() }
+  let body = "",
+    submissions = 0
+  const view = await testRender(
+    () => (
+      <App
+        data={githubDataFixture}
+        operations={repositoryOperationsFixture}
+        initialNavigation={{ detail: { kind: "issue", number } }}
+        issueDetail={{
+          number,
+          resource: {
+            status: "ready",
+            value: { ...issueDetailFixture, permissions: { ...issueDetailFixture.permissions!, comment: allowed() } },
+          },
+          comments: { status: "ready", value: { items: [], page: 1, hasMore: false } },
+          references: { status: "ready", value: [] },
+        }}
+        onIssueDraftChange={(_number, draft) => {
+          if (draft.body !== undefined) body = draft.body
+        }}
+        onSubmitIssueAction={async () => {
+          submissions++
+          return pending.promise
+        }}
+      />
+    ),
+    { width: 100, height: 30 },
+  )
+  const settle = async () => {
+    await view.flush()
+    await Bun.sleep(35)
+    await view.flush()
+  }
   try {
     await settle()
     view.mockInput.pressKey("c")
@@ -318,20 +481,29 @@ test("inline comments retain and confirm text without an injected action-state g
     await settle()
     expect(view.renderer.root.findDescendantById("issue-comment-resume")).toBeUndefined()
     expect(view.captureCharFrame()).toContain("Comment posted")
-    view.mockInput.pressKey("c"); await settle()
+    view.mockInput.pressKey("c")
+    await settle()
     await view.mockInput.typeText("Read-only draft")
-    setAllowed(false); await settle()
+    setAllowed(false)
+    await settle()
     expect((view.renderer.root.findDescendantById("issue-comment-editor") as TextareaRenderable).focused).toBe(true)
-    await view.mockInput.typeText(" retained"); await settle()
-    view.mockInput.pressKey("s", { ctrl: true }); await settle()
+    await view.mockInput.typeText(" retained")
+    await settle()
+    view.mockInput.pressKey("s", { ctrl: true })
+    await settle()
     expect(submissions).toBe(1)
     expect(view.renderer.root.findDescendantById("issue-action-confirm")).toBeUndefined()
-    view.mockInput.pressEscape(); await settle()
+    view.mockInput.pressEscape()
+    await settle()
     expect(view.renderer.root.findDescendantById("issue-detail-scroll")).toBeDefined()
     expect(view.renderer.root.findDescendantById("issue-comment-editor")).toBeUndefined()
-    await clickControl(view, "issue-comment-resume"); await settle()
+    await clickControl(view, "issue-comment-resume")
+    await settle()
     expect((view.renderer.root.findDescendantById("issue-comment-editor") as TextareaRenderable).plainText).toBe("Read-only draft retained")
-    setAllowed(true); await settle()
+    setAllowed(true)
+    await settle()
     expect(body).toBe("Read-only draft retained")
-  } finally { view.renderer.destroy() }
+  } finally {
+    view.renderer.destroy()
+  }
 })

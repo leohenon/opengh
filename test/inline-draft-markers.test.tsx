@@ -42,18 +42,46 @@ test("saved draft markers follow their source lines and resume exact anchors wit
   const [interactive, setInteractive] = createSignal(true)
   const resumed: ReviewAnchor[] = []
   const file = parseDiff({ kind: "patch", patch }).files[0]!.body!
-  await render(() => <KeybindingsProvider><box width="100%" height="100%" flexDirection="column">
-    <SearchProvider identity="draft-markers" enabled>
-      <DiffScreen target={{ kind: "pull", number: 1 }} savedDrafts={drafts()} commentable
-        resource={{ status: "ready", value: { kind: "patch", patch } }} interactive={interactive()}
-        showScrollbar={false} onLoadFiles={() => {}}
-        review={available() ? { headSha: "head", comments: [], onComment: anchor => { resumed.push(anchor) }, onOpenReview: () => {} } : undefined} />
-    </SearchProvider>
-  </box></KeybindingsProvider>, setup.renderer)
-  const settle = async () => { await setup.flush(); await setup.renderer.idle(); await setup.flush() }
+  await render(
+    () => (
+      <KeybindingsProvider>
+        <box width="100%" height="100%" flexDirection="column">
+          <SearchProvider identity="draft-markers" enabled>
+            <DiffScreen
+              target={{ kind: "pull", number: 1 }}
+              savedDrafts={drafts()}
+              commentable
+              resource={{ status: "ready", value: { kind: "patch", patch } }}
+              interactive={interactive()}
+              showScrollbar={false}
+              onLoadFiles={() => {}}
+              review={
+                available()
+                  ? {
+                      headSha: "head",
+                      comments: [],
+                      onComment: (anchor) => {
+                        resumed.push(anchor)
+                      },
+                      onOpenReview: () => {},
+                    }
+                  : undefined
+              }
+            />
+          </SearchProvider>
+        </box>
+      </KeybindingsProvider>
+    ),
+    setup.renderer,
+  )
+  const settle = async () => {
+    await setup.flush()
+    await setup.renderer.idle()
+    await setup.flush()
+  }
   const marker = (id: string) => setup.renderer.root.findDescendantById(`diff-comment-card:draft:${id}`)
   const expectedRow = (anchor: ReviewAnchor, layout: "split" | "unified") => {
-    const row = reviewRows(file, layout).find(row => (anchor.side === "LEFT" ? row.left : row.right)?.line === anchor.line)!
+    const row = reviewRows(file, layout).find((row) => (anchor.side === "LEFT" ? row.left : row.right)?.line === anchor.line)!
     return setup.renderer.root.findDescendantById(row.id)!
   }
   try {
@@ -111,7 +139,7 @@ test("saved draft markers follow their source lines and resume exact anchors wit
     await settle()
     expect(marker("right")).toBeDefined()
     expect(marker("range")).toBeDefined()
-    setDrafts(current => current.filter(draft => draft.id !== "right"))
+    setDrafts((current) => current.filter((draft) => draft.id !== "right"))
     await settle()
     expect(marker("right")).toBeUndefined()
     expect(marker("range")).toBeDefined()

@@ -26,8 +26,7 @@ type View = Awaited<ReturnType<typeof testRender>>
 function linkCells(view: View, url: string) {
   const cells: Array<{ x: number; y: number }> = []
   for (let y = 0; y < view.renderer.height; y++)
-    for (let x = 0; x < view.renderer.width; x++)
-      if (view.renderer.getLinkAt(x, y) === url) cells.push({ x, y })
+    for (let x = 0; x < view.renderer.width; x++) if (view.renderer.getLinkAt(x, y) === url) cells.push({ x, y })
   expect(cells.length).toBeGreaterThan(0)
   return cells
 }
@@ -57,20 +56,38 @@ async function settleMarkdown(view: View) {
 function MarkdownSample(props: { content: string }) {
   const { colors, theme } = useTheme()
   const style = createReactiveMarkdownStyle(colors, theme)
-  return <box width="100%" flexDirection="column" backgroundColor={colors.canvas}>
-    <GitHubMarkdown content={props.content} syntaxStyle={style()} />
-  </box>
+  return (
+    <box width="100%" flexDirection="column" backgroundColor={colors.canvas}>
+      <GitHubMarkdown content={props.content} syntaxStyle={style()} />
+    </box>
+  )
 }
 
 test("standalone image blocks wrap neutral clickable captions in rich and minimal Markdown", async () => {
   const url = "https://example.com/screenshot.png"
   const opened: string[] = []
   const [style, setStyle] = createSignal<MarkdownStyle>("rich")
-  const view = await testRender(() => <ThemeProvider name="github">
-    <MarkdownProvider style={style()}><HyperlinkProvider identity="image" onOpen={(target) => { opened.push(target) }}>
-      <HyperlinkSurface><MarkdownSample content={`<img alt="A &amp; B [screenshot] showing a long description across multiple lines" src="${url}">`} /></HyperlinkSurface>
-    </HyperlinkProvider></MarkdownProvider>
-  </ThemeProvider>, { width: 100, height: 20 })
+  const view = await testRender(
+    () => (
+      <ThemeProvider name="github">
+        <MarkdownProvider style={style()}>
+          <HyperlinkProvider
+            identity="image"
+            onOpen={(target) => {
+              opened.push(target)
+            }}
+          >
+            <HyperlinkSurface>
+              <MarkdownSample
+                content={`<img alt="A &amp; B [screenshot] showing a long description across multiple lines" src="${url}">`}
+              />
+            </HyperlinkSurface>
+          </HyperlinkProvider>
+        </MarkdownProvider>
+      </ThemeProvider>
+    ),
+    { width: 100, height: 20 },
+  )
   try {
     for (const preference of ["rich", "minimal"] as const) {
       setStyle(preference)
@@ -92,15 +109,31 @@ test("standalone image blocks wrap neutral clickable captions in rich and minima
         expect(opened.at(-1)).toBe(url)
       }
     }
-  } finally { view.renderer.destroy() }
+  } finally {
+    view.renderer.destroy()
+  }
 })
 
 test("image filename fallbacks truncate to one line and retain full clickable destinations after resizing", async () => {
   const [content, setContent] = createSignal("")
   const opened: string[] = []
-  const view = await testRender(() => <ThemeProvider name="github"><HyperlinkProvider identity="filename" onOpen={(url) => { opened.push(url) }}>
-    <HyperlinkSurface><MarkdownSample content={content()} /></HyperlinkSurface>
-  </HyperlinkProvider></ThemeProvider>, { width: 80, height: 12 })
+  const view = await testRender(
+    () => (
+      <ThemeProvider name="github">
+        <HyperlinkProvider
+          identity="filename"
+          onOpen={(url) => {
+            opened.push(url)
+          }}
+        >
+          <HyperlinkSurface>
+            <MarkdownSample content={content()} />
+          </HyperlinkSurface>
+        </HyperlinkProvider>
+      </ThemeProvider>
+    ),
+    { width: 80, height: 12 },
+  )
   try {
     for (const name of ["a-very-long-unbroken-screenshot-filename-for-review.png", "界".repeat(20) + ".png", "👩‍💻".repeat(10) + ".png"]) {
       const url = `https://example.com/images/${encodeURIComponent(name)}?token=secret#preview`
@@ -122,7 +155,9 @@ test("image filename fallbacks truncate to one line and retain full clickable de
     await settleMarkdown(view)
     expect(view.captureCharFrame()).toContain("│ open image")
     linkCells(view, "https://example.com/")
-  } finally { view.renderer.destroy() }
+  } finally {
+    view.renderer.destroy()
+  }
 })
 
 test("opens painted wrapped markdown and table links without native OSC 8 support", async () => {
@@ -131,16 +166,45 @@ test("opens painted wrapped markdown and table links without native OSC 8 suppor
   const commitUrl = "https://github.com/owner/repo/pull/42/commits/abc1234"
   const referenceUrl = "https://github.com/owner/repo/issues/9"
   const opened: string[] = []
-  const stdout = Object.assign(new Writable({
-    write(_chunk, _encoding, callback) { callback() },
-  }), { columns: 32, rows: 36, isTTY: true }) as unknown as NodeJS.WriteStream
+  const stdout = Object.assign(
+    new Writable({
+      write(_chunk, _encoding, callback) {
+        callback()
+      },
+    }),
+    { columns: 32, rows: 36, isTTY: true },
+  ) as unknown as NodeJS.WriteStream
   const nativeSession = new NativeSession(stdout)
-  const view = await testRender(() => <HyperlinkProvider identity="markdown" onOpen={(url) => { opened.push(url) }}>
-    <HyperlinkSurface>
-      <MarkdownSample content={`Before [a deliberately long linked label that wraps across several visible rows](${wrappedUrl}).\n\n| Resource | Status |\n| --- | --- |\n| [Documentation](${tableUrl}) | Ready |`} />
-      <TimelineCommits commits={[{ kind: "commit-added", event: "committed", id: "native-commit", url: commitUrl, sha: "abc1234", message: "Native subject #9", author: "author" }]} />
-    </HyperlinkSurface>
-  </HyperlinkProvider>, { width: 32, height: 36, stdout, nativeSession, bufferedOutput: "stdout" })
+  const view = await testRender(
+    () => (
+      <HyperlinkProvider
+        identity="markdown"
+        onOpen={(url) => {
+          opened.push(url)
+        }}
+      >
+        <HyperlinkSurface>
+          <MarkdownSample
+            content={`Before [a deliberately long linked label that wraps across several visible rows](${wrappedUrl}).\n\n| Resource | Status |\n| --- | --- |\n| [Documentation](${tableUrl}) | Ready |`}
+          />
+          <TimelineCommits
+            commits={[
+              {
+                kind: "commit-added",
+                event: "committed",
+                id: "native-commit",
+                url: commitUrl,
+                sha: "abc1234",
+                message: "Native subject #9",
+                author: "author",
+              },
+            ]}
+          />
+        </HyperlinkSurface>
+      </HyperlinkProvider>
+    ),
+    { width: 32, height: 36, stdout, nativeSession, bufferedOutput: "stdout" },
+  )
   try {
     await settleMarkdown(view)
     expect(nativeSession.getCapabilities().hyperlinks).toBe(false)
@@ -160,7 +224,9 @@ test("opens painted wrapped markdown and table links without native OSC 8 suppor
     expect(hovered.fg).toEqual(normal.fg)
     expect(hovered.attributes).toBe(normal.attributes)
     expect(hovered.bg.a).toBeCloseTo(normal.bg.a)
-    expect(Math.max(Math.abs(hovered.bg.r - normal.bg.r), Math.abs(hovered.bg.g - normal.bg.g), Math.abs(hovered.bg.b - normal.bg.b))).toBeLessThan(0.07)
+    expect(
+      Math.max(Math.abs(hovered.bg.r - normal.bg.r), Math.abs(hovered.bg.g - normal.bg.g), Math.abs(hovered.bg.b - normal.bg.b)),
+    ).toBeLessThan(0.07)
     expect(styleAt(view, plain)).toEqual(normalPlain)
     expect(styleAt(view, tableCell)).toEqual(normalTable)
     expect(view.captureCharFrame()).toBe(frame)
@@ -193,7 +259,9 @@ test("opens painted wrapped markdown and table links without native OSC 8 suppor
     const reference = linkCells(view, referenceUrl)[0]!
     await view.mockMouse.click(reference.x, reference.y)
     expect(opened).toEqual([wrappedUrl, tableUrl, commitUrl, referenceUrl])
-  } finally { view.renderer.destroy() }
+  } finally {
+    view.renderer.destroy()
+  }
 })
 
 test("keeps drag, right-click, selection and message double-click distinct from inline links", async () => {
@@ -206,22 +274,52 @@ test("keeps drag, right-click, selection and message double-click distinct from 
   const controls: ReactionControls = {
     action: () => ({ operation: { status: "idle" } }),
     add: () => {},
-    open: (value) => { reactions.push(value) },
+    open: (value) => {
+      reactions.push(value)
+    },
     context: () => {},
   }
   function Message() {
     const { colors } = useTheme()
     const links = useHyperlinkMouse()
-    const mouse = messageReactionMouse(() => target, () => ({ canReact: true }), () => "ordinary selectable text", () => controls, () => true)
-    return <box {...mouse} width="100%" flexDirection="column" backgroundColor={colors.canvas}>
-      <text {...links}><a href={url}>Inline documentation</a></text>
-      <text id="plain-message">ordinary selectable text</text>
-      <text {...mouseClick(() => { callbacks++ })}><a href={callbackUrl}>Callback reference</a></text>
-    </box>
+    const mouse = messageReactionMouse(
+      () => target,
+      () => ({ canReact: true }),
+      () => "ordinary selectable text",
+      () => controls,
+      () => true,
+    )
+    return (
+      <box {...mouse} width="100%" flexDirection="column" backgroundColor={colors.canvas}>
+        <text {...links}>
+          <a href={url}>Inline documentation</a>
+        </text>
+        <text id="plain-message">ordinary selectable text</text>
+        <text
+          {...mouseClick(() => {
+            callbacks++
+          })}
+        >
+          <a href={callbackUrl}>Callback reference</a>
+        </text>
+      </box>
+    )
   }
-  const view = await testRender(() => <HyperlinkProvider identity="message" onOpen={(value) => { opened.push(value) }}>
-    <HyperlinkSurface><Message /></HyperlinkSurface>
-  </HyperlinkProvider>, { width: 50, height: 12 })
+  const view = await testRender(
+    () => (
+      <HyperlinkProvider
+        identity="message"
+        onOpen={(value) => {
+          opened.push(value)
+        }}
+      >
+        <HyperlinkSurface>
+          <Message />
+        </HyperlinkSurface>
+      </HyperlinkProvider>
+    ),
+    { width: 50, height: 12 },
+  )
   try {
     await view.flush()
     const cell = linkCells(view, url)[0]!
@@ -260,7 +358,9 @@ test("keeps drag, right-click, selection and message double-click distinct from 
     expect(callbacks).toBe(1)
     expect(opened).toEqual(before)
     expect(reactions).toEqual([target])
-  } finally { view.renderer.destroy() }
+  } finally {
+    view.renderer.destroy()
+  }
 })
 
 test("popup links open once and backdrop dismissal consumes the whole click", async () => {
@@ -269,16 +369,37 @@ test("popup links open once and backdrop dismissal consumes the whole click", as
   const opened: string[] = []
   const [visible, setVisible] = createSignal(true)
   let dismissals = 0
-  const view = await testRender(() => <HyperlinkProvider identity="popup" onOpen={(url) => { opened.push(url) }}>
-    <HyperlinkSurface enabled={!visible()}>
-      <text><a href={backgroundUrl}>Background link under backdrop</a></text>
-      <Show when={visible()}>
-        <Popup width={30} height={6} onClose={() => { dismissals++; setVisible(false) }}>
-          <text><a href={popupUrl}>Popup documentation</a></text>
-        </Popup>
-      </Show>
-    </HyperlinkSurface>
-  </HyperlinkProvider>, { width: 60, height: 20 })
+  const view = await testRender(
+    () => (
+      <HyperlinkProvider
+        identity="popup"
+        onOpen={(url) => {
+          opened.push(url)
+        }}
+      >
+        <HyperlinkSurface enabled={!visible()}>
+          <text>
+            <a href={backgroundUrl}>Background link under backdrop</a>
+          </text>
+          <Show when={visible()}>
+            <Popup
+              width={30}
+              height={6}
+              onClose={() => {
+                dismissals++
+                setVisible(false)
+              }}
+            >
+              <text>
+                <a href={popupUrl}>Popup documentation</a>
+              </text>
+            </Popup>
+          </Show>
+        </HyperlinkSurface>
+      </HyperlinkProvider>
+    ),
+    { width: 60, height: 20 },
+  )
   try {
     await view.flush()
     const popup = linkCells(view, popupUrl)[0]!
@@ -299,9 +420,10 @@ test("popup links open once and backdrop dismissal consumes the whole click", as
     const background = linkCells(view, backgroundUrl)[0]!
     await view.mockMouse.click(background.x, background.y)
     expect(opened).toEqual([popupUrl, backgroundUrl])
-  } finally { view.renderer.destroy() }
+  } finally {
+    view.renderer.destroy()
+  }
 })
-
 
 test("loaded document headings and repeated footnote backlinks scroll locally with colored references", async () => {
   const repository = "leohenon/opengh-sandbox"
@@ -325,14 +447,49 @@ ${Array.from({ length: 24 }, (_, index) => `Filler paragraph ${index}.`).join("\
 The heading target is here.
 
 [^short]: Footnote target text.`
-  const data = { ...githubDataFixture, repo: { ...githubDataFixture.repo, nameWithOwner: repository, url: `https://github.com/${repository}` },
-    documents: { status: "ready" as const, value: [{ id: "readme", repository, ref: "main", path: "README.md", label: "README",
-      resource: { status: "ready" as const, value: content } },
-      { id: "guide", repository, ref: "main", path: "GUIDE.md", label: "Guide", resource: { status: "ready" as const,
-        value: `## Guide\n\nFirst heading.\n\n${"Guide filler.\n\n".repeat(24)}## Guide\n\nSecond heading target.\n\n[Back to the second reference](README.md#user-content-fnref-short-2)` } }] } }
-  const view = await testRender(() => <ThemeProvider name="github" mode="dark"><App data={data} operations={repositoryOperationsFixture}
-    config={{ ...defaultConfig, showStatusBarHints: false, markdownStyle: style() }}
-    onOpenUrl={async (url) => { external.push(url) }} /></ThemeProvider>, { width: 80, height: 22 })
+  const data = {
+    ...githubDataFixture,
+    repo: { ...githubDataFixture.repo, nameWithOwner: repository, url: `https://github.com/${repository}` },
+    documents: {
+      status: "ready" as const,
+      value: [
+        {
+          id: "readme",
+          repository,
+          ref: "main",
+          path: "README.md",
+          label: "README",
+          resource: { status: "ready" as const, value: content },
+        },
+        {
+          id: "guide",
+          repository,
+          ref: "main",
+          path: "GUIDE.md",
+          label: "Guide",
+          resource: {
+            status: "ready" as const,
+            value: `## Guide\n\nFirst heading.\n\n${"Guide filler.\n\n".repeat(24)}## Guide\n\nSecond heading target.\n\n[Back to the second reference](README.md#user-content-fnref-short-2)`,
+          },
+        },
+      ],
+    },
+  }
+  const view = await testRender(
+    () => (
+      <ThemeProvider name="github" mode="dark">
+        <App
+          data={data}
+          operations={repositoryOperationsFixture}
+          config={{ ...defaultConfig, showStatusBarHints: false, markdownStyle: style() }}
+          onOpenUrl={async (url) => {
+            external.push(url)
+          }}
+        />
+      </ThemeProvider>
+    ),
+    { width: 80, height: 22 },
+  )
   const click = async (url: string) => {
     const cell = linkCells(view, url)[0]!
     await view.mockMouse.click(cell.x, cell.y)
@@ -340,7 +497,11 @@ The heading target is here.
     await view.flush()
   }
   try {
-    for (const [width, variant] of [[80, "rich"], [40, "minimal"], [80, "rich"]] as const) {
+    for (const [width, variant] of [
+      [80, "rich"],
+      [40, "minimal"],
+      [80, "rich"],
+    ] as const) {
       setStyle(variant)
       view.resize(width, 22)
       await settleMarkdown(view)
@@ -348,7 +509,10 @@ The heading target is here.
       scroll.scrollTo(0)
       await view.flush()
       expect(view.captureCharFrame()).not.toContain("\uE000")
-      const reference = view.captureSpans().lines.flatMap((line) => line.spans).find((span) => span.text.includes("#42"))!
+      const reference = view
+        .captureSpans()
+        .lines.flatMap((line) => line.spans)
+        .find((span) => span.text.includes("#42"))!
       expect(reference).toBeDefined()
       expect(reference.fg.equals(RGBA.fromHex(resolveTheme("github", "dark").markdownLink))).toBe(true)
       await click(noteUrl)
@@ -375,36 +539,80 @@ The heading target is here.
     // Cross-document anchor scrolling finishes asynchronously after the destination mounts.
     await waitForText(view, "Second reference")
     expect(external).toEqual([])
-  } finally { view.renderer.destroy() }
+  } finally {
+    view.renderer.destroy()
+  }
 })
 
 test("table anchors jump to the wrapped target cell and source-row links", async () => {
   const documentUrl = `${githubDataFixture.repo.url}/blob/main/README.md`
   const noteUrl = `${documentUrl}#user-content-fn-table`
   const backlinkUrl = `${documentUrl}#user-content-fnref-table`
-  const rows = Array.from({ length: 30 }, (_, row) => `| R${row} | ${row === 19
-    ? `${"Wrapping context inside the target cell. ".repeat(10)}<a id="table-cell"></a>TABLE_CELL_TARGET[^table].`
-    : `Description ${row}.`} |`)
-  const lines = ["# Table anchors", "", "[Note](#user-content-fn-table) · [Source row](#SOURCE) · [Named cell](#table-cell)", "", "| Row | Description |", "| --- | --- |", ...rows, "",
-    ...Array.from({ length: 12 }, (_, index) => `After table ${index}.\n`), "[^table]: Table footnote text."]
+  const rows = Array.from(
+    { length: 30 },
+    (_, row) =>
+      `| R${row} | ${
+        row === 19
+          ? `${"Wrapping context inside the target cell. ".repeat(10)}<a id="table-cell"></a>TABLE_CELL_TARGET[^table].`
+          : `Description ${row}.`
+      } |`,
+  )
+  const lines = [
+    "# Table anchors",
+    "",
+    "[Note](#user-content-fn-table) · [Source row](#SOURCE) · [Named cell](#table-cell)",
+    "",
+    "| Row | Description |",
+    "| --- | --- |",
+    ...rows,
+    "",
+    ...Array.from({ length: 12 }, (_, index) => `After table ${index}.\n`),
+    "[^table]: Table footnote text.",
+  ]
   const sourceLine = lines.findIndex((line) => line.startsWith("| R19 |")) + 1
   const content = lines.join("\n").replace("#SOURCE", `#L${sourceLine}`)
-  const data = { ...githubDataFixture, documents: { status: "ready" as const, value: [{
-    id: "table", repository: githubDataFixture.repo.nameWithOwner, ref: "main", path: "README.md", label: "README",
-    resource: { status: "ready" as const, value: content },
-  }] } }
+  const data = {
+    ...githubDataFixture,
+    documents: {
+      status: "ready" as const,
+      value: [
+        {
+          id: "table",
+          repository: githubDataFixture.repo.nameWithOwner,
+          ref: "main",
+          path: "README.md",
+          label: "README",
+          resource: { status: "ready" as const, value: content },
+        },
+      ],
+    },
+  }
   const [style, setStyle] = createSignal<"rich" | "minimal">("rich")
   const external: string[] = []
-  const view = await testRender(() => <App data={data} operations={repositoryOperationsFixture}
-    config={{ ...defaultConfig, showStatusBarHints: false, markdownStyle: style() }}
-    onOpenUrl={async (url) => { external.push(url) }} />, { width: 80, height: 22 })
+  const view = await testRender(
+    () => (
+      <App
+        data={data}
+        operations={repositoryOperationsFixture}
+        config={{ ...defaultConfig, showStatusBarHints: false, markdownStyle: style() }}
+        onOpenUrl={async (url) => {
+          external.push(url)
+        }}
+      />
+    ),
+    { width: 80, height: 22 },
+  )
   const click = async (url: string) => {
     const cell = linkCells(view, url)[0]!
     await view.mockMouse.click(cell.x, cell.y)
     await settleMarkdown(view)
   }
   try {
-    for (const [width, variant] of [[80, "rich"], [40, "minimal"], [80, "rich"]] as const) {
+    for (const [width, variant] of [
+      [80, "rich"],
+      [40, "minimal"],
+      [80, "rich"],
+    ] as const) {
       setStyle(variant)
       view.resize(width, 22)
       await settleMarkdown(view)
@@ -426,33 +634,86 @@ test("table anchors jump to the wrapped target cell and source-row links", async
       expect(view.captureCharFrame()).not.toContain("\uE000")
       expect(external).toEqual([])
     }
-  } finally { view.renderer.destroy() }
+  } finally {
+    view.renderer.destroy()
+  }
 })
 
 test("source-line ranges resolve original Markdown prose, code, moved footnotes and plain documents", async () => {
   const documentUrl = `${githubDataFixture.repo.url}/blob/main/README.md`
-  const lines = ["# Source positions", "", "[Prose](#PROSE) · [Code](#CODE) · [Footnote](#NOTE) · [Plain](LICENSE#L30)", "",
+  const lines = [
+    "# Source positions",
+    "",
+    "[Prose](#PROSE) · [Code](#CODE) · [Footnote](#NOTE) · [Plain](LICENSE#L30)",
+    "",
     ...Array.from({ length: 20 }, (_, index) => `Before target ${index}.\n`),
     "The preceding source line wraps on narrower terminals. ".repeat(10),
-    "PROSE_SOURCE_TARGET with an &amp; entity.", "", "```ts", "const first = 1;", "const second = 2; // CODE_SOURCE_TARGET", "", "console.log(second);", "```", "",
-    "[^source]: MOVED_FOOTNOTE_SOURCE_TARGET", "", "Reference to the moved note[^source].", "",
-    ...Array.from({ length: 20 }, (_, index) => `After target ${index}.\n`)]
+    "PROSE_SOURCE_TARGET with an &amp; entity.",
+    "",
+    "```ts",
+    "const first = 1;",
+    "const second = 2; // CODE_SOURCE_TARGET",
+    "",
+    "console.log(second);",
+    "```",
+    "",
+    "[^source]: MOVED_FOOTNOTE_SOURCE_TARGET",
+    "",
+    "Reference to the moved note[^source].",
+    "",
+    ...Array.from({ length: 20 }, (_, index) => `After target ${index}.\n`),
+  ]
   const source = lines.join("\n")
   const sourceLines = source.split("\n")
   const proseLine = sourceLines.findIndex((line) => line.startsWith("PROSE_SOURCE_TARGET")) + 1
   const codeLine = sourceLines.findIndex((line) => line.includes("CODE_SOURCE_TARGET")) + 1
   const noteLine = sourceLines.findIndex((line) => line.startsWith("[^source]:")) + 1
-  const content = source.replace("#PROSE", `#L${proseLine}`).replace("#CODE", `#L${codeLine}-L${codeLine + 1}`).replace("#NOTE", `#L${noteLine}`)
+  const content = source
+    .replace("#PROSE", `#L${proseLine}`)
+    .replace("#CODE", `#L${codeLine}-L${codeLine + 1}`)
+    .replace("#NOTE", `#L${noteLine}`)
   const repository = githubDataFixture.repo.nameWithOwner
-  const data = { ...githubDataFixture, documents: { status: "ready" as const, value: [
-    { id: "source", repository, ref: "main", path: "README.md", label: "README", resource: { status: "ready" as const, value: content } },
-    { id: "license", repository, ref: "main", path: "LICENSE", label: "License", resource: { status: "ready" as const,
-      value: Array.from({ length: 60 }, (_, index) => `License source line ${index + 1}`).join("\n") } },
-  ] } }
+  const data = {
+    ...githubDataFixture,
+    documents: {
+      status: "ready" as const,
+      value: [
+        {
+          id: "source",
+          repository,
+          ref: "main",
+          path: "README.md",
+          label: "README",
+          resource: { status: "ready" as const, value: content },
+        },
+        {
+          id: "license",
+          repository,
+          ref: "main",
+          path: "LICENSE",
+          label: "License",
+          resource: {
+            status: "ready" as const,
+            value: Array.from({ length: 60 }, (_, index) => `License source line ${index + 1}`).join("\n"),
+          },
+        },
+      ],
+    },
+  }
   const external: string[] = []
-  const view = await testRender(() => <App data={data} operations={repositoryOperationsFixture}
-    config={{ ...defaultConfig, showStatusBarHints: false }} onOpenUrl={async (url) => { external.push(url) }} />,
-    { width: 60, height: 22 })
+  const view = await testRender(
+    () => (
+      <App
+        data={data}
+        operations={repositoryOperationsFixture}
+        config={{ ...defaultConfig, showStatusBarHints: false }}
+        onOpenUrl={async (url) => {
+          external.push(url)
+        }}
+      />
+    ),
+    { width: 60, height: 22 },
+  )
   const click = async (url: string) => {
     const cell = linkCells(view, url)[0]!
     await view.mockMouse.click(cell.x, cell.y)
@@ -463,23 +724,29 @@ test("source-line ranges resolve original Markdown prose, code, moved footnotes 
     for (const width of [60, 40, 80]) {
       view.resize(width, 22)
       await settleMarkdown(view)
-      top().scrollTo(0); await view.flush()
+      top().scrollTo(0)
+      await view.flush()
       await click(`${documentUrl}#L${proseLine}`)
       expect(view.captureCharFrame().split("\n")[top().viewport.y]).toContain("PROSE_SOURCE_TARGET")
-      top().scrollTo(0); await view.flush()
+      top().scrollTo(0)
+      await view.flush()
       await click(`${documentUrl}#L${codeLine}-L${codeLine + 1}`)
       expect(view.captureCharFrame().split("\n")[top().viewport.y]).toContain("const second = 2;")
       const code = codeBlocks(view.renderer.root).find((block) => !block.conceal && block.content.includes("CODE_SOURCE_TARGET"))!
       expect(code.plainText).toBe("const first = 1;\nconst second = 2; // CODE_SOURCE_TARGET\n\nconsole.log(second);")
-      top().scrollTo(0); await view.flush()
+      top().scrollTo(0)
+      await view.flush()
       await click(`${documentUrl}#L${noteLine}`)
       expect(view.captureCharFrame()).toContain("MOVED_FOOTNOTE_SOURCE_TARGET")
       expect(view.captureCharFrame()).not.toContain("\uE000")
       expect(external).toEqual([])
     }
-    top().scrollTo(0); await view.flush()
+    top().scrollTo(0)
+    await view.flush()
     await click(documentUrl.replace("README.md", "LICENSE#L30"))
     expect(view.captureCharFrame().split("\n")[top().viewport.y]).toContain("License source line 30")
     expect(external).toEqual([])
-  } finally { view.renderer.destroy() }
+  } finally {
+    view.renderer.destroy()
+  }
 })

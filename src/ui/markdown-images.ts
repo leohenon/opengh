@@ -7,7 +7,11 @@ export function imageFilename(source: string): string {
     const path = new URL(source, "https://github.com/").pathname
     const name = path.slice(path.lastIndexOf("/") + 1)
     let decoded = name
-    try { decoded = decodeURIComponent(name) } catch { /* Keep malformed escapes readable. */ }
+    try {
+      decoded = decodeURIComponent(name)
+    } catch {
+      /* Keep malformed escapes readable. */
+    }
     return decoded.replace(/[\u0000-\u001f\u007f-\u009f]/g, " ").trim()
   } catch {
     return ""

@@ -14,8 +14,13 @@ export async function loadLatestStableRelease(transport: GitHubTransport = creat
   }
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("Invalid opengh release response")
   const release = value as Record<string, unknown>
-  if (release.draft !== false || release.prerelease !== false || typeof release.tag_name !== "string"
-    || release.tag_name !== release.tag_name.trim() || !/^v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/.test(release.tag_name))
+  if (
+    release.draft !== false ||
+    release.prerelease !== false ||
+    typeof release.tag_name !== "string" ||
+    release.tag_name !== release.tag_name.trim() ||
+    !/^v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/.test(release.tag_name)
+  )
     throw new Error("GitHub did not return a published stable opengh release")
   return { version: release.tag_name.slice(1) }
 }

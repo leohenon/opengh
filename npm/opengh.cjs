@@ -8,16 +8,20 @@ const fs = require("node:fs")
 
 function usesMusl() {
   if (process.platform !== "linux") return false
-  try { return !process.report.getReport().header.glibcVersionRuntime }
-  catch { return fs.existsSync("/etc/alpine-release") }
+  try {
+    return !process.report.getReport().header.glibcVersionRuntime
+  } catch {
+    return fs.existsSync("/etc/alpine-release")
+  }
 }
 
 // Package managers that ignore "libc" install both Linux variants, so the choice is made here.
 const musl = usesMusl()
 const name = `opengh-${process.platform}-${process.arch}${musl ? "-musl" : ""}`
 let executable
-try { executable = require.resolve(`${name}/bin/opengh`) }
-catch {
+try {
+  executable = require.resolve(`${name}/bin/opengh`)
+} catch {
   console.error(`opengh: no executable is installed for ${process.platform} ${process.arch}${musl ? " (musl)" : ""}.
 Reinstall without omitting optional dependencies (they provide ${name}),
 or download a release from https://github.com/leohenon/opengh/releases.`)
@@ -25,7 +29,9 @@ or download a release from https://github.com/leohenon/opengh/releases.`)
 }
 
 // Some package managers drop the executable bit when unpacking.
-try { if (!(fs.statSync(executable).mode & 0o111)) fs.chmodSync(executable, 0o755) } catch {}
+try {
+  if (!(fs.statSync(executable).mode & 0o111)) fs.chmodSync(executable, 0o755)
+} catch {}
 
 const result = spawnSync(executable, process.argv.slice(2), { stdio: "inherit" })
 if (result.error) {

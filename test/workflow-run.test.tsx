@@ -13,20 +13,35 @@ test("Actions opens run details, retains them across tabs, and restores the sele
   const browser: (string | number | undefined)[] = []
   const copies: string[] = []
   let jobPages = 0
-  const view = await testRender(() => (
-    <App data={githubDataFixture} operations={repositoryOperationsFixture}
-      runDetail={detail()}
-      onLoadRun={async (id) => {
-        opened.push(id)
-        setDetail({ id, resource: { status: "ready", value: { ...workflowRunFixture, id } },
-          jobs: { status: "ready", value: { items: [workflowJobFixture], page: 1, hasMore: false } } })
-      }}
-      onCloseRun={() => setDetail(undefined)}
-      onLoadMoreRunJobs={async () => { jobPages++ }}
-      onOpenInBrowser={async (target) => { browser.push(target) }}
-      onCopyToClipboard={async (value) => { copies.push(value); return true }}
-    />
-  ), { width: 110, height: 36 })
+  const view = await testRender(
+    () => (
+      <App
+        data={githubDataFixture}
+        operations={repositoryOperationsFixture}
+        runDetail={detail()}
+        onLoadRun={async (id) => {
+          opened.push(id)
+          setDetail({
+            id,
+            resource: { status: "ready", value: { ...workflowRunFixture, id } },
+            jobs: { status: "ready", value: { items: [workflowJobFixture], page: 1, hasMore: false } },
+          })
+        }}
+        onCloseRun={() => setDetail(undefined)}
+        onLoadMoreRunJobs={async () => {
+          jobPages++
+        }}
+        onOpenInBrowser={async (target) => {
+          browser.push(target)
+        }}
+        onCopyToClipboard={async (value) => {
+          copies.push(value)
+          return true
+        }}
+      />
+    ),
+    { width: 110, height: 36 },
+  )
   try {
     await view.flush()
     view.mockInput.pressKey("5")
@@ -65,7 +80,8 @@ test("Actions opens run details, retains them across tabs, and restores the sele
     view.mockInput.pressKey("r")
     await view.flush()
     expect(opened).toEqual([9809, 9809, 9809])
-    setDetail((current) => ({ ...current!,
+    setDetail((current) => ({
+      ...current!,
       resource: { status: "error", phase: "load", message: "Run refresh failed", value: current!.resource.value },
       jobs: { status: "error", phase: "pagination", message: "Jobs page failed", value: current!.jobs.value },
     }))
@@ -79,18 +95,26 @@ test("Actions opens run details, retains them across tabs, and restores the sele
   }
 })
 
-
 test("run detail refreshes stay quiet while retaining content and footer hints", async () => {
   const value = { ...workflowRunFixture, status: "in_progress", conclusion: "" }
   const jobs = { items: [workflowJobFixture], page: 1, hasMore: false }
-  const [detail, setDetail] = createSignal<RunDetailState>({ id: 9812,
-    resource: { status: "ready", value }, jobs: { status: "ready", value: jobs },
+  const [detail, setDetail] = createSignal<RunDetailState>({
+    id: 9812,
+    resource: { status: "ready", value },
+    jobs: { status: "ready", value: jobs },
   })
   const [operations, setOperations] = createSignal(repositoryOperationsFixture)
-  const view = await testRender(() => (
-    <App data={githubDataFixture} operations={operations()} runDetail={detail()}
-      config={{ ...defaultConfig, showStatusBarHints: true }} />
-  ), { width: 110, height: 36 })
+  const view = await testRender(
+    () => (
+      <App
+        data={githubDataFixture}
+        operations={operations()}
+        runDetail={detail()}
+        config={{ ...defaultConfig, showStatusBarHints: true }}
+      />
+    ),
+    { width: 110, height: 36 },
+  )
   const footer = () => view.captureCharFrame().split("\n").filter(Boolean).at(-1)!.trim()
   try {
     await view.flush()
@@ -102,7 +126,8 @@ test("run detail refreshes stay quiet while retaining content and footer hints",
     expect(hints).toContain("r refresh")
     expect(view.captureCharFrame()).toContain("Run unit tests")
     for (const part of ["resource", "jobs"] as const) {
-      setDetail({ id: 9812,
+      setDetail({
+        id: 9812,
         resource: part === "resource" ? { status: "loading", phase: "load", value } : { status: "ready", value },
         jobs: { status: "loading", phase: "load", value: jobs },
       })
@@ -115,9 +140,7 @@ test("run detail refreshes stay quiet while retaining content and footer hints",
       expect(footer()).toBe(hints.replace(" · r refresh", ""))
     }
     setOperations(repositoryOperationsFixture)
-    setDetail({ id: 9812, resource: { status: "ready", value },
-      jobs: { status: "loading", phase: "pagination", value: jobs },
-    })
+    setDetail({ id: 9812, resource: { status: "ready", value }, jobs: { status: "loading", phase: "pagination", value: jobs } })
     await view.flush()
     await Bun.sleep(250)
     await view.flush()
@@ -145,20 +168,36 @@ test("active run details poll every five seconds, pause off-tab, and stop on com
   let loads = 0
   let complete = false
   let jobsComplete = false
-  const view = await testRender(() => (
-    <App data={githubDataFixture} operations={repositoryOperationsFixture}
-      runDetail={detail()}
-      onLoadRun={async (id) => {
-        loads++
-        setDetail({ id, resource: { status: "ready", value: {
-          ...workflowRunFixture, id, status: complete ? "completed" : "in_progress", conclusion: complete ? "success" : "",
-        } }, jobs: { status: "ready", value: { items: [{ ...workflowJobFixture,
-          status: jobsComplete ? "completed" : "in_progress",
-        }], page: 1, hasMore: false } } })
-      }}
-      onCloseRun={() => setDetail(undefined)}
-    />
-  ), { width: 110, height: 36 })
+  const view = await testRender(
+    () => (
+      <App
+        data={githubDataFixture}
+        operations={repositoryOperationsFixture}
+        runDetail={detail()}
+        onLoadRun={async (id) => {
+          loads++
+          setDetail({
+            id,
+            resource: {
+              status: "ready",
+              value: {
+                ...workflowRunFixture,
+                id,
+                status: complete ? "completed" : "in_progress",
+                conclusion: complete ? "success" : "",
+              },
+            },
+            jobs: {
+              status: "ready",
+              value: { items: [{ ...workflowJobFixture, status: jobsComplete ? "completed" : "in_progress" }], page: 1, hasMore: false },
+            },
+          })
+        }}
+        onCloseRun={() => setDetail(undefined)}
+      />
+    ),
+    { width: 110, height: 36 },
+  )
   const tick = async () => {
     for (const callback of [...timers.values()]) callback()
     await view.flush()
@@ -229,8 +268,7 @@ test("retained run errors stay in the status bar without toasts across automatic
   const refresh = async (id: number) => {
     loads++
     const previousJobs = detail()?.jobs ?? { status: "ready" as const, value: jobs }
-    setDetail({ id, resource: { status: "loading", phase: "load", value },
-      jobs: { status: "loading", phase: "load", value: jobs } })
+    setDetail({ id, resource: { status: "loading", phase: "load", value }, jobs: { status: "loading", phase: "load", value: jobs } })
     await Promise.resolve()
     if (failure === "resource") {
       setDetail({ id, resource: { status: "error", phase: "load", message: "Run unavailable", value }, jobs: previousJobs })
@@ -238,14 +276,27 @@ test("retained run errors stay in the status bar without toasts across automatic
     }
     setDetail({ id, resource: { status: "ready", value }, jobs: { status: "loading", phase: "load", value: jobs } })
     await Promise.resolve()
-    setDetail({ id, resource: { status: "ready", value }, jobs: failure === "jobs"
-      ? { status: "error", phase: "load", message: "Jobs unavailable", value: jobs }
-      : { status: "ready", value: jobs } })
+    setDetail({
+      id,
+      resource: { status: "ready", value },
+      jobs:
+        failure === "jobs"
+          ? { status: "error", phase: "load", message: "Jobs unavailable", value: jobs }
+          : { status: "ready", value: jobs },
+    })
   }
-  const view = await testRender(() => (
-    <App data={githubDataFixture} operations={repositoryOperationsFixture}
-      runDetail={detail()} onLoadRun={refresh} onCloseRun={() => setDetail(undefined)} />
-  ), { width: 110, height: 36 })
+  const view = await testRender(
+    () => (
+      <App
+        data={githubDataFixture}
+        operations={repositoryOperationsFixture}
+        runDetail={detail()}
+        onLoadRun={refresh}
+        onCloseRun={() => setDetail(undefined)}
+      />
+    ),
+    { width: 110, height: 36 },
+  )
   try {
     await view.flush()
     view.mockInput.pressKey("5")
@@ -253,8 +304,16 @@ test("retained run errors stay in the status bar without toasts across automatic
     view.mockInput.pressEnter()
     await view.flush()
     // Detail errors live in the status bar, not in toasts, so a retained error is shown exactly once.
-    const errors = () => view.captureCharFrame().split("\n").filter((line) => line.includes("unavailable")).map((line) => line.trim())
-    for (const [part, message] of [["resource", "Run unavailable"], ["jobs", "Jobs unavailable"]] as const) {
+    const errors = () =>
+      view
+        .captureCharFrame()
+        .split("\n")
+        .filter((line) => line.includes("unavailable"))
+        .map((line) => line.trim())
+    for (const [part, message] of [
+      ["resource", "Run unavailable"],
+      ["jobs", "Jobs unavailable"],
+    ] as const) {
       const shown = [`× ${message} · r retry`]
       failure = part
       await refresh(9812)

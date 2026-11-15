@@ -16,13 +16,19 @@ const StatusPromptContext = createContext<{ prompt(): StatusPrompt | undefined; 
 
 export function StatusPromptProvider(props: { children: JSX.Element }) {
   const [prompt, setPrompt] = createSignal<StatusPrompt>()
-  return <StatusPromptContext.Provider value={{
-    prompt,
-    open(next) {
-      setPrompt(next)
-      return () => setPrompt((current) => current === next ? undefined : current)
-    },
-  }}>{props.children}</StatusPromptContext.Provider>
+  return (
+    <StatusPromptContext.Provider
+      value={{
+        prompt,
+        open(next) {
+          setPrompt(next)
+          return () => setPrompt((current) => (current === next ? undefined : current))
+        },
+      }}
+    >
+      {props.children}
+    </StatusPromptContext.Provider>
+  )
 }
 
 export function useStatusPrompt() {
@@ -32,16 +38,44 @@ export function useStatusPrompt() {
 export function StatusPromptBar(props: { fallback: JSX.Element; zIndex?: number }) {
   const context = useStatusPrompt()
   const { colors } = useTheme()
-  return <Show when={context?.prompt()} fallback={props.fallback} keyed>
-    {(prompt) => <box height={1} minWidth={0} flexShrink={0} flexDirection="row" overflow="hidden" backgroundColor={colors.canvas} zIndex={props.zIndex ?? 0}>
-      <text height={1} flexShrink={0} wrapMode="none" fg={colors.blue}> {prompt.prefix} </text>
-      <box height={1} flexGrow={1} flexBasis={0} minWidth={0} overflow="hidden">
-        <KeyInput id={prompt.id} width="100%" focused value={prompt.value()} onInput={prompt.onInput}
-          placeholder={prompt.placeholder} placeholderColor={colors.muted} textColor={colors.text} backgroundColor={colors.canvas} />
-      </box>
-      <Show when={prompt.detail?.()}>
-        {(detail) => <text height={1} flexShrink={0} wrapMode="none" fg={colors.muted}>{detail()} </text>}
-      </Show>
-    </box>}
-  </Show>
+  return (
+    <Show when={context?.prompt()} fallback={props.fallback} keyed>
+      {(prompt) => (
+        <box
+          height={1}
+          minWidth={0}
+          flexShrink={0}
+          flexDirection="row"
+          overflow="hidden"
+          backgroundColor={colors.canvas}
+          zIndex={props.zIndex ?? 0}
+        >
+          <text height={1} flexShrink={0} wrapMode="none" fg={colors.blue}>
+            {" "}
+            {prompt.prefix}{" "}
+          </text>
+          <box height={1} flexGrow={1} flexBasis={0} minWidth={0} overflow="hidden">
+            <KeyInput
+              id={prompt.id}
+              width="100%"
+              focused
+              value={prompt.value()}
+              onInput={prompt.onInput}
+              placeholder={prompt.placeholder}
+              placeholderColor={colors.muted}
+              textColor={colors.text}
+              backgroundColor={colors.canvas}
+            />
+          </box>
+          <Show when={prompt.detail?.()}>
+            {(detail) => (
+              <text height={1} flexShrink={0} wrapMode="none" fg={colors.muted}>
+                {detail()}{" "}
+              </text>
+            )}
+          </Show>
+        </box>
+      )}
+    </Show>
+  )
 }

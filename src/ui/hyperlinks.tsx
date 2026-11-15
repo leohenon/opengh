@@ -22,7 +22,9 @@ export function HyperlinkProvider(props: { identity: unknown; onOpen: (url: stri
   let hovered: HoveredLink | undefined
   let blocked: { x: number; y: number } | undefined
   const links: Links = {
-    get identity() { return props.identity },
+    get identity() {
+      return props.identity
+    },
     open: (url) => props.onOpen(url),
     clearHover(block = true) {
       if (!hovered) return
@@ -33,13 +35,17 @@ export function HyperlinkProvider(props: { identity: unknown; onOpen: (url: stri
     move(event, url) {
       if (blocked?.x === event.x && blocked.y === event.y) return
       blocked = undefined
-      const next = url && event.target && !event.isDragging
-        ? { x: event.x, y: event.y, target: event.target, url, identity: props.identity } : undefined
+      const next =
+        url && event.target && !event.isDragging
+          ? { x: event.x, y: event.y, target: event.target, url, identity: props.identity }
+          : undefined
       const changed = hovered?.target !== next?.target || hovered?.url !== next?.url
       hovered = next
       if (changed && !renderer.isDestroyed) renderer.requestRender()
     },
-    leave(event) { if (hovered?.target === event.target) links.clearHover() },
+    leave(event) {
+      if (hovered?.target === event.target) links.clearHover()
+    },
   }
   let mask = new Float32Array(0)
   const matrix = new Float32Array(16)
@@ -47,8 +53,12 @@ export function HyperlinkProvider(props: { identity: unknown; onOpen: (url: stri
   const paintHover: Parameters<typeof renderer.addPostProcessFn>[0] = (buffer) => {
     const point = hovered
     if (!point) return
-    if (point.target.isDestroyed || point.identity !== props.identity
-      || renderer.hitTest(point.x, point.y) !== point.target.num || renderer.getLinkAt(point.x, point.y) !== point.url) {
+    if (
+      point.target.isDestroyed ||
+      point.identity !== props.identity ||
+      renderer.hitTest(point.x, point.y) !== point.target.num ||
+      renderer.getLinkAt(point.x, point.y) !== point.url
+    ) {
       links.clearHover()
       return
     }
@@ -62,13 +72,14 @@ export function HyperlinkProvider(props: { identity: unknown; onOpen: (url: stri
     const top = Math.max(0, point.target.y)
     const right = Math.min(buffer.width, point.target.x + point.target.width)
     const bottom = Math.min(buffer.height, point.target.y + point.target.height)
-    for (let y = top; y < bottom; y++) for (let x = left; x < right; x++) {
-      if (renderer.getLinkIdAt(x, y) === link && renderer.hitTest(x, y) === point.target.num) {
-        mask[used++] = x
-        mask[used++] = y
-        mask[used++] = 1
+    for (let y = top; y < bottom; y++)
+      for (let x = left; x < right; x++) {
+        if (renderer.getLinkIdAt(x, y) === link && renderer.hitTest(x, y) === point.target.num) {
+          mask[used++] = x
+          mask[used++] = y
+          mask[used++] = 1
+        }
       }
-    }
     if (tintColor !== theme.markdownLink) {
       tintColor = theme.markdownLink
       const tint = RGBA.fromHex(tintColor)
@@ -78,8 +89,14 @@ export function HyperlinkProvider(props: { identity: unknown; onOpen: (url: stri
     if (used) buffer.colorMatrix(matrix, mask.subarray(0, used), 0.06, TargetChannel.BG)
   }
   renderer.addPostProcessFn(paintHover)
-  const cancel = () => { links.press = undefined; links.clearHover() }
-  createEffect(() => { props.identity; cancel() })
+  const cancel = () => {
+    links.press = undefined
+    links.clearHover()
+  }
+  createEffect(() => {
+    props.identity
+    cancel()
+  })
   renderer.keyInput.prependListener("keypress", cancel)
   renderer.keyInput.prependListener("paste", cancel)
   onCleanup(() => {
@@ -96,8 +113,13 @@ export function useHyperlinkMouse(enabled: () => boolean = () => true) {
   const renderer = useRenderer()
   const links = useContext(Hyperlinks)
   let pointedUrl: string | null = null
-  const hover = mouseHover(() => !!links && enabled() && !!pointedUrl, () => links?.identity)
-  const cancel = () => { if (links) links.press = undefined }
+  const hover = mouseHover(
+    () => !!links && enabled() && !!pointedUrl,
+    () => links?.identity,
+  )
+  const cancel = () => {
+    if (links) links.press = undefined
+  }
   const plain = (event: MouseEvent) => !event.modifiers.ctrl && !event.modifiers.alt && !event.modifiers.shift
   return {
     onMouseDown(event: MouseEvent) {
@@ -106,16 +128,27 @@ export function useHyperlinkMouse(enabled: () => boolean = () => true) {
       if (!links || !enabled() || event.button !== MouseButton.LEFT || !plain(event)) return
       const url = renderer.getLinkAt(event.x, event.y)
       const selection = renderer.getSelection()
-      if (!url || selection && selection.behavior !== "cell") return
+      if (!url || (selection && selection.behavior !== "cell")) return
       links.press = { x: event.x, y: event.y, url, target: event.target, identity: links.identity }
       event.stopPropagation()
     },
     onMouseUp(event: MouseEvent) {
       const start = links?.press
       cancel()
-      if (!links || !start || !enabled() || event.button !== MouseButton.LEFT || !plain(event)
-        || start.x !== event.x || start.y !== event.y || start.target !== event.target || start.target?.isDestroyed
-        || start.identity !== links.identity || renderer.getLinkAt(event.x, event.y) !== start.url) return
+      if (
+        !links ||
+        !start ||
+        !enabled() ||
+        event.button !== MouseButton.LEFT ||
+        !plain(event) ||
+        start.x !== event.x ||
+        start.y !== event.y ||
+        start.target !== event.target ||
+        start.target?.isDestroyed ||
+        start.identity !== links.identity ||
+        renderer.getLinkAt(event.x, event.y) !== start.url
+      )
+        return
       const selection = renderer.getSelection()
       if (selection && selection.behavior !== "cell") return
       event.stopPropagation()
@@ -133,12 +166,24 @@ export function useHyperlinkMouse(enabled: () => boolean = () => true) {
       links?.leave(event)
       hover.handlers.onMouseOut(event)
     },
-    onMouseDrag() { cancel(); links?.clearHover(); hover.handlers.onMouseDrag() },
-    onMouseScroll() { cancel(); links?.clearHover(); hover.handlers.onMouseScroll() },
+    onMouseDrag() {
+      cancel()
+      links?.clearHover()
+      hover.handlers.onMouseDrag()
+    },
+    onMouseScroll() {
+      cancel()
+      links?.clearHover()
+      hover.handlers.onMouseScroll()
+    },
   }
 }
 
 export function HyperlinkSurface(props: { enabled?: boolean; children: JSX.Element }) {
   const mouse = useHyperlinkMouse(() => props.enabled !== false)
-  return <box {...mouse} width="100%" height="100%" flexDirection="column">{props.children}</box>
+  return (
+    <box {...mouse} width="100%" height="100%" flexDirection="column">
+      {props.children}
+    </box>
+  )
 }

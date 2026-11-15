@@ -20,7 +20,10 @@ export function LoadingText(props: { text: string; color?: string; delay?: numbe
 
   return (
     <Show when={visible()}>
-      <text fg={props.color ?? colors.muted}>{props.text.replace(/(?:…|\.{1,3})$/, "")}{dots()}</text>
+      <text fg={props.color ?? colors.muted}>
+        {props.text.replace(/(?:…|\.{1,3})$/, "")}
+        {dots()}
+      </text>
     </Show>
   )
 }

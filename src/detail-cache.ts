@@ -17,12 +17,20 @@ const MAX_MEASURED_BYTES = 64 * 1024 * 1024
 
 /** One memory budget shared by every cache in a session, so caches cannot each use the full limit. */
 type Member = { oldest(except?: string): number | undefined; evictOldest(except?: string): boolean; sweep(time: number): void }
-export type CacheBudget = { maxBytes: number; used: number; register(member: Member): void; fit(owner: Member, protectedKey: string, time: number): void }
+export type CacheBudget = {
+  maxBytes: number
+  used: number
+  register(member: Member): void
+  fit(owner: Member, protectedKey: string, time: number): void
+}
 export function createCacheBudget(maxBytes = 32 * 1024 * 1024): CacheBudget {
   const members: Member[] = []
   return {
-    maxBytes, used: 0,
-    register(member) { members.push(member) },
+    maxBytes,
+    used: 0,
+    register(member) {
+      members.push(member)
+    },
     fit(owner, protectedKey, time) {
       for (const member of members) member.sweep(time)
       // Evict the least recently used entry across all caches, never the one being stored.
@@ -31,7 +39,10 @@ export function createCacheBudget(maxBytes = 32 * 1024 * 1024): CacheBudget {
         let oldest = Infinity
         for (const member of members) {
           const usedAt = member.oldest(member === owner ? protectedKey : undefined)
-          if (usedAt !== undefined && usedAt < oldest) { oldest = usedAt; victim = member }
+          if (usedAt !== undefined && usedAt < oldest) {
+            oldest = usedAt
+            victim = member
+          }
         }
         if (!victim?.evictOldest(victim === owner ? protectedKey : undefined)) return
       }
@@ -47,13 +58,25 @@ export function estimateBytes(value: unknown, budget = MAX_MEASURED_BYTES): numb
   while (stack.length) {
     const current = stack.pop()
     if (total > budget) return budget + 1
-    if (typeof current === "string") { total += current.length * 2; continue }
-    if (typeof current !== "object" || current === null) { total += 8; continue }
+    if (typeof current === "string") {
+      total += current.length * 2
+      continue
+    }
+    if (typeof current !== "object" || current === null) {
+      total += 8
+      continue
+    }
     if (seen.has(current)) continue
     seen.add(current)
     total += 16
-    if (Array.isArray(current)) { for (const item of current) stack.push(item); continue }
-    for (const [key, item] of Object.entries(current)) { total += key.length * 2; stack.push(item) }
+    if (Array.isArray(current)) {
+      for (const item of current) stack.push(item)
+      continue
+    }
+    for (const [key, item] of Object.entries(current)) {
+      total += key.length * 2
+      stack.push(item)
+    }
   }
   return total
 }
@@ -77,17 +100,28 @@ export function createDetailCache<T>(options: DetailCacheOptions = {}) {
     entries.delete(key)
   }
   // Map order is recency order: get() and set() move entries to the end.
-  const first = (except?: string) => { for (const [key, entry] of entries) if (key !== except) return [key, entry] as const }
+  const first = (except?: string) => {
+    for (const [key, entry] of entries) if (key !== except) return [key, entry] as const
+  }
   const member: Member = {
     oldest: (except) => first(except)?.[1].usedAt,
-    evictOldest(except) { const found = first(except); if (!found) return false; remove(found[0]); return true },
-    sweep(time) { for (const [key, entry] of entries) if (time - entry.usedAt > retainMs) remove(key) },
+    evictOldest(except) {
+      const found = first(except)
+      if (!found) return false
+      remove(found[0])
+      return true
+    },
+    sweep(time) {
+      for (const [key, entry] of entries) if (time - entry.usedAt > retainMs) remove(key)
+    },
   }
   budget.register(member)
   const trim = (protectedKey: string) => {
     const time = now()
     member.sweep(time)
-    while ((entries.size > maxEntries || totalBytes > maxBytes) && member.evictOldest(protectedKey)) { /* bounded by entries */ }
+    while ((entries.size > maxEntries || totalBytes > maxBytes) && member.evictOldest(protectedKey)) {
+      /* bounded by entries */
+    }
     budget.fit(member, protectedKey, time)
   }
   return {
@@ -95,7 +129,10 @@ export function createDetailCache<T>(options: DetailCacheOptions = {}) {
       const entry = entries.get(key)
       if (!entry) return undefined
       const time = now()
-      if (time - entry.usedAt > retainMs) { remove(key); return undefined }
+      if (time - entry.usedAt > retainMs) {
+        remove(key)
+        return undefined
+      }
       entry.usedAt = time
       entries.delete(key)
       entries.set(key, entry)
@@ -108,17 +145,25 @@ export function createDetailCache<T>(options: DetailCacheOptions = {}) {
       remove(key)
       // Oversized values stay usable while active but are never retained for later.
       if (bytes > maxValueBytes) return
-      entries.set(key, { value, bytes, loadedAt: fresh ? time : previous?.loadedAt ?? STALE, usedAt: time })
+      entries.set(key, { value, bytes, loadedAt: fresh ? time : (previous?.loadedAt ?? STALE), usedAt: time })
       totalBytes += bytes
       budget.used += bytes
       trim(key)
     },
     // Marks one key, or every key matching a predicate, as needing revalidation before reuse.
     markStale(match: string | ((key: string) => boolean)) {
-      if (typeof match === "string") { const entry = entries.get(match); if (entry) entry.loadedAt = STALE; return }
+      if (typeof match === "string") {
+        const entry = entries.get(match)
+        if (entry) entry.loadedAt = STALE
+        return
+      }
       for (const [key, entry] of entries) if (match(key)) entry.loadedAt = STALE
     },
-    get size() { return entries.size },
-    get bytes() { return totalBytes },
+    get size() {
+      return entries.size
+    },
+    get bytes() {
+      return totalBytes
+    },
   }
 }

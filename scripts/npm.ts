@@ -29,15 +29,18 @@ for (const [target, { os, cpu, libc }] of Object.entries(targets)) {
   await cp(join(built, "opengh"), join(directory, "bin", "opengh"))
   await chmod(join(directory, "bin", "opengh"), 0o755)
   for (const file of ["LICENSE", "THIRD-PARTY-NOTICES.md"]) await cp(join(built, file), join(directory, file))
-  await writeFile(join(directory, "package.json"), json({
-    name: `opengh-${target}`,
-    ...shared,
-    description: `The opengh executable for ${os} ${cpu}${libc === "musl" ? " (musl)" : ""}. Install @leohenon/opengh instead.`,
-    os: [os],
-    cpu: [cpu],
-    ...(libc ? { libc: [libc] } : {}),
-    files: ["bin", "THIRD-PARTY-NOTICES.md"],
-  }))
+  await writeFile(
+    join(directory, "package.json"),
+    json({
+      name: `opengh-${target}`,
+      ...shared,
+      description: `The opengh executable for ${os} ${cpu}${libc === "musl" ? " (musl)" : ""}. Install @leohenon/opengh instead.`,
+      os: [os],
+      cpu: [cpu],
+      ...(libc ? { libc: [libc] } : {}),
+      files: ["bin", "THIRD-PARTY-NOTICES.md"],
+    }),
+  )
 }
 
 const launcher = join(out, "opengh")
@@ -45,16 +48,19 @@ await mkdir(join(launcher, "bin"), { recursive: true })
 await cp(join(root, "npm", "opengh.cjs"), join(launcher, "bin", "opengh.cjs"))
 await chmod(join(launcher, "bin", "opengh.cjs"), 0o755)
 for (const file of ["LICENSE", "README.md"]) await cp(join(root, file), join(launcher, file))
-await writeFile(join(launcher, "package.json"), json({
-  name: "@leohenon/opengh",
-  ...shared,
-  description: "A familiar terminal interface for GitHub.",
-  keywords: ["github", "terminal", "tui", "cli", "pull-request", "code-review"],
-  bin: { opengh: "bin/opengh.cjs" },
-  files: ["bin"],
-  os: [...new Set(Object.values(targets).map((target) => target.os))],
-  cpu: [...new Set(Object.values(targets).map((target) => target.cpu))],
-  engines: { node: ">=18" },
-  optionalDependencies: Object.fromEntries(Object.keys(targets).map((target) => [`opengh-${target}`, manifest.version])),
-}))
+await writeFile(
+  join(launcher, "package.json"),
+  json({
+    name: "@leohenon/opengh",
+    ...shared,
+    description: "A familiar terminal interface for GitHub.",
+    keywords: ["github", "terminal", "tui", "cli", "pull-request", "code-review"],
+    bin: { opengh: "bin/opengh.cjs" },
+    files: ["bin"],
+    os: [...new Set(Object.values(targets).map((target) => target.os))],
+    cpu: [...new Set(Object.values(targets).map((target) => target.cpu))],
+    engines: { node: ">=18" },
+    optionalDependencies: Object.fromEntries(Object.keys(targets).map((target) => [`opengh-${target}`, manifest.version])),
+  }),
+)
 console.log(`dist/npm: @leohenon/opengh and ${Object.keys(targets).length} platform packages at ${manifest.version}`)

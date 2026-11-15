@@ -1,16 +1,15 @@
 import { unified } from "unified"
 import remarkParse from "remark-parse"
 
-export type TextReference = { repository: string } & (
-  | { kind: "issue"; number: number }
-  | { kind: "commit"; sha: string }
-)
+export type TextReference = { repository: string } & ({ kind: "issue"; number: number } | { kind: "commit"; sha: string })
 
 type MarkdownNode = { type: string; value?: string; url?: string; children?: MarkdownNode[] }
 
 function markdownText(text: string): string {
   // Remove comments before parsing: comments can also occur inside link destinations.
-  const tree = unified().use(remarkParse).parse(text.replace(/<!--[\s\S]*?(?:-->|$)/g, " "))
+  const tree = unified()
+    .use(remarkParse)
+    .parse(text.replace(/<!--[\s\S]*?(?:-->|$)/g, " "))
   const parts: string[] = []
   function visit(node: MarkdownNode) {
     if (node.type === "code" || node.type === "inlineCode") return
@@ -27,7 +26,10 @@ export function parseTextReferences(text: string, repository: string, markdown =
   const repo = "[a-z\\d_.-]+/[a-z\\d_.-]+"
   const sha = "[a-f\\d]{7,40}"
   // Consume qualified forms as a whole so their SHA/number is not also treated as local.
-  const tokens = new RegExp(`(?<![\\w/@#.-])(?:https://github\\.com/${repo}/(?:issues/\\d+|pull/\\d+|commit/${sha})|${repo}(?:#\\d+|@${sha})|#\\d+|${sha})(?![\\w])`, "gi")
+  const tokens = new RegExp(
+    `(?<![\\w/@#.-])(?:https://github\\.com/${repo}/(?:issues/\\d+|pull/\\d+|commit/${sha})|${repo}(?:#\\d+|@${sha})|#\\d+|${sha})(?![\\w])`,
+    "gi",
+  )
   const found = new Map<string, TextReference>()
   for (const match of input.matchAll(tokens)) {
     const token = match[0]
@@ -53,11 +55,12 @@ export function parseTextReferences(text: string, repository: string, markdown =
       kind = "commit"
       if (entity.length !== 40 && !(/[a-f]/i.test(entity) && /\d/.test(entity))) continue
     }
-    if (targetRepository.split("/").some(part => part === "." || part === "..")) continue
+    if (targetRepository.split("/").some((part) => part === "." || part === "..")) continue
     targetRepository = targetRepository.toLowerCase()
-    const reference: TextReference = kind === "issue"
-      ? { kind, repository: targetRepository, number: Number(entity) }
-      : { kind, repository: targetRepository, sha: entity.toLowerCase() }
+    const reference: TextReference =
+      kind === "issue"
+        ? { kind, repository: targetRepository, number: Number(entity) }
+        : { kind, repository: targetRepository, sha: entity.toLowerCase() }
     if (reference.kind === "issue" && (!Number.isSafeInteger(reference.number) || reference.number <= 0)) continue
     const key = `${targetRepository}:${kind}:${reference.kind === "issue" ? reference.number : reference.sha}`
     found.set(key, reference)

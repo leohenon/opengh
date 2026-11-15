@@ -27,7 +27,9 @@ export function spawnGitHub(args: string[], cwd?: string, input?: string) {
     })
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT" && !Bun.which("gh"))
-      throw new Error("GitHub CLI (gh) was not found on PATH. Install it from https://cli.github.com, then run gh auth login --hostname github.com.")
+      throw new Error(
+        "GitHub CLI (gh) was not found on PATH. Install it from https://cli.github.com, then run gh auth login --hostname github.com.",
+      )
     throw error
   }
   children.add(child)

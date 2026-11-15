@@ -35,7 +35,9 @@ export class GitHubRequestScheduler {
               this.active++
               acquired = true
               resolve()
-            } catch (error) { reject(error) }
+            } catch (error) {
+              reject(error)
+            }
           }
           const abort = () => {
             const index = this.queue.indexOf(start)
@@ -51,7 +53,8 @@ export class GitHubRequestScheduler {
         signal?.throwIfAborted()
         this.assertAvailable(path, write)
       } catch (error) {
-        if (write) throw new GitHubRequestNotSentError(error instanceof Error ? error.message : "GitHub request cancelled; no changes were sent.")
+        if (write)
+          throw new GitHubRequestNotSentError(error instanceof Error ? error.message : "GitHub request cancelled; no changes were sent.")
         throw error
       }
       return await task()
@@ -72,8 +75,7 @@ export class GitHubRequestScheduler {
       return
     }
     const retry = headers.get("retry-after")
-    const retryAt = retry === null ? 0 : /^\d+(?:\.\d+)?$/.test(retry)
-      ? now + Number(retry) * 1000 : Date.parse(retry)
+    const retryAt = retry === null ? 0 : /^\d+(?:\.\d+)?$/.test(retry) ? now + Number(retry) * 1000 : Date.parse(retry)
     const reset = headers.get("x-ratelimit-reset")
     const resetAt = exhausted && reset !== null ? Number(reset) * 1000 + 1000 : 0
     const specified = Math.max(Number.isFinite(retryAt) ? retryAt : 0, Number.isFinite(resetAt) ? resetAt : 0)

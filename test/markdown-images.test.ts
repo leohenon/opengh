@@ -15,7 +15,12 @@ test("filename middle truncation fits terminal columns without splitting graphem
   expect(fitImageFilename("long-name.png", 0)).toBe("")
   expect(fitImageFilename("long-name.png", 1)).toBe("…")
   const segmenter = new Intl.Segmenter(undefined, { granularity: "grapheme" })
-  for (const name of ["screenshot-of-the-full-review.png", "界".repeat(20) + ".png", "e\u0301".repeat(20) + ".png", "👩‍💻".repeat(20) + ".png"]) {
+  for (const name of [
+    "screenshot-of-the-full-review.png",
+    "界".repeat(20) + ".png",
+    "e\u0301".repeat(20) + ".png",
+    "👩‍💻".repeat(20) + ".png",
+  ]) {
     const allowed = new Set([...segmenter.segment(name + "…")].map(({ segment }) => segment))
     for (let width = 0; width <= 40; width++) {
       const result = fitImageFilename(name, width)

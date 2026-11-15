@@ -13,14 +13,25 @@ afterEach(() => {
 
 test("picker hover highlights without changing keyboard selection, query, or focus", async () => {
   let selected = ""
-  const view = await testRender(() => (
-    <SearchablePicker title="Choose" placeholder="Search" height={12}
-      items={["alpha", "beta"]} itemKey={(item) => item}
-      match={(item, query) => item.includes(query) ? 0 : undefined}
-      onSelect={(item) => { selected = item }} onClose={() => {}}>
-      {(item) => <text>{item}</text>}
-    </SearchablePicker>
-  ), { width: 80, height: 24 })
+  const view = await testRender(
+    () => (
+      <SearchablePicker
+        title="Choose"
+        placeholder="Search"
+        height={12}
+        items={["alpha", "beta"]}
+        itemKey={(item) => item}
+        match={(item, query) => (item.includes(query) ? 0 : undefined)}
+        onSelect={(item) => {
+          selected = item
+        }}
+        onClose={() => {}}
+      >
+        {(item) => <text>{item}</text>}
+      </SearchablePicker>
+    ),
+    { width: 80, height: 24 },
+  )
   active.push(view)
   await view.flush()
   await view.mockInput.typeText("a")
@@ -34,7 +45,12 @@ test("picker hover highlights without changing keyboard selection, query, or foc
   await view.mockMouse.moveTo(second.x + 4, second.y)
   await view.flush()
   expect(second.backgroundColor).toEqual(first.backgroundColor)
-  expect(view.captureCharFrame().split("\n").find((line) => line.includes("beta"))).not.toContain("›")
+  expect(
+    view
+      .captureCharFrame()
+      .split("\n")
+      .find((line) => line.includes("beta")),
+  ).not.toContain("›")
   expect(query.value).toBe("a")
   expect(query.focused).toBe(true)
   expect(selected).toBe("")
@@ -51,11 +67,22 @@ test("theme hover never previews or saves and busy rows lose their hover", async
   const [saving, setSaving] = createSignal(false)
   const previews: ThemeName[] = []
   const saves: ThemeName[] = []
-  const view = await testRender(() => (
-    <ThemePicker current="github" saving={saving()}
-      onPreview={(name) => { previews.push(name) }} onCancel={() => {}}
-      onSelect={async (name) => { saves.push(name) }} />
-  ), { width: 80, height: 45 })
+  const view = await testRender(
+    () => (
+      <ThemePicker
+        current="github"
+        saving={saving()}
+        onPreview={(name) => {
+          previews.push(name)
+        }}
+        onCancel={() => {}}
+        onSelect={async (name) => {
+          saves.push(name)
+        }}
+      />
+    ),
+    { width: 80, height: 45 },
+  )
   active.push(view)
   await view.flush()
   const current = view.renderer.root.findDescendantById("theme-github") as BoxRenderable
@@ -67,7 +94,12 @@ test("theme hover never previews or saves and busy rows lose their hover", async
   expect(other.backgroundColor).toEqual(current.backgroundColor)
   expect(previews).toEqual(initialPreviews)
   expect(saves).toEqual([])
-  expect(view.captureCharFrame().split("\n").find((line) => line.includes("dracula"))).not.toContain("›")
+  expect(
+    view
+      .captureCharFrame()
+      .split("\n")
+      .find((line) => line.includes("dracula")),
+  ).not.toContain("›")
 
   setSaving(true)
   await view.flush()

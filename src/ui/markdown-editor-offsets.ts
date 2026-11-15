@@ -15,7 +15,10 @@ export function markdownEditorOffsets(text: string, measure: (text: string) => n
     const lineEnd = newline < 0 ? text.length : newline
     for (const { index, segment } of graphemes.segment(text.slice(lineStart, lineEnd))) {
       let width = widths.get(segment)
-      if (width === undefined) { width = measure(segment); widths.set(segment, width) }
+      if (width === undefined) {
+        width = measure(segment)
+        widths.set(segment, width)
+      }
       const start = lineStart + index
       const end = start + segment.length
       starts.fill(offset, start, end)

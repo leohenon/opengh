@@ -44,8 +44,7 @@ const graphemes = new Intl.Segmenter(undefined, { granularity: "grapheme" })
 type TableState = { base: TextTableContent; painted?: TextTableContent; signature?: string }
 
 function visible(node: Renderable) {
-  for (let current: Renderable | null = node; current; current = current.parent)
-    if (!current.visible || current.isDestroyed) return false
+  for (let current: Renderable | null = node; current; current = current.parent) if (!current.visible || current.isDestroyed) return false
   return true
 }
 
@@ -59,8 +58,7 @@ function ranges(chunks: TextChunk[], query: string) {
   const hidden: SearchRange[] = []
   let offset = 0
   for (const chunk of chunks) {
-    if ((chunk.attributes ?? 0) & TextAttributes.HIDDEN)
-      hidden.push({ start: offset, end: offset + chunk.text.length })
+    if ((chunk.attributes ?? 0) & TextAttributes.HIDDEN) hidden.push({ start: offset, end: offset + chunk.text.length })
     offset += chunk.text.length
   }
   let index = 0
@@ -75,7 +73,8 @@ function ranges(chunks: TextChunk[], query: string) {
 // must not be used here after concealment/normalization.
 function position(column: number, geometry: Geometry) {
   const info = geometry.lineInfo
-  let low = 0, high = info.lineStartCols.length
+  let low = 0,
+    high = info.lineStartCols.length
   while (low < high) {
     const middle = (low + high) >>> 1
     if (info.lineStartCols[middle]! <= column) low = middle + 1
@@ -84,11 +83,15 @@ function position(column: number, geometry: Geometry) {
   const row = low - 1
   if (row < 0) return undefined
   const width = info.lineWidthCols[row]!
-  const available = geometry.width - (row === 0 ? geometry.firstLineOffset ?? 0 : 0)
-  const padding = geometry.align === "right" ? Math.max(0, available - width)
-    : geometry.align === "center" ? Math.floor(Math.max(0, available - width) / 2) : 0
+  const available = geometry.width - (row === 0 ? (geometry.firstLineOffset ?? 0) : 0)
+  const padding =
+    geometry.align === "right"
+      ? Math.max(0, available - width)
+      : geometry.align === "center"
+        ? Math.floor(Math.max(0, available - width) / 2)
+        : 0
   return {
-    x: geometry.x + column - info.lineStartCols[row]! + padding + (row === 0 ? geometry.firstLineOffset ?? 0 : 0),
+    x: geometry.x + column - info.lineStartCols[row]! + padding + (row === 0 ? (geometry.firstLineOffset ?? 0) : 0),
     y: geometry.y + row,
   }
 }
@@ -116,8 +119,10 @@ export function createRenderedSearch(root: Renderable, options: RenderedSearchOp
   let cachedQuery = ""
   let cachedColors = ""
   let paintedColors = ""
-  const colorKey = () => [options.matchBackground, options.activeBackground, options.matchForeground, options.activeForeground]
-    .map((color) => color ? Array.from(color.buffer).join(",") : "").join(";")
+  const colorKey = () =>
+    [options.matchBackground, options.activeBackground, options.matchForeground, options.activeForeground]
+      .map((color) => (color ? Array.from(color.buffer).join(",") : ""))
+      .join(";")
   let cachedGeometry = -1
   let cachedLayout: number | undefined = -1
   let paintedGeometry = -1
@@ -127,7 +132,8 @@ export function createRenderedSearch(root: Renderable, options: RenderedSearchOp
   // identities. Idle polls do neither tree walks nor text/range reindexing.
   const scene = root.ctx.nativeScene
   let cachedInputs: { node: TextBufferRenderable | TextTableRenderable; content: unknown; measurement?: string }[] = []
-  const input = (node: TextBufferRenderable | TextTableRenderable) => node instanceof TextTableRenderable ? node.content : node.renderedChunks
+  const input = (node: TextBufferRenderable | TextTableRenderable) =>
+    node instanceof TextTableRenderable ? node.content : node.renderedChunks
   const rangeCache = new WeakMap<TextChunk[], { query: string; matches: SearchRange[] }>()
   const cachedRanges = (chunks: TextChunk[], value: string) => {
     const cached = rangeCache.get(chunks)
@@ -136,22 +142,28 @@ export function createRenderedSearch(root: Renderable, options: RenderedSearchOp
     rangeCache.set(chunks, { query: value, matches })
     return matches
   }
-  const texts = new Map<TextBufferRenderable, {
-    previous: TextBufferRenderable["textDecorator"]
-    installed: TextBufferRenderable["textDecorator"]
-    signature: string
-  }>()
+  const texts = new Map<
+    TextBufferRenderable,
+    {
+      previous: TextBufferRenderable["textDecorator"]
+      installed: TextBufferRenderable["textDecorator"]
+      signature: string
+    }
+  >()
   const tables = new Map<TextTableRenderable, TableState>()
   // Native offset measurements are cached independently of wrapping/scrolling.
   // The controller may reindex the same tree every 150ms without allocating probes.
-  const offsets = new Map<string, {
-    text: string
-    starts: Uint32Array
-    ends: Uint32Array
-    cells: { index: number; segment: string }[]
-    measurementKey?: string
-    columns?: Float64Array
-  }>()
+  const offsets = new Map<
+    string,
+    {
+      text: string
+      starts: Uint32Array
+      ends: Uint32Array
+      cells: { index: number; segment: string }[]
+      measurementKey?: string
+      columns?: Float64Array
+    }
+  >()
 
   function mapping(segment: string, chunks: TextChunk[]) {
     const text = chunks.map((chunk) => chunk.text).join("")
@@ -220,21 +232,23 @@ export function createRenderedSearch(root: Renderable, options: RenderedSearchOp
       if (previous && previous.end > start) previous.end = Math.max(previous.end, end)
       else matches.push({ start, end })
     }
-    let offset = 0, index = 0
+    let offset = 0,
+      index = 0
     const result: TextChunk[] = []
     for (const chunk of chunks) {
-      const start = offset, end = start + chunk.text.length
+      const start = offset,
+        end = start + chunk.text.length
       while (offset < end) {
         while (matches[index] && matches[index]!.end <= offset) index++
         const range = matches[index]
         const inside = range && range.start <= offset
         const active = activePaint && activePaint.start <= offset && activePaint.end > offset
-        let to = Math.min(end, inside ? range.end : range?.start ?? end)
+        let to = Math.min(end, inside ? range.end : (range?.start ?? end))
         if (activePaint && activePaint.start > offset) to = Math.min(to, activePaint.start)
         if (active) to = Math.min(to, activePaint!.end)
         const part = { ...chunk, text: chunk.text.slice(offset - start, to - start) }
         if (inside) {
-          part.bg = active ? options.activeBackground ?? defaultActiveBg : options.matchBackground ?? defaultMatchBg
+          part.bg = active ? (options.activeBackground ?? defaultActiveBg) : (options.matchBackground ?? defaultMatchBg)
           const fg = active ? options.activeForeground : options.matchForeground
           if (fg) part.fg = fg
           part.attributes = (chunk.attributes ?? 0) | (active ? TextAttributes.UNDERLINE : 0)
@@ -264,7 +278,9 @@ export function createRenderedSearch(root: Renderable, options: RenderedSearchOp
           key: key(node),
           chunks: node.renderedChunks,
           geometry: () => ({
-            x: 0, y: 0, width: node.width,
+            x: 0,
+            y: 0,
+            width: node.width,
             firstLineOffset: node.firstLineOffset,
             lineInfo: node.renderedLineInfo,
             measureTextOffset: (text) => node.measureTextOffset(text),
@@ -273,12 +289,17 @@ export function createRenderedSearch(root: Renderable, options: RenderedSearchOp
           }),
         })
       } else if (node instanceof TextTableRenderable) {
-        tableState(node).base.forEach((row, r) => row.forEach((chunks, c) => {
-          if (chunks) result.push({
-            owner: node, key: `${key(node)}/${r}/${c}`, chunks,
-            geometry: () => node.getCellGeometry(r, c),
-          })
-        }))
+        tableState(node).base.forEach((row, r) =>
+          row.forEach((chunks, c) => {
+            if (chunks)
+              result.push({
+                owner: node,
+                key: `${key(node)}/${r}/${c}`,
+                chunks,
+                geometry: () => node.getCellGeometry(r, c),
+              })
+          }),
+        )
       }
     }
     return result
@@ -299,9 +320,13 @@ export function createRenderedSearch(root: Renderable, options: RenderedSearchOp
       }
     }
     if (!query) return
-    const signature = JSON.stringify([query, activeId, ...[
-      options.matchBackground, options.activeBackground, options.matchForeground, options.activeForeground,
-    ].map((color) => color ? Array.from(color.buffer) : null)])
+    const signature = JSON.stringify([
+      query,
+      activeId,
+      ...[options.matchBackground, options.activeBackground, options.matchForeground, options.activeForeground].map((color) =>
+        color ? Array.from(color.buffer) : null,
+      ),
+    ])
     for (const node of owners) {
       if (node instanceof TextBufferRenderable) {
         const state = texts.get(node)
@@ -313,8 +338,7 @@ export function createRenderedSearch(root: Renderable, options: RenderedSearchOp
       } else {
         const state = tableState(node)
         if (state.signature === signature && node.content === state.painted) continue
-        const content = state.base.map((row, r) => row.map((chunks, c) =>
-          chunks ? decorate(chunks, `${key(node)}/${r}/${c}`) : chunks))
+        const content = state.base.map((row, r) => row.map((chunks, c) => (chunks ? decorate(chunks, `${key(node)}/${r}/${c}`) : chunks)))
         state.painted = content
         state.signature = signature
         node.content = content
@@ -323,8 +347,7 @@ export function createRenderedSearch(root: Renderable, options: RenderedSearchOp
   }
 
   function primaryScroll() {
-    for (let node: Renderable | null = root; node; node = node.parent)
-      if (node instanceof ScrollBoxRenderable) return node
+    for (let node: Renderable | null = root; node; node = node.parent) if (node instanceof ScrollBoxRenderable) return node
     for (const node of walk(root, options.exclude)) if (node instanceof ScrollBoxRenderable) return node
     return undefined
   }
@@ -406,9 +429,21 @@ export function createRenderedSearch(root: Renderable, options: RenderedSearchOp
     },
     search(value: string): RenderedSearchMatch[] {
       if (disposed) return []
-      if (!options.exclude && cachedResults && cachedColors === colorKey() && cachedQuery === value && cachedGeometry === scene.currentGeometryRevision && cachedLayout === scene.observedLayoutRevision
-        && cachedInputs.every(({ node, content, measurement }) => !node.isDestroyed && input(node) === content
-          && (!(node instanceof TextBufferRenderable) || node.textMeasurementKey === measurement))) return cachedResults
+      if (
+        !options.exclude &&
+        cachedResults &&
+        cachedColors === colorKey() &&
+        cachedQuery === value &&
+        cachedGeometry === scene.currentGeometryRevision &&
+        cachedLayout === scene.observedLayoutRevision &&
+        cachedInputs.every(
+          ({ node, content, measurement }) =>
+            !node.isDestroyed &&
+            input(node) === content &&
+            (!(node instanceof TextBufferRenderable) || node.textMeasurementKey === measurement),
+        )
+      )
+        return cachedResults
       if (query !== value) generation++
       query = value
       const current = segments()
@@ -434,13 +469,22 @@ export function createRenderedSearch(root: Renderable, options: RenderedSearchOp
       cachedLayout = scene.observedLayoutRevision
       cachedResults = found
       cachedInputs = [...new Set(current.map((segment) => segment.owner))].map((node) => ({
-        node, content: input(node), measurement: node instanceof TextBufferRenderable ? node.textMeasurementKey : undefined,
+        node,
+        content: input(node),
+        measurement: node instanceof TextBufferRenderable ? node.textMeasurementKey : undefined,
       }))
       return found
     },
     highlight(id?: string) {
       if (disposed) return
-      if (!options.exclude && activeId === id && paintedColors === colorKey() && paintedGeometry === scene.currentGeometryRevision && paintedLayout === scene.observedLayoutRevision) return
+      if (
+        !options.exclude &&
+        activeId === id &&
+        paintedColors === colorKey() &&
+        paintedGeometry === scene.currentGeometryRevision &&
+        paintedLayout === scene.observedLayoutRevision
+      )
+        return
       activeId = id
       paint(segments())
       paintedColors = colorKey()
@@ -454,15 +498,28 @@ export function createRenderedSearch(root: Renderable, options: RenderedSearchOp
       const restore = [...nodes].flatMap((node) => {
         if (node instanceof ScrollBoxRenderable) {
           const { scrollTop, scrollLeft } = node
-          return [() => { if (!node.isDestroyed) node.scrollTo({ x: scrollLeft, y: scrollTop }) }]
+          return [
+            () => {
+              if (!node.isDestroyed) node.scrollTo({ x: scrollLeft, y: scrollTop })
+            },
+          ]
         }
         if (node instanceof TextBufferRenderable) {
           const { scrollX, scrollY } = node
-          return [() => { if (!node.isDestroyed) { node.scrollX = scrollX; node.scrollY = scrollY } }]
+          return [
+            () => {
+              if (!node.isDestroyed) {
+                node.scrollX = scrollX
+                node.scrollY = scrollY
+              }
+            },
+          ]
         }
         return []
       })
-      return () => { if (!disposed && visible(root)) for (const reset of restore) reset() }
+      return () => {
+        if (!disposed && visible(root)) for (const reset of restore) reset()
+      }
     },
     dispose() {
       if (disposed) return

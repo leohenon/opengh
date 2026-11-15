@@ -63,9 +63,7 @@ export function BranchPicker(props: {
       const label = props.branches.phase === "pagination" ? "Loading more branches…" : "Loading branches…"
       return { kind: "load", key: "load-more", label }
     }
-    const label = query().trim() && !hasBranchMatch()
-      ? "No matches loaded — Load more branches…"
-      : "Load more branches…"
+    const label = query().trim() && !hasBranchMatch() ? "No matches loaded — Load more branches…" : "Load more branches…"
     return { kind: "load", key: "load-more", label, action: "load-more" }
   }
   const rows = createMemo<PickerRow[]>(() => [
@@ -88,8 +86,8 @@ export function BranchPicker(props: {
       placeholder="Search branches"
       items={rows()}
       itemKey={(row) => row.key}
-      itemDisabled={(row) => row.kind === "branch" ? props.canSwitch === false : !row.action}
-      match={(row, needle) => row.kind === "branch" ? fuzzyScore(row.branch, needle) : Number.MAX_SAFE_INTEGER}
+      itemDisabled={(row) => (row.kind === "branch" ? props.canSwitch === false : !row.action)}
+      match={(row, needle) => (row.kind === "branch" ? fuzzyScore(row.branch, needle) : Number.MAX_SAFE_INTEGER)}
       preferred={(row) => row.kind === "branch" && row.branch === props.current}
       height={22}
       showScrollbar={props.showScrollbar}

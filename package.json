@@ -13,6 +13,8 @@
     "start": "bun src/index.tsx",
     "test": "bun test",
     "typecheck": "tsc --noEmit",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
     "hooks:install": "git config --local core.hooksPath .githooks",
     "prepare": "if git rev-parse --git-dir >/dev/null 2>&1; then bun run hooks:install; fi",
     "build": "bun scripts/build.ts",
@@ -48,6 +50,7 @@
     "@types/bun": "1.3.14",
     "@types/hast": "^3.0.5",
     "@types/react": "^19.2.0",
+    "prettier": "3.10.1",
     "typescript": "5.9.3"
   },
   "overrides": {

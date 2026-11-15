@@ -22,9 +22,22 @@ test("live bindings update help, header, footer and behavior; disabled actions d
   const [config, setConfig] = createSignal<Config>({ ...defaultConfig, showStatusBarHints: true })
   let opened = 0
   let commits = 0
-  const view = await testRender(() => <App data={githubDataFixture} operations={repositoryOperationsFixture}
-    config={config()} onOpenInBrowser={async () => { opened++ }} onLoadCommit={async () => { commits++ }} />,
-  { width: 140, height: 40 })
+  const view = await testRender(
+    () => (
+      <App
+        data={githubDataFixture}
+        operations={repositoryOperationsFixture}
+        config={config()}
+        onOpenInBrowser={async () => {
+          opened++
+        }}
+        onLoadCommit={async () => {
+          commits++
+        }}
+      />
+    ),
+    { width: 140, height: 40 },
+  )
   active.push(view)
   await view.flush()
   view.mockInput.pressKey("?")
@@ -38,10 +51,16 @@ test("live bindings update help, header, footer and behavior; disabled actions d
   view.resize(140, 40)
   view.mockInput.pressKey("g")
   await view.flush()
-  setConfig((current) => ({ ...current, keybindings: {
-    "global.help": ["f1"], "item.open": ["f2"], "navigation.tab2": ["f3"],
-    "navigation.activate": ["f4"], "item.copy": [],
-  } }))
+  setConfig((current) => ({
+    ...current,
+    keybindings: {
+      "global.help": ["f1"],
+      "item.open": ["f2"],
+      "navigation.tab2": ["f3"],
+      "navigation.activate": ["f4"],
+      "item.copy": [],
+    },
+  }))
   await view.flush()
   let frame = view.captureCharFrame()
   expect(frame).toContain("f3 Commits")
@@ -77,16 +96,36 @@ test("search scopes protect typing, use remapped controls and do not retain nati
     return null
   }
   const overrides: KeybindingOverrides = {
-    "picker.down": ["ctrl+n"], "picker.accept": ["f6"], "dialog.close": ["f7"], "editor.backspace": ["f8"],
+    "picker.down": ["ctrl+n"],
+    "picker.accept": ["f6"],
+    "dialog.close": ["f7"],
+    "editor.backspace": ["f8"],
   }
-  const view = await testRender(() => <KeybindingsProvider overrides={overrides}>
-    <Ambient />
-    <SearchablePicker title="Picker" placeholder="Search" height={12} items={["alpha", "beta"]}
-      itemKey={(item) => item} match={(_item, value) => value ? undefined : 0}
-      onQueryChange={(value) => { query = value }} onSelect={(item) => { selected = item }} onClose={() => closed++}>
-      {(item, current) => <text>{current() ? `active ${item}` : item}</text>}
-    </SearchablePicker>
-  </KeybindingsProvider>, { width: 80, height: 20 })
+  const view = await testRender(
+    () => (
+      <KeybindingsProvider overrides={overrides}>
+        <Ambient />
+        <SearchablePicker
+          title="Picker"
+          placeholder="Search"
+          height={12}
+          items={["alpha", "beta"]}
+          itemKey={(item) => item}
+          match={(_item, value) => (value ? undefined : 0)}
+          onQueryChange={(value) => {
+            query = value
+          }}
+          onSelect={(item) => {
+            selected = item
+          }}
+          onClose={() => closed++}
+        >
+          {(item, current) => <text>{current() ? `active ${item}` : item}</text>}
+        </SearchablePicker>
+      </KeybindingsProvider>
+    ),
+    { width: 80, height: 20 },
+  )
   active.push(view)
   await view.flush()
   await view.mockInput.typeText("qs?,")
@@ -118,10 +157,29 @@ test("search scopes protect typing, use remapped controls and do not retain nati
 test("multiline editing remaps movement, newline, deletion and submit without breaking paste", async () => {
   let editor!: TextareaRenderable
   let submitted = 0
-  const view = await testRender(() => <KeybindingsProvider overrides={{
-    "editor.move-left": ["f3"], "editor.backspace": ["f2"], "editor.newline": ["ctrl+enter"], "editor.submit": ["f4"],
-  }}><KeyTextarea focused width={30} height={6} ref={(value) => { editor = value }} onSubmit={() => submitted++} /></KeybindingsProvider>,
-  { width: 40, height: 10, kittyKeyboard: true })
+  const view = await testRender(
+    () => (
+      <KeybindingsProvider
+        overrides={{
+          "editor.move-left": ["f3"],
+          "editor.backspace": ["f2"],
+          "editor.newline": ["ctrl+enter"],
+          "editor.submit": ["f4"],
+        }}
+      >
+        <KeyTextarea
+          focused
+          width={30}
+          height={6}
+          ref={(value) => {
+            editor = value
+          }}
+          onSubmit={() => submitted++}
+        />
+      </KeybindingsProvider>
+    ),
+    { width: 40, height: 10, kittyKeyboard: true },
+  )
   active.push(view)
   await view.flush()
   await view.mockInput.typeText("ab")
@@ -146,9 +204,21 @@ test("multiline editing remaps movement, newline, deletion and submit without br
 for (const Editor of [KeyInput, KeyTextarea]) {
   test(`${Editor.name} supports Ctrl/Cmd+Z undo and shifted redo`, async () => {
     let editor!: TextareaRenderable
-    const view = await testRender(() => <KeybindingsProvider>
-      <Editor focused width={30} height={6} ref={(value) => { editor = value }} />
-    </KeybindingsProvider>, { width: 40, height: 10, kittyKeyboard: true })
+    const view = await testRender(
+      () => (
+        <KeybindingsProvider>
+          <Editor
+            focused
+            width={30}
+            height={6}
+            ref={(value) => {
+              editor = value
+            }}
+          />
+        </KeybindingsProvider>
+      ),
+      { width: 40, height: 10, kittyKeyboard: true },
+    )
     active.push(view)
     await view.flush()
     await view.mockInput.pasteBracketedText("draft text")
@@ -169,9 +239,24 @@ for (const Editor of [KeyInput, KeyTextarea]) {
   test(`${Editor.name} groups typing, separates pauses/navigation, and restores atomic selection edits`, async () => {
     let editor!: TextareaRenderable
     let input = ""
-    const view = await testRender(() => <KeybindingsProvider>
-      <Editor focused width={30} height={6} ref={(value) => { editor = value }} onInput={(value: string) => { input = value }} />
-    </KeybindingsProvider>, { width: 40, height: 10, kittyKeyboard: true })
+    const view = await testRender(
+      () => (
+        <KeybindingsProvider>
+          <Editor
+            focused
+            width={30}
+            height={6}
+            ref={(value) => {
+              editor = value
+            }}
+            onInput={(value: string) => {
+              input = value
+            }}
+          />
+        </KeybindingsProvider>
+      ),
+      { width: 40, height: 10, kittyKeyboard: true },
+    )
     active.push(view)
     await view.flush()
     const clock = spyOn(Date, "now").mockReturnValue(1000)
@@ -230,9 +315,24 @@ for (const Editor of [KeyInput, KeyTextarea]) {
   test(`${Editor.name} groups repeated deletion by direction and breaks groups on mouse clicks`, async () => {
     let editor!: TextareaRenderable
     let clicks = 0
-    const view = await testRender(() => <KeybindingsProvider>
-      <Editor focused width={30} height={6} ref={(value) => { editor = value }} onMouseDown={() => { clicks++ }} />
-    </KeybindingsProvider>, { width: 40, height: 10, kittyKeyboard: true })
+    const view = await testRender(
+      () => (
+        <KeybindingsProvider>
+          <Editor
+            focused
+            width={30}
+            height={6}
+            ref={(value) => {
+              editor = value
+            }}
+            onMouseDown={() => {
+              clicks++
+            }}
+          />
+        </KeybindingsProvider>
+      ),
+      { width: 40, height: 10, kittyKeyboard: true },
+    )
     active.push(view)
     await view.flush()
     const clock = spyOn(Date, "now").mockReturnValue(1000)
@@ -305,9 +405,20 @@ test("opening a modal never confirms with the same event, and cleanup restores l
   }
   function Harness() {
     useKeyActions({ "navigation.activate": () => setModal(true), "global.help": () => ambient++ })
-    return <Show when={modal()} fallback={<text>Page</text>}><Dialog /></Show>
+    return (
+      <Show when={modal()} fallback={<text>Page</text>}>
+        <Dialog />
+      </Show>
+    )
   }
-  const view = await testRender(() => <KeybindingsProvider><Harness /></KeybindingsProvider>, { width: 30, height: 8 })
+  const view = await testRender(
+    () => (
+      <KeybindingsProvider>
+        <Harness />
+      </KeybindingsProvider>
+    ),
+    { width: 30, height: 8 },
+  )
   active.push(view)
   await view.flush()
   view.mockInput.pressEnter()
@@ -323,24 +434,46 @@ test("opening a modal never confirms with the same event, and cleanup restores l
   expect(ambient).toBe(1)
 })
 
-
 test("issue draft controls and confirmation hints follow remaps without leaking into typing", async () => {
   const [state, setState] = createSignal<IssueActionState>({ body: "", reason: "completed", operation: { status: "idle" } })
   let hint = ""
   let submitted = 0
   let closed = 0
   let discarded = 0
-  const view = await testRender(() => <KeybindingsProvider overrides={{
-    "dialog.submit": ["f2"], "dialog.confirm": ["f3"], "dialog.close": ["f4"],
-    "dialog.togglePreview": ["f5"], "dialog.discard": ["f6"],
-  }}><IssueActionDialog number={42} kind="comment" state={state()} showScrollbar={false}
-    repositoryUrl="https://github.com/owner/repo" onBodyChange={(body) => setState((value) => ({ ...value, body }))}
-    onReasonChange={() => {}} onDuplicateTargetChange={() => {}} onSubmit={() => submitted++}
-    onDiscard={() => {
-      discarded++
-      setState((value) => ({ ...value, body: "" }))
-    }} onClose={() => closed++} onHintChange={(value) => { hint = value ?? "" }}
-  /></KeybindingsProvider>, { width: 100, height: 32 })
+  const view = await testRender(
+    () => (
+      <KeybindingsProvider
+        overrides={{
+          "dialog.submit": ["f2"],
+          "dialog.confirm": ["f3"],
+          "dialog.close": ["f4"],
+          "dialog.togglePreview": ["f5"],
+          "dialog.discard": ["f6"],
+        }}
+      >
+        <IssueActionDialog
+          number={42}
+          kind="comment"
+          state={state()}
+          showScrollbar={false}
+          repositoryUrl="https://github.com/owner/repo"
+          onBodyChange={(body) => setState((value) => ({ ...value, body }))}
+          onReasonChange={() => {}}
+          onDuplicateTargetChange={() => {}}
+          onSubmit={() => submitted++}
+          onDiscard={() => {
+            discarded++
+            setState((value) => ({ ...value, body: "" }))
+          }}
+          onClose={() => closed++}
+          onHintChange={(value) => {
+            hint = value ?? ""
+          }}
+        />
+      </KeybindingsProvider>
+    ),
+    { width: 100, height: 32 },
+  )
   active.push(view)
   await view.flush()
   await view.mockInput.typeText("qrs?,")
@@ -385,25 +518,44 @@ test("issue draft controls and confirmation hints follow remaps without leaking 
   expect(closed).toBe(1)
 })
 
-
 test("mouse menus and reaction picker respect remapped dialog and navigation actions", async () => {
   const [screen, setScreen] = createSignal("context")
   const reactions: string[] = []
   let menuActions = 0
-  const view = await testRender(() => <KeybindingsProvider overrides={{
-    "dialog.close": ["f4"], "navigation.down": ["f2"], "navigation.activate": ["f9"],
-  }}>
-    <Show when={screen() === "context"} fallback={
-      <Show when={screen() === "reactions"} fallback={<text>Done</text>}>
-        <ReactionPicker message={{ target: { kind: "issue", number: 42 }, state: {} }}
-          action={() => ({ operation: { status: "idle" } })} showScrollbar={false}
-          onAdd={(_target, kind) => reactions.push(kind)} onClose={() => setScreen("done")} />
-      </Show>
-    }>
-      <ContextMenu position={{ x: 2, y: 2 }} items={[{ label: "Action", run: () => {} }]}
-        onSelect={() => menuActions++} onClose={() => setScreen("reactions")} />
-    </Show>
-  </KeybindingsProvider>, { width: 80, height: 24 })
+  const view = await testRender(
+    () => (
+      <KeybindingsProvider
+        overrides={{
+          "dialog.close": ["f4"],
+          "navigation.down": ["f2"],
+          "navigation.activate": ["f9"],
+        }}
+      >
+        <Show
+          when={screen() === "context"}
+          fallback={
+            <Show when={screen() === "reactions"} fallback={<text>Done</text>}>
+              <ReactionPicker
+                message={{ target: { kind: "issue", number: 42 }, state: {} }}
+                action={() => ({ operation: { status: "idle" } })}
+                showScrollbar={false}
+                onAdd={(_target, kind) => reactions.push(kind)}
+                onClose={() => setScreen("done")}
+              />
+            </Show>
+          }
+        >
+          <ContextMenu
+            position={{ x: 2, y: 2 }}
+            items={[{ label: "Action", run: () => {} }]}
+            onSelect={() => menuActions++}
+            onClose={() => setScreen("reactions")}
+          />
+        </Show>
+      </KeybindingsProvider>
+    ),
+    { width: 80, height: 24 },
+  )
   active.push(view)
   await view.flush()
   view.mockInput.pressEnter()
@@ -420,14 +572,26 @@ test("mouse menus and reaction picker respect remapped dialog and navigation act
   expect(screen()).toBe("done")
 })
 
-
 test("multiline indentation preserves selected Unicode lines and is one undoable edit", async () => {
   let editor!: TextareaRenderable
   const initial = "one\n\t界\nlast"
-  const view = await testRender(() => <KeybindingsProvider>
-    <KeyTextarea ref={(value) => { editor = value }} initialValue={initial}
-      focused width={50} height={6} selectionOccupancy="boundary" />
-  </KeybindingsProvider>, { width: 60, height: 10 })
+  const view = await testRender(
+    () => (
+      <KeybindingsProvider>
+        <KeyTextarea
+          ref={(value) => {
+            editor = value
+          }}
+          initialValue={initial}
+          focused
+          width={50}
+          height={6}
+          selectionOccupancy="boundary"
+        />
+      </KeybindingsProvider>
+    ),
+    { width: 60, height: 10 },
+  )
   active.push(view)
   await view.flush()
   editor.gotoBufferHome()
@@ -454,18 +618,45 @@ test("multiline indentation preserves selected Unicode lines and is one undoable
   expect(editor.plainText).toBe(initial)
 })
 
-
 test("single and multiline clears preserve undo, cursor and selection but fresh drafts reset history", async () => {
   for (const singleLine of [true, false]) {
     let editor!: TextareaRenderable
     const seed = "Draft 界 text"
     const [value, setValue] = createSignal(seed)
     const [session, setSession] = createSignal(0)
-    const view = await testRender(() => <KeybindingsProvider>
-      {singleLine ? <KeyInput ref={item => { editor = item }} focused value={value()} historyKey={session()} onInput={setValue} width={40} />
-        : <KeyTextarea ref={item => { editor = item }} focused initialValue={seed} historyKey={session()}
-          onContentChange={() => { if (editor) setValue(editor.plainText) }} width={40} height={6} />}
-    </KeybindingsProvider>, { width: 50, height: 10 })
+    const view = await testRender(
+      () => (
+        <KeybindingsProvider>
+          {singleLine ? (
+            <KeyInput
+              ref={(item) => {
+                editor = item
+              }}
+              focused
+              value={value()}
+              historyKey={session()}
+              onInput={setValue}
+              width={40}
+            />
+          ) : (
+            <KeyTextarea
+              ref={(item) => {
+                editor = item
+              }}
+              focused
+              initialValue={seed}
+              historyKey={session()}
+              onContentChange={() => {
+                if (editor) setValue(editor.plainText)
+              }}
+              width={40}
+              height={6}
+            />
+          )}
+        </KeybindingsProvider>
+      ),
+      { width: 50, height: 10 },
+    )
     active.push(view)
     await view.flush()
     editor.gotoBufferEnd()
@@ -482,21 +673,26 @@ test("single and multiline clears preserve undo, cursor and selection but fresh 
     expect(editor.plainText).toBe("")
     // Repeating Clear on an empty field must not erase the previous clear or typing.
     replaceEditorText(editor, "")
-    view.mockInput.pressKey("z", { ctrl: true }); await view.flush()
+    view.mockInput.pressKey("z", { ctrl: true })
+    await view.flush()
     expect(editor.plainText).toBe(text)
     expect(value()).toBe(text)
     expect(editor.cursorOffset).toBe(cursor)
     expect(editor.getSelection()).toEqual(selection)
-    view.mockInput.pressKey("z", { ctrl: true }); await view.flush()
+    view.mockInput.pressKey("z", { ctrl: true })
+    await view.flush()
     expect(editor.plainText).toBe(seed)
-    view.mockInput.pressKey(".", { ctrl: true }); await view.flush()
+    view.mockInput.pressKey(".", { ctrl: true })
+    await view.flush()
     expect(editor.plainText).toBe(text)
-    view.mockInput.pressKey(".", { ctrl: true }); await view.flush()
+    view.mockInput.pressKey(".", { ctrl: true })
+    await view.flush()
     expect(value()).toBe("")
     // A fresh draft resets the stack even when it starts with the same empty text.
-    setSession(current => current + 1)
+    setSession((current) => current + 1)
     await view.flush()
-    view.mockInput.pressKey("z", { ctrl: true }); await view.flush()
+    view.mockInput.pressKey("z", { ctrl: true })
+    await view.flush()
     expect(editor.plainText).toBe("")
     expect(value()).toBe("")
   }

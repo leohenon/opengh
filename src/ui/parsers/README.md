@@ -6,14 +6,14 @@ Import `../markdown-parsers.ts` for its registration side effect **before** a Tr
 
 All files are unmodified upstream assets. Each directory contains the release WASM, the same tag's `queries/highlights.scm`, and its MIT `LICENSE` (including upstream copyright notices).
 
-| Directory | GitHub repository | Tag |
-| --- | --- | --- |
-| `json` | [tree-sitter/tree-sitter-json](https://github.com/tree-sitter/tree-sitter-json/tree/v0.24.8) | `v0.24.8` |
-| `bash` | [tree-sitter/tree-sitter-bash](https://github.com/tree-sitter/tree-sitter-bash/tree/v0.25.1) | `v0.25.1` |
-| `yaml` | [tree-sitter-grammars/tree-sitter-yaml](https://github.com/tree-sitter-grammars/tree-sitter-yaml/tree/v0.7.2) | `v0.7.2` |
-| `diff` | [tree-sitter-grammars/tree-sitter-diff](https://github.com/tree-sitter-grammars/tree-sitter-diff/tree/v0.2.0) | `v0.2.0` |
-| `python` | [tree-sitter/tree-sitter-python](https://github.com/tree-sitter/tree-sitter-python/tree/v0.25.0) | `v0.25.0` |
-| `rust` | [tree-sitter/tree-sitter-rust](https://github.com/tree-sitter/tree-sitter-rust/tree/v0.24.2) | `v0.24.2` |
+| Directory | GitHub repository                                                                                             | Tag       |
+| --------- | ------------------------------------------------------------------------------------------------------------- | --------- |
+| `json`    | [tree-sitter/tree-sitter-json](https://github.com/tree-sitter/tree-sitter-json/tree/v0.24.8)                  | `v0.24.8` |
+| `bash`    | [tree-sitter/tree-sitter-bash](https://github.com/tree-sitter/tree-sitter-bash/tree/v0.25.1)                  | `v0.25.1` |
+| `yaml`    | [tree-sitter-grammars/tree-sitter-yaml](https://github.com/tree-sitter-grammars/tree-sitter-yaml/tree/v0.7.2) | `v0.7.2`  |
+| `diff`    | [tree-sitter-grammars/tree-sitter-diff](https://github.com/tree-sitter-grammars/tree-sitter-diff/tree/v0.2.0) | `v0.2.0`  |
+| `python`  | [tree-sitter/tree-sitter-python](https://github.com/tree-sitter/tree-sitter-python/tree/v0.25.0)              | `v0.25.0` |
+| `rust`    | [tree-sitter/tree-sitter-rust](https://github.com/tree-sitter/tree-sitter-rust/tree/v0.24.2)                  | `v0.24.2` |
 
 Exact download URL patterns, substituting the table's `repository`, `tag`, and directory as `language`:
 

@@ -17,13 +17,35 @@ test("list hover is motion-only, never changes selection/scroll, and yields imme
   let selected = -1
   let activated = 0
   let pages = 0
-  const view = await testRender(() => <MouseSurface>
-    <Show when={visible()}><SelectableList items={items()} itemKey={(item) => item.id} active={enabled()} empty="empty"
-      onSelect={(item) => { selected = item.id }} onActivate={() => { activated++ }} onEndReached={() => { pages++ }}>
-      {(item) => <text id={`hover-row-${item().id}`}>row {item().id}</text>}
-    </SelectableList></Show>
-    <box height={2} flexShrink={0}><text>Noninteractive space</text></box>
-  </MouseSurface>, { width: 45, height: 14 })
+  const view = await testRender(
+    () => (
+      <MouseSurface>
+        <Show when={visible()}>
+          <SelectableList
+            items={items()}
+            itemKey={(item) => item.id}
+            active={enabled()}
+            empty="empty"
+            onSelect={(item) => {
+              selected = item.id
+            }}
+            onActivate={() => {
+              activated++
+            }}
+            onEndReached={() => {
+              pages++
+            }}
+          >
+            {(item) => <text id={`hover-row-${item().id}`}>row {item().id}</text>}
+          </SelectableList>
+        </Show>
+        <box height={2} flexShrink={0}>
+          <text>Noninteractive space</text>
+        </box>
+      </MouseSurface>
+    ),
+    { width: 45, height: 14 },
+  )
   const pointer = spyOn(view.renderer, "setMousePointer")
   const row = (id: number) => view.renderer.root.findDescendantById(`hover-row-${id}`)!.parent as BoxRenderable
   try {
@@ -82,7 +104,10 @@ test("list hover is motion-only, never changes selection/scroll, and yields imme
     setVisible(false)
     await view.flush()
     expect(keyInput.listenerCount("keypress")).toBe(listeners - 1) // The list's own keyboard handler left, not one handler per row.
-  } finally { pointer.mockRestore(); view.renderer.destroy() }
+  } finally {
+    pointer.mockRestore()
+    view.renderer.destroy()
+  }
 })
 
 test("nested cursor ownership, disabled/removed controls, noninteractive motion and renderer cleanup stay independent", async () => {
@@ -92,16 +117,56 @@ test("nested cursor ownership, disabled/removed controls, noninteractive motion 
   let child!: ReturnType<typeof mouseHover>
   function Child() {
     child = mouseHover(() => !disabled())
-    return <text id="child" {...mouseClick(() => {}, () => !disabled(), undefined, child)}>Child</text>
+    return (
+      <text
+        id="child"
+        {...mouseClick(
+          () => {},
+          () => !disabled(),
+          undefined,
+          child,
+        )}
+      >
+        Child
+      </text>
+    )
   }
   function Controls() {
     parent = mouseHover()
-    return <box width={25} height={4} {...mouseClick(() => {}, () => true, undefined, parent)}>
-      <Show when={childVisible()}><Child /></Show>
-    </box>
+    return (
+      <box
+        width={25}
+        height={4}
+        {...mouseClick(
+          () => {},
+          () => true,
+          undefined,
+          parent,
+        )}
+      >
+        <Show when={childVisible()}>
+          <Child />
+        </Show>
+      </box>
+    )
   }
-  const first = await testRender(() => <MouseSurface><Controls /><text>Plain text</text></MouseSurface>, { width: 40, height: 10 })
-  const second = await testRender(() => <MouseSurface><text {...mouseClick(() => {})}>Other renderer</text></MouseSurface>, { width: 40, height: 10 })
+  const first = await testRender(
+    () => (
+      <MouseSurface>
+        <Controls />
+        <text>Plain text</text>
+      </MouseSurface>
+    ),
+    { width: 40, height: 10 },
+  )
+  const second = await testRender(
+    () => (
+      <MouseSurface>
+        <text {...mouseClick(() => {})}>Other renderer</text>
+      </MouseSurface>
+    ),
+    { width: 40, height: 10 },
+  )
   const pointerA = spyOn(first.renderer, "setMousePointer")
   const pointerB = spyOn(second.renderer, "setMousePointer")
   const keysA = first.renderer.keyInput
@@ -112,7 +177,8 @@ test("nested cursor ownership, disabled/removed controls, noninteractive motion 
   const listenersB = keysB.listenerCount("keypress")
   const pasteListenersA = keysA.listenerCount("paste")
   try {
-    await first.flush(); await second.flush()
+    await first.flush()
+    await second.flush()
     await first.mockMouse.moveTo(1, 0)
     expect(child.hovered()).toBe(true)
     expect(parent.hovered()).toBe(false)
@@ -144,9 +210,11 @@ test("nested cursor ownership, disabled/removed controls, noninteractive motion 
     await first.flush()
     expect(pointerA.mock.calls.at(-1)?.[0]).toBe("pointer")
   } finally {
-    first.renderer.destroy(); second.renderer.destroy()
+    first.renderer.destroy()
+    second.renderer.destroy()
     await Promise.all([first.renderer.closed, second.renderer.closed])
-    pointerA.mockRestore(); pointerB.mockRestore()
+    pointerA.mockRestore()
+    pointerB.mockRestore()
   }
   expect(keysA.listenerCount("keypress")).toBe(listenersA - 1)
   expect(keysB.listenerCount("keypress")).toBe(listenersB - 1)

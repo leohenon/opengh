@@ -6,18 +6,34 @@ import { referencedItems, type IssueLinkReference } from "../src/ui/issue-refere
 import { clickControl } from "./fixtures/mouse"
 
 test("shows all unique references without hints and restores each tab's selection and scroll", async () => {
-  const link = (kind: "pull" | "issue", number: number): IssueLinkReference => ({
-    kind, number, id: `${kind}-${number}`, repository: "owner/repo", title: `${kind} title ${number}`,
-    url: `https://github.com/owner/repo/${kind === "pull" ? "pull" : "issues"}/${number}`, actor: "author",
-    createdAt: `2026-01-${String(number).padStart(2, "0")}T00:00:00Z`, state: "open",
-    ...(kind === "pull" ? { merged: false, draft: false } : {}),
-  } as IssueLinkReference)
+  const link = (kind: "pull" | "issue", number: number): IssueLinkReference =>
+    ({
+      kind,
+      number,
+      id: `${kind}-${number}`,
+      repository: "owner/repo",
+      title: `${kind} title ${number}`,
+      url: `https://github.com/owner/repo/${kind === "pull" ? "pull" : "issues"}/${number}`,
+      actor: "author",
+      createdAt: `2026-01-${String(number).padStart(2, "0")}T00:00:00Z`,
+      state: "open",
+      ...(kind === "pull" ? { merged: false, draft: false } : {}),
+    }) as IssueLinkReference
   const references: IssueReference[] = [
     ...Array.from({ length: 8 }, (_, index) => link("pull", index + 1)),
     ...Array.from({ length: 8 }, (_, index) => link("issue", index + 11)),
     { ...link("pull", 8), title: "older duplicate", createdAt: "2025-01-01T00:00:00Z" },
     link("issue", 30),
-    { kind: "commit", id: "commit", repository: "owner/repo", sha: "a".repeat(40), title: "commit title", url: `https://github.com/owner/repo/commit/${"a".repeat(40)}`, actor: "author", createdAt: "2026-02-01T00:00:00Z" },
+    {
+      kind: "commit",
+      id: "commit",
+      repository: "owner/repo",
+      sha: "a".repeat(40),
+      title: "commit title",
+      url: `https://github.com/owner/repo/commit/${"a".repeat(40)}`,
+      actor: "author",
+      createdAt: "2026-02-01T00:00:00Z",
+    },
   ]
   const currentIssue = { repository: "owner/repo", number: 30 }
   const items = referencedItems(references, currentIssue)
@@ -28,10 +44,26 @@ test("shows all unique references without hints and restores each tab's selectio
   let openCalls = 0
   let copied: IssueLinkReference | undefined
   let closes = 0
-  const view = await testRender(() => (
-    <IssueReferencesPicker references={references} currentIssue={currentIssue} showScrollbar={false}
-      onOpen={(item) => { opened = item; openCalls++ }} onCopy={(item) => { copied = item }} onClose={() => { closes++ }} />
-  ), { width: 100, height: 28 })
+  const view = await testRender(
+    () => (
+      <IssueReferencesPicker
+        references={references}
+        currentIssue={currentIssue}
+        showScrollbar={false}
+        onOpen={(item) => {
+          opened = item
+          openCalls++
+        }}
+        onCopy={(item) => {
+          copied = item
+        }}
+        onClose={() => {
+          closes++
+        }}
+      />
+    ),
+    { width: 100, height: 28 },
+  )
   try {
     await view.flush()
     const initial = view.captureCharFrame()
@@ -60,24 +92,27 @@ test("shows all unique references without hints and restores each tab's selectio
     await view.flush()
     expect(view.captureCharFrame()).toBe(pullFrame)
     view.mockInput.pressEnter()
-    expect((opened?.kind !== "commit" ? opened?.number : undefined)).toBe(1)
+    expect(opened?.kind !== "commit" ? opened?.number : undefined).toBe(1)
     expect(opened?.kind).toBe("pull")
     await clickControl(view, "references-tab-issue")
     expect(view.captureCharFrame()).toBe(issueFrame)
     view.mockInput.pressKey("o")
     view.mockInput.pressKey("y")
-    expect((opened?.kind !== "commit" ? opened?.number : undefined)).toBe(12)
+    expect(opened?.kind !== "commit" ? opened?.number : undefined).toBe(12)
     expect(copied?.kind).toBe("issue")
-    expect((copied?.kind !== "commit" ? copied?.number : undefined)).toBe(12)
+    expect(copied?.kind !== "commit" ? copied?.number : undefined).toBe(12)
     expect(view.renderer.root.findDescendantById("references-copy")).toBeUndefined()
     expect(view.renderer.root.findDescendantById("references-open")).toBeUndefined()
     expect(view.renderer.root.findDescendantById("references-back")).toBeUndefined()
-    const row = view.captureCharFrame().split("\n").findIndex((line) => line.includes("issue title 12"))
+    const row = view
+      .captureCharFrame()
+      .split("\n")
+      .findIndex((line) => line.includes("issue title 12"))
     expect(row).toBeGreaterThanOrEqual(0)
     const beforeOpen = openCalls
     await view.mockMouse.click(50, row)
     expect(openCalls).toBe(beforeOpen + 1)
-    expect((opened?.kind !== "commit" ? opened?.number : undefined)).toBe(12)
+    expect(opened?.kind !== "commit" ? opened?.number : undefined).toBe(12)
     view.mockInput.pressArrow("left")
     await view.flush()
     expect(view.captureCharFrame()).toBe(pullFrame)
@@ -85,7 +120,8 @@ test("shows all unique references without hints and restores each tab's selectio
     expect(view.captureCharFrame()).toContain("commit title")
     view.mockInput.pressEnter()
     expect(opened?.kind).toBe("commit")
-    await view.mockMouse.click(0, 0); await view.flush()
+    await view.mockMouse.click(0, 0)
+    await view.flush()
     expect(closes).toBe(1)
   } finally {
     view.renderer.destroy()

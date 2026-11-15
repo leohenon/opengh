@@ -2,12 +2,20 @@ import { parseSafeUrl } from "./link-target"
 
 export async function openUrl(url: string): Promise<void> {
   if (!parseSafeUrl(url)) throw new Error("Cannot open URL: expected a safe absolute HTTP, HTTPS, or mailto URL")
-  const command = process.platform === "darwin" ? ["open", url]
-    : process.platform === "linux" ? ["xdg-open", url]
-    : process.platform === "win32" ? [
-      "powershell.exe", "-NoProfile", "-NonInteractive", "-Command",
-      "Start-Process -FilePath $env:OPENGH_OPEN_URL -ErrorAction Stop",
-    ] : undefined
+  const command =
+    process.platform === "darwin"
+      ? ["open", url]
+      : process.platform === "linux"
+        ? ["xdg-open", url]
+        : process.platform === "win32"
+          ? [
+              "powershell.exe",
+              "-NoProfile",
+              "-NonInteractive",
+              "-Command",
+              "Start-Process -FilePath $env:OPENGH_OPEN_URL -ErrorAction Stop",
+            ]
+          : undefined
   if (!command) throw new Error(`Opening URLs is not supported on ${process.platform}`)
 
   try {

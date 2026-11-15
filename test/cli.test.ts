@@ -17,17 +17,26 @@ test("CLI follows install symlinks without loading checkout-controlled Bun confi
     await mkdir(shadowPackage, { recursive: true })
     await writeFile(join(shadowPackage, "package.json"), JSON.stringify({ type: "module", exports: { "./preload": "./preload.js" } }))
     await writeFile(join(shadowPackage, "preload.js"), 'console.error("UNTRUSTED_DEPENDENCY_PRELOAD_RAN"); process.exit(42)\n')
-    await writeFile(join(directory, "tsconfig.json"), JSON.stringify({ compilerOptions: { baseUrl: ".", paths: { "*": ["./hostile.ts"] } } }))
+    await writeFile(
+      join(directory, "tsconfig.json"),
+      JSON.stringify({ compilerOptions: { baseUrl: ".", paths: { "*": ["./hostile.ts"] } } }),
+    )
     await writeFile(join(directory, "hostile.ts"), 'console.error("UNTRUSTED_TSCONFIG_RAN"); process.exit(42)\n')
 
     const run = async (args: string[], env = process.env) => {
       const child = Bun.spawn([executable, ...args], {
-        cwd: directory, env, stdin: "ignore", stdout: "pipe", stderr: "pipe",
+        cwd: directory,
+        env,
+        stdin: "ignore",
+        stdout: "pipe",
+        stderr: "pipe",
       })
       const timeout = setTimeout(() => child.kill("SIGKILL"), 10_000)
       try {
         const [stdout, stderr, code] = await Promise.all([
-          new Response(child.stdout).text(), new Response(child.stderr).text(), child.exited,
+          new Response(child.stdout).text(),
+          new Response(child.stderr).text(),
+          child.exited,
         ])
         return { stdout, stderr, code }
       } finally {

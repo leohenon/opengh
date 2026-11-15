@@ -11,7 +11,11 @@ test("local identity comes from git origin, not GH_REPO, including nested cwd", 
   const directory = await mkdtemp(join(tmpdir(), "opengh-command-"))
   const previous = process.env.GH_REPO
   const git = async (...args: string[]) => {
-    const child = Bun.spawn(["git", "-c", "core.hooksPath=/dev/null", "-c", "commit.gpgsign=false", ...args], { cwd: directory, stdout: "ignore", stderr: "pipe" })
+    const child = Bun.spawn(["git", "-c", "core.hooksPath=/dev/null", "-c", "commit.gpgsign=false", ...args], {
+      cwd: directory,
+      stdout: "ignore",
+      stderr: "pipe",
+    })
     expect(await child.exited).toBe(0)
   }
   try {
@@ -34,7 +38,12 @@ test("local identity comes from git origin, not GH_REPO, including nested cwd", 
 
 test("streams both pipes and retains failed command output", async () => {
   let output = ""
-  const task = runCommand({ cwd, args: [process.execPath, "-e", "process.stdout.write('out'); process.stderr.write('err'); process.exit(7)"] }, (chunk) => { output += chunk })
+  const task = runCommand(
+    { cwd, args: [process.execPath, "-e", "process.stdout.write('out'); process.stderr.write('err'); process.exit(7)"] },
+    (chunk) => {
+      output += chunk
+    },
+  )
   expect(await task.result).toEqual({ exitCode: 7, cancelled: false })
   expect(output).toContain("out")
   expect(output).toContain("err")
@@ -42,26 +51,39 @@ test("streams both pipes and retains failed command output", async () => {
 
 test("cancellation kills descendants, including a child ignoring SIGTERM", async () => {
   let resolveStarted!: () => void
-  const started = new Promise<void>((done) => { resolveStarted = done })
+  const started = new Promise<void>((done) => {
+    resolveStarted = done
+  })
   let output = ""
-  const script = "const {spawn}=require('node:child_process'); const child=spawn(process.execPath,['-e',\"process.on('SIGTERM',()=>{}); console.log('ready'); setInterval(()=>{},1000)\"],{stdio:['ignore','pipe','pipe']}); child.stdout.on('data', b=>process.stdout.write(child.pid+':'+b)); setInterval(()=>{},1000)"
-  const task = runCommand({ cwd, args: [process.execPath, "-e", script] }, (chunk) => { output += chunk; if (output.includes("ready")) resolveStarted() })
+  const script =
+    "const {spawn}=require('node:child_process'); const child=spawn(process.execPath,['-e',\"process.on('SIGTERM',()=>{}); console.log('ready'); setInterval(()=>{},1000)\"],{stdio:['ignore','pipe','pipe']}); child.stdout.on('data', b=>process.stdout.write(child.pid+':'+b)); setInterval(()=>{},1000)"
+  const task = runCommand({ cwd, args: [process.execPath, "-e", script] }, (chunk) => {
+    output += chunk
+    if (output.includes("ready")) resolveStarted()
+  })
   await started
   const pid = Number(output.split(":")[0])
   task.cancel()
   expect((await task.result).cancelled).toBe(true)
   let alive = true
   for (let attempt = 0; attempt < 40 && alive; attempt++) {
-    try { process.kill(pid, 0); await Bun.sleep(25) } catch { alive = false }
+    try {
+      process.kill(pid, 0)
+      await Bun.sleep(25)
+    } catch {
+      alive = false
+    }
   }
   expect(alive).toBe(false)
 })
 
 for (const parentExits of [false, true]) {
-  test.skipIf(process.platform === "win32")(`shutdown drains command groups before exit (parent exits early: ${parentExits})`, async () => {
-    // Keep the process-wide shutdown latch out of this test runner.
-    const descendant = "process.on('SIGTERM',()=>{}); console.log('ready'); setInterval(()=>{},1000)"
-    const parent = `
+  test.skipIf(process.platform === "win32")(
+    `shutdown drains command groups before exit (parent exits early: ${parentExits})`,
+    async () => {
+      // Keep the process-wide shutdown latch out of this test runner.
+      const descendant = "process.on('SIGTERM',()=>{}); console.log('ready'); setInterval(()=>{},1000)"
+      const parent = `
       const { spawn } = require('node:child_process');
       const child = spawn(process.execPath, ['-e', ${JSON.stringify(descendant)}], { stdio: ['ignore', 'pipe', 'inherit'] });
       child.stdout.once('data', () => {
@@ -70,8 +92,8 @@ for (const parentExits of [false, true]) {
       });
       setInterval(() => {}, 1000);
     `
-    // Inherited stderr keeps the command open even after the parent exits.
-    const script = `
+      // Inherited stderr keeps the command open even after the parent exits.
+      const script = `
       import { runCommand, stopCommandProcesses } from ${JSON.stringify(join(import.meta.dir, "../src/command-actions.ts"))};
       import assert from 'node:assert/strict';
       const deadline = setTimeout(() => process.exit(3), 5000);
@@ -94,32 +116,56 @@ for (const parentExits of [false, true]) {
       clearTimeout(deadline);
       process.exit(0);
     `
-    const owner = Bun.spawn([process.execPath, "-e", script], { cwd, stdout: "pipe", stderr: "pipe" })
-    let group = 0, pid = 0
-    try {
-      const output = await new Response(owner.stdout).text()
-      group = Number(output.split(":")[0])
-      pid = Number(output.split(":")[1])
-      const error = await new Response(owner.stderr).text()
-      expect({ code: await owner.exited, error }).toEqual({ code: 0, error: "" })
-      expect(pid).toBeGreaterThan(0)
-      let alive = true
-      for (let attempt = 0; attempt < 40 && alive; attempt++) {
-        try { process.kill(pid, 0); await Bun.sleep(25) } catch { alive = false }
+      const owner = Bun.spawn([process.execPath, "-e", script], { cwd, stdout: "pipe", stderr: "pipe" })
+      let group = 0,
+        pid = 0
+      try {
+        const output = await new Response(owner.stdout).text()
+        group = Number(output.split(":")[0])
+        pid = Number(output.split(":")[1])
+        const error = await new Response(owner.stderr).text()
+        expect({ code: await owner.exited, error }).toEqual({ code: 0, error: "" })
+        expect(pid).toBeGreaterThan(0)
+        let alive = true
+        for (let attempt = 0; attempt < 40 && alive; attempt++) {
+          try {
+            process.kill(pid, 0)
+            await Bun.sleep(25)
+          } catch {
+            alive = false
+          }
+        }
+        expect(alive).toBe(false)
+      } finally {
+        owner.kill()
+        if (group > 0) {
+          try {
+            process.kill(-group, "SIGKILL")
+          } catch {}
+        }
+        if (pid > 0) {
+          try {
+            process.kill(pid, "SIGKILL")
+          } catch {}
+        }
       }
-      expect(alive).toBe(false)
-    } finally {
-      owner.kill()
-      if (group > 0) { try { process.kill(-group, "SIGKILL") } catch {} }
-      if (pid > 0) { try { process.kill(pid, "SIGKILL") } catch {} }
-    }
-  }, 10000)
+    },
+    10000,
+  )
 }
 
 test("clone arguments cannot turn destination into flags and expand home paths", () => {
   const local = { directory: cwd, repository: "cli/cli" }
   expect(matchesLocalRepository(local, "CLI/cli")).toBe(true)
-  expect(cloneCommand("cli/cli", "--evil; echo hi", cwd).args).toEqual(["gh", "repo", "clone", "github.com/cli/cli", `${cwd}/--evil; echo hi`, "--", "--progress"])
+  expect(cloneCommand("cli/cli", "--evil; echo hi", cwd).args).toEqual([
+    "gh",
+    "repo",
+    "clone",
+    "github.com/cli/cli",
+    `${cwd}/--evil; echo hi`,
+    "--",
+    "--progress",
+  ])
   expect(cloneCommand("cli/cli", "~/dev/cli", cwd).args[4]).toBe(join(homedir(), "dev/cli"))
   expect(plainCommandOutput("\x1b[31mprogress\rnext\x1b[0m\r\n")).toBe("progress\nnext\n")
 })

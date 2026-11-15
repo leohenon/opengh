@@ -53,9 +53,10 @@ function createMarkdownStyle(colors: AppColors, theme: ResolvedTheme, owner: Cli
   if (minimal) {
     for (const [scope, style] of Object.entries(styles)) {
       // Links and diff colors convey meaning rather than syntax decoration.
-      if (scope.startsWith("diff.") || scope.startsWith("markup.link") && scope !== "markup.link.url") continue
+      if (scope.startsWith("diff.") || (scope.startsWith("markup.link") && scope !== "markup.link.url")) continue
       style.fg = ["conceal", "comment", "markup.link.url", "markup.image.marker", "markup.list"].includes(scope)
-        ? colors.muted : colors.text
+        ? colors.muted
+        : colors.text
       delete style.bg
       if (scope === "comment") delete style.italic
     }
@@ -70,7 +71,10 @@ export function createReactiveMarkdownStyle(colors: AppColors, theme: ResolvedTh
   const release = (style: SyntaxStyle) => {
     queueMicrotask(() => {
       if (!renderer.isDestroyed) renderer.requestRender()
-      void renderer.idle().catch(() => {}).finally(() => style.destroy())
+      void renderer
+        .idle()
+        .catch(() => {})
+        .finally(() => style.destroy())
     })
   }
   const style = createMemo(() => {
@@ -84,4 +88,3 @@ export function createReactiveMarkdownStyle(colors: AppColors, theme: ResolvedTh
   })
   return style
 }
-

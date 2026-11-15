@@ -26,20 +26,32 @@ export function stopCommandProcesses(): Promise<void> {
 export function commandEnvironment() {
   const env = githubEnvironment()
   for (const key of Object.keys(env)) if (key.startsWith("GIT_") || key === "GH_REPO") delete env[key]
-  return { ...env, GH_PROMPT_DISABLED: "1", GIT_TERMINAL_PROMPT: "0", GIT_ASKPASS: "/usr/bin/false", SSH_ASKPASS: "/usr/bin/false", GIT_SSH_COMMAND: "ssh -oBatchMode=yes" }
+  return {
+    ...env,
+    GH_PROMPT_DISABLED: "1",
+    GIT_TERMINAL_PROMPT: "0",
+    GIT_ASKPASS: "/usr/bin/false",
+    SSH_ASKPASS: "/usr/bin/false",
+    GIT_SSH_COMMAND: "ssh -oBatchMode=yes",
+  }
 }
 
 export function runCommand(spec: CommandSpec, onOutput: (chunk: string) => void): CommandTask {
   if (stopping) throw new Error("Command processes are shutting down")
   const child = spawn(spec.args[0]!, spec.args.slice(1), {
-    cwd: spec.cwd, env: commandEnvironment(), stdio: ["ignore", "pipe", "pipe"], detached: true,
+    cwd: spec.cwd,
+    env: commandEnvironment(),
+    stdio: ["ignore", "pipe", "pipe"],
+    detached: true,
   })
   let cancelled = false
   let finished = false
   let escalation: ReturnType<typeof setTimeout> | undefined
   const kill = (signal: NodeJS.Signals) => {
     if (!child.pid) return
-    try { process.kill(-child.pid, signal) } catch (error) {
+    try {
+      process.kill(-child.pid, signal)
+    } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "ESRCH") onOutput(`\nCould not signal command: ${String(error)}\n`)
     }
   }
@@ -58,7 +70,10 @@ export function runCommand(spec: CommandSpec, onOutput: (chunk: string) => void)
     child.on("close", (exitCode) => {
       finished = true
       // The parent may exit before its descendants. Finish cancellation of the entire group.
-      if (escalation) { clearTimeout(escalation); kill("SIGKILL") }
+      if (escalation) {
+        clearTimeout(escalation)
+        kill("SIGKILL")
+      }
       done({ exitCode, cancelled })
     })
   })
@@ -70,7 +85,9 @@ export function runCommand(spec: CommandSpec, onOutput: (chunk: string) => void)
 
 async function git(cwd: string, args: string[]) {
   let output = ""
-  const result = await runCommand({ args: ["git", ...args], cwd }, (chunk) => { output += chunk }).result
+  const result = await runCommand({ args: ["git", ...args], cwd }, (chunk) => {
+    output += chunk
+  }).result
   if (result.exitCode !== 0) throw new Error(output.trim() || "Could not inspect local repository")
   return output.trim()
 }
@@ -82,7 +99,9 @@ export async function resolveLocalRepository(cwd: string): Promise<LocalReposito
     const match = /^(?:https:\/\/github\.com\/|git@github\.com:|ssh:\/\/git@github\.com\/)([\w.-]+\/[\w.-]+?)(?:\.git)?\/?$/i.exec(remote)
     if (!match) return undefined
     return { directory, repository: match[1]! }
-  } catch { return undefined }
+  } catch {
+    return undefined
+  }
 }
 
 export function matchesLocalRepository(local: LocalRepository | undefined, repository: string) {
@@ -101,5 +120,10 @@ export function cloneCommand(repository: string, destination: string, cwd: strin
 
 // Progress uses CR rewrites; render it as lines rather than letting control bytes affect the TUI.
 export function plainCommandOutput(output: string) {
-  return output.replace(/\x1b\][^\x07]*(?:\x07|\x1b\\)/g, "").replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, "").replace(/\r\n/g, "\n").replace(/\r/g, "\n").replace(/[\x00-\x08\x0b-\x1f\x7f]/g, "")
+  return output
+    .replace(/\x1b\][^\x07]*(?:\x07|\x1b\\)/g, "")
+    .replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, "")
+    .replace(/\r\n/g, "\n")
+    .replace(/\r/g, "\n")
+    .replace(/[\x00-\x08\x0b-\x1f\x7f]/g, "")
 }

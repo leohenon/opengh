@@ -8,7 +8,13 @@ import { createReviewDraftStorage } from "../src/pull-review-session"
 import { createInlineCommentStorage } from "../src/inline-comments"
 import type { IssueComment } from "../src/models"
 import { createRepositorySession, type RepositoryLoaders, type RepositorySession } from "../src/repository-session"
-import { commitDetailFixture, githubDataFixture, issueCommentsFixture, issueDetailFixture, pullContextFixture } from "./fixtures/github-data"
+import {
+  commitDetailFixture,
+  githubDataFixture,
+  issueCommentsFixture,
+  issueDetailFixture,
+  pullContextFixture,
+} from "./fixtures/github-data"
 
 test("drafts survive restarts, isolate subjects/actions, retain failures, and durably settle confirmed posts", async () => {
   const directory = mkdtempSync(join(tmpdir(), "opengh-drafts-"))
@@ -23,15 +29,22 @@ test("drafts survive restarts, isolate subjects/actions, retain failures, and du
   const loaders: RepositoryLoaders = {
     metadata: async (repository) => ({ ...githubDataFixture.repo, nameWithOwner: repository }),
     workCounts: async () => ({ issues: 0, pulls: 0 }),
-    documents: async () => [], document: async () => "",
+    documents: async () => [],
+    document: async () => "",
     branches: async () => ({ items: [], hasMore: false }),
-    commits: async () => ({ items: [], hasMore: false }), commitCount: async () => 0,
+    commits: async () => ({ items: [], hasMore: false }),
+    commitCount: async () => 0,
     commit: async () => commitDetailFixture,
     issue: async (_repository, number) => ({ ...issueDetailFixture, number, commentCount: 0 }),
-    issueComments: async () => ({ items: [], hasMore: false }), issueReferences: async () => [],
-    issues: async () => ({ items: [], hasMore: false }), pulls: async () => ({ items: [], hasMore: false }),
-    pull: async () => { throw new Error("No pull request loader was injected.") },
-    pullCommits: async () => [], pullContext: async () => pullContextFixture,
+    issueComments: async () => ({ items: [], hasMore: false }),
+    issueReferences: async () => [],
+    issues: async () => ({ items: [], hasMore: false }),
+    pulls: async () => ({ items: [], hasMore: false }),
+    pull: async () => {
+      throw new Error("No pull request loader was injected.")
+    },
+    pullCommits: async () => [],
+    pullContext: async () => pullContextFixture,
     runs: async () => ({ items: [], hasMore: false }),
     createIssueComment: async (_repository, _number, body) => {
       commentCalls++
@@ -45,10 +58,16 @@ test("drafts survive restarts, isolate subjects/actions, retain failures, and du
   }
   const restart = async (repository = "owner/repo") => {
     const disk = createDiskDraftStore(drafts)
-    const session = createRepositorySession(loaders, { ...disk, save: (...args) => {
-      disk.save(...args)
-      if (failAfterPublish) { failAfterPublish = false; throw new Error("Published save lost its acknowledgement") }
-    } })
+    const session = createRepositorySession(loaders, {
+      ...disk,
+      save: (...args) => {
+        disk.save(...args)
+        if (failAfterPublish) {
+          failAfterPublish = false
+          throw new Error("Published save lost its acknowledgement")
+        }
+      },
+    })
     sessions.push(session)
     await session.load(repository)
     return session
@@ -146,7 +165,9 @@ test("drafts survive restarts, isolate subjects/actions, retain failures, and du
     session.prepareIssueAction(number, "comment")
     await session.loadIssue(number)
     let resolve!: (comment: IssueComment) => void
-    pendingComment = new Promise((done) => { resolve = done })
+    pendingComment = new Promise((done) => {
+      resolve = done
+    })
     const posting = session.submitIssueAction(number, "comment")
     session.prepareIssueAction(number, "reopen") // no kind swap during a submit
     expect(session.issueAction(number).body).toBe("Latest retained comment")
@@ -198,6 +219,8 @@ test("draft stores sweep only stale atomic-write files, not drafts or submission
       for (const name of [...stale, retained[0]!, retained[1]!, retained[3]!]) utimesSync(join(directory, name), old, old)
       create(directory)
       expect(readdirSync(directory).sort()).toEqual(retained.sort())
-    } finally { rmSync(directory, { recursive: true, force: true }) }
+    } finally {
+      rmSync(directory, { recursive: true, force: true })
+    }
   }
 })

@@ -19,10 +19,24 @@ describe("ThemePicker", () => {
     const [saving, setSaving] = createSignal(false)
     let writes = 0
     let closes = 0
-    const view = await testRender(() => <ThemeProvider name={config().theme}>
-      <Settings config={config()} saving={saving()} onClose={() => { closes++ }}
-        onChange={async (next) => { writes++; setConfig(next) }} />
-    </ThemeProvider>, { width: 100, height: 60 })
+    const view = await testRender(
+      () => (
+        <ThemeProvider name={config().theme}>
+          <Settings
+            config={config()}
+            saving={saving()}
+            onClose={() => {
+              closes++
+            }}
+            onChange={async (next) => {
+              writes++
+              setConfig(next)
+            }}
+          />
+        </ThemeProvider>
+      ),
+      { width: 100, height: 60 },
+    )
     active.push(view)
     await view.flush()
     await clickControl(view, "setting-color-mode")
@@ -41,7 +55,9 @@ describe("ThemePicker", () => {
     await clickControl(view, "theme-dracula")
     expect(config().theme).toBe("dracula")
     expect(view.captureCharFrame()).toContain("Settings")
-    view.mockInput.pressEscape(); await Bun.sleep(60); await view.flush()
+    view.mockInput.pressEscape()
+    await Bun.sleep(60)
+    await view.flush()
     expect(closes).toBe(1)
   })
 
@@ -49,13 +65,26 @@ describe("ThemePicker", () => {
     const [config, setConfig] = createSignal<Config>({ ...defaultConfig, theme: "github" })
     let closes = 0
     let finish!: () => void
-    const save = new Promise<void>((resolve) => { finish = resolve })
-    const view = await testRender(() => (
-      <ThemeProvider name={config().theme}>
-        <Settings config={config()} onClose={() => { closes++ }}
-          onChange={async (next) => { await save; setConfig(next) }} />
-      </ThemeProvider>
-    ), { width: 120, height: 32 })
+    const save = new Promise<void>((resolve) => {
+      finish = resolve
+    })
+    const view = await testRender(
+      () => (
+        <ThemeProvider name={config().theme}>
+          <Settings
+            config={config()}
+            onClose={() => {
+              closes++
+            }}
+            onChange={async (next) => {
+              await save
+              setConfig(next)
+            }}
+          />
+        </ThemeProvider>
+      ),
+      { width: 120, height: 32 },
+    )
     active.push(view)
     await view.flush()
     view.mockInput.pressEnter()
@@ -69,7 +98,9 @@ describe("ThemePicker", () => {
     expect(view.captureCharFrame()).toContain("Themes")
     expect(view.renderer.root.findDescendantById("theme-back")).toBeUndefined()
     expect(config().theme).toBe("github")
-    view.mockInput.pressEscape(); await Bun.sleep(60); await view.flush()
+    view.mockInput.pressEscape()
+    await Bun.sleep(60)
+    await view.flush()
     expect(view.captureCharFrame()).toContain("Themes")
 
     finish()
@@ -89,9 +120,13 @@ describe("ThemePicker", () => {
       () => (
         <ThemePicker
           current="opengh"
-          onPreview={(theme) => { preview = theme }}
+          onPreview={(theme) => {
+            preview = theme
+          }}
           onCancel={() => {}}
-          onSelect={async (theme) => { selected = theme }}
+          onSelect={async (theme) => {
+            selected = theme
+          }}
         />
       ),
       { width: 80, height: 45 },
@@ -118,9 +153,15 @@ describe("ThemePicker", () => {
       () => (
         <ThemePicker
           current="github"
-          onPreview={(theme) => { preview = theme }}
-          onCancel={() => { cancelled++ }}
-          onSelect={async () => { throw new Error("Theme config is read-only") }}
+          onPreview={(theme) => {
+            preview = theme
+          }}
+          onCancel={() => {
+            cancelled++
+          }}
+          onSelect={async () => {
+            throw new Error("Theme config is read-only")
+          }}
         />
       ),
       { width: 80, height: 20 },
@@ -138,7 +179,9 @@ describe("ThemePicker", () => {
     view.mockInput.pressEscape()
     await Bun.sleep(30)
     expect(cancelled).toBe(1)
-    view.mockInput.pressEscape(); await Bun.sleep(60); await view.flush()
+    view.mockInput.pressEscape()
+    await Bun.sleep(60)
+    await view.flush()
     expect(cancelled).toBe(2)
   })
 })

@@ -7,8 +7,8 @@ export async function openGitHub(repository: string, target?: string | number, v
   const args = runId
     ? ["run", "view", runId, "--web", "--repo", qualifiedRepository]
     : view === "diff" && typeof target === "number"
-    ? ["pr", "diff", String(target), "--web", "--repo", qualifiedRepository]
-    : ["browse", ...(target !== undefined ? [String(target)] : []), "--repo", qualifiedRepository]
+      ? ["pr", "diff", String(target), "--web", "--repo", qualifiedRepository]
+      : ["browse", ...(target !== undefined ? [String(target)] : []), "--repo", qualifiedRepository]
   const child = spawnGitHub(args)
   let timedOut = false
   const timeout = setTimeout(() => {
@@ -16,13 +16,10 @@ export async function openGitHub(repository: string, target?: string | number, v
     child.kill()
   }, 20_000)
   try {
-    const [output, error, code] = await Promise.all([
-      new Response(child.stdout).text(),
-      new Response(child.stderr).text(),
-      child.exited,
-    ])
+    const [output, error, code] = await Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text(), child.exited])
     if (timedOut) throw new Error("Opening GitHub timed out")
-    if (code !== 0) throw new GitHubApiError(repository, error.trim() || output.trim() || `Opening GitHub failed (${code})`, code === 4 ? 401 : undefined)
+    if (code !== 0)
+      throw new GitHubApiError(repository, error.trim() || output.trim() || `Opening GitHub failed (${code})`, code === 4 ? 401 : undefined)
   } finally {
     clearTimeout(timeout)
   }

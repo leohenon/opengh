@@ -3,30 +3,76 @@ import { createHash } from "node:crypto"
 import { mkdtemp, readdir, readFile, rm, stat, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { createInlineComments, createInlineCommentStorage, InlineCommentUncertainError, type InlineCommentStorage, type InlineCommentAttempt } from "../src/inline-comments"
+import {
+  createInlineComments,
+  createInlineCommentStorage,
+  InlineCommentUncertainError,
+  type InlineCommentStorage,
+  type InlineCommentAttempt,
+} from "../src/inline-comments"
 import { createGitHubReviews } from "../src/github/reviews"
 import { GitHubApiError, GitHubRequestNotSentError, type GitHubTransport } from "../src/github/transport"
 import type { InlineCommentInput } from "../src/review-types"
 
 // The persisted attempt identity, exactly as earlier builds fingerprinted it; the repository ID is stored alongside.
-const stored: InlineCommentAttempt["input"] = { accountId: 7, repository: "o/r", number: 1, headSha: "a".repeat(40), baseSha: "b".repeat(40), body: "Public comment", anchor: { path: "a.ts", line: 2, side: "RIGHT", startLine: 1, startSide: "RIGHT" } }
+const stored: InlineCommentAttempt["input"] = {
+  accountId: 7,
+  repository: "o/r",
+  number: 1,
+  headSha: "a".repeat(40),
+  baseSha: "b".repeat(40),
+  body: "Public comment",
+  anchor: { path: "a.ts", line: 2, side: "RIGHT", startLine: 1, startSide: "RIGHT" },
+}
 const input: InlineCommentInput = { ...stored, repositoryId: 71 }
 function fixture() {
   const saved = new Map<string, InlineCommentAttempt>()
   const key = (value: InlineCommentAttempt["input"]) => JSON.stringify({ ...value, repositoryId: undefined })
   const storage: InlineCommentStorage = {
-    async load(input) { return structuredClone(saved.get(key(input))) },
-    async save(attempt) { if (saved.has(key(attempt.input))) throw new Error("existing"); saved.set(key(attempt.input), structuredClone(attempt)) },
-    async remove(attempt) { if (JSON.stringify(saved.get(key(attempt.input))) !== JSON.stringify(attempt)) throw new Error("changed"); saved.delete(key(attempt.input)) },
-    async update(previous, next) { if (JSON.stringify(saved.get(key(previous.input))) !== JSON.stringify(previous)) throw new Error("changed"); saved.set(key(next.input), structuredClone(next)) },
+    async load(input) {
+      return structuredClone(saved.get(key(input)))
+    },
+    async save(attempt) {
+      if (saved.has(key(attempt.input))) throw new Error("existing")
+      saved.set(key(attempt.input), structuredClone(attempt))
+    },
+    async remove(attempt) {
+      if (JSON.stringify(saved.get(key(attempt.input))) !== JSON.stringify(attempt)) throw new Error("changed")
+      saved.delete(key(attempt.input))
+    },
+    async update(previous, next) {
+      if (JSON.stringify(saved.get(key(previous.input))) !== JSON.stringify(previous)) throw new Error("changed")
+      saved.set(key(next.input), structuredClone(next))
+    },
   }
-  const data = { repositoryId: 71, draft: false, account: 7, head: input.headSha, base: input.baseSha, access: true, locked: false, fail: undefined as Error | undefined,
-    reads: 0, readFail: false, record: true, posts: [] as { path: string; method: string; body: Record<string, unknown> }[], comments: [] as any[] }
+  const data = {
+    repositoryId: 71,
+    draft: false,
+    account: 7,
+    head: input.headSha,
+    base: input.baseSha,
+    access: true,
+    locked: false,
+    fail: undefined as Error | undefined,
+    reads: 0,
+    readFail: false,
+    record: true,
+    posts: [] as { path: string; method: string; body: Record<string, unknown> }[],
+    comments: [] as any[],
+  }
   const transport: GitHubTransport = {
     async json<T>(path: string): Promise<T> {
       if (path === "user") return { id: data.account, login: "me" } as T
       if (path === "repos/o/r") return { id: data.repositoryId, archived: false, private: true, permissions: { pull: data.access } } as T
-      if (path === "repos/o/r/pulls/1") return { head: { sha: data.head }, base: { sha: data.base }, state: "open", draft: data.draft, locked: data.locked, user: { id: 8 } } as T
+      if (path === "repos/o/r/pulls/1")
+        return {
+          head: { sha: data.head },
+          base: { sha: data.base },
+          state: "open",
+          draft: data.draft,
+          locked: data.locked,
+          user: { id: 8 },
+        } as T
       if (path.includes("/reviews?")) return [{ id: 50, user: { id: 7 }, state: "PENDING" }] as T
       if (path.includes("/files?")) return [{ filename: "a.ts", patch: "@@ -1,2 +1,2 @@\n one\n two" }] as T
       if (path.includes("/comments?")) {
@@ -37,7 +83,9 @@ function fixture() {
       }
       throw new Error(path)
     },
-    async text() { throw new Error("no access") },
+    async text() {
+      throw new Error("no access")
+    },
     async mutate<T>(path: string, method: "POST" | "PATCH", body: Record<string, unknown>): Promise<T> {
       expect(saved.size).toBeGreaterThan(0)
       data.posts.push({ path, method, body })
@@ -56,9 +104,21 @@ test.each([false, true])("posts exact public comment payload independently of a 
   expect(eligibility.canComment).toBe(false)
   expect(eligibility.canInlineComment).toBe(true)
   expect((await service.post(input)).id).toBe(1001)
-  expect(data.posts).toEqual([{ path: "repos/o/r/pulls/1/comments", method: "POST", body: {
-    body: input.body, commit_id: input.headSha, path: "a.ts", line: 2, side: "RIGHT", start_line: 1, start_side: "RIGHT",
-  } }])
+  expect(data.posts).toEqual([
+    {
+      path: "repos/o/r/pulls/1/comments",
+      method: "POST",
+      body: {
+        body: input.body,
+        commit_id: input.headSha,
+        path: "a.ts",
+        line: 2,
+        side: "RIGHT",
+        start_line: 1,
+        start_side: "RIGHT",
+      },
+    },
+  ])
 })
 test("denies changed head/base/account and missing permission before mutation", async () => {
   for (const change of [{ head: "c".repeat(40) }, { base: "c".repeat(40) }, { account: 9 }, { access: false }, { locked: true }]) {
@@ -84,15 +144,19 @@ test("a same-name replacement repository receives no inline comment and leaves n
 })
 test("an uncertain attempt records its repository and is never reconciled or retried against a replacement", async () => {
   const { data, service, storage } = fixture()
-  data.record = false; data.fail = new Error("timeout")
+  data.record = false
+  data.fail = new Error("timeout")
   await expect(service.post(input)).rejects.toMatchObject({ retryAllowed: true })
   const attempt = await storage.load(input)
   expect(attempt).toEqual({ input: stored, repositoryId: 71, commentIds: [], failure: "timeout" })
   // The replacement holds an identical comment, which reconciliation would confirm before deleting the marker.
-  data.repositoryId = 72; data.fail = undefined
+  data.repositoryId = 72
+  data.fail = undefined
   data.comments.push({ ...data.posts[0]!.body, id: 2000, user: { id: 7 } })
   const reads = data.reads
-  await expect(service.post({ ...input, repositoryId: 72 }, { retryUnconfirmed: true })).rejects.toThrow("Repository changed; no comment was sent.")
+  await expect(service.post({ ...input, repositoryId: 72 }, { retryUnconfirmed: true })).rejects.toThrow(
+    "Repository changed; no comment was sent.",
+  )
   expect(data.reads).toBe(reads)
   expect(await storage.load(input)).toEqual(attempt)
   // A caller still holding the original ID cannot retry into the replacement either.
@@ -112,19 +176,41 @@ test("a legacy attempt stored without a repository ID is still found and reconci
     await expect(service.post(input)).rejects.toMatchObject({ retryAllowed: true, message: expect.stringContaining("original timeout") })
     expect(data.posts).toHaveLength(0) // Found: an identical comment must not be posted blindly.
     expect(await readdir(directory)).toHaveLength(1)
-    data.comments.push({ id: 1001, user: { id: 7 }, commit_id: input.headSha, body: input.body, path: "a.ts", line: 2, side: "RIGHT", start_line: 1, start_side: "RIGHT" })
+    data.comments.push({
+      id: 1001,
+      user: { id: 7 },
+      commit_id: input.headSha,
+      body: input.body,
+      path: "a.ts",
+      line: 2,
+      side: "RIGHT",
+      start_line: 1,
+      start_side: "RIGHT",
+    })
     expect((await service.post(input)).id).toBe(1001)
     expect(data.posts).toHaveLength(0)
     expect(await readdir(directory)).toEqual([])
-  } finally { await rm(directory, { recursive: true, force: true }) }
+  } finally {
+    await rm(directory, { recursive: true, force: true })
+  }
 })
 test("uncertain retry reconciles paginated own comment without duplicating; uses original anchors only when outdated", async () => {
   const { data, storage, transport } = fixture()
   data.comments = Array.from({ length: 100 }, (_, i) => ({ id: i + 1 }))
   data.fail = new GitHubApiError("comments", "server failure", 502)
   // Simulate an earlier unknown write, then reconcile its outdated response.
-  await storage.save({ input: stored, commentIds: data.comments.map(c => c.id) })
-  data.comments.push({ id: 1001, user: { id: 7 }, commit_id: input.headSha, body: input.body, path: "a.ts", line: 2, side: "RIGHT", start_line: 1, start_side: "RIGHT" })
+  await storage.save({ input: stored, commentIds: data.comments.map((c) => c.id) })
+  data.comments.push({
+    id: 1001,
+    user: { id: 7 },
+    commit_id: input.headSha,
+    body: input.body,
+    path: "a.ts",
+    line: 2,
+    side: "RIGHT",
+    start_line: 1,
+    start_side: "RIGHT",
+  })
   const posted = data.comments[100]
   Object.assign(posted, { original_line: posted.line, original_start_line: posted.start_line, line: null, start_line: null })
   data.head = "c".repeat(40)
@@ -134,21 +220,37 @@ test("uncertain retry reconciles paginated own comment without duplicating; uses
 })
 test("unresolved attempts do not block different input, ignoring baseline matches", async () => {
   const { data, service } = fixture()
-  data.comments.push({ id: 1, user: { id: 7 }, commit_id: input.headSha, body: input.body, path: "a.ts", line: 2, side: "RIGHT", start_line: 1, start_side: "RIGHT" })
-  data.record = false; data.fail = new Error("timeout")
+  data.comments.push({
+    id: 1,
+    user: { id: 7 },
+    commit_id: input.headSha,
+    body: input.body,
+    path: "a.ts",
+    line: 2,
+    side: "RIGHT",
+    start_line: 1,
+    start_side: "RIGHT",
+  })
+  data.record = false
+  data.fail = new Error("timeout")
   await expect(service.post(input)).rejects.toMatchObject({ checkGitHub: true })
   await expect(service.post(input)).rejects.toMatchObject({ checkGitHub: true })
-  data.fail = undefined; data.record = true
+  data.fail = undefined
+  data.record = true
   expect((await service.post({ ...input, body: "different" })).id).toBe(1002)
   expect(data.posts).toHaveLength(2)
 })
 test("definitive rejection releases marker; cleanup failure after success still returns success", async () => {
   const { data, service, storage } = fixture()
-  data.fail = new GitHubApiError("comments", "invalid", 422); data.record = false
+  data.fail = new GitHubApiError("comments", "invalid", 422)
+  data.record = false
   await expect(service.post(input)).rejects.toThrow("invalid")
   expect(await storage.load(input)).toBeUndefined()
-  data.fail = undefined; data.record = true
-  storage.remove = async () => { throw new Error("disk failure") }
+  data.fail = undefined
+  data.record = true
+  storage.remove = async () => {
+    throw new Error("disk failure")
+  }
   expect((await service.post(input)).id).toBe(1002)
   expect((await service.post(input)).id).toBe(1002)
   expect(data.posts).toHaveLength(2)
@@ -157,7 +259,10 @@ test("cancellation during marker persistence prevents dispatch and releases the 
   const { data, service, storage } = fixture()
   const controller = new AbortController()
   const save = storage.save
-  storage.save = async (attempt) => { await save(attempt); controller.abort() }
+  storage.save = async (attempt) => {
+    await save(attempt)
+    controller.abort()
+  }
   await expect(service.post(input, { signal: controller.signal })).rejects.toBeInstanceOf(GitHubRequestNotSentError)
   expect(data.posts).toHaveLength(0)
   expect(await storage.load(input)).toBeUndefined()
@@ -171,7 +276,10 @@ test("cancelling an unsent explicit retry preserves the original uncertain recei
   const previous = await storage.load(input)
   const controller = new AbortController()
   const update = storage.update
-  storage.update = async (before, after) => { await update(before, after); controller.abort() }
+  storage.update = async (before, after) => {
+    await update(before, after)
+    controller.abort()
+  }
   await expect(service.post(input, { retryUnconfirmed: true, signal: controller.signal })).rejects.toBeInstanceOf(GitHubRequestNotSentError)
   expect(data.posts).toHaveLength(1)
   expect(await storage.load(input)).toEqual(previous)
@@ -181,7 +289,9 @@ test("known-unsent account guard clears the inline marker and preserves the orig
   const { data, service, storage, transport } = fixture()
   const post = transport.mutate!
   const failure = new GitHubRequestNotSentError("Account changed; no changes were sent")
-  transport.mutate = async () => { throw failure }
+  transport.mutate = async () => {
+    throw failure
+  }
   await expect(service.post(input)).rejects.toBe(failure)
   expect(await storage.load(input)).toBeUndefined()
   expect(data.posts).toHaveLength(0)
@@ -191,16 +301,26 @@ test("known-unsent account guard clears the inline marker and preserves the orig
 
 test("explicit retry requires consent and a fresh complete read; original failure survives restart", async () => {
   const { data, service, storage, transport } = fixture()
-  data.record = false; data.fail = new Error("socket timeout")
-  await expect(service.post(input)).rejects.toMatchObject({ checkGitHub: true, retryAllowed: true, message: expect.stringContaining("socket timeout") })
-  expect((await storage.load(input) as InlineCommentAttempt).failure).toBe("socket timeout")
+  data.record = false
+  data.fail = new Error("socket timeout")
+  await expect(service.post(input)).rejects.toMatchObject({
+    checkGitHub: true,
+    retryAllowed: true,
+    message: expect.stringContaining("socket timeout"),
+  })
+  expect(((await storage.load(input)) as InlineCommentAttempt).failure).toBe("socket timeout")
   const fresh = createInlineComments({ storage, transport })
   await expect(fresh.post(input)).rejects.toBeInstanceOf(InlineCommentUncertainError)
   expect(data.posts).toHaveLength(1)
   data.readFail = true
-  await expect(fresh.post(input, { retryUnconfirmed: true })).rejects.toMatchObject({ retryAllowed: false, message: expect.stringContaining("socket timeout") })
+  await expect(fresh.post(input, { retryUnconfirmed: true })).rejects.toMatchObject({
+    retryAllowed: false,
+    message: expect.stringContaining("socket timeout"),
+  })
   expect(data.posts).toHaveLength(1)
-  data.readFail = false; data.fail = undefined; data.record = true
+  data.readFail = false
+  data.fail = undefined
+  data.record = true
   const reads = data.reads
   expect((await fresh.post(input, { retryUnconfirmed: true })).id).toBe(1002)
   expect(data.reads - reads).toBe(2) // reconciliation, then fresh baseline
@@ -208,7 +328,8 @@ test("explicit retry requires consent and a fresh complete read; original failur
 })
 test("a match arriving before explicit retry prevents a duplicate; unknown failures reconcile immediately", async () => {
   const { data, service } = fixture()
-  data.record = false; data.fail = new Error("timeout")
+  data.record = false
+  data.fail = new Error("timeout")
   await expect(service.post(input)).rejects.toMatchObject({ retryAllowed: true })
   data.comments.push({ ...data.posts[0]!.body, id: 1001, user: { id: 7 } })
   expect((await service.post(input, { retryUnconfirmed: true })).id).toBe(1001)
@@ -234,12 +355,15 @@ test("legacy marker migrates when loading another input, preserving its original
     await writeFile(legacy, "broken")
     await expect(storage.load(input)).rejects.toThrow()
     expect(await readFile(legacy, "utf8")).toBe("broken")
-  } finally { await rm(directory, { recursive: true, force: true }) }
+  } finally {
+    await rm(directory, { recursive: true, force: true })
+  }
 })
 test("disk attempts are private, exclusive and corrupt files are never overwritten", async () => {
   const directory = await mkdtemp(join(tmpdir(), "inline-attempt-"))
   try {
-    const storage = createInlineCommentStorage(directory), attempt = { input: stored, repositoryId: 71, commentIds: [] }
+    const storage = createInlineCommentStorage(directory),
+      attempt = { input: stored, repositoryId: 71, commentIds: [] }
     await storage.save(attempt)
     const path = join(directory, (await readdir(directory))[0]!)
     // The repository ID does not rename the marker, so attempts stored by earlier builds are still found.
@@ -247,7 +371,9 @@ test("disk attempts are private, exclusive and corrupt files are never overwritt
     expect((await stat(path)).mode & 0o777).toBe(0o600)
     expect(await storage.load(input)).toEqual(attempt)
     for (const repositoryId of [0, -1, 1.5, "71", null])
-      await expect(storage.update(attempt, { ...attempt, repositoryId } as InlineCommentAttempt)).rejects.toThrow("Invalid inline comment attempt")
+      await expect(storage.update(attempt, { ...attempt, repositoryId } as InlineCommentAttempt)).rejects.toThrow(
+        "Invalid inline comment attempt",
+      )
     expect(await storage.load(input)).toEqual(attempt)
     await expect(storage.save(attempt)).rejects.toThrow()
     await writeFile(path, "broken")
@@ -256,5 +382,7 @@ test("disk attempts are private, exclusive and corrupt files are never overwritt
     await expect(storage.update(attempt, { ...attempt, failure: "timeout" })).rejects.toThrow()
     await expect(storage.remove(attempt)).rejects.toThrow()
     expect(await readFile(path, "utf8")).toBe("broken")
-  } finally { await rm(directory, { recursive: true, force: true }) }
+  } finally {
+    await rm(directory, { recursive: true, force: true })
+  }
 })

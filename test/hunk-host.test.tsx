@@ -6,7 +6,10 @@ import { createSignal, onCleanup, onMount, Show } from "solid-js"
 import { createHunkDiffFilesFromPatch } from "hunkdiff/opentui"
 import { initializeHunk, mountHunk } from "../src/ui/hunk-host"
 
-const file = (name: string) => createHunkDiffFilesFromPatch(`diff --git a/${name} b/${name}\n--- a/${name}\n+++ b/${name}\n@@ -1 +1 @@\n-old-${name}\n+new-${name}\n`)[0]!
+const file = (name: string) =>
+  createHunkDiffFilesFromPatch(
+    `diff --git a/${name} b/${name}\n--- a/${name}\n+++ b/${name}\n@@ -1 +1 @@\n-old-${name}\n+new-${name}\n`,
+  )[0]!
 
 test("Hunk portal preserves Solid siblings through updates, local remounts and renderer shutdown", async () => {
   const setup = await createTestRenderer({ width: 90, height: 20 })
@@ -28,10 +31,29 @@ test("Hunk portal preserves Solid siblings through updates, local remounts and r
       pane = undefined
       if (!renderer.isDestroyed && !box.isDestroyed) box.destroyRecursively()
     })
-    return <box ref={(value) => { box = value }} width="100%" height={15} />
+    return (
+      <box
+        ref={(value) => {
+          box = value
+        }}
+        width="100%"
+        height={15}
+      />
+    )
   }
   try {
-    await render(() => <box flexDirection="column"><text>{label()}</text><Show when={visible()}><Host /></Show><text>Solid footer</text></box>, renderer)
+    await render(
+      () => (
+        <box flexDirection="column">
+          <text>{label()}</text>
+          <Show when={visible()}>
+            <Host />
+          </Show>
+          <text>Solid footer</text>
+        </box>
+      ),
+      renderer,
+    )
     const keyListeners = renderer.keyInput.listenerCount("keypress")
     await setup.renderOnce()
     expect(setup.captureCharFrame()).toContain("new-one.ts")
@@ -74,6 +96,9 @@ test("Hunk portal preserves Solid siblings through updates, local remounts and r
     expect(renderer.isDestroyed).toBe(true)
     expect(pane).toBeUndefined()
   } finally {
-    if (!renderer.isDestroyed) { renderer.destroy(); await renderer.closed }
+    if (!renderer.isDestroyed) {
+      renderer.destroy()
+      await renderer.closed
+    }
   }
 })

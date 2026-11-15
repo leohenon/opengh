@@ -15,7 +15,9 @@ export function PullDraftDialog(props: {
 }) {
   const { colors } = useTheme()
   const keys = useKeybindings()
-  const submit = () => { if (!props.disabled) props.onSubmit() }
+  const submit = () => {
+    if (!props.disabled) props.onSubmit()
+  }
   createEffect(() => props.onHintChange(keys.hints(["dialog.confirm", "confirm"], ["dialog.close", "cancel"])))
   onCleanup(() => props.onHintChange(undefined))
   useKeyActions({ "dialog.confirm": submit, "dialog.close": props.onClose }, { priority: 150, modal: true })
@@ -27,11 +29,15 @@ export function PullDraftDialog(props: {
           Mark PR #{props.number} {props.draft ? "as draft" : "ready for review"}?
         </text>
         <Show when={props.disabled}>
-          <text marginTop={1} fg={colors.yellow} wrapMode="word">This action is no longer available. Refresh the PR.</text>
+          <text marginTop={1} fg={colors.yellow} wrapMode="word">
+            This action is no longer available. Refresh the PR.
+          </text>
         </Show>
         <box flexGrow={1} minHeight={1} />
         <box height={1} flexShrink={0}>
-          <Action id="pull-draft-confirm" disabled={props.disabled} onActivate={submit}>Confirm</Action>
+          <Action id="pull-draft-confirm" disabled={props.disabled} onActivate={submit}>
+            Confirm
+          </Action>
         </box>
       </box>
     </Popup>

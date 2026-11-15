@@ -14,11 +14,22 @@ export function Action(props: {
   const { colors } = useTheme()
   const hover = mouseHover(() => !props.disabled, props.identity)
   return (
-    <text id={props.id} height={1} flexShrink={0} selectable={false} wrapMode="none"
+    <text
+      id={props.id}
+      height={1}
+      flexShrink={0}
+      selectable={false}
+      wrapMode="none"
       bg={hover.hovered() ? colors.panelHover : undefined}
       attributes={hover.hovered() ? TextAttributes.BOLD : TextAttributes.NONE}
-      fg={props.disabled ? colors.muted : props.fg ?? colors.blue}
-      {...mouseClick(() => props.onActivate(), () => !props.disabled, props.identity, hover)}>
+      fg={props.disabled ? colors.muted : (props.fg ?? colors.blue)}
+      {...mouseClick(
+        () => props.onActivate(),
+        () => !props.disabled,
+        props.identity,
+        hover,
+      )}
+    >
       {props.children}
     </text>
   )

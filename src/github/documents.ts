@@ -4,9 +4,7 @@ import { RequestBudgetLimitError } from "./request-budget"
 import { repositoryName, repositoryPath, type RepositoryReference } from "./repository-target"
 
 function object(value: unknown): Record<string, unknown> | undefined {
-  return value !== null && typeof value === "object" && !Array.isArray(value)
-    ? value as Record<string, unknown>
-    : undefined
+  return value !== null && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : undefined
 }
 
 function nonempty(value: unknown): value is string {
@@ -18,8 +16,9 @@ function repoPart(value: unknown): value is string {
 }
 
 function filePath(value: unknown): value is string {
-  return nonempty(value) && !/[\\\x00-\x1f\x7f]/.test(value)
-    && value.split("/").every(part => part !== "" && part !== "." && part !== "..")
+  return (
+    nonempty(value) && !/[\\\x00-\x1f\x7f]/.test(value) && value.split("/").every((part) => part !== "" && part !== "." && part !== "..")
+  )
 }
 
 function source(repository: string, ref: string, path: string, label: string): RepositoryDocument {
@@ -36,10 +35,13 @@ function overviewDocuments(html: string, repo: Repo, branch: string): Repository
     for (const attr of script[1]!.matchAll(/([\w-]+)\s*=\s*(["'])(.*?)\2/g)) {
       attributes.set(attr[1]!.toLowerCase(), attr[3]!)
     }
-    if (attributes.get("type") !== "application/json"
-      || attributes.get("data-target") !== "react-app.embeddedData") continue
+    if (attributes.get("type") !== "application/json" || attributes.get("data-target") !== "react-app.embeddedData") continue
     let data: unknown
-    try { data = JSON.parse(script[2]!) } catch { continue }
+    try {
+      data = JSON.parse(script[2]!)
+    } catch {
+      continue
+    }
     const payload = object(object(data)?.payload)
     // Anonymous name-based pages are only authoritative for this exact repo.
     if (object(object(payload?.codeViewLayoutRoute)?.repo)?.id !== repo.id) continue
@@ -52,15 +54,22 @@ function overviewDocuments(html: string, repo: Repo, branch: string): Repository
       let valid = true
       for (const value of files) {
         const file = object(value)
-        if (!file || !repoPart(file.repoName) || !filePath(file.path)
-          || !nonempty(file.refName) || !nonempty(file.tabName)
-          || !nonempty(file.preferredFileType) || !nonempty(file.displayName)) {
+        if (
+          !file ||
+          !repoPart(file.repoName) ||
+          !filePath(file.path) ||
+          !nonempty(file.refName) ||
+          !nonempty(file.tabName) ||
+          !nonempty(file.preferredFileType) ||
+          !nonempty(file.displayName)
+        ) {
           valid = false
           break
         }
         const repository = `${repo.nameWithOwner.split("/")[0]}/${file.repoName}`
-        documents.push(source(repository, file.refName, file.path,
-          file.preferredFileType === "license" ? licenseLabel(file.tabName) : file.tabName))
+        documents.push(
+          source(repository, file.refName, file.path, file.preferredFileType === "license" ? licenseLabel(file.tabName) : file.tabName),
+        )
       }
       if (valid) return documents
     }
@@ -98,7 +107,7 @@ export function createGitHubDocuments(transport: GitHubTransport) {
     ])
     const documents: RepositoryDocument[] = []
     const add = (path: string, label: string) => {
-      if (!documents.some(document => document.path === path)) {
+      if (!documents.some((document) => document.path === path)) {
         documents.push(source(repositoryName(repo), branch, path, label))
       }
     }
@@ -111,16 +120,23 @@ export function createGitHubDocuments(transport: GitHubTransport) {
     for (const directory of [".github", "", "docs"]) {
       const entries = await optional(`${base}/contents/${directory}${query}`, options)
       if (!Array.isArray(entries)) continue
-      const files = entries.map(object).filter(entry => entry?.type === "file"
-        && nonempty(entry.name) && filePath(entry.path)
-        && entry.path === (directory ? `${directory}/${entry.name}` : entry.name))
+      const files = entries
+        .map(object)
+        .filter(
+          (entry) =>
+            entry?.type === "file" &&
+            nonempty(entry.name) &&
+            filePath(entry.path) &&
+            entry.path === (directory ? `${directory}/${entry.name}` : entry.name),
+        )
       for (const [name] of prose) {
-        const entry = files.find(file => proseName(file!.name as string) === name)
+        const entry = files.find((file) => proseName(file!.name as string) === name)
         if (entry && !selected.has(name)) selected.set(name, entry.path as string)
       }
       if (!hasLicense && licensePaths.length === 0) {
-        licensePaths = files.filter(file => /^(licen[sc]e|copying|unlicense)(?:$|[._-])/i.test(file!.name as string))
-          .map(file => file!.path as string)
+        licensePaths = files
+          .filter((file) => /^(licen[sc]e|copying|unlicense)(?:$|[._-])/i.test(file!.name as string))
+          .map((file) => file!.path as string)
       }
     }
     for (const [name, title] of prose) {
@@ -162,7 +178,7 @@ export function createGitHubDocuments(transport: GitHubTransport) {
     const legacy = typeof repositoryOrDocument === "object" && "path" in repositoryOrDocument
     const document = (legacy ? repositoryOrDocument : documentOrOptions) as RepositoryDocument
     const options = (legacy ? documentOrOptions : requestOptions) as RequestOptions | undefined
-    const repository = legacy ? document.repository : repositoryOrDocument as RepositoryReference
+    const repository = legacy ? document.repository : (repositoryOrDocument as RepositoryReference)
     const target = document.repository.toLowerCase() === repositoryName(repository).toLowerCase() ? repository : document.repository
     const base = repositoryPath(target)
     if (!filePath(document.path) || !nonempty(document.ref)) throw new Error("Invalid document source")

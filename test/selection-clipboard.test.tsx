@@ -6,15 +6,29 @@ import { copyText } from "../src/ui/clipboard"
 import { SelectionClipboard } from "../src/ui/components/selection-clipboard"
 
 const active: CliRenderer[] = []
-afterEach(() => { for (const renderer of active.splice(0)) if (!renderer.isDestroyed) renderer.destroy() })
+afterEach(() => {
+  for (const renderer of active.splice(0)) if (!renderer.isDestroyed) renderer.destroy()
+})
 
 async function setup(copy: (value: string) => Promise<boolean> = async () => true) {
   const [visible, setVisible] = createSignal(true)
   const values: string[] = []
-  const view = await testRender(() => <box width="100%" height="100%">
-    <Show when={visible()}><SelectionClipboard onCopy={async (value) => { values.push(value); return copy(value) }} /></Show>
-    <text id="selection-text">{"hello world\n  indented text"}</text>
-  </box>, { width: 80, height: 20 })
+  const view = await testRender(
+    () => (
+      <box width="100%" height="100%">
+        <Show when={visible()}>
+          <SelectionClipboard
+            onCopy={async (value) => {
+              values.push(value)
+              return copy(value)
+            }}
+          />
+        </Show>
+        <text id="selection-text">{"hello world\n  indented text"}</text>
+      </box>
+    ),
+    { width: 80, height: 20 },
+  )
   active.push(view.renderer)
   await view.flush()
   const text = view.renderer.root.findDescendantById("selection-text")!
@@ -66,7 +80,12 @@ test("cleanup removes the selection listener", async () => {
 
 test("serializes rapid selections and resets the toast for repeated copies", async () => {
   let release!: (copied: boolean) => void
-  const view = await setup(() => new Promise<boolean>((resolve) => { release = resolve }))
+  const view = await setup(
+    () =>
+      new Promise<boolean>((resolve) => {
+        release = resolve
+      }),
+  )
   await view.mockMouse.drag(0, 0, 4, 0)
   expect(view.renderer.getSelection()).toBeNull() // Clear on release, not after the native tool finishes.
   await view.mockMouse.drag(6, 0, 10, 0)
@@ -86,7 +105,9 @@ test("serializes rapid selections and resets the toast for repeated copies", asy
 })
 
 test("falls back to OSC 52, including native errors, and reports failure", async () => {
-  const view = await setup(async () => { throw new Error("native clipboard failed") })
+  const view = await setup(async () => {
+    throw new Error("native clipboard failed")
+  })
   const terminal = spyOn(view.renderer, "copyToClipboardOSC52").mockReturnValue(true)
   try {
     await view.mockMouse.drag(0, 0, 4, 0)
@@ -98,12 +119,19 @@ test("falls back to OSC 52, including native errors, and reports failure", async
     await view.flush()
     expect(view.captureCharFrame()).toContain("Could not copy Text")
     expect(view.captureCharFrame().replace(/\s+/g, " ")).toContain("native clipboard failed")
-  } finally { terminal.mockRestore() }
+  } finally {
+    terminal.mockRestore()
+  }
 })
 
 test("does not publish or start queued copies after unmount", async () => {
   let release!: (copied: boolean) => void
-  const view = await setup(() => new Promise<boolean>((resolve) => { release = resolve }))
+  const view = await setup(
+    () =>
+      new Promise<boolean>((resolve) => {
+        release = resolve
+      }),
+  )
   const terminal = spyOn(view.renderer, "copyToClipboardOSC52").mockReturnValue(true)
   try {
     await view.mockMouse.drag(0, 0, 4, 0)
@@ -115,15 +143,27 @@ test("does not publish or start queued copies after unmount", async () => {
     expect(view.values).toHaveLength(1)
     expect(terminal).not.toHaveBeenCalled()
     expect(view.captureCharFrame()).not.toContain("Text copied to clipboard")
-  } finally { terminal.mockRestore() }
+  } finally {
+    terminal.mockRestore()
+  }
 })
 
 test("copies mouse selections in an editable textarea without changing its value", async () => {
   const values: string[] = []
-  const view = await testRender(() => <box width="100%" height="100%">
-    <SelectionClipboard onCopy={async (value) => { values.push(value); return true }} />
-    <textarea id="editor" width={40} height={5} initialValue="editable text" />
-  </box>, { width: 80, height: 20 })
+  const view = await testRender(
+    () => (
+      <box width="100%" height="100%">
+        <SelectionClipboard
+          onCopy={async (value) => {
+            values.push(value)
+            return true
+          }}
+        />
+        <textarea id="editor" width={40} height={5} initialValue="editable text" />
+      </box>
+    ),
+    { width: 80, height: 20 },
+  )
   active.push(view.renderer)
   await view.flush()
   await view.mockMouse.drag(0, 0, 8, 0)
@@ -142,7 +182,9 @@ test("uses terminal fallback when the native clipboard is unavailable", async ()
     await view.flush()
     expect(terminal).toHaveBeenCalledWith(view.values[0])
     expect(view.captureCharFrame()).toContain("Text sent to terminal")
-  } finally { terminal.mockRestore() }
+  } finally {
+    terminal.mockRestore()
+  }
 })
 
 test("manual clipboard actions share ordering with pending selection copies", async () => {
@@ -150,10 +192,20 @@ test("manual clipboard actions share ordering with pending selection copies", as
   const calls: string[] = []
   const view = await setup((value) => {
     calls.push(value)
-    return new Promise<boolean>((resolve) => { release = resolve })
+    return new Promise<boolean>((resolve) => {
+      release = resolve
+    })
   })
   await view.mockMouse.drag(0, 0, 4, 0)
-  const manual = copyText(view.renderer, async (value) => { calls.push(value); return true }, "latest-sha", "SHA")
+  const manual = copyText(
+    view.renderer,
+    async (value) => {
+      calls.push(value)
+      return true
+    },
+    "latest-sha",
+    "SHA",
+  )
   await view.flush()
   expect(calls).toEqual([view.values[0]!])
   release(true)

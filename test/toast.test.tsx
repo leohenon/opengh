@@ -14,10 +14,7 @@ afterEach(() => {
 
 describe("Toast", () => {
   test("fits a short title without a minimum width and stays within the terminal", async () => {
-    const view = await testRender(
-      () => <Toast title="Config reloaded" message="" onDismiss={() => {}} />,
-      { width: 80, height: 24 },
-    )
+    const view = await testRender(() => <Toast title="Config reloaded" message="" onDismiss={() => {}} />, { width: 80, height: 24 })
     active.push(view)
     await view.flush()
     const toast = view.renderer.root.getChildren().find((child) => child.zIndex === 150)
@@ -32,13 +29,29 @@ describe("Toast", () => {
   test("copying a large message shows only a compact confirmation, not the clipboard payload", async () => {
     const body = "Large clipboard payload\n".repeat(100)
     let copied = ""
-    const view = await testRender(() => <App data={githubDataFixture} operations={repositoryOperationsFixture}
-      issueDetail={{ number: issueDetailFixture.number, resource: { status: "ready", value: { ...issueDetailFixture, body } },
-        comments: { status: "ready", value: { items: [], page: 1, hasMore: false } }, references: { status: "ready", value: [] } }}
-      getReactionAction={() => ({ operation: { status: "idle" } })}
-      onAddReaction={async () => { throw new Error("Unexpected mutation") }}
-      onCopyToClipboard={async (value) => { copied = value; return true }}
-    />, { width: 100, height: 32 })
+    const view = await testRender(
+      () => (
+        <App
+          data={githubDataFixture}
+          operations={repositoryOperationsFixture}
+          issueDetail={{
+            number: issueDetailFixture.number,
+            resource: { status: "ready", value: { ...issueDetailFixture, body } },
+            comments: { status: "ready", value: { items: [], page: 1, hasMore: false } },
+            references: { status: "ready", value: [] },
+          }}
+          getReactionAction={() => ({ operation: { status: "idle" } })}
+          onAddReaction={async () => {
+            throw new Error("Unexpected mutation")
+          }}
+          onCopyToClipboard={async (value) => {
+            copied = value
+            return true
+          }}
+        />
+      ),
+      { width: 100, height: 32 },
+    )
     active.push(view)
     await view.flush()
     view.mockInput.pressKey("3")
@@ -56,9 +69,16 @@ describe("Toast", () => {
 
   test("auto-dismisses without a visible countdown or close button", async () => {
     const [visible, setVisible] = createSignal(true)
-    const view = await testRender(() => <box width={80} height={24}>
-      <Show when={visible()}><Toast title="Text copied to clipboard" message="" tone="success" duration={200} onDismiss={() => setVisible(false)} /></Show>
-    </box>, { width: 80, height: 24 })
+    const view = await testRender(
+      () => (
+        <box width={80} height={24}>
+          <Show when={visible()}>
+            <Toast title="Text copied to clipboard" message="" tone="success" duration={200} onDismiss={() => setVisible(false)} />
+          </Show>
+        </box>
+      ),
+      { width: 80, height: 24 },
+    )
     active.push(view)
     await view.flush()
     const frame = view.captureCharFrame()

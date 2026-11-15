@@ -11,10 +11,26 @@ import { useKeyActions, useKeybindings } from "../keybindings"
 import { createRenderedSearch } from "../rendered-search"
 import { useSearchTarget } from "../search-context"
 
-type Setting = "tab-shortcuts" | "theme" | "color-mode" | "reduced-motion" | "markdown-style" | "scrollbars" | "detail-layout" | "details-placement" | "status-bar-hints" | "icon-style" | "compact-header" | "hide-documents-tab" | "tab-counts" | "diff-layout" | "diff-wrap" | "diff-fullscreen"
+type Setting =
+  | "tab-shortcuts"
+  | "theme"
+  | "color-mode"
+  | "reduced-motion"
+  | "markdown-style"
+  | "scrollbars"
+  | "detail-layout"
+  | "details-placement"
+  | "status-bar-hints"
+  | "icon-style"
+  | "compact-header"
+  | "hide-documents-tab"
+  | "tab-counts"
+  | "diff-layout"
+  | "diff-wrap"
+  | "diff-fullscreen"
 
 const sectionOrder = ["Appearance", "Layout", "Usability", "Diffs"] as const
-type Section = typeof sectionOrder[number]
+type Section = (typeof sectionOrder)[number]
 const sectionSettings: Record<Section, readonly Setting[]> = {
   Appearance: ["theme", "color-mode", "markdown-style"],
   Layout: ["compact-header", "tab-counts", "hide-documents-tab", "detail-layout", "details-placement"],
@@ -26,19 +42,22 @@ const settingDefinitions: Record<Setting, { title: string; value: (config: Confi
   theme: { title: "Theme", value: (config) => config.theme },
   "color-mode": { title: "Color mode", value: (config) => config.colorMode },
   "markdown-style": { title: "Markdown style", value: (config) => config.markdownStyle },
-  "compact-header": { title: "Compact header", value: (config) => config.compactHeader ? "on" : "off" },
-  "tab-shortcuts": { title: "Tab shortcuts", value: (config) => config.showTabShortcuts ? "on" : "off" },
-  "tab-counts": { title: "Tab counts", value: (config) => config.showTabCounts ? "on" : "off" },
-  "hide-documents-tab": { title: "Document tabs", value: (config) => config.hideDocumentsTab ? "off" : "on" },
+  "compact-header": { title: "Compact header", value: (config) => (config.compactHeader ? "on" : "off") },
+  "tab-shortcuts": { title: "Tab shortcuts", value: (config) => (config.showTabShortcuts ? "on" : "off") },
+  "tab-counts": { title: "Tab counts", value: (config) => (config.showTabCounts ? "on" : "off") },
+  "hide-documents-tab": { title: "Document tabs", value: (config) => (config.hideDocumentsTab ? "off" : "on") },
   "detail-layout": { title: "Detail width", value: (config) => config.detailLayout },
   "details-placement": { title: "Details placement", value: (config) => config.detailsPlacement },
-  "icon-style": { title: "Icon style", value: (config) => config.iconStyle === "nerd" ? "Nerd Font" : config.iconStyle === "none" ? "None" : "Unicode" },
-  "status-bar-hints": { title: "Shortcut hints", value: (config) => config.showStatusBarHints ? "on" : "off" },
-  scrollbars: { title: "Scrollbars", value: (config) => config.showScrollbars ? "on" : "off" },
-  "reduced-motion": { title: "Reduced motion", value: (config) => config.reducedMotion ? "on" : "off" },
+  "icon-style": {
+    title: "Icon style",
+    value: (config) => (config.iconStyle === "nerd" ? "Nerd Font" : config.iconStyle === "none" ? "None" : "Unicode"),
+  },
+  "status-bar-hints": { title: "Shortcut hints", value: (config) => (config.showStatusBarHints ? "on" : "off") },
+  scrollbars: { title: "Scrollbars", value: (config) => (config.showScrollbars ? "on" : "off") },
+  "reduced-motion": { title: "Reduced motion", value: (config) => (config.reducedMotion ? "on" : "off") },
   "diff-layout": { title: "Diff layout", value: (config) => config.diffLayout },
-  "diff-wrap": { title: "Diff wrapping", value: (config) => config.diffWrap ? "on" : "off" },
-  "diff-fullscreen": { title: "Fullscreen diffs", value: (config) => config.diffFullscreen ? "on" : "off" },
+  "diff-wrap": { title: "Diff wrapping", value: (config) => (config.diffWrap ? "on" : "off") },
+  "diff-fullscreen": { title: "Fullscreen diffs", value: (config) => (config.diffFullscreen ? "on" : "off") },
 }
 const diffLayoutValues = ["auto", "split", "unified"] as const
 const colorModeValues = ["system", "dark", "light"] as const
@@ -67,19 +86,34 @@ export function Settings(props: {
   const rowHeight = () => 1
   const popupHeight = () => settingOrder.length * rowHeight() + 11 + (sectionOrder.length - 1) * 3
   const split = () => dimensions().width >= 110
-  createEffect(() => props.onHintChange?.(busy() ? "Updating settings…" : screen() === "themes"
-    ? keys.hints(["picker.accept", "confirm"], ["dialog.close", "back"])
-    : keys.hints(["navigation.activate", selected() === "theme" ? "open" : "change"], ["dialog.close", "close"], ["search.start", "search"])))
+  createEffect(() =>
+    props.onHintChange?.(
+      busy()
+        ? "Updating settings…"
+        : screen() === "themes"
+          ? keys.hints(["picker.accept", "confirm"], ["dialog.close", "back"])
+          : keys.hints(
+              ["navigation.activate", selected() === "theme" ? "open" : "change"],
+              ["dialog.close", "close"],
+              ["search.start", "search"],
+            ),
+    ),
+  )
   onCleanup(() => props.onHintChange?.(undefined))
   const revealSetting = () => {
     if (selected() === settingOrder[0]) settingsScroll?.scrollTo(0)
     else settingsScroll?.scrollChildIntoView(`setting-${selected()}`)
   }
-  createEffect(on(() => [rowHeight(), dimensions().height], () => {
-    renderer.once(CliRenderEvents.FRAME, revealSetting)
-    renderer.requestRender()
-    onCleanup(() => renderer.off(CliRenderEvents.FRAME, revealSetting))
-  }))
+  createEffect(
+    on(
+      () => [rowHeight(), dimensions().height],
+      () => {
+        renderer.once(CliRenderEvents.FRAME, revealSetting)
+        renderer.requestRender()
+        onCleanup(() => renderer.off(CliRenderEvents.FRAME, revealSetting))
+      },
+    ),
+  )
   const searchRows = new Map<Setting, ReturnType<typeof createRenderedSearch>>()
   const matchingRows = new Map<Setting, string>()
   useSearchTarget({
@@ -94,13 +128,24 @@ export function Settings(props: {
         const matches = searchRows.get(setting)?.search(query) ?? []
         if (!matches.length) return []
         matchingRows.set(setting, matches[0]!.id)
-        return [{ id: setting, position: index, reveal() { setSelected(setting); revealSetting() } }]
+        return [
+          {
+            id: setting,
+            position: index,
+            reveal() {
+              setSelected(setting)
+              revealSetting()
+            },
+          },
+        ]
       })
     },
     highlight(id) {
       for (const [setting, first] of matchingRows) searchRows.get(setting)?.highlight(setting === id ? first : undefined)
     },
-    clear() { for (const row of searchRows.values()) row.clear() },
+    clear() {
+      for (const row of searchRows.values()) row.clear()
+    },
     snapshot() {
       const setting = selected()
       const top = settingsScroll?.scrollTop ?? 0
@@ -116,7 +161,18 @@ export function Settings(props: {
     revealSetting()
   }
 
-  const toggleBoolean = async (key: "reducedMotion" | "showScrollbars" | "showStatusBarHints" | "compactHeader" | "hideDocumentsTab" | "showTabCounts" | "showTabShortcuts" | "diffWrap" | "diffFullscreen") => {
+  const toggleBoolean = async (
+    key:
+      | "reducedMotion"
+      | "showScrollbars"
+      | "showStatusBarHints"
+      | "compactHeader"
+      | "hideDocumentsTab"
+      | "showTabCounts"
+      | "showTabShortcuts"
+      | "diffWrap"
+      | "diffFullscreen",
+  ) => {
     if (busy()) return
     setSaving(true)
     setError("")
@@ -203,7 +259,10 @@ export function Settings(props: {
     setSaving(true)
     setError("")
     try {
-      await props.onChange({ ...props.config, iconStyle: props.config.iconStyle === "unicode" ? "nerd" : props.config.iconStyle === "nerd" ? "none" : "unicode" })
+      await props.onChange({
+        ...props.config,
+        iconStyle: props.config.iconStyle === "unicode" ? "nerd" : props.config.iconStyle === "nerd" ? "none" : "unicode",
+      })
     } catch (error) {
       setError(error instanceof Error ? error.message : "Could not save settings")
     } finally {
@@ -230,59 +289,118 @@ export function Settings(props: {
     setSelected(setting)
     revealSetting()
     switch (setting) {
-      case "theme": openThemes(); break
-      case "color-mode": void changeColorMode(direction); break
-      case "reduced-motion": void toggleBoolean("reducedMotion"); break
-      case "markdown-style": void changeMarkdownStyle(); break
-      case "scrollbars": void toggleBoolean("showScrollbars"); break
-      case "tab-shortcuts": void toggleBoolean("showTabShortcuts"); break
-      case "tab-counts": void toggleBoolean("showTabCounts"); break
-      case "hide-documents-tab": void toggleBoolean("hideDocumentsTab"); break
-      case "compact-header": void toggleBoolean("compactHeader"); break
-      case "status-bar-hints": void toggleBoolean("showStatusBarHints"); break
-      case "detail-layout": void changeDetailLayout(); break
-      case "details-placement": void changeDetailsPlacement(); break
-      case "icon-style": void changeIconStyle(); break
-      case "diff-layout": void changeDiffLayout(direction); break
-      case "diff-wrap": void toggleBoolean("diffWrap"); break
-      case "diff-fullscreen": void toggleBoolean("diffFullscreen"); break
+      case "theme":
+        openThemes()
+        break
+      case "color-mode":
+        void changeColorMode(direction)
+        break
+      case "reduced-motion":
+        void toggleBoolean("reducedMotion")
+        break
+      case "markdown-style":
+        void changeMarkdownStyle()
+        break
+      case "scrollbars":
+        void toggleBoolean("showScrollbars")
+        break
+      case "tab-shortcuts":
+        void toggleBoolean("showTabShortcuts")
+        break
+      case "tab-counts":
+        void toggleBoolean("showTabCounts")
+        break
+      case "hide-documents-tab":
+        void toggleBoolean("hideDocumentsTab")
+        break
+      case "compact-header":
+        void toggleBoolean("compactHeader")
+        break
+      case "status-bar-hints":
+        void toggleBoolean("showStatusBarHints")
+        break
+      case "detail-layout":
+        void changeDetailLayout()
+        break
+      case "details-placement":
+        void changeDetailsPlacement()
+        break
+      case "icon-style":
+        void changeIconStyle()
+        break
+      case "diff-layout":
+        void changeDiffLayout(direction)
+        break
+      case "diff-wrap":
+        void toggleBoolean("diffWrap")
+        break
+      case "diff-fullscreen":
+        void toggleBoolean("diffFullscreen")
+        break
     }
   }
   useKeyActions({}, { when: () => screen() === "settings" && busy(), priority: 200, modal: true })
-  useKeyActions({
-    "dialog.close": requestClose,
-    "navigation.up": () => moveSetting(-1),
-    "navigation.down": () => moveSetting(1),
-    "navigation.pageUp": () => {
-      if (split() || !descriptionScroll) return false
-      descriptionScroll.scrollBy(-Math.max(1, descriptionScroll.viewport.height))
+  useKeyActions(
+    {
+      "dialog.close": requestClose,
+      "navigation.up": () => moveSetting(-1),
+      "navigation.down": () => moveSetting(1),
+      "navigation.pageUp": () => {
+        if (split() || !descriptionScroll) return false
+        descriptionScroll.scrollBy(-Math.max(1, descriptionScroll.viewport.height))
+      },
+      "navigation.pageDown": () => {
+        if (split() || !descriptionScroll) return false
+        descriptionScroll.scrollBy(Math.max(1, descriptionScroll.viewport.height))
+      },
+      "settings.previousValue": () => changeSetting(selected(), -1),
+      "settings.nextValue": () => changeSetting(selected(), 1),
+      "navigation.activate": () => changeSetting(selected(), 1),
     },
-    "navigation.pageDown": () => {
-      if (split() || !descriptionScroll) return false
-      descriptionScroll.scrollBy(Math.max(1, descriptionScroll.viewport.height))
-    },
-    "settings.previousValue": () => changeSetting(selected(), -1),
-    "settings.nextValue": () => changeSetting(selected(), 1),
-    "navigation.activate": () => changeSetting(selected(), 1),
-  }, { when: () => screen() === "settings" && !busy(), priority: 100, modal: true })
+    { when: () => screen() === "settings" && !busy(), priority: 100, modal: true },
+  )
 
   const settingRow = (setting: Setting) => {
     const definition = settingDefinitions[setting]
     const active = () => selected() === setting
-    const hover = mouseHover(() => !busy(), () => setting)
-    onCleanup(() => { searchRows.get(setting)?.dispose(); searchRows.delete(setting) })
+    const hover = mouseHover(
+      () => !busy(),
+      () => setting,
+    )
+    onCleanup(() => {
+      searchRows.get(setting)?.dispose()
+      searchRows.delete(setting)
+    })
     return (
       <box
         id={`setting-${setting}`}
-        ref={(row) => searchRows.set(setting, createRenderedSearch(row, {
-          exclude: (node) => node === row.getChildren()[0]
-            || node.id === `setting-${setting}-previous` || node.id === `setting-${setting}-next`,
-          get matchBackground() { return RGBA.fromHex(colors.searchMatchBg) },
-          get matchForeground() { return RGBA.fromHex(colors.searchMatchFg) },
-          get activeBackground() { return RGBA.fromHex(colors.searchCurrentMatchBg) },
-          get activeForeground() { return RGBA.fromHex(colors.searchCurrentMatchFg) },
-        }))}
-        {...mouseClick(() => changeSetting(setting, 1), () => !busy(), () => setting, hover)}
+        ref={(row) =>
+          searchRows.set(
+            setting,
+            createRenderedSearch(row, {
+              exclude: (node) =>
+                node === row.getChildren()[0] || node.id === `setting-${setting}-previous` || node.id === `setting-${setting}-next`,
+              get matchBackground() {
+                return RGBA.fromHex(colors.searchMatchBg)
+              },
+              get matchForeground() {
+                return RGBA.fromHex(colors.searchMatchFg)
+              },
+              get activeBackground() {
+                return RGBA.fromHex(colors.searchCurrentMatchBg)
+              },
+              get activeForeground() {
+                return RGBA.fromHex(colors.searchCurrentMatchFg)
+              },
+            }),
+          )
+        }
+        {...mouseClick(
+          () => changeSetting(setting, 1),
+          () => !busy(),
+          () => setting,
+          hover,
+        )}
         height={rowHeight()}
         flexShrink={0}
         flexDirection="row"
@@ -291,80 +409,127 @@ export function Settings(props: {
         paddingLeft={1}
         paddingRight={1}
       >
-        <text width={2} fg={colors.blue}>{active() ? "›" : " "}</text>
+        <text width={2} fg={colors.blue}>
+          {active() ? "›" : " "}
+        </text>
         <box flexGrow={1} minWidth={0} flexDirection="column">
-          <text width="100%" height={1} wrapMode="none" fg={colors.text} attributes={active() ? TextAttributes.BOLD : TextAttributes.NONE}>{definition.title}</text>
+          <text width="100%" height={1} wrapMode="none" fg={colors.text} attributes={active() ? TextAttributes.BOLD : TextAttributes.NONE}>
+            {definition.title}
+          </text>
         </box>
-        <box width={split() ? 24 : Math.min(24, Math.max(12, Math.floor((dimensions().width - 10) * 0.35)))} height={1} flexShrink={0} flexDirection="row">
-          <Action id={`setting-${setting}-previous`} onActivate={() => changeSetting(setting, -1)} disabled={busy()} fg={active() ? colors.blue : colors.muted}>‹</Action>
-          <text minWidth={0} flexShrink={1} wrapMode="none" fg={active() ? colors.blue : colors.muted}> {definition.value(props.config)} </text>
-          <Action id={`setting-${setting}-next`} onActivate={() => changeSetting(setting, 1)} disabled={busy()} fg={active() ? colors.blue : colors.muted}>›</Action>
+        <box
+          width={split() ? 24 : Math.min(24, Math.max(12, Math.floor((dimensions().width - 10) * 0.35)))}
+          height={1}
+          flexShrink={0}
+          flexDirection="row"
+        >
+          <Action
+            id={`setting-${setting}-previous`}
+            onActivate={() => changeSetting(setting, -1)}
+            disabled={busy()}
+            fg={active() ? colors.blue : colors.muted}
+          >
+            ‹
+          </Action>
+          <text minWidth={0} flexShrink={1} wrapMode="none" fg={active() ? colors.blue : colors.muted}>
+            {" "}
+            {definition.value(props.config)}{" "}
+          </text>
+          <Action
+            id={`setting-${setting}-next`}
+            onActivate={() => changeSetting(setting, 1)}
+            disabled={busy()}
+            fg={active() ? colors.blue : colors.muted}
+          >
+            ›
+          </Action>
         </box>
       </box>
     )
   }
 
   const detail = () => {
-    if (selected() === "theme") return {
-      title: "Theme",
-      description: "Choose the color theme. Browse to preview.",
-    }
-    if (selected() === "color-mode") return {
-      title: "Color mode",
-      description: "Follow the terminal appearance or choose light or dark.",
-    }
-    if (selected() === "reduced-motion") return {
-      title: "Reduced motion",
-      description: "Replace animated loading dots with static dots.",
-    }
-    if (selected() === "markdown-style") return {
-      title: "Markdown style",
-      description: "Rich uses syntax colors and borders. Minimal keeps formatting simple.",
-    }
-    if (selected() === "tab-shortcuts") return {
-      title: "Tab shortcuts",
-      description: "Show number shortcuts next to tabs",
-    }
-    if (selected() === "tab-counts") return {
-      title: "Tab counts",
-      description: "Show open issue and pull request totals in tabs.",
-    }
-    if (selected() === "hide-documents-tab") return {
-      title: "Document tabs",
-      description: "Show document tabs on Overview." + (keys.key("overview.nextDocument") ? ` ${keys.key("overview.nextDocument")} cycles documents even when hidden.` : ""),
-    }
-    if (selected() === "compact-header") return {
-      title: "Compact header",
-      description: "Fit tabs and the repository name on one row.",
-    }
-    if (selected() === "scrollbars") return {
-      title: "Scrollbars",
-      description: "Show vertical scrollbars for overflowing content.",
-    }
-    if (selected() === "icon-style") return {
-      title: "Icon style",
-      description: "Choose Unicode, Nerd Font, or no icons. Nerd Font requires a compatible terminal font.",
-    }
-    if (selected() === "detail-layout") return {
-      title: "Detail width",
-      description: "Centered limits reading width. Wide fills the available space.",
-    }
-    if (selected() === "details-placement") return {
-      title: "Details placement",
-      description: "Auto uses a sidebar when space allows. Inline keeps issue and PR details below the title.",
-    }
-    if (selected() === "diff-layout") return {
-      title: "Diff layout",
-      description: "Auto splits diffs side by side on wide terminals and stacks them on narrow ones." + (keys.key("diff.toggleLayout") ? ` ${keys.key("diff.toggleLayout")} toggles the layout of the open diff.` : ""),
-    }
-    if (selected() === "diff-wrap") return {
-      title: "Diff wrapping",
-      description: "Wrap long diff lines instead of panning horizontally." + (keys.key("diff.toggleWrap") ? ` ${keys.key("diff.toggleWrap")} toggles wrapping for the open diff.` : ""),
-    }
-    if (selected() === "diff-fullscreen") return {
-      title: "Fullscreen diffs",
-      description: "Replace the tab bar with a compact review header. Turn off to keep app tabs visible while reviewing diffs.",
-    }
+    if (selected() === "theme")
+      return {
+        title: "Theme",
+        description: "Choose the color theme. Browse to preview.",
+      }
+    if (selected() === "color-mode")
+      return {
+        title: "Color mode",
+        description: "Follow the terminal appearance or choose light or dark.",
+      }
+    if (selected() === "reduced-motion")
+      return {
+        title: "Reduced motion",
+        description: "Replace animated loading dots with static dots.",
+      }
+    if (selected() === "markdown-style")
+      return {
+        title: "Markdown style",
+        description: "Rich uses syntax colors and borders. Minimal keeps formatting simple.",
+      }
+    if (selected() === "tab-shortcuts")
+      return {
+        title: "Tab shortcuts",
+        description: "Show number shortcuts next to tabs",
+      }
+    if (selected() === "tab-counts")
+      return {
+        title: "Tab counts",
+        description: "Show open issue and pull request totals in tabs.",
+      }
+    if (selected() === "hide-documents-tab")
+      return {
+        title: "Document tabs",
+        description:
+          "Show document tabs on Overview." +
+          (keys.key("overview.nextDocument") ? ` ${keys.key("overview.nextDocument")} cycles documents even when hidden.` : ""),
+      }
+    if (selected() === "compact-header")
+      return {
+        title: "Compact header",
+        description: "Fit tabs and the repository name on one row.",
+      }
+    if (selected() === "scrollbars")
+      return {
+        title: "Scrollbars",
+        description: "Show vertical scrollbars for overflowing content.",
+      }
+    if (selected() === "icon-style")
+      return {
+        title: "Icon style",
+        description: "Choose Unicode, Nerd Font, or no icons. Nerd Font requires a compatible terminal font.",
+      }
+    if (selected() === "detail-layout")
+      return {
+        title: "Detail width",
+        description: "Centered limits reading width. Wide fills the available space.",
+      }
+    if (selected() === "details-placement")
+      return {
+        title: "Details placement",
+        description: "Auto uses a sidebar when space allows. Inline keeps issue and PR details below the title.",
+      }
+    if (selected() === "diff-layout")
+      return {
+        title: "Diff layout",
+        description:
+          "Auto splits diffs side by side on wide terminals and stacks them on narrow ones." +
+          (keys.key("diff.toggleLayout") ? ` ${keys.key("diff.toggleLayout")} toggles the layout of the open diff.` : ""),
+      }
+    if (selected() === "diff-wrap")
+      return {
+        title: "Diff wrapping",
+        description:
+          "Wrap long diff lines instead of panning horizontally." +
+          (keys.key("diff.toggleWrap") ? ` ${keys.key("diff.toggleWrap")} toggles wrapping for the open diff.` : ""),
+      }
+    if (selected() === "diff-fullscreen")
+      return {
+        title: "Fullscreen diffs",
+        description: "Replace the tab bar with a compact review header. Turn off to keep app tabs visible while reviewing diffs.",
+      }
     return {
       title: "Shortcut hints",
       description: "Show keyboard shortcuts in the status bar.",
@@ -375,7 +540,7 @@ export function Settings(props: {
     <Popup width={100} height={popupHeight()} fullscreen={!split()} zIndex={200} placement="center" onClose={requestClose}>
       <Show
         when={screen() === "settings"}
-        fallback={(
+        fallback={
           <ThemePicker
             current={props.config.theme}
             saving={busy()}
@@ -391,7 +556,7 @@ export function Settings(props: {
               }
             }}
           />
-        )}
+        }
       >
         <box flexGrow={1} minHeight={0} flexDirection={split() ? "row" : "column"}>
           <box
@@ -405,14 +570,28 @@ export function Settings(props: {
             paddingBottom={1}
           >
             <box height={1} flexShrink={0} flexDirection="row" justifyContent="space-between">
-              <text fg={colors.text} attributes={TextAttributes.BOLD}>Settings</text>
+              <text fg={colors.text} attributes={TextAttributes.BOLD}>
+                Settings
+              </text>
             </box>
             <box height={1} flexShrink={0} />
-            <scrollbox ref={(value) => { settingsScroll = value }} focusable={false} flexGrow={1} minHeight={0} scrollY scrollX={false} scrollbarOptions={{ visible: false }}>
+            <scrollbox
+              ref={(value) => {
+                settingsScroll = value
+              }}
+              focusable={false}
+              flexGrow={1}
+              minHeight={0}
+              scrollY
+              scrollX={false}
+              scrollbarOptions={{ visible: false }}
+            >
               <For each={sectionOrder}>
                 {(section, index) => (
                   <box flexDirection="column" flexShrink={0} marginTop={index() === 0 ? 0 : 1}>
-                    <text height={1} flexShrink={0} fg={colors.muted}>{section}</text>
+                    <text height={1} flexShrink={0} fg={colors.muted}>
+                      {section}
+                    </text>
                     <box height={1} flexShrink={0} />
                     <For each={sectionSettings[section]}>{(setting) => settingRow(setting)}</For>
                   </box>
@@ -420,27 +599,40 @@ export function Settings(props: {
               </For>
             </scrollbox>
             <Show when={props.loadError || error()}>
-              {(message) => <text fg={colors.red} wrapMode="word">{message()}</text>}
+              {(message) => (
+                <text fg={colors.red} wrapMode="word">
+                  {message()}
+                </text>
+              )}
             </Show>
           </box>
-          <Show when={split()} fallback={(
-            <scrollbox
-              id="settings-description"
-              ref={(value) => { descriptionScroll = value }}
-              height={Math.min(8, Math.max(3, Math.floor(dimensions().height / 3)))}
-              flexShrink={0}
-              paddingX={4}
-              paddingY={1}
-              backgroundColor={colors.panelHover}
-              focusable={false}
-              scrollY
-              scrollX={false}
-              scrollbarOptions={{ visible: false }}
-            >
-              <text width="100%" height={1} flexShrink={0} fg={colors.blue} attributes={TextAttributes.BOLD}>{detail().title}</text>
-              <text width="100%" flexShrink={0} fg={colors.text} wrapMode="word">{detail().description}</text>
-            </scrollbox>
-          )}>
+          <Show
+            when={split()}
+            fallback={
+              <scrollbox
+                id="settings-description"
+                ref={(value) => {
+                  descriptionScroll = value
+                }}
+                height={Math.min(8, Math.max(3, Math.floor(dimensions().height / 3)))}
+                flexShrink={0}
+                paddingX={4}
+                paddingY={1}
+                backgroundColor={colors.panelHover}
+                focusable={false}
+                scrollY
+                scrollX={false}
+                scrollbarOptions={{ visible: false }}
+              >
+                <text width="100%" height={1} flexShrink={0} fg={colors.blue} attributes={TextAttributes.BOLD}>
+                  {detail().title}
+                </text>
+                <text width="100%" flexShrink={0} fg={colors.text} wrapMode="word">
+                  {detail().description}
+                </text>
+              </scrollbox>
+            }
+          >
             <box
               position="relative"
               top={-1}
@@ -454,10 +646,14 @@ export function Settings(props: {
               backgroundColor={colors.panelHover}
             >
               <box height={1} flexShrink={0} flexDirection="row" justifyContent="space-between">
-                <text fg={colors.blue} attributes={TextAttributes.BOLD}>{detail().title}</text>
+                <text fg={colors.blue} attributes={TextAttributes.BOLD}>
+                  {detail().title}
+                </text>
               </box>
               <box height={1} flexShrink={0} />
-              <text fg={colors.text} wrapMode="word">{detail().description}</text>
+              <text fg={colors.text} wrapMode="word">
+                {detail().description}
+              </text>
             </box>
           </Show>
         </box>

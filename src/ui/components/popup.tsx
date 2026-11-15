@@ -23,15 +23,16 @@ export function Popup(props: {
   const { colors } = useTheme()
   let dismissOnRelease = false
   const availableHeight = () => Math.max(1, dimensions().height - ((props.reserveStatusBar ?? props.fullscreen) ? 1 : 0))
-  const insetSize = (available: number, requested: number) => Math.max(1, Math.min(
-    props.expanded ? Math.max(requested, Math.floor(available * 0.9)) : requested,
-    available - 2,
-  ))
-  const width = () => props.fullscreen ? dimensions().width : insetSize(dimensions().width, props.width ?? 64)
-  const height = () => props.fullscreen ? availableHeight() : insetSize(availableHeight(), props.height)
-  const top = () => props.fullscreen ? 0 : props.expanded || props.placement === "center"
-    ? Math.max(0, Math.floor((availableHeight() - height()) / 2))
-    : Math.max(0, Math.min(Math.floor(availableHeight() / 4), availableHeight() - height() - 1))
+  const insetSize = (available: number, requested: number) =>
+    Math.max(1, Math.min(props.expanded ? Math.max(requested, Math.floor(available * 0.9)) : requested, available - 2))
+  const width = () => (props.fullscreen ? dimensions().width : insetSize(dimensions().width, props.width ?? 64))
+  const height = () => (props.fullscreen ? availableHeight() : insetSize(availableHeight(), props.height))
+  const top = () =>
+    props.fullscreen
+      ? 0
+      : props.expanded || props.placement === "center"
+        ? Math.max(0, Math.floor((availableHeight() - height()) / 2))
+        : Math.max(0, Math.min(Math.floor(availableHeight() / 4), availableHeight() - height() - 1))
 
   return (
     <box

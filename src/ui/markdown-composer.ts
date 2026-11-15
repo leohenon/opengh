@@ -10,20 +10,25 @@ export type ComposerPresentation = {
   showStatusBarHints?: boolean
 }
 
-export function createMarkdownComposer(props: ComposerPresentation, options: {
-  editor(): TextareaRenderable | undefined
-  scroll(): ScrollBoxRenderable | undefined
-  blocked(): boolean
-  editable?(): boolean
-  onError(message: string | undefined): void
-}) {
+export function createMarkdownComposer(
+  props: ComposerPresentation,
+  options: {
+    editor(): TextareaRenderable | undefined
+    scroll(): ScrollBoxRenderable | undefined
+    blocked(): boolean
+    editable?(): boolean
+    onError(message: string | undefined): void
+  },
+) {
   const renderer = useRenderer()
   const [localExpanded, setLocalExpanded] = createSignal(false)
   const [preview, setPreview] = createSignal(false)
   const [externalEditing, setExternalEditing] = createSignal(false)
   const expanded = () => props.expanded ?? localExpanded()
   let disposed = false
-  onCleanup(() => { disposed = true })
+  onCleanup(() => {
+    disposed = true
+  })
   const blocked = () => externalEditing() || options.blocked()
   const openEditor = async () => {
     const editor = options.editor()
@@ -58,16 +63,21 @@ export function createMarkdownComposer(props: ComposerPresentation, options: {
       setLocalExpanded(next)
       props.onExpandedChange?.(next)
     },
-    "dialog.togglePreview": () => { if (blocked()) return false; setPreview(value => !value) },
-    "dialog.externalEditor": () => { void openEditor() },
-    "navigation.up": () => scrollPreview(scroll => scroll.scrollBy(-1)),
-    "navigation.down": () => scrollPreview(scroll => scroll.scrollBy(1)),
-    "navigation.halfPageUp": () => scrollPreview(scroll => scroll.scrollBy(-Math.max(1, Math.floor(scroll.viewport.height / 2)))),
-    "navigation.halfPageDown": () => scrollPreview(scroll => scroll.scrollBy(Math.max(1, Math.floor(scroll.viewport.height / 2)))),
-    "navigation.pageUp": () => scrollPreview(scroll => scroll.scrollBy(-Math.max(1, scroll.viewport.height))),
-    "navigation.pageDown": () => scrollPreview(scroll => scroll.scrollBy(Math.max(1, scroll.viewport.height))),
-    "navigation.first": () => scrollPreview(scroll => scroll.scrollTo(0)),
-    "navigation.last": () => scrollPreview(scroll => scroll.scrollTo(scroll.scrollHeight)),
+    "dialog.togglePreview": () => {
+      if (blocked()) return false
+      setPreview((value) => !value)
+    },
+    "dialog.externalEditor": () => {
+      void openEditor()
+    },
+    "navigation.up": () => scrollPreview((scroll) => scroll.scrollBy(-1)),
+    "navigation.down": () => scrollPreview((scroll) => scroll.scrollBy(1)),
+    "navigation.halfPageUp": () => scrollPreview((scroll) => scroll.scrollBy(-Math.max(1, Math.floor(scroll.viewport.height / 2)))),
+    "navigation.halfPageDown": () => scrollPreview((scroll) => scroll.scrollBy(Math.max(1, Math.floor(scroll.viewport.height / 2)))),
+    "navigation.pageUp": () => scrollPreview((scroll) => scroll.scrollBy(-Math.max(1, scroll.viewport.height))),
+    "navigation.pageDown": () => scrollPreview((scroll) => scroll.scrollBy(Math.max(1, scroll.viewport.height))),
+    "navigation.first": () => scrollPreview((scroll) => scroll.scrollTo(0)),
+    "navigation.last": () => scrollPreview((scroll) => scroll.scrollTo(scroll.scrollHeight)),
   }
   return { expanded, preview, externalEditing, actions }
 }

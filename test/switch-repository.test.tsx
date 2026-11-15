@@ -18,11 +18,24 @@ test("repository picker opens its visible typed or recent selection", async () =
     { query: "https://github.com/OWNER/REPO-TWO", expected: "owner/repo-two", current: true },
   ]) {
     const opened: string[] = []
-    const view = await testRender(() => <ThemeProvider name="github">
-      <SwitchRepositoryScreen recent={["owner/repo-two", "OWNER/REPO-TWO"]} current="owner/repo-two"
-        showStatusBarHints={false} onOpen={(repository) => opened.push(repository)} onClose={() => {}} />
-    </ThemeProvider>, { width: 100, height: 24, exitOnCtrlC: false })
-    const settle = async () => { await Bun.sleep(0); await view.flush() }
+    const view = await testRender(
+      () => (
+        <ThemeProvider name="github">
+          <SwitchRepositoryScreen
+            recent={["owner/repo-two", "OWNER/REPO-TWO"]}
+            current="owner/repo-two"
+            showStatusBarHints={false}
+            onOpen={(repository) => opened.push(repository)}
+            onClose={() => {}}
+          />
+        </ThemeProvider>
+      ),
+      { width: 100, height: 24, exitOnCtrlC: false },
+    )
+    const settle = async () => {
+      await Bun.sleep(0)
+      await view.flush()
+    }
     try {
       await settle()
       await view.mockInput.typeText(scenario.query)
@@ -44,7 +57,9 @@ test("repository picker opens its visible typed or recent selection", async () =
       else view.mockInput.pressEnter()
       await settle()
       expect(opened).toEqual([scenario.expected])
-    } finally { view.renderer.destroy() }
+    } finally {
+      view.renderer.destroy()
+    }
   }
 })
 
@@ -59,7 +74,9 @@ test("repository switch popup isolates input, preserves cancelled navigation, an
   let browser = 0
   let finishCommand!: (result: CommandResult) => void
   let finishMetadata!: () => void
-  const pendingMetadata = new Promise<void>((resolve) => { finishMetadata = resolve })
+  const pendingMetadata = new Promise<void>((resolve) => {
+    finishMetadata = resolve
+  })
   const loaders: RepositoryLoaders = {
     workCounts: async () => ({ issues: 61, pulls: 24 }),
     commitCount: async () => 4,
@@ -69,37 +86,74 @@ test("repository switch popup isolates input, preserves cancelled navigation, an
       if (repository === "owner/pending") await pendingMetadata
       return { ...githubDataFixture.repo, nameWithOwner: repository, url: `https://github.com/${repository}` }
     },
-    documents: async (repo, branch) => [{ id: `${repo.nameWithOwner}:README.md`, repository: repo.nameWithOwner, ref: branch, path: "README.md", label: "README" }],
+    documents: async (repo, branch) => [
+      { id: `${repo.nameWithOwner}:README.md`, repository: repo.nameWithOwner, ref: branch, path: "README.md", label: "README" },
+    ],
     document: async () => Array.from({ length: 100 }, (_, index) => `Line ${index} of documentation\n`).join("\n"),
     branches: async () => ({ items: ["main", "next"], hasMore: false }),
-    commits: async (repository, branch) => { branchLoads.push(`${repository.nameWithOwner}:${branch}`); return { items: githubDataFixture.commits.value!.items, hasMore: false } },
+    commits: async (repository, branch) => {
+      branchLoads.push(`${repository.nameWithOwner}:${branch}`)
+      return { items: githubDataFixture.commits.value!.items, hasMore: false }
+    },
     commit: async (_repository, sha) => ({ ...commitDetailFixture, sha }),
     issue: async () => issueDetailFixture,
     issueComments: async () => ({ items: [], hasMore: false }),
     issueReferences: async () => [],
     issues: async (_repository, state) => ({ items: githubDataFixture.issues[state].value!.items, hasMore: false }),
     pulls: async (_repository, state) => ({ items: githubDataFixture.pulls[state].value!.items, hasMore: false }),
-    pull: async () => { throw new Error("No pull request loader was injected.") },
+    pull: async () => {
+      throw new Error("No pull request loader was injected.")
+    },
     pullCommits: async () => githubDataFixture.commits.value!.items,
     pullContext: async () => pullContextFixture,
     runs: async () => ({ items: githubDataFixture.runs.value!.items, hasMore: false }),
   }
-  const view = await testRender(() => <Root cwd="/work" repositoryArgument="anomalyco/opentui" services={{
-    resolveRepository: async () => "anomalyco/opentui",
-    resolveLocalRepository: async () => undefined,
-    loadRepositoryTabs: async () => ({}),
-    saveRepositoryTabs: async () => {},
-    loadRecentRepositories: async () => { recentReads++; return [...recent] },
-    rememberRepository: async (repository) => { recent = [repository, ...recent.filter((item) => item !== repository)] },
-    loadConfig: async () => ({ ...defaultConfig, theme: "nord", showStatusBarHints: true }),
-    saveConfig: async () => { saves++ },
-    createRepositorySession: () => createRepositorySession(loaders),
-    openGitHub: async () => { browser++ },
-    copyToHostClipboard: async () => true, // The default pipes clicked text into the developer's real clipboard.
-    runCommand: () => ({ cancel: () => finishCommand({ exitCode: 143, cancelled: true }), result: new Promise<CommandResult>((resolve) => { finishCommand = resolve }) }),
-  }} />, { width: 120, height: 32, exitOnCtrlC: false })
-  const settle = async () => { await Bun.sleep(0); await view.flush() }
-  const escape = async () => { view.mockInput.pressEscape(); await Bun.sleep(30); await view.flush() }
+  const view = await testRender(
+    () => (
+      <Root
+        cwd="/work"
+        repositoryArgument="anomalyco/opentui"
+        services={{
+          resolveRepository: async () => "anomalyco/opentui",
+          resolveLocalRepository: async () => undefined,
+          loadRepositoryTabs: async () => ({}),
+          saveRepositoryTabs: async () => {},
+          loadRecentRepositories: async () => {
+            recentReads++
+            return [...recent]
+          },
+          rememberRepository: async (repository) => {
+            recent = [repository, ...recent.filter((item) => item !== repository)]
+          },
+          loadConfig: async () => ({ ...defaultConfig, theme: "nord", showStatusBarHints: true }),
+          saveConfig: async () => {
+            saves++
+          },
+          createRepositorySession: () => createRepositorySession(loaders),
+          openGitHub: async () => {
+            browser++
+          },
+          copyToHostClipboard: async () => true, // The default pipes clicked text into the developer's real clipboard.
+          runCommand: () => ({
+            cancel: () => finishCommand({ exitCode: 143, cancelled: true }),
+            result: new Promise<CommandResult>((resolve) => {
+              finishCommand = resolve
+            }),
+          }),
+        }}
+      />
+    ),
+    { width: 120, height: 32, exitOnCtrlC: false },
+  )
+  const settle = async () => {
+    await Bun.sleep(0)
+    await view.flush()
+  }
+  const escape = async () => {
+    view.mockInput.pressEscape()
+    await Bun.sleep(30)
+    await view.flush()
+  }
   const switchPage = async (mouse = false) => {
     if (mouse) await clickControl(view, "repository-dropdown")
     else view.mockInput.pressKey("S")
@@ -273,5 +327,7 @@ test("repository switch popup isolates input, preserves cancelled navigation, an
     view.mockInput.pressKey(",")
     await settle()
     expect(view.captureCharFrame()).toContain("nord")
-  } finally { view.renderer.destroy() }
+  } finally {
+    view.renderer.destroy()
+  }
 }, 15_000) // About 100 rendered interactions: 2.8s idle and over 4s on a busy machine, too close to the 5s default.

@@ -8,7 +8,10 @@ import { anchorMarkers, type MarkdownAnchorPosition } from "./markdown-anchors"
 const parser = unified().use(remarkParse).use(remarkGfm)
 
 // Native table cells already have styled chunks, with a separate URL suffix.
-export function compactLinkChunks(chunks: TextChunk[], options: { linkColor?: RGBA; onAnchor?: (id: string, position: MarkdownAnchorPosition) => void } = {}) {
+export function compactLinkChunks(
+  chunks: TextChunk[],
+  options: { linkColor?: RGBA; onAnchor?: (id: string, position: MarkdownAnchorPosition) => void } = {},
+) {
   const result: TextChunk[] = []
   let line = 0
   let column = 0
@@ -20,9 +23,14 @@ export function compactLinkChunks(chunks: TextChunk[], options: { linkColor?: RG
   for (let index = 0; index < chunks.length; index++) {
     const chunk = chunks[index]!
     const url = chunk.link?.url
-    if (url && chunk.text === " (" && chunks[index + 1]?.text === url
-      && chunks[index + 1]?.link?.url === url && chunks[index + 2]?.text === ")"
-      && chunks[index + 2]?.link?.url === url) {
+    if (
+      url &&
+      chunk.text === " (" &&
+      chunks[index + 1]?.text === url &&
+      chunks[index + 1]?.link?.url === url &&
+      chunks[index + 2]?.text === ")" &&
+      chunks[index + 2]?.link?.url === url
+    ) {
       index += 2
     } else {
       let text = ""
@@ -44,7 +52,10 @@ export function compactLinkChunks(chunks: TextChunk[], options: { linkColor?: RG
 }
 
 // Conceal destinations, not the links themselves: keep labels selectable and linked.
-export function compactMarkdownLinks(block: CodeRenderable, options: { padInlineCode?: boolean; onAnchors?: (anchors: Map<string, MarkdownAnchorPosition>) => void } = {}) {
+export function compactMarkdownLinks(
+  block: CodeRenderable,
+  options: { padInlineCode?: boolean; onAnchors?: (anchors: Map<string, MarkdownAnchorPosition>) => void } = {},
+) {
   let source = ""
   let links: Array<{ start: number; end: number; labelStart: number; labelEnd: number; url: string }> = []
   let inlineCode: Array<{ start: number; end: number }> = []
@@ -63,8 +74,7 @@ export function compactMarkdownLinks(block: CodeRenderable, options: { padInline
       const end = node.position?.end.offset
       if (start === undefined || end === undefined) return
       const text = source.slice(start, end)
-      for (const match of text.matchAll(/▧/g))
-        markers.push([start + match.index!, start + match.index! + 1, "markup.image.marker"])
+      for (const match of text.matchAll(/▧/g)) markers.push([start + match.index!, start + match.index! + 1, "markup.image.marker"])
       // Tree-sitter leaves backslash escapes visible in prose. Parse text nodes
       // only, so inline code and fenced examples keep their literal backslashes.
       for (const match of text.matchAll(/\\[!"#$%&'()*+,\-./:;<=>?@[\]\\^_`{|}~]/g))
@@ -75,13 +85,14 @@ export function compactMarkdownLinks(block: CodeRenderable, options: { padInline
       const end = node.position?.end.offset
       if (start !== undefined && end !== undefined) deleted.push({ start, end })
     })
-    if (options.padInlineCode) visit(tree, "inlineCode", (node) => {
-      const start = node.position?.start.offset
-      const end = node.position?.end.offset
-      if (start === undefined || end === undefined) return
-      const ticks = source.slice(start, end).match(/^`+/)?.[0].length ?? 1
-      inlineCode.push({ start: start + ticks, end: end - ticks })
-    })
+    if (options.padInlineCode)
+      visit(tree, "inlineCode", (node) => {
+        const start = node.position?.start.offset
+        const end = node.position?.end.offset
+        if (start === undefined || end === undefined) return
+        const ticks = source.slice(start, end).match(/^`+/)?.[0].length ?? 1
+        inlineCode.push({ start: start + ticks, end: end - ticks })
+      })
     visit(tree, "link", (node) => {
       const start = node.position?.start.offset
       const end = node.position?.end.offset
@@ -93,9 +104,9 @@ export function compactMarkdownLinks(block: CodeRenderable, options: { padInline
     if (!links.length) return markers.length ? [...highlights, ...markers] : highlights
     // Remove existing conceal replacements inside the destination (notably the
     // closing bracket's space), then conceal the entire suffix including titles.
-    const result = highlights.filter(([start, end, , meta]) => !(
-      meta?.conceal !== undefined && links.some((link) => start >= link.labelEnd && end <= link.end)
-    ))
+    const result = highlights.filter(
+      ([start, end, , meta]) => !(meta?.conceal !== undefined && links.some((link) => start >= link.labelEnd && end <= link.end)),
+    )
     for (const link of links) {
       const meta = { conceal: "", isInjection: true }
       result.push([link.start, link.labelStart, "conceal", meta] satisfies SimpleHighlight)
@@ -122,19 +133,20 @@ export function compactMarkdownLinks(block: CodeRenderable, options: { padInline
       if (range && deleted.some((span) => range.start >= span.start && range.end <= span.end))
         chunk.attributes = (chunk.attributes ?? 0) | TextAttributes.STRIKETHROUGH
     })
-    const result = await linkify?.(chunks, context) ?? chunks
+    const result = (await linkify?.(chunks, context)) ?? chunks
     let offset = 0
     const sourceIndices = new Map<TextChunk, number>()
     for (const chunk of result) {
       if (!chunk.text) continue
       let index = source.indexOf(chunk.text, offset)
       // Don't match repeated text or spaces inside a concealed URL/title.
-      let hidden = links.find((item) => index >= item.labelEnd && index < item.end)
-        ?? anchors.find((item) => index >= item.start && index < item.end)
+      let hidden =
+        links.find((item) => index >= item.labelEnd && index < item.end) ?? anchors.find((item) => index >= item.start && index < item.end)
       while (hidden) {
         index = source.indexOf(chunk.text, hidden.end)
-        hidden = links.find((item) => index >= item.labelEnd && index < item.end)
-          ?? anchors.find((item) => index >= item.start && index < item.end)
+        hidden =
+          links.find((item) => index >= item.labelEnd && index < item.end) ??
+          anchors.find((item) => index >= item.start && index < item.end)
       }
       if (index < 0) continue // Concealed markers and decoded entities aren't source text.
       const link = links.find((item) => index >= item.labelStart && index + chunk.text.length <= item.labelEnd)

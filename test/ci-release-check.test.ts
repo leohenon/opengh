@@ -5,22 +5,41 @@ import { join } from "node:path"
 import { fileURLToPath } from "node:url"
 
 const directories: string[] = []
-afterEach(async () => { await Promise.all(directories.splice(0).map(path => rm(path, { recursive: true, force: true }))) })
+afterEach(async () => {
+  await Promise.all(directories.splice(0).map((path) => rm(path, { recursive: true, force: true })))
+})
 const script = fileURLToPath(new URL("../scripts/ci-release-check.mjs", import.meta.url))
 
 test.each([
-  "version only", "tag", "pull request", "ordinary subject", "source change", "other manifest field",
-  "wrong version", "invalid manifest", "formatting change", "multiple commits", "initial commit",
-])("CI scope is conservative for %s", async scenario => {
+  "version only",
+  "tag",
+  "pull request",
+  "ordinary subject",
+  "source change",
+  "other manifest field",
+  "wrong version",
+  "invalid manifest",
+  "formatting change",
+  "multiple commits",
+  "initial commit",
+])("CI scope is conservative for %s", async (scenario) => {
   const directory = await mkdtemp(join(tmpdir(), "opengh-ci-scope-"))
   directories.push(directory)
   const repo = join(directory, "repo")
   await mkdir(repo)
   const output = join(directory, "output")
-  const env = { ...process.env, GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_NOSYSTEM: "1",
-    GIT_AUTHOR_NAME: "CI test", GIT_AUTHOR_EMAIL: "test@example.invalid", GIT_COMMITTER_NAME: "CI test", GIT_COMMITTER_EMAIL: "test@example.invalid",
+  const env = {
+    ...process.env,
+    GIT_CONFIG_GLOBAL: "/dev/null",
+    GIT_CONFIG_NOSYSTEM: "1",
+    GIT_AUTHOR_NAME: "CI test",
+    GIT_AUTHOR_EMAIL: "test@example.invalid",
+    GIT_COMMITTER_NAME: "CI test",
+    GIT_COMMITTER_EMAIL: "test@example.invalid",
     GITHUB_EVENT_NAME: scenario === "pull request" ? "pull_request" : "push",
-    GITHUB_REF: scenario === "tag" ? "refs/tags/v0.0.1-beta.1" : "refs/heads/main", GITHUB_OUTPUT: output }
+    GITHUB_REF: scenario === "tag" ? "refs/tags/v0.0.1-beta.1" : "refs/heads/main",
+    GITHUB_OUTPUT: output,
+  }
   const run = async (args: string[], extra = {}) => {
     const child = Bun.spawn(args, { cwd: repo, env: { ...env, ...extra }, stdin: "ignore", stdout: "pipe", stderr: "pipe" })
     const [code, out, error] = await Promise.all([child.exited, new Response(child.stdout).text(), new Response(child.stderr).text()])
@@ -63,7 +82,7 @@ test("both CI matrices are gated without removing release-tag CI", async () => {
   }
   expect(ci.on).toHaveProperty("workflow_call")
   expect(ci.jobs.changes!.outputs?.run_ci).toBe("${{ steps.scope.outputs.run_ci }}")
-  expect(ci.jobs.changes!.steps?.find(step => step.id === "scope")?.run).toBe("node scripts/ci-release-check.mjs")
+  expect(ci.jobs.changes!.steps?.find((step) => step.id === "scope")?.run).toBe("node scripts/ci-release-check.mjs")
   for (const job of [ci.jobs.test!, ci.jobs.nix!]) {
     expect(job.needs).toBe("changes")
     expect(job.if).toBe("${{ needs.changes.outputs.run_ci == 'true' }}")

@@ -8,8 +8,11 @@ function required(name) {
 }
 
 function parseJson(value, source) {
-  try { return JSON.parse(value) }
-  catch { throw new Error(`Invalid JSON from ${source}`) }
+  try {
+    return JSON.parse(value)
+  } catch {
+    throw new Error(`Invalid JSON from ${source}`)
+  }
 }
 
 function gh(args, input) {
@@ -28,13 +31,13 @@ const stages = {
   homebrew: "Homebrew tap update",
 }
 const jobs = parseJson(required("RELEASE_JOBS"), "release job results")
-const results = Object.keys(stages).map(key => {
+const results = Object.keys(stages).map((key) => {
   const result = jobs?.[key]?.result
   if (!["success", "failure", "cancelled", "skipped"].includes(result)) throw new Error(`Invalid result for ${key}`)
   return result
 })
 const failed = results.includes("failure")
-const recovered = results.every(result => result === "success")
+const recovered = results.every((result) => result === "success")
 if (!failed && !recovered) {
   console.log("Release did not finish; leaving failure issues unchanged.")
 } else {
@@ -47,28 +50,40 @@ if (!failed && !recovered) {
   const url = `https://github.com/${repository}/actions/runs/${run}/attempts/${attempt}`
   // List all pages directly: search indexing delays must not create duplicate issues on retries.
   const pages = parseJson(gh(["api", "--paginate", "--slurp", `repos/${repository}/issues?state=all&per_page=100`]), "issue list")
-  if (!Array.isArray(pages) || pages.some(page => !Array.isArray(page))) throw new Error("Invalid issue list")
+  if (!Array.isArray(pages) || pages.some((page) => !Array.isArray(page))) throw new Error("Invalid issue list")
   const issues = pages.flat()
   for (const issue of issues) {
-    if (!issue || !Number.isInteger(issue.number) || typeof issue.title !== "string"
-      || !["open", "closed"].includes(issue.state) || (issue.body != null && typeof issue.body !== "string")) {
+    if (
+      !issue ||
+      !Number.isInteger(issue.number) ||
+      typeof issue.title !== "string" ||
+      !["open", "closed"].includes(issue.state) ||
+      (issue.body != null && typeof issue.body !== "string")
+    ) {
       throw new Error("Invalid issue in release failure lookup")
     }
   }
-  const matches = issues.filter(issue => !issue.pull_request && issue.title === title && issue.body?.includes(marker))
+  const matches = issues.filter((issue) => !issue.pull_request && issue.title === title && issue.body?.includes(marker))
   if (matches.length > 1) throw new Error(`Multiple failure issues found for ${tag}; reconcile them manually`)
   const issue = matches[0]
-  const body = [
-    marker,
-    recovered ? `Release **${tag}** recovered successfully.` : "",
-    `[Workflow run · attempt ${attempt}](${url})`,
-    "| Stage | Result |\n| --- | --- |\n"
-      + Object.values(stages).map((name, index) => `| ${name} | ${results[index]} |`).join("\n"),
-    ...(failed ? [
-      "Failed publications may have partially succeeded. No automatic rollback.",
-      "Fix the cause, then re-run failed jobs—not the release command. Bad published artifacts need a new version. Closes automatically on recovery.",
-    ] : []),
-  ].filter(Boolean).join("\n\n") + "\n"
+  const body =
+    [
+      marker,
+      recovered ? `Release **${tag}** recovered successfully.` : "",
+      `[Workflow run · attempt ${attempt}](${url})`,
+      "| Stage | Result |\n| --- | --- |\n" +
+        Object.values(stages)
+          .map((name, index) => `| ${name} | ${results[index]} |`)
+          .join("\n"),
+      ...(failed
+        ? [
+            "Failed publications may have partially succeeded. No automatic rollback.",
+            "Fix the cause, then re-run failed jobs—not the release command. Bad published artifacts need a new version. Closes automatically on recovery.",
+          ]
+        : []),
+    ]
+      .filter(Boolean)
+      .join("\n\n") + "\n"
   // Do not retry writes blindly: a failed acknowledgement may still mean the issue was updated.
   if (issue) {
     if (failed || issue.state === "open") {

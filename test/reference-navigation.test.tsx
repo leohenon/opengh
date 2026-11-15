@@ -9,21 +9,44 @@ import { commitDetailFixture, githubDataFixture, issueDetailFixture, repositoryO
 test("references open internal details and every Back control unwinds the linked trail", async () => {
   const repository = githubDataFixture.repo.nameWithOwner
   const commitReference: IssueReference = {
-    kind: "commit", id: "description-commit", repository, sha: commitDetailFixture.sha,
-    title: commitDetailFixture.message, url: `${githubDataFixture.repo.url}/commit/${commitDetailFixture.sha}`,
-    actor: "author", createdAt: issueDetailFixture.createdAt,
+    kind: "commit",
+    id: "description-commit",
+    repository,
+    sha: commitDetailFixture.sha,
+    title: commitDetailFixture.message,
+    url: `${githubDataFixture.repo.url}/commit/${commitDetailFixture.sha}`,
+    actor: "author",
+    createdAt: issueDetailFixture.createdAt,
   }
   const issueReference: IssueReference = {
-    kind: "issue", id: "message-issue", repository, number: issueDetailFixture.number,
-    title: issueDetailFixture.title, url: issueDetailFixture.url, state: "open",
-    actor: "author", createdAt: issueDetailFixture.createdAt,
+    kind: "issue",
+    id: "message-issue",
+    repository,
+    number: issueDetailFixture.number,
+    title: issueDetailFixture.title,
+    url: issueDetailFixture.url,
+    state: "open",
+    actor: "author",
+    createdAt: issueDetailFixture.createdAt,
   }
   const nextIssueReference: IssueReference = {
-    ...issueReference, id: "next-issue", number: issueDetailFixture.number + 1, title: "Linked second issue",
+    ...issueReference,
+    id: "next-issue",
+    number: issueDetailFixture.number + 1,
+    title: "Linked second issue",
   }
   const pull: PullRequestDetail = {
-    ...issueDetailFixture, merged: false, draft: false, baseBranch: "main", headBranch: "fix",
-    additions: 1, deletions: 0, changedFiles: 1, commitCount: 1, reviewers: [], mergeable: true,
+    ...issueDetailFixture,
+    merged: false,
+    draft: false,
+    baseBranch: "main",
+    headBranch: "fix",
+    additions: 1,
+    deletions: 0,
+    changedFiles: 1,
+    commitCount: 1,
+    reviewers: [],
+    mergeable: true,
     references: [commitReference],
   }
   const [commit, setCommit] = createSignal<CommitDetailState>()
@@ -31,30 +54,51 @@ test("references open internal details and every Back control unwinds the linked
   const commits: string[] = []
   const issues: number[] = []
   let browserCalls = 0
-  const view = await testRender(() => <App
-    data={githubDataFixture} operations={repositoryOperationsFixture}
-    initialNavigation={{ detail: { kind: "pull", number: pull.number } }}
-    pullDetail={{ number: pull.number, resource: { status: "ready", value: pull },
-      comments: { status: "ready", value: { items: [], page: 1, hasMore: false } },
-      references: { status: "ready", value: [] }, commits: { status: "ready", value: [] },
-      context: { status: "loading", phase: "load" } }}
-    commitDetail={commit()}
-    onLoadCommit={async (sha) => {
-      commits.push(sha)
-      setCommit({ sha, resource: { status: "ready", value: { ...commitDetailFixture, references: [issueReference] } } })
-    }}
-    onCloseCommit={() => setCommit(undefined)}
-    issueDetail={issue()}
-    onLoadIssue={async (number) => {
-      issues.push(number)
-      setIssue({ number, resource: { status: "ready", value: { ...issueDetailFixture, number,
-        title: number === issueDetailFixture.number ? issueDetailFixture.title : nextIssueReference.title } },
-        comments: { status: "ready", value: { items: [], page: 1, hasMore: false } },
-        references: { status: "ready", value: number === issueDetailFixture.number ? [nextIssueReference] : [] } })
-    }}
-    onCloseIssue={() => setIssue(undefined)}
-    onOpenInBrowser={async () => { browserCalls++ }}
-  />, { width: 120, height: 32 })
+  const view = await testRender(
+    () => (
+      <App
+        data={githubDataFixture}
+        operations={repositoryOperationsFixture}
+        initialNavigation={{ detail: { kind: "pull", number: pull.number } }}
+        pullDetail={{
+          number: pull.number,
+          resource: { status: "ready", value: pull },
+          comments: { status: "ready", value: { items: [], page: 1, hasMore: false } },
+          references: { status: "ready", value: [] },
+          commits: { status: "ready", value: [] },
+          context: { status: "loading", phase: "load" },
+        }}
+        commitDetail={commit()}
+        onLoadCommit={async (sha) => {
+          commits.push(sha)
+          setCommit({ sha, resource: { status: "ready", value: { ...commitDetailFixture, references: [issueReference] } } })
+        }}
+        onCloseCommit={() => setCommit(undefined)}
+        issueDetail={issue()}
+        onLoadIssue={async (number) => {
+          issues.push(number)
+          setIssue({
+            number,
+            resource: {
+              status: "ready",
+              value: {
+                ...issueDetailFixture,
+                number,
+                title: number === issueDetailFixture.number ? issueDetailFixture.title : nextIssueReference.title,
+              },
+            },
+            comments: { status: "ready", value: { items: [], page: 1, hasMore: false } },
+            references: { status: "ready", value: number === issueDetailFixture.number ? [nextIssueReference] : [] },
+          })
+        }}
+        onCloseIssue={() => setIssue(undefined)}
+        onOpenInBrowser={async () => {
+          browserCalls++
+        }}
+      />
+    ),
+    { width: 120, height: 32 },
+  )
   try {
     await view.flush()
     const detailScroll = view.renderer.root.findDescendantById("pull-detail-scroll")!
@@ -67,7 +111,10 @@ test("references open internal details and every Back control unwinds the linked
     await view.flush()
     expect(view.captureCharFrame()).toContain("Commits (1)")
     expect(view.renderer.listenerCount("selection")).toBeLessThanOrEqual(view.renderer.getMaxListeners())
-    const row = view.captureCharFrame().split("\n").findIndex((line) => line.includes(commitDetailFixture.message))
+    const row = view
+      .captureCharFrame()
+      .split("\n")
+      .findIndex((line) => line.includes(commitDetailFixture.message))
     expect(row).toBeGreaterThanOrEqual(0)
     await view.mockMouse.click(40, row)
     await view.flush()

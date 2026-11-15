@@ -1,23 +1,8 @@
 import { CliRenderEvents, type ThemeMode, type TerminalColors } from "@opentui/core"
 import { useRenderer } from "@opentui/solid"
 import { defaultConfig, type ColorMode } from "../config"
-import {
-  createContext,
-  createEffect,
-  createMemo,
-  createSignal,
-  onCleanup,
-  useContext,
-  type ParentProps,
-} from "solid-js"
-import {
-  appColors,
-  isThemeName,
-  resolveTheme,
-  type AppColors,
-  type ResolvedTheme,
-  type ThemeName,
-} from "../theme"
+import { createContext, createEffect, createMemo, createSignal, onCleanup, useContext, type ParentProps } from "solid-js"
+import { appColors, isThemeName, resolveTheme, type AppColors, type ResolvedTheme, type ThemeName } from "../theme"
 
 type ThemeContextValue = {
   colors: AppColors
@@ -61,7 +46,10 @@ export function ThemeProvider(props: ParentProps<{ name: string; mode?: ColorMod
     if (!disposed) setSystemMode(mode)
   }
   renderer.on(CliRenderEvents.THEME_MODE, updateMode)
-  void renderer.waitForThemeMode().then(updateMode).catch(() => {})
+  void renderer
+    .waitForThemeMode()
+    .then(updateMode)
+    .catch(() => {})
   renderer.on(CliRenderEvents.PALETTE, updatePalette)
   onCleanup(() => {
     disposed = true
@@ -72,9 +60,12 @@ export function ThemeProvider(props: ParentProps<{ name: string; mode?: ColorMod
     if ((selected() !== "terminal-minimal" && selected() !== "terminal-native") || paletteRequested) return
     paletteRequested = true
     // Unsupported terminals retain the neutral fallback palette.
-    void renderer.getPalette({ size: 16 }).then(updatePalette).catch(() => {})
+    void renderer
+      .getPalette({ size: 16 })
+      .then(updatePalette)
+      .catch(() => {})
   })
-  const mode = () => !props.mode || props.mode === "system" ? systemMode() ?? "dark" : props.mode
+  const mode = () => (!props.mode || props.mode === "system" ? (systemMode() ?? "dark") : props.mode)
   const resolved = createMemo(() => resolveTheme(selected(), mode(), terminalColors()))
   const resolvedColors = createMemo(() => appColors(resolved()))
   const colors = reactiveProxy(resolvedColors)

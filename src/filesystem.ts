@@ -20,10 +20,10 @@ function directoryParts(path: string) {
 
 function checkDirectory(path: string, entry: Stats, destination: boolean) {
   // Windows uses ACLs, not meaningful POSIX uid/group-writable mode bits.
-  const untrusted = process.getuid !== undefined && (
-    (!owned(entry.uid) && !(entry.uid === 0 && !destination))
-    || ((entry.mode & 0o022) !== 0 && !(!destination && entry.uid === 0 && (entry.mode & 0o1000) !== 0))
-  )
+  const untrusted =
+    process.getuid !== undefined &&
+    ((!owned(entry.uid) && !(entry.uid === 0 && !destination)) ||
+      ((entry.mode & 0o022) !== 0 && !(!destination && entry.uid === 0 && (entry.mode & 0o1000) !== 0)))
   if (!entry.isDirectory() || untrusted) throw new Error(`Untrusted writable directory: ${path}`)
 }
 
@@ -32,7 +32,9 @@ async function syncDirectory(path: string) {
   try {
     checkDirectory(path, await directory.stat(), false)
     await directory.sync()
-  } finally { await directory.close() }
+  } finally {
+    await directory.close()
+  }
 }
 
 // Resolve component by component so every intermediate symlink's parent is
@@ -46,7 +48,10 @@ async function trustedDirectory(path: string, create = true, durable = false): P
     checkDirectory(current, await lstat(current), false)
     const part = pending.shift()!
     if (!part || part === ".") continue
-    if (part === "..") { current = dirname(current); continue }
+    if (part === "..") {
+      current = dirname(current)
+      continue
+    }
     const next = join(current, part)
     let entry = await fileEntry(next)
     if (!entry) {
@@ -141,10 +146,13 @@ export async function readPrivateJson(path: string, options: { maxBytes: number;
       chunks.push(Buffer.from(buffer.subarray(0, bytesRead)))
     }
     text = Buffer.concat(chunks, size).toString("utf8")
-  } finally { await file.close() }
+  } finally {
+    await file.close()
+  }
   // Match the previous JSON reader for editor-produced UTF-8 BOM files.
-  try { return JSON.parse(text.charCodeAt(0) === 0xfeff ? text.slice(1) : text) }
-  catch (error) {
+  try {
+    return JSON.parse(text.charCodeAt(0) === 0xfeff ? text.slice(1) : text)
+  } catch (error) {
     // Parser diagnostics may echo file contents. Keep failures useful without
     // leaking a credential if a misconfigured link points at a sensitive file.
     if (error instanceof SyntaxError) throw new SyntaxError(`Invalid JSON file: ${path}`)
@@ -163,7 +171,9 @@ export async function atomicPrivateWrite(path: string, content: string, preserve
     try {
       await file.writeFile(content)
       await file.chmod(mode)
-    } finally { await file.close() }
+    } finally {
+      await file.close()
+    }
     await rename(temporary, destination)
   } catch (error) {
     await rm(temporary, { force: true }).catch(() => {})

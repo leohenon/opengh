@@ -17,7 +17,9 @@ test("relative ages retain minute precision instead of showing just now for the 
     expect(ago(new Date(now - 59 * 60_000).toISOString())).toBe("59m ago")
     expect(ago(new Date(now - 60 * 60_000).toISOString())).toBe("1h ago")
     expect(ago("invalid")).toBe("Unknown time")
-  } finally { clock.mockRestore() }
+  } finally {
+    clock.mockRestore()
+  }
 })
 
 describe("terminal text fitting", () => {

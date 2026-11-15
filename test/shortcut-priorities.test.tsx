@@ -10,14 +10,24 @@ import { githubDataFixture, repositoryOperationsFixture } from "./fixtures/githu
 
 test("Help puts primary actions before secondary actions and omits redundant navigation keys", async () => {
   const [page, setPage] = createSignal<ComponentProps<typeof Help>["view"]>("commits")
-  const view = await testRender(() => <KeybindingsProvider><Help view={page()} onClose={() => {}}
-    hasDocumentTabs hasMoreFiles hasMoreComments hasReferences canComment hasIssueActions />
-  </KeybindingsProvider>, { width: 100, height: 45 })
+  const view = await testRender(
+    () => (
+      <KeybindingsProvider>
+        <Help view={page()} onClose={() => {}} hasDocumentTabs hasMoreFiles hasMoreComments hasReferences canComment hasIssueActions />
+      </KeybindingsProvider>
+    ),
+    { width: 100, height: 45 },
+  )
   const cases = [
-    ["overview", "move / scroll"], ["commits", "open commit"], ["issues", "open issue"],
-    ["pulls", "open pull request"], ["actions", "open workflow run"],
-    ["commit", "back to commits"], ["issue", "back to issues"],
-    ["pull", "back to pull requests"], ["run", "back to workflow runs"],
+    ["overview", "move / scroll"],
+    ["commits", "open commit"],
+    ["issues", "open issue"],
+    ["pulls", "open pull request"],
+    ["actions", "open workflow run"],
+    ["commit", "back to commits"],
+    ["issue", "back to issues"],
+    ["pull", "back to pull requests"],
+    ["run", "back to workflow runs"],
     ["diff", "close diff; return to origin"],
   ] as const
   try {
@@ -25,26 +35,31 @@ test("Help puts primary actions before secondary actions and omits redundant nav
       setPage(target)
       await view.flush()
       const frame = view.captureCharFrame()
-      const rows = frame.split("\n").filter(row => row.trim())
+      const rows = frame.split("\n").filter((row) => row.trim())
       expect(rows[1]).toContain(primary)
       expect(frame).not.toContain("1 / 2")
       expect(frame).not.toContain("PgUp")
       expect(frame).not.toContain("PgDn")
       expect(frame).toContain("Right-click")
       expect(frame).toContain("open context menu")
-      if (target === "commits" || target === "pulls")
-        expect(frame.indexOf(primary)).toBeLessThan(frame.indexOf("view diff"))
-      expect(frame.indexOf("refresh / retry")).toBeLessThan(frame.indexOf("open " + (target === "overview" ? "repo on GitHub" : target === "diff" ? "diff on GitHub" : "on GitHub")))
+      if (target === "commits" || target === "pulls") expect(frame.indexOf(primary)).toBeLessThan(frame.indexOf("view diff"))
+      expect(frame.indexOf("refresh / retry")).toBeLessThan(
+        frame.indexOf("open " + (target === "overview" ? "repo on GitHub" : target === "diff" ? "diff on GitHub" : "on GitHub")),
+      )
     }
-  } finally { view.renderer.destroy() }
+  } finally {
+    view.renderer.destroy()
+  }
 })
 
 test("narrow status bars retain primary and recovery actions in a stable order", async () => {
   expect(fitStatusHints("ctrl+shift+f12 excessively long hint · esc back · ? help", 18)).toBe("esc back · ? help")
   expect(fitStatusHints("enter open · ↑/↓ select · o GitHub", 23)).toBe("enter open · ↑/↓ select")
   const [data, setData] = createSignal(githubDataFixture)
-  const view = await testRender(() => <App data={data()} operations={repositoryOperationsFixture}
-    config={{ ...defaultConfig, showStatusBarHints: true }} />, { width: 120, height: 30 })
+  const view = await testRender(
+    () => <App data={data()} operations={repositoryOperationsFixture} config={{ ...defaultConfig, showStatusBarHints: true }} />,
+    { width: 120, height: 30 },
+  )
   const footer = () => view.captureCharFrame().split("\n")[29]!.trim()
   try {
     for (const key of ["2", "3", "4", "5"]) {
@@ -61,11 +76,13 @@ test("narrow status bars retain primary and recovery actions in a stable order",
       expect(footer()).toBe(wide)
     }
     view.mockInput.pressKey("2")
-    setData(current => ({ ...current, commits: { status: "error", phase: "load", message: "Offline" } }))
+    setData((current) => ({ ...current, commits: { status: "error", phase: "load", message: "Offline" } }))
     view.resize(32, 30)
     await view.flush()
     expect(footer()).toStartWith("r retry")
     expect(footer()).not.toContain("enter open")
     expect(footer()).not.toContain("D diff")
-  } finally { view.renderer.destroy() }
+  } finally {
+    view.renderer.destroy()
+  }
 })

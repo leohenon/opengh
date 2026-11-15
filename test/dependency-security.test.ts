@@ -20,7 +20,8 @@ test("shell quoting rejects comment/newline injection in installed and bundled d
   }) as typeof quote
   for (const stringify of [quote, bundledQuote]) {
     expect(stringify(["git", "diff", "a path"])).toBe("git diff 'a path'")
-    expect(() => stringify(["echo", "ok", { comment: "x" }, "a\nsecurity-marker;#"]))
-      .toThrow("a token after a `comment` must not contain line terminators")
+    expect(() => stringify(["echo", "ok", { comment: "x" }, "a\nsecurity-marker;#"])).toThrow(
+      "a token after a `comment` must not contain line terminators",
+    )
   }
 })

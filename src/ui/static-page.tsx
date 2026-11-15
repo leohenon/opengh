@@ -1,5 +1,14 @@
 import { PassThrough, Writable } from "node:stream"
-import { BoxRenderable, CliRenderer, CodeRenderable, RGBA, ScrollBoxRenderable, TextAttributes, type CapturedLine, type Renderable } from "@opentui/core"
+import {
+  BoxRenderable,
+  CliRenderer,
+  CodeRenderable,
+  RGBA,
+  ScrollBoxRenderable,
+  TextAttributes,
+  type CapturedLine,
+  type Renderable,
+} from "@opentui/core"
 import { render } from "@opentui/solid"
 import type { JSX } from "solid-js"
 import type { Config } from "../config"
@@ -16,13 +25,25 @@ export const STATIC_MAX_LINES = 4096
 export const STATIC_MAX_BYTES = 1024 * 1024
 
 function descendants(root: Renderable): Renderable[] {
-  return root.getChildren().flatMap(child => [child, ...descendants(child)])
+  return root.getChildren().flatMap((child) => [child, ...descendants(child)])
 }
 
 function StaticRoot(props: { bind: (root: BoxRenderable, colors: AppColors) => void; width: number; children: JSX.Element }) {
   const { colors } = useTheme()
-  return <box ref={value => props.bind(value, colors)} position="absolute" left={0} top={0} width={props.width} height={64}
-    flexDirection="column" backgroundColor={colors.canvas}>{props.children}</box>
+  return (
+    <box
+      ref={(value) => props.bind(value, colors)}
+      position="absolute"
+      left={0}
+      top={0}
+      width={props.width}
+      height={64}
+      flexDirection="column"
+      backgroundColor={colors.canvas}
+    >
+      {props.children}
+    </box>
+  )
 }
 
 function sameRGB(left: RGBA, right: RGBA): boolean {
@@ -30,23 +51,36 @@ function sameRGB(left: RGBA, right: RGBA): boolean {
 }
 
 function serializeLine(line: CapturedLine, color: boolean, palette: { text: RGBA; muted: RGBA }): string {
-  if (!color) return line.spans.map(span => safeOutput(span.text)).join("").trimEnd()
-  return line.spans.map(span => {
-    const codes = [0]
-    for (const [attribute, code] of [
-      [TextAttributes.BOLD, 1], [TextAttributes.DIM, 2], [TextAttributes.ITALIC, 3],
-      [TextAttributes.UNDERLINE, 4], [TextAttributes.BLINK, 5],
-      [TextAttributes.HIDDEN, 8], [TextAttributes.STRIKETHROUGH, 9],
-    ] as const) if (span.attributes & attribute) codes.push(code)
-    if (sameRGB(span.fg, palette.text) || sameRGB(span.fg, palette.muted)) {
-      // Neutral text follows the terminal's foreground for light/dark contrast.
-      codes.push(39)
-      if (sameRGB(span.fg, palette.muted) && !(span.attributes & TextAttributes.DIM)) codes.push(2)
-    } else codes.push(38, 2, ...span.fg.toInts().slice(0, 3))
-    // All inline surfaces use the terminal background, including code and comments.
-    codes.push(49)
-    return `\x1b[${codes.join(";")}m${safeOutput(span.text)}`
-  }).join("") + "\x1b[0m"
+  if (!color)
+    return line.spans
+      .map((span) => safeOutput(span.text))
+      .join("")
+      .trimEnd()
+  return (
+    line.spans
+      .map((span) => {
+        const codes = [0]
+        for (const [attribute, code] of [
+          [TextAttributes.BOLD, 1],
+          [TextAttributes.DIM, 2],
+          [TextAttributes.ITALIC, 3],
+          [TextAttributes.UNDERLINE, 4],
+          [TextAttributes.BLINK, 5],
+          [TextAttributes.HIDDEN, 8],
+          [TextAttributes.STRIKETHROUGH, 9],
+        ] as const)
+          if (span.attributes & attribute) codes.push(code)
+        if (sameRGB(span.fg, palette.text) || sameRGB(span.fg, palette.muted)) {
+          // Neutral text follows the terminal's foreground for light/dark contrast.
+          codes.push(39)
+          if (sameRGB(span.fg, palette.muted) && !(span.attributes & TextAttributes.DIM)) codes.push(2)
+        } else codes.push(38, 2, ...span.fg.toInts().slice(0, 3))
+        // All inline surfaces use the terminal background, including code and comments.
+        codes.push(49)
+        return `\x1b[${codes.join(";")}m${safeOutput(span.text)}`
+      })
+      .join("") + "\x1b[0m"
+  )
 }
 
 // No terminal setup: all rendering and input use private, in-memory streams.
@@ -58,17 +92,34 @@ export async function renderStaticPage(
 ): Promise<string> {
   const width = Math.max(1, Math.min(500, Math.floor(Number.isFinite(options.width) ? options.width || 80 : 80)))
   const stdin = Object.assign(new PassThrough(), { isTTY: false, setRawMode: () => stdin })
-  const stdout = Object.assign(new Writable({ write(_chunk, _encoding, done) { done() } }), {
-    columns: width, rows: 64, isTTY: false,
-  })
+  const stdout = Object.assign(
+    new Writable({
+      write(_chunk, _encoding, done) {
+        done()
+      },
+    }),
+    {
+      columns: width,
+      rows: 64,
+      isTTY: false,
+    },
+  )
   const renderer = new CliRenderer(stdin as unknown as NodeJS.ReadStream, stdout as unknown as NodeJS.WriteStream, width, 64, {
-    bufferedOutput: "memory", screenMode: "main-screen", externalOutputMode: "passthrough",
-    consoleMode: "disabled", useMouse: false, exitSignals: [], exitOnCtrlC: false, remote: true,
+    bufferedOutput: "memory",
+    screenMode: "main-screen",
+    externalOutputMode: "passthrough",
+    consoleMode: "disabled",
+    useMouse: false,
+    exitSignals: [],
+    exitOnCtrlC: false,
+    remote: true,
   })
   let root!: BoxRenderable
   let colors!: AppColors
   let renderError: Error | undefined
-  renderer.on("render:error", error => { renderError = error })
+  renderer.on("render:error", (error) => {
+    renderError = error
+  })
   const idle = async () => {
     await renderer.idle()
     if (renderError) throw renderError
@@ -78,7 +129,7 @@ export async function renderStaticPage(
     for (let pass = 0; pass < 10; pass++) {
       await idle()
       const code = descendants(root).filter((node): node is CodeRenderable => node instanceof CodeRenderable)
-      await Promise.all(code.map(node => node.highlightingDone))
+      await Promise.all(code.map((node) => node.highlightingDone))
       await idle()
       const count = descendants(root).length
       if (count === previous) return
@@ -88,28 +139,49 @@ export async function renderStaticPage(
   }
   try {
     const config = options.config
-    await render(() => <ThemeProvider name={config.theme} mode={config.colorMode}>
-      <IconProvider style={config.iconStyle}>
-        <MarkdownProvider style={config.markdownStyle}>
-          <MotionProvider reduced>
-            <KeybindingsProvider>
-              <StaticRoot bind={(value, palette) => { root = value; colors = palette }} width={width}>{node()}</StaticRoot>
-            </KeybindingsProvider>
-          </MotionProvider>
-        </MarkdownProvider>
-      </IconProvider>
-    </ThemeProvider>, renderer)
+    await render(
+      () => (
+        <ThemeProvider name={config.theme} mode={config.colorMode}>
+          <IconProvider style={config.iconStyle}>
+            <MarkdownProvider style={config.markdownStyle}>
+              <MotionProvider reduced>
+                <KeybindingsProvider>
+                  <StaticRoot
+                    bind={(value, palette) => {
+                      root = value
+                      colors = palette
+                    }}
+                    width={width}
+                  >
+                    {node()}
+                  </StaticRoot>
+                </KeybindingsProvider>
+              </MotionProvider>
+            </MarkdownProvider>
+          </IconProvider>
+        </ThemeProvider>
+      ),
+      renderer,
+    )
     let height = 64
     let incomplete = false
     for (let pass = 0; pass < 10; pass++) {
       await settle()
-      const overflow = Math.max(0, ...descendants(root).filter((node): node is ScrollBoxRenderable => node instanceof ScrollBoxRenderable)
-        .map(scroll => scroll.scrollHeight - scroll.viewport.height))
+      const overflow = Math.max(
+        0,
+        ...descendants(root)
+          .filter((node): node is ScrollBoxRenderable => node instanceof ScrollBoxRenderable)
+          .map((scroll) => scroll.scrollHeight - scroll.viewport.height),
+      )
       if (overflow <= 0) break
       const next = height + Math.ceil(overflow)
       height = Math.min(STATIC_MAX_LINES, next)
       root.height = height
-      if (next > STATIC_MAX_LINES) { incomplete = true; await settle(); break }
+      if (next > STATIC_MAX_LINES) {
+        incomplete = true
+        await settle()
+        break
+      }
       if (pass === 9) throw new Error("Inline page layout did not settle.")
     }
     const lines: { text: string; blank: boolean }[] = []
@@ -122,12 +194,15 @@ export async function renderStaticPage(
       for (const line of renderer.currentRenderBuffer.getSpanLines().slice(0, Math.min(64, height - offset))) {
         const text = serializeLine(line, options.color !== false, palette)
         bytes += Buffer.byteLength(text) + 1
-        if (bytes > STATIC_MAX_BYTES) { incomplete = true; break capture }
-        lines.push({ text, blank: line.spans.every(span => !span.text.trim()) })
+        if (bytes > STATIC_MAX_BYTES) {
+          incomplete = true
+          break capture
+        }
+        lines.push({ text, blank: line.spans.every((span) => !span.text.trim()) })
       }
     }
     while (lines.at(-1)?.blank) lines.pop()
-    return lines.map(line => line.text).join("\n") + "\n\n" + (incomplete ? `${INLINE_INCOMPLETE}\n` : "")
+    return lines.map((line) => line.text).join("\n") + "\n\n" + (incomplete ? `${INLINE_INCOMPLETE}\n` : "")
   } finally {
     renderer.destroy()
     try {

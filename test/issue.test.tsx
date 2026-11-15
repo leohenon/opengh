@@ -5,7 +5,14 @@ import type { CommitDetailState, IssueDetailState } from "../src/repository-stat
 import type { IssueDetail, IssueReference } from "../src/models"
 import type { DetailTarget } from "../src/navigation"
 import { App } from "../src/ui/app"
-import { commitDetailFixture, githubDataFixture, issueDetailFixture, issueCommentsFixture, issuePullReferenceFixture, repositoryOperationsFixture } from "./fixtures/github-data"
+import {
+  commitDetailFixture,
+  githubDataFixture,
+  issueDetailFixture,
+  issueCommentsFixture,
+  issuePullReferenceFixture,
+  repositoryOperationsFixture,
+} from "./fixtures/github-data"
 import { waitForText } from "./fixtures/wait"
 
 const active: Array<{ renderer: { destroy(): void; isDestroyed: boolean } }> = []
@@ -28,32 +35,59 @@ test("issue details retain scrolling and restore selection while hidden tabs sta
   let more = 0
   let commitLoads = 0
   const comments = Array.from({ length: 30 }, (_, index) => ({ ...issueCommentsFixture[0]!, id: index + 1, body: `Comment body ${index}` }))
-  const view = await testRender(() => (
-    <App
-      data={{ ...githubDataFixture, issues: { ...githubDataFixture.issues, open: { status: "ready", value: { items, page: 1, hasMore: false } } } }}
-      operations={repositoryOperationsFixture}
-      issueDetail={detail()}
-      onLoadIssue={async (number) => {
-        loaded.push(number)
-        setDetail({ number, resource: { status: "ready", value: {
-          ...items.find((issue) => issue.number === number)!, commentCount: 30,
-          url: `https://github.com/anomalyco/opentui/issues/${number}`,
-        } }, comments: { status: "ready", value: { items: comments, page: 1, hasMore: true } }, references: { status: "ready", value: [] } })
-      }}
-      onLoadMoreIssueComments={async () => { more++ }}
-      onCloseIssue={() => setDetail(undefined)}
-      onOpenInBrowser={async (target) => { opened.push(target) }}
-      onCopyToClipboard={async (value) => { copied = value; return true }}
-      onLoadCommit={async () => { commitLoads++ }}
-    />
-  ), { width: 120, height: 32 })
+  const view = await testRender(
+    () => (
+      <App
+        data={{
+          ...githubDataFixture,
+          issues: { ...githubDataFixture.issues, open: { status: "ready", value: { items, page: 1, hasMore: false } } },
+        }}
+        operations={repositoryOperationsFixture}
+        issueDetail={detail()}
+        onLoadIssue={async (number) => {
+          loaded.push(number)
+          setDetail({
+            number,
+            resource: {
+              status: "ready",
+              value: {
+                ...items.find((issue) => issue.number === number)!,
+                commentCount: 30,
+                url: `https://github.com/anomalyco/opentui/issues/${number}`,
+              },
+            },
+            comments: { status: "ready", value: { items: comments, page: 1, hasMore: true } },
+            references: { status: "ready", value: [] },
+          })
+        }}
+        onLoadMoreIssueComments={async () => {
+          more++
+        }}
+        onCloseIssue={() => setDetail(undefined)}
+        onOpenInBrowser={async (target) => {
+          opened.push(target)
+        }}
+        onCopyToClipboard={async (value) => {
+          copied = value
+          return true
+        }}
+        onLoadCommit={async () => {
+          commitLoads++
+        }}
+      />
+    ),
+    { width: 120, height: 32 },
+  )
   active.push(view)
   await settle(view)
   view.mockInput.pressKey("3")
   await settle(view)
   for (let i = 0; i < 18; i++) view.mockInput.pressKey("j")
   await settle(view)
-  const selected = view.captureCharFrame().split("\n").find((row) => row.includes("▌"))!
+  const selected = view
+    .captureCharFrame()
+    .split("\n")
+    .find((row) => row.includes("▌"))!
   expect(selected).toBeDefined()
   view.mockInput.pressEnter()
   await settle(view)
@@ -118,7 +152,12 @@ test("issue details retain scrolling and restore selection while hidden tabs sta
   await Bun.sleep(30)
   await view.flush()
   expect(detail()).toBeUndefined()
-  expect(view.captureCharFrame().split("\n").find((row) => row.includes("▌"))).toBe(selected)
+  expect(
+    view
+      .captureCharFrame()
+      .split("\n")
+      .find((row) => row.includes("▌")),
+  ).toBe(selected)
 })
 
 test("permission recovery guidance remains visible with readable issue content and clears after recovery", async () => {
@@ -128,17 +167,22 @@ test("permission recovery guidance remains visible with readable issue content a
     permissions: undefined,
     permissionsError: "GitHub account changed. Restart opengh before continuing; no changes were sent.",
   })
-  const view = await testRender(() => <App
-    data={githubDataFixture}
-    operations={repositoryOperationsFixture}
-    initialNavigation={{ detail: { kind: "issue", number: issueDetailFixture.number } }}
-    issueDetail={{
-      number: issueDetailFixture.number,
-      resource: { status: "ready", value: issue() },
-      comments: { status: "ready", value: { items: [], page: 1, hasMore: false } },
-      references: { status: "ready", value: [] },
-    }}
-  />, { width: 100, height: 32 })
+  const view = await testRender(
+    () => (
+      <App
+        data={githubDataFixture}
+        operations={repositoryOperationsFixture}
+        initialNavigation={{ detail: { kind: "issue", number: issueDetailFixture.number } }}
+        issueDetail={{
+          number: issueDetailFixture.number,
+          resource: { status: "ready", value: issue() },
+          comments: { status: "ready", value: { items: [], page: 1, hasMore: false } },
+          references: { status: "ready", value: [] },
+        }}
+      />
+    ),
+    { width: 100, height: 32 },
+  )
   active.push(view)
   await settle(view)
   await waitForText(view, "Readable issue description.")
@@ -156,26 +200,44 @@ test("issue and comment failures retry separately, with honest empty states", as
   const [detail, setDetail] = createSignal<IssueDetailState>()
   let loads = 0
   let retries = 0
-  const view = await testRender(() => (
-    <App
-      data={githubDataFixture}
-      operations={repositoryOperationsFixture}
-      issueDetail={detail()}
-      onLoadIssue={async () => {
-        loads++
-        setDetail({ number, resource: loads === 1
-          ? { status: "error", phase: "load", message: "Issue unavailable" }
-          : { status: "ready", value: { ...issueDetailFixture, state: "closed", stateReason: "not_planned", locked: true, body: "", labels: [], assignees: [], milestone: undefined } },
-          comments: { status: "error", phase: "load", message: "Comments unavailable" },
-          references: { status: "ready", value: [] },
-        })
-      }}
-      onLoadMoreIssueComments={async () => {
-        retries++
-        setDetail((current) => ({ ...current!, comments: { status: "ready", value: { items: [], page: 1, hasMore: false } } }))
-      }}
-    />
-  ), { width: 100, height: 32 })
+  const view = await testRender(
+    () => (
+      <App
+        data={githubDataFixture}
+        operations={repositoryOperationsFixture}
+        issueDetail={detail()}
+        onLoadIssue={async () => {
+          loads++
+          setDetail({
+            number,
+            resource:
+              loads === 1
+                ? { status: "error", phase: "load", message: "Issue unavailable" }
+                : {
+                    status: "ready",
+                    value: {
+                      ...issueDetailFixture,
+                      state: "closed",
+                      stateReason: "not_planned",
+                      locked: true,
+                      body: "",
+                      labels: [],
+                      assignees: [],
+                      milestone: undefined,
+                    },
+                  },
+            comments: { status: "error", phase: "load", message: "Comments unavailable" },
+            references: { status: "ready", value: [] },
+          })
+        }}
+        onLoadMoreIssueComments={async () => {
+          retries++
+          setDetail((current) => ({ ...current!, comments: { status: "ready", value: { items: [], page: 1, hasMore: false } } }))
+        }}
+      />
+    ),
+    { width: 100, height: 32 },
+  )
   active.push(view)
   await settle(view)
   view.mockInput.pressKey("3")
@@ -209,23 +271,36 @@ test("zero-comment issues still show PR mentions and open the correct source rep
   let retries = 0
   let opened: { detail?: DetailTarget; repository?: string } = {}
   let copied = ""
-  const view = await testRender(() => (
-    <App data={githubDataFixture} operations={repositoryOperationsFixture} issueDetail={detail()}
-      onLoadIssue={async () => {
-        loads++
-        setDetail({ number, resource: { status: "ready", value: { ...issueDetailFixture, body: "A short description.", commentCount: 0 } },
-          comments: { status: "ready", value: { items: [], page: 1, hasMore: false } },
-          references: { status: "error", phase: "load", message: "Timeline unavailable" },
-        })
-      }}
-      onRetryIssueReferences={async () => {
-        retries++
-        setDetail((current) => ({ ...current!, references: { status: "ready", value: [issuePullReferenceFixture] } }))
-      }}
-      onOpenReference={(repository, detail) => { opened = { detail, repository } }}
-      onCopyToClipboard={async (value) => { copied = value; return true }}
-    />
-  ), { width: 120, height: 36 })
+  const view = await testRender(
+    () => (
+      <App
+        data={githubDataFixture}
+        operations={repositoryOperationsFixture}
+        issueDetail={detail()}
+        onLoadIssue={async () => {
+          loads++
+          setDetail({
+            number,
+            resource: { status: "ready", value: { ...issueDetailFixture, body: "A short description.", commentCount: 0 } },
+            comments: { status: "ready", value: { items: [], page: 1, hasMore: false } },
+            references: { status: "error", phase: "load", message: "Timeline unavailable" },
+          })
+        }}
+        onRetryIssueReferences={async () => {
+          retries++
+          setDetail((current) => ({ ...current!, references: { status: "ready", value: [issuePullReferenceFixture] } }))
+        }}
+        onOpenReference={(repository, detail) => {
+          opened = { detail, repository }
+        }}
+        onCopyToClipboard={async (value) => {
+          copied = value
+          return true
+        }}
+      />
+    ),
+    { width: 120, height: 36 },
+  )
   active.push(view)
   await settle(view)
   view.mockInput.pressKey("3")
@@ -283,35 +358,43 @@ test("issue and commit refreshes keep one indicator and ignore repeated refresh 
   const [commit, setCommit] = createSignal<CommitDetailState>()
   let issueLoads = 0
   let commitLoads = 0
-  const view = await testRender(() => (
-    <App data={githubDataFixture} operations={repositoryOperationsFixture} issueDetail={issue()} commitDetail={commit()}
-      onLoadIssue={async () => {
-        issueLoads++
-        if (issueLoads === 1) {
-          setIssue({ ...readyIssue, comments: { status: "loading", phase: "load" }, references: { status: "loading", phase: "load" } })
-          await initial.promise
-        } else {
-          setIssue({ ...readyIssue,
-            resource: { status: "loading", phase: "load", value: readyIssue.resource.value },
-            comments: { status: "loading", phase: "load", value: readyIssue.comments.value },
-            references: { status: "loading", phase: "load", value: readyIssue.references.value },
-          })
-          await metadata.promise
-          setIssue((current) => ({ ...current!, resource: readyIssue.resource }))
-          await activity.promise
-        }
-        setIssue(readyIssue)
-      }}
-      onLoadCommit={async (sha) => {
-        commitLoads++
-        if (commitLoads > 1) {
-          setCommit({ sha, resource: { status: "loading", phase: "load", value: commit()?.resource.value } })
-          await commitRefresh.promise
-        }
-        setCommit({ sha, resource: { status: "ready", value: commitDetailFixture } })
-      }}
-    />
-  ), { width: 120, height: 40 })
+  const view = await testRender(
+    () => (
+      <App
+        data={githubDataFixture}
+        operations={repositoryOperationsFixture}
+        issueDetail={issue()}
+        commitDetail={commit()}
+        onLoadIssue={async () => {
+          issueLoads++
+          if (issueLoads === 1) {
+            setIssue({ ...readyIssue, comments: { status: "loading", phase: "load" }, references: { status: "loading", phase: "load" } })
+            await initial.promise
+          } else {
+            setIssue({
+              ...readyIssue,
+              resource: { status: "loading", phase: "load", value: readyIssue.resource.value },
+              comments: { status: "loading", phase: "load", value: readyIssue.comments.value },
+              references: { status: "loading", phase: "load", value: readyIssue.references.value },
+            })
+            await metadata.promise
+            setIssue((current) => ({ ...current!, resource: readyIssue.resource }))
+            await activity.promise
+          }
+          setIssue(readyIssue)
+        }}
+        onLoadCommit={async (sha) => {
+          commitLoads++
+          if (commitLoads > 1) {
+            setCommit({ sha, resource: { status: "loading", phase: "load", value: commit()?.resource.value } })
+            await commitRefresh.promise
+          }
+          setCommit({ sha, resource: { status: "ready", value: commitDetailFixture } })
+        }}
+      />
+    ),
+    { width: 120, height: 40 },
+  )
   active.push(view)
   try {
     await settle(view)
@@ -366,25 +449,63 @@ test("issue and commit refreshes keep one indicator and ignore repeated refresh 
 test("mixed references render chronologically and the references menu includes issues and PRs", async () => {
   const [detail, setDetail] = createSignal<IssueDetailState>()
   const references: IssueReference[] = [
-    { kind: "issue", id: "related-issue", repository: "other/repo", number: 8, state: "open",
-      title: "Related issue title", url: "https://github.com/other/repo/issues/8", actor: "alice", createdAt: "2026-04-14T00:00:00Z" },
-    { kind: "commit", id: "related-commit", repository: "anomalyco/opentui", sha: "a".repeat(40),
-      title: "Commit reference title", url: `https://github.com/anomalyco/opentui/commit/${"a".repeat(40)}`,
-      actor: "max", createdAt: "2026-04-12T12:00:00Z" },
+    {
+      kind: "issue",
+      id: "related-issue",
+      repository: "other/repo",
+      number: 8,
+      state: "open",
+      title: "Related issue title",
+      url: "https://github.com/other/repo/issues/8",
+      actor: "alice",
+      createdAt: "2026-04-14T00:00:00Z",
+    },
+    {
+      kind: "commit",
+      id: "related-commit",
+      repository: "anomalyco/opentui",
+      sha: "a".repeat(40),
+      title: "Commit reference title",
+      url: `https://github.com/anomalyco/opentui/commit/${"a".repeat(40)}`,
+      actor: "max",
+      createdAt: "2026-04-12T12:00:00Z",
+    },
   ]
   let opened: { detail?: DetailTarget; repository?: string } = {}
-  const view = await testRender(() => (
-    <App data={githubDataFixture} operations={repositoryOperationsFixture} issueDetail={detail()}
-      onLoadIssue={async () => {
-        setDetail({ number: issueDetailFixture.number,
-          resource: { status: "ready", value: { ...issueDetailFixture, body: "Short description.", labels: [], assignees: [], milestone: undefined, commentCount: 1 } },
-          comments: { status: "ready", value: { items: [{ ...issueCommentsFixture[0]!, body: "Comment between the references." }], page: 1, hasMore: false } },
-          references: { status: "ready", value: references },
-        })
-      }}
-      onOpenReference={(repository, detail) => { opened = { detail, repository } }}
-    />
-  ), { width: 120, height: 40 })
+  const view = await testRender(
+    () => (
+      <App
+        data={githubDataFixture}
+        operations={repositoryOperationsFixture}
+        issueDetail={detail()}
+        onLoadIssue={async () => {
+          setDetail({
+            number: issueDetailFixture.number,
+            resource: {
+              status: "ready",
+              value: {
+                ...issueDetailFixture,
+                body: "Short description.",
+                labels: [],
+                assignees: [],
+                milestone: undefined,
+                commentCount: 1,
+              },
+            },
+            comments: {
+              status: "ready",
+              value: { items: [{ ...issueCommentsFixture[0]!, body: "Comment between the references." }], page: 1, hasMore: false },
+            },
+            references: { status: "ready", value: references },
+          })
+        }}
+        onOpenReference={(repository, detail) => {
+          opened = { detail, repository }
+        }}
+      />
+    ),
+    { width: 120, height: 40 },
+  )
   active.push(view)
   await settle(view)
   view.mockInput.pressKey("3")

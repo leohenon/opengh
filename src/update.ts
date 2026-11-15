@@ -24,7 +24,11 @@ type UpdateOptions = {
 
 export async function runUpdateInstaller(script: string, options: InstallerOptions, timeoutMs = 300_000): Promise<number> {
   const child = Bun.spawn(["sh", "-c", script], {
-    ...options, stdin: "ignore", stdout: "inherit", stderr: "inherit", detached: true,
+    ...options,
+    stdin: "ignore",
+    stdout: "inherit",
+    stderr: "inherit",
+    detached: true,
   })
   const state: { stopped?: "timeout" | "SIGINT" | "SIGTERM" | "SIGHUP" } = {}
   const stop = (reason: NonNullable<typeof state.stopped>) => {
@@ -32,7 +36,11 @@ export async function runUpdateInstaller(script: string, options: InstallerOptio
     state.stopped = reason
     // A shell's TERM trap can wait forever for its foreground command. Kill its entire
     // isolated process group, including hung probes/downloaders, without waiting for traps.
-    try { process.kill(-child.pid, "SIGKILL") } catch { child.kill("SIGKILL") }
+    try {
+      process.kill(-child.pid, "SIGKILL")
+    } catch {
+      child.kill("SIGKILL")
+    }
   }
   const interrupt = () => stop("SIGINT")
   const terminate = () => stop("SIGTERM")
@@ -74,8 +82,10 @@ function isJavaScriptInstallation(executable: string) {
   if (!manifest || typeof manifest !== "object" || Array.isArray(manifest))
     throw new Error(`Invalid installation metadata at ${path}. Use the original installation method to update.`)
   const name = (manifest as Record<string, unknown>).name
-  return typeof name === "string" && (name === "opengh" || name === "@leohenon/opengh"
-    || /^opengh-(?:darwin-(?:arm64|x64)|linux-(?:arm64|x64)(?:-musl)?)$/.test(name))
+  return (
+    typeof name === "string" &&
+    (name === "opengh" || name === "@leohenon/opengh" || /^opengh-(?:darwin-(?:arm64|x64)|linux-(?:arm64|x64)(?:-musl)?)$/.test(name))
+  )
 }
 
 export function installationUpdateHint(executable: string) {
@@ -108,7 +118,9 @@ export async function runUpdate(options: UpdateOptions = {}): Promise<void> {
     await mkdir(lock, { mode: 0o700 })
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "EEXIST")
-      throw new Error(`An update lock already exists at ${lock}. Ensure no update is running; remove it if a previous attempt was interrupted.`)
+      throw new Error(
+        `An update lock already exists at ${lock}. Ensure no update is running; remove it if a previous attempt was interrupted.`,
+      )
     throw new Error(`Cannot update ${executable}: its directory must be writable. ${(error as Error).message}`)
   }
 
@@ -118,8 +130,11 @@ export async function runUpdate(options: UpdateOptions = {}): Promise<void> {
     const order = Bun.semver.order(latest.version, currentVersion)
     const log = options.log ?? console.log
     if (order <= 0) {
-      log(order === 0 ? `opengh ${currentVersion} is up to date.`
-        : `opengh ${currentVersion} is newer than the latest stable release (${latest.version}); nothing changed.`)
+      log(
+        order === 0
+          ? `opengh ${currentVersion} is up to date.`
+          : `opengh ${currentVersion} is newer than the latest stable release (${latest.version}); nothing changed.`,
+      )
       return
     }
     log(`Updating opengh ${currentVersion} → ${latest.version}…`)

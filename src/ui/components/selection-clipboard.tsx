@@ -4,15 +4,13 @@ import { createSignal, onCleanup, Show } from "solid-js"
 import { copyText, type ClipboardNotice } from "../clipboard"
 import { Toast } from "./toast"
 
-export function SelectionClipboard(props: {
-  onCopy: (value: string) => Promise<boolean>
-}) {
+export function SelectionClipboard(props: { onCopy: (value: string) => Promise<boolean> }) {
   const renderer = useRenderer()
   const [notice, setNotice] = createSignal<ClipboardNotice>()
   let disposed = false
   let request = 0
   const selected = (selection: Selection) => {
-    if (selection.isDragging || selection.isStart && selection.behavior === "cell") return
+    if (selection.isDragging || (selection.isStart && selection.behavior === "cell")) return
     // Snapshot now: the selection/renderables may change before a clipboard write completes.
     const text = selection.getSelectedText()
     if (!text) return
@@ -29,7 +27,16 @@ export function SelectionClipboard(props: {
     disposed = true
     renderer.off(CliRenderEvents.SELECTION, selected)
   })
-  return <Show when={notice()} keyed>{(current) => (
-    <Toast {...current} duration={current.tone === "success" ? 1000 : current.duration} zIndex={300} onDismiss={() => setNotice(undefined)} />
-  )}</Show>
+  return (
+    <Show when={notice()} keyed>
+      {(current) => (
+        <Toast
+          {...current}
+          duration={current.tone === "success" ? 1000 : current.duration}
+          zIndex={300}
+          onDismiss={() => setNotice(undefined)}
+        />
+      )}
+    </Show>
+  )
 }

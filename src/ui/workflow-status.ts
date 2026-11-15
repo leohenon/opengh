@@ -6,14 +6,20 @@ type WorkflowStatus = { status: string; conclusion: string }
 export function runIcon(run: WorkflowStatus, icons: IconSet["workflow"]) {
   if (run.status !== "completed") return icons.clock
   switch (run.conclusion) {
-    case "success": return icons.success
+    case "success":
+      return icons.success
     case "failure":
-    case "timed_out": return icons.failure
+    case "timed_out":
+      return icons.failure
     case "cancelled":
-    case "stale": return icons.cancelled
-    case "skipped": return icons.skipped
-    case "action_required": return icons.attention
-    default: return icons.neutral
+    case "stale":
+      return icons.cancelled
+    case "skipped":
+      return icons.skipped
+    case "action_required":
+      return icons.attention
+    default:
+      return icons.neutral
   }
 }
 

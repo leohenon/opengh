@@ -114,24 +114,27 @@ try {
   // Resolved from the entry module: this path is the same from source and inside a compiled
   // executable, where scripts/build.ts embeds the worker as a second entry point.
   initializeHunk(renderer, new URL("./ui/workers/hunk-highlight.js", import.meta.url))
-  await render(() => (
-    <Root
-      repositoryArgument={launch.repositoryArgument}
-      initialPage={launch.initialPage}
-      initialDetail={launch.initialDetail}
-      focus={launch.focus}
-      resumeLocation={resumeLocation}
-      onNavigationChange={resumeWriter.remember}
-      cwd={cwd}
-      initialConfig={initialConfig}
-      initialConfigError={initialConfigError}
-      services={{
-        saveConfig: (config) => trackSave(saveConfig(config)),
-        saveRepositoryTabs: (tabs) => trackSave(saveRepositoryTabs(tabs)),
-        rememberRepository: (repository) => trackSave(rememberRepository(repository)),
-      }}
-    />
-  ), renderer)
+  await render(
+    () => (
+      <Root
+        repositoryArgument={launch.repositoryArgument}
+        initialPage={launch.initialPage}
+        initialDetail={launch.initialDetail}
+        focus={launch.focus}
+        resumeLocation={resumeLocation}
+        onNavigationChange={resumeWriter.remember}
+        cwd={cwd}
+        initialConfig={initialConfig}
+        initialConfigError={initialConfigError}
+        services={{
+          saveConfig: (config) => trackSave(saveConfig(config)),
+          saveRepositoryTabs: (tabs) => trackSave(saveRepositoryTabs(tabs)),
+          rememberRepository: (repository) => trackSave(rememberRepository(repository)),
+        }}
+      />
+    ),
+    renderer,
+  )
 } catch (error) {
   process.exitCode = 1
   renderer.destroy()

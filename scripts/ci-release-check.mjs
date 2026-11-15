@@ -22,7 +22,9 @@ function shouldRunCI() {
   const after = git("show", `${head}:package.json`)
   try {
     if (JSON.parse(after).version !== match[1] || JSON.parse(before).version === match[1]) return true
-  } catch { return true }
+  } catch {
+    return true
+  }
   // Require the exact edit made by scripts/release.ts, not just a release-looking subject.
   const expected = before.replace(/^(\s*"version":\s*")[^"]*(")/m, `$1${match[1]}$2`)
   return after !== expected

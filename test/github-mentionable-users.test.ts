@@ -10,8 +10,12 @@ const response = (nodes: unknown = [{ login: "alice" }]) => ({ data: { repositor
 function fixture(value: unknown) {
   const calls: { query: string; variables: Record<string, string>; options?: RequestOptions }[] = []
   const transport: GitHubTransport = {
-    async json<T>(): Promise<T> { throw new Error("Unexpected REST request") },
-    async text() { throw new Error("Unexpected text request") },
+    async json<T>(): Promise<T> {
+      throw new Error("Unexpected REST request")
+    },
+    async text() {
+      throw new Error("Unexpected text request")
+    },
     async graphql<T>(query: string, variables: Record<string, string>, options?: RequestOptions) {
       calls.push({ query, variables, options })
       if (value instanceof Error) throw value
@@ -48,7 +52,21 @@ test("node selector preserves immutable repository identity instead of the old n
   }
 })
 
-test.each(["a".repeat(40), "a b", "a\nb", "a\tb", "a/b", "@alice", "a_b", 'a") { viewer { login } }', "a\\b", "é", "alice[bot]", "a\u0000", "a\u007f"])("rejects malformed query %j before dispatch", async query => {
+test.each([
+  "a".repeat(40),
+  "a b",
+  "a\nb",
+  "a\tb",
+  "a/b",
+  "@alice",
+  "a_b",
+  'a") { viewer { login } }',
+  "a\\b",
+  "é",
+  "alice[bot]",
+  "a\u0000",
+  "a\u007f",
+])("rejects malformed query %j before dispatch", async (query) => {
   const { calls, load } = fixture(response())
   await expect(load("owner/repo", query)).rejects.toThrow("query")
   expect(calls).toHaveLength(0)
@@ -64,23 +82,73 @@ test("accepts empty and maximum-length fragments without interpolating them", as
 
 test("rejects invalid repository selectors before dispatch", async () => {
   const { calls, load } = fixture(response())
-  for (const repository of ["../repo", "owner/repo/extra", { ...target, nodeId: "" }, { ...target, id: 0 }] satisfies RepositoryReference[]) {
+  for (const repository of [
+    "../repo",
+    "owner/repo/extra",
+    { ...target, nodeId: "" },
+    { ...target, id: 0 },
+  ] satisfies RepositoryReference[]) {
     await expect(load(repository, "")).rejects.toThrow()
   }
   expect(calls).toHaveLength(0)
 })
 
 test("skips null nodes and deduplicates safe logins case-insensitively", async () => {
-  const { load } = fixture(response([null, { login: "Alice" }, { login: "alice" }, { login: "a-b9" }, { login: "dependabot[bot]" }, { login: "DEPENDABOT[bot]" }, { login: "a".repeat(39) }]))
+  const { load } = fixture(
+    response([
+      null,
+      { login: "Alice" },
+      { login: "alice" },
+      { login: "a-b9" },
+      { login: "dependabot[bot]" },
+      { login: "DEPENDABOT[bot]" },
+      { login: "a".repeat(39) },
+    ]),
+  )
   expect(await load("owner/repo", "")).toEqual(["Alice", "a-b9", "dependabot[bot]", "a".repeat(39)])
   expect(await fixture(response([null])).load("owner/repo", "")).toEqual([])
 })
 
-test.each([null, undefined, [], {}, { data: null }, { data: {} }, { data: { repository: null } }, { data: { repository: [] } }, { data: { repository: {} } }, { data: { repository: { mentionableUsers: null } } }, response(null), response({}), response("nodes"), response(Array.from({ length: 31 }, () => ({ login: "alice" })))])("rejects missing or malformed response %j", async value => {
+test.each([
+  null,
+  undefined,
+  [],
+  {},
+  { data: null },
+  { data: {} },
+  { data: { repository: null } },
+  { data: { repository: [] } },
+  { data: { repository: {} } },
+  { data: { repository: { mentionableUsers: null } } },
+  response(null),
+  response({}),
+  response("nodes"),
+  response(Array.from({ length: 31 }, () => ({ login: "alice" }))),
+])("rejects missing or malformed response %j", async (value) => {
   await expect(fixture(value).load("owner/repo", "")).rejects.toThrow()
 })
 
-test.each([{}, [], "alice", 1, { login: null }, { login: 1 }, { login: "" }, { login: "-" }, { login: "-alice" }, { login: "a".repeat(40) }, { login: "a b" }, { login: "a\nb" }, { login: "a/b" }, { login: "a\\b" }, { login: "@alice" }, { login: "é" }, { login: "[bot]" }, { login: "a\u0000" }, { login: "a\u007f" }])("rejects malformed non-null user node %j", async node => {
+test.each([
+  {},
+  [],
+  "alice",
+  1,
+  { login: null },
+  { login: 1 },
+  { login: "" },
+  { login: "-" },
+  { login: "-alice" },
+  { login: "a".repeat(40) },
+  { login: "a b" },
+  { login: "a\nb" },
+  { login: "a/b" },
+  { login: "a\\b" },
+  { login: "@alice" },
+  { login: "é" },
+  { login: "[bot]" },
+  { login: "a\u0000" },
+  { login: "a\u007f" },
+])("rejects malformed non-null user node %j", async (node) => {
   await expect(fixture(response([{ login: "valid" }, node])).load("owner/repo", "")).rejects.toThrow("login")
 })
 
@@ -96,8 +164,12 @@ test("forwards request options unchanged and accounts for unique output items", 
   const counts: number[] = []
   const budget: RequestBudget = {
     signal: controller.signal,
-    takeRequest() {}, consumeBytes() {}, dispose() {},
-    consumeItems(count) { counts.push(count) },
+    takeRequest() {},
+    consumeBytes() {},
+    dispose() {},
+    consumeItems(count) {
+      counts.push(count)
+    },
   }
   const options = { signal: controller.signal, budget, maxBytes: 4096, limitMessage: "too large" }
   const { load, calls } = fixture(response([{ login: "Alice" }, null, { login: "alice" }, { login: "bob" }]))
@@ -106,7 +178,9 @@ test("forwards request options unchanged and accounts for unique output items", 
   expect(calls[0]!.options!.signal).toBe(controller.signal)
   expect(counts).toEqual([2])
   const error = new Error("item budget exhausted")
-  budget.consumeItems = () => { throw error }
+  budget.consumeItems = () => {
+    throw error
+  }
   await expect(load(target, "", options)).rejects.toBe(error)
 })
 

@@ -9,27 +9,20 @@ export function ResourceStateView<T>(props: {
   children: (value: Accessor<T>) => JSX.Element
 }) {
   const { colors } = useTheme()
-  const value = () => props.resource.value === undefined
-    ? undefined
-    : { current: props.resource.value as T }
+  const value = () => (props.resource.value === undefined ? undefined : { current: props.resource.value as T })
 
   return (
     <Show
       when={value()}
-      fallback={(
+      fallback={
         <box flexGrow={1} minHeight={0} alignItems="center" justifyContent="center">
-          <Show
-            when={props.resource.status === "error"}
-            fallback={<LoadingText text="Loading…" />}
-          >
+          <Show when={props.resource.status === "error"} fallback={<LoadingText text="Loading…" />}>
             <Show when={!props.hideError}>
-              <text fg={colors.red}>
-                × {props.resource.status === "error" ? props.resource.message : "Load failed"}
-              </text>
+              <text fg={colors.red}>× {props.resource.status === "error" ? props.resource.message : "Load failed"}</text>
             </Show>
           </Show>
         </box>
-      )}
+      }
     >
       {(current) => props.children(() => current().current)}
     </Show>

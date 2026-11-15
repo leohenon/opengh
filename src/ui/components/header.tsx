@@ -13,18 +13,30 @@ import { useLoadingDots } from "../motion"
 
 function RepositoryName(props: { repo: Repo; short?: boolean; interactive?: boolean; onOpen?: () => void }) {
   const { colors } = useTheme()
-  const pickerMouse = mouseClick(() => props.onOpen?.(), () => props.interactive !== false && Boolean(props.onOpen))
+  const pickerMouse = mouseClick(
+    () => props.onOpen?.(),
+    () => props.interactive !== false && Boolean(props.onOpen),
+  )
   return (
-    <box id="repository-dropdown" flexDirection="row" flexShrink={1} minWidth={0} maxWidth="100%"
-      {...(props.onOpen ? pickerMouse : {})}>
+    <box id="repository-dropdown" flexDirection="row" flexShrink={1} minWidth={0} maxWidth="100%" {...(props.onOpen ? pickerMouse : {})}>
       <box flexDirection="row" flexShrink={1} minWidth={0} overflow="hidden">
         <Show when={!props.short}>
           <text height={1} wrapMode="none" flexShrink={0} selectable={!props.onOpen} fg={colors.muted}>
-            <Show when={!props.onOpen && props.interactive !== false} fallback={`${props.repo.nameWithOwner.split("/")[0]}/`}><a href={props.repo.url}>{props.repo.nameWithOwner.split("/")[0]}/</a></Show>
+            <Show when={!props.onOpen && props.interactive !== false} fallback={`${props.repo.nameWithOwner.split("/")[0]}/`}>
+              <a href={props.repo.url}>{props.repo.nameWithOwner.split("/")[0]}/</a>
+            </Show>
           </text>
         </Show>
-        <text height={1} wrapMode="none" truncate flexShrink={1} minWidth={0} selectable={!props.onOpen}
-          fg={props.interactive === false && props.onOpen ? colors.muted : colors.blue} attributes={TextAttributes.BOLD}>
+        <text
+          height={1}
+          wrapMode="none"
+          truncate
+          flexShrink={1}
+          minWidth={0}
+          selectable={!props.onOpen}
+          fg={props.interactive === false && props.onOpen ? colors.muted : colors.blue}
+          attributes={TextAttributes.BOLD}
+        >
           <Show when={!props.onOpen && props.interactive !== false} fallback={props.repo.nameWithOwner.split("/").slice(1).join("/")}>
             <a href={props.repo.url}>{props.repo.nameWithOwner.split("/").slice(1).join("/")}</a>
           </Show>
@@ -37,21 +49,30 @@ function RepositoryName(props: { repo: Repo; short?: boolean; interactive?: bool
 export function ReviewHeader(props: { repo: Repo; target: DiffTarget; totals?: { additions: number; deletions: number } }) {
   const { colors } = useTheme()
   const dimensions = useTerminalDimensions()
-  const label = () => props.target.kind === "pull" ? `PR #${props.target.number}` : `${dimensions().width < 45 ? "" : "Commit "}${props.target.sha.slice(0, 7)}`
-  const totalsWidth = () => props.totals ? Bun.stringWidth(`+${props.totals.additions} −${props.totals.deletions}`) : 0
+  const label = () =>
+    props.target.kind === "pull"
+      ? `PR #${props.target.number}`
+      : `${dimensions().width < 45 ? "" : "Commit "}${props.target.sha.slice(0, 7)}`
+  const totalsWidth = () => (props.totals ? Bun.stringWidth(`+${props.totals.additions} −${props.totals.deletions}`) : 0)
   const sideWidth = () => Math.max(0, Math.floor((dimensions().width - totalsWidth()) / 2))
   return (
     <box height={1} flexShrink={0} minWidth={0} flexDirection="row" backgroundColor={colors.header} overflow="hidden">
       <box height={1} width={sideWidth()} flexShrink={0} minWidth={0} flexDirection="row" overflow="hidden" gap={1}>
-        <text height={1} flexGrow={1} minWidth={0} wrapMode="none" truncate fg={colors.muted}>{dimensions().width < 60 ? props.repo.nameWithOwner.split("/").at(-1) : props.repo.nameWithOwner}</text>
+        <text height={1} flexGrow={1} minWidth={0} wrapMode="none" truncate fg={colors.muted}>
+          {dimensions().width < 60 ? props.repo.nameWithOwner.split("/").at(-1) : props.repo.nameWithOwner}
+        </text>
       </box>
       <Show when={props.totals}>
-        {(totals) => <text id="review-totals" height={1} width={totalsWidth()} flexShrink={0} wrapMode="none" fg={colors.muted}>
-          +{totals().additions} −{totals().deletions}
-        </text>}
+        {(totals) => (
+          <text id="review-totals" height={1} width={totalsWidth()} flexShrink={0} wrapMode="none" fg={colors.muted}>
+            +{totals().additions} −{totals().deletions}
+          </text>
+        )}
       </Show>
       <box height={1} flexGrow={1} minWidth={0} flexDirection="row" justifyContent="flex-end" overflow="hidden">
-        <text height={1} wrapMode="none" truncate fg={colors.text} attributes={TextAttributes.BOLD}>{label()}</text>
+        <text height={1} wrapMode="none" truncate fg={colors.text} attributes={TextAttributes.BOLD}>
+          {label()}
+        </text>
       </box>
     </box>
   )
@@ -73,22 +94,27 @@ export function Header(props: {
   const dimensions = useTerminalDimensions()
   const keys = useKeybindings()
   const icons = useIcons()
-  const dots = useLoadingDots(() => props.showTabCounts !== false
-    && !props.workCounts?.value && props.workCounts?.status !== "error"
-    && props.tabs.some((tab) => tab.page === "issues" || tab.page === "pulls"))
-  const tabKey = (index: number) => props.showTabShortcuts !== false && index < 5 ? keys.key(`navigation.tab${index + 1}` as KeyAction) : ""
+  const dots = useLoadingDots(
+    () =>
+      props.showTabCounts !== false &&
+      !props.workCounts?.value &&
+      props.workCounts?.status !== "error" &&
+      props.tabs.some((tab) => tab.page === "issues" || tab.page === "pulls"),
+  )
+  const tabKey = (index: number) =>
+    props.showTabShortcuts !== false && index < 5 ? keys.key(`navigation.tab${index + 1}` as KeyAction) : ""
   const tabLabel = (index: number, label: string) => [tabKey(index), label].filter(Boolean).join(" ")
   const layout = createMemo(() => {
     const width = Math.max(0, dimensions().width - 4)
     let tabs = props.tabs.map((tab, index) => {
       const label = [props.showTabShortcuts !== false ? tabKey(index) : icons().navigation[tab.page], tab.label].filter(Boolean).join(" ")
-      if (props.showTabCounts === false || tab.page !== "issues" && tab.page !== "pulls") return { ...tab, label, counted: label }
+      if (props.showTabCounts === false || (tab.page !== "issues" && tab.page !== "pulls")) return { ...tab, label, counted: label }
       const count = props.workCounts?.value?.[tab.page]
       const placeholder = props.workCounts?.status === "error" ? "—" : "..."
       return { ...tab, label, counted: `${label} (${count ?? placeholder})` }
     })
-    const totalWidth = (labels: string[]) => labels.reduce((sum, label) => sum + Bun.stringWidth(label), 0)
-      + Math.max(0, labels.length - 1) * 3
+    const totalWidth = (labels: string[]) =>
+      labels.reduce((sum, label) => sum + Bun.stringWidth(label), 0) + Math.max(0, labels.length - 1) * 3
     if (totalWidth(tabs.map((tab) => tab.counted)) > width) {
       tabs = tabs.map((tab, index) => {
         const label = tabLabel(index, props.tabs[index]!.label)
@@ -103,17 +129,19 @@ export function Header(props: {
     const showRepository = props.compact && countedWidth + 2 + repositoryWidth <= width
     const available = width - (showRepository ? 2 + repositoryWidth : 0)
     const labels = tabs.map((tab) => ({ ...tab, label: countedWidth <= available ? tab.counted : tab.label }))
-    const active = Math.max(0, labels.findIndex((tab) => tab.page === props.page))
-    const windowWidth = (start: number, end: number) => totalWidth(labels.slice(start, end).map((tab) => tab.label))
-      + (start > 0 ? 2 : 0) + (end < labels.length ? 2 : 0)
+    const active = Math.max(
+      0,
+      labels.findIndex((tab) => tab.page === props.page),
+    )
+    const windowWidth = (start: number, end: number) =>
+      totalWidth(labels.slice(start, end).map((tab) => tab.label)) + (start > 0 ? 2 : 0) + (end < labels.length ? 2 : 0)
     let start = active
     let end = Math.min(active + 1, labels.length)
     // Keep the largest contiguous set of whole tabs containing the active tab.
     // Earliest-window ties keep the strip stable until navigation reaches its edge.
     for (let left = 0; left <= active; left++) {
       for (let right = active + 1; right <= labels.length; right++) {
-        if (windowWidth(left, right) <= available && (right - left > end - start
-          || right - left === end - start && left < start)) {
+        if (windowWidth(left, right) <= available && (right - left > end - start || (right - left === end - start && left < start))) {
           start = left
           end = right
         }
@@ -127,7 +155,14 @@ export function Header(props: {
       if (Bun.stringWidth(visible[0].label) + (start > 0 ? 2 : 0) + (end < labels.length ? 2 : 0) > available)
         visible[0] = { ...visible[0], label: tabKey(active) || shortLabels[visible[0].page] }
     }
-    return { tabs: visible, before: start > 0, after: end < labels.length, previous: labels[start - 1]?.page, next: labels[end]?.page, showRepository }
+    return {
+      tabs: visible,
+      before: start > 0,
+      after: end < labels.length,
+      previous: labels[start - 1]?.page,
+      next: labels[end]?.page,
+      showRepository,
+    }
   })
 
   return (
@@ -140,27 +175,51 @@ export function Header(props: {
       <box height={props.compact ? 1 : 2} minWidth={0} flexDirection="row" paddingLeft={2} paddingRight={2} gap={2}>
         <box minWidth={0} overflow="hidden" flexGrow={1} flexDirection="row">
           <Show when={layout().before}>
-            <text height={1} width={2} flexShrink={0} fg={colors.muted} selectable={false}
-              {...mouseClick(() => { const page = layout().previous; if (page) props.onSelect?.(page) }, () => props.interactive !== false && Boolean(props.onSelect))}>‹ </text>
+            <text
+              height={1}
+              width={2}
+              flexShrink={0}
+              fg={colors.muted}
+              selectable={false}
+              {...mouseClick(
+                () => {
+                  const page = layout().previous
+                  if (page) props.onSelect?.(page)
+                },
+                () => props.interactive !== false && Boolean(props.onSelect),
+              )}
+            >
+              ‹{" "}
+            </text>
           </Show>
           <box flexDirection="row" gap={3} flexShrink={0}>
             <For each={layout().tabs}>
               {(tab) => {
                 const active = () => props.page === tab.page
                 return (
-                  <box height={props.compact ? 1 : 2} width={Bun.stringWidth(tab.label)} flexShrink={0} flexDirection="column"
-                    {...mouseClick(() => props.onSelect?.(tab.page), () => props.interactive !== false && Boolean(props.onSelect))}>
+                  <box
+                    height={props.compact ? 1 : 2}
+                    width={Bun.stringWidth(tab.label)}
+                    flexShrink={0}
+                    flexDirection="column"
+                    {...mouseClick(
+                      () => props.onSelect?.(tab.page),
+                      () => props.interactive !== false && Boolean(props.onSelect),
+                    )}
+                  >
                     <text
                       height={1}
                       wrapMode="none"
                       selectable={false}
-                      fg={active() ? props.compact ? colors.salmon : colors.text : colors.muted}
+                      fg={active() ? (props.compact ? colors.salmon : colors.text) : colors.muted}
                       attributes={active() ? TextAttributes.BOLD : TextAttributes.NONE}
                     >
                       {tab.label.includes("(...)") ? tab.label.replace("(...)", `(${dots()})`) : tab.label}
                     </text>
                     <Show when={!props.compact}>
-                      <text selectable={false} fg={colors.salmon}>{active() ? "─".repeat(Bun.stringWidth(tab.label)) : " ".repeat(Bun.stringWidth(tab.label))}</text>
+                      <text selectable={false} fg={colors.salmon}>
+                        {active() ? "─".repeat(Bun.stringWidth(tab.label)) : " ".repeat(Bun.stringWidth(tab.label))}
+                      </text>
                     </Show>
                   </box>
                 )
@@ -168,8 +227,23 @@ export function Header(props: {
             </For>
           </box>
           <Show when={layout().after}>
-            <text height={1} width={2} flexShrink={0} fg={colors.muted} selectable={false}
-              {...mouseClick(() => { const page = layout().next; if (page) props.onSelect?.(page) }, () => props.interactive !== false && Boolean(props.onSelect))}> ›</text>
+            <text
+              height={1}
+              width={2}
+              flexShrink={0}
+              fg={colors.muted}
+              selectable={false}
+              {...mouseClick(
+                () => {
+                  const page = layout().next
+                  if (page) props.onSelect?.(page)
+                },
+                () => props.interactive !== false && Boolean(props.onSelect),
+              )}
+            >
+              {" "}
+              ›
+            </text>
           </Show>
         </box>
         <Show when={layout().showRepository}>

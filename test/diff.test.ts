@@ -8,22 +8,34 @@ import { MAX_PATCH_LINES, parsePatchFiles } from "../src/patch-files"
 import { patchFixture } from "./fixtures/diff"
 
 function transport(text: GitHubTransport["text"]): GitHubTransport {
-  return { json: async () => { throw new Error("Unexpected JSON request") }, text }
+  return {
+    json: async () => {
+      throw new Error("Unexpected JSON request")
+    },
+    text,
+  }
 }
 
 test("diff requests use authenticated API media types and preserve PR/commit identities", async () => {
   const calls: Array<[string, string | undefined]> = []
-  const load = createGitHubDiff(transport(async (path, accept, options) => {
-    calls.push([path, accept])
-    expect(options?.signal).toBeInstanceOf(AbortSignal)
-    expect(options?.budget).toBeDefined()
-    expect(options?.signal).toBe(options?.budget?.signal)
-    expect(options?.signal?.aborted).toBe(false)
-    expect(options?.maxBytes).toBe(MAX_DIFF_BYTES)
-    return accept === "application/vnd.github+json" ? JSON.stringify({ head: "a".repeat(40), base: "b".repeat(40) }) : patchFixture
-  }))
+  const load = createGitHubDiff(
+    transport(async (path, accept, options) => {
+      calls.push([path, accept])
+      expect(options?.signal).toBeInstanceOf(AbortSignal)
+      expect(options?.budget).toBeDefined()
+      expect(options?.signal).toBe(options?.budget?.signal)
+      expect(options?.signal?.aborted).toBe(false)
+      expect(options?.maxBytes).toBe(MAX_DIFF_BYTES)
+      return accept === "application/vnd.github+json" ? JSON.stringify({ head: "a".repeat(40), base: "b".repeat(40) }) : patchFixture
+    }),
+  )
   const signal = new AbortController().signal
-  expect(await load("base/private", { kind: "pull", number: 42 }, signal)).toEqual({ kind: "patch", patch: patchFixture, headSha: "a".repeat(40), baseSha: "b".repeat(40) })
+  expect(await load("base/private", { kind: "pull", number: 42 }, signal)).toEqual({
+    kind: "patch",
+    patch: patchFixture,
+    headSha: "a".repeat(40),
+    baseSha: "b".repeat(40),
+  })
   await load("owner/repo", { kind: "commit", sha: "abc123" }, signal)
   expect(calls).toEqual([
     ["repos/base/private/pulls/42", "application/vnd.github+json"],
@@ -42,17 +54,22 @@ test("degraded file listings paginate without pretending absent patches are unch
   const paths: string[] = []
   let fullPages = false
   let budget: RequestBudget | undefined
-  const load = createGitHubDiff(transport(async (path, _accept, options) => {
-    expect(options?.jq).toBe(". | map({filename, previous_filename, status, additions, deletions})")
-    expect(options?.budget).toBeDefined()
-    if (budget) expect(options?.budget).toBe(budget)
-    budget = options?.budget
-    paths.push(path)
-    const files = Array.from({ length: fullPages || path.endsWith("page=1") ? 100 : 1 }, (_, index) => ({
-      filename: `${paths.length}-${index}.txt`, status: "modified", additions: 1, deletions: 1,
-    }))
-    return JSON.stringify(files)
-  }))
+  const load = createGitHubDiff(
+    transport(async (path, _accept, options) => {
+      expect(options?.jq).toBe(". | map({filename, previous_filename, status, additions, deletions})")
+      expect(options?.budget).toBeDefined()
+      if (budget) expect(options?.budget).toBe(budget)
+      budget = options?.budget
+      paths.push(path)
+      const files = Array.from({ length: fullPages || path.endsWith("page=1") ? 100 : 1 }, (_, index) => ({
+        filename: `${paths.length}-${index}.txt`,
+        status: "modified",
+        additions: 1,
+        deletions: 1,
+      }))
+      return JSON.stringify(files)
+    }),
+  )
   const result = await load("owner/repo", { kind: "pull", number: 1 }, new AbortController().signal, true)
   expect(result.kind).toBe("files")
   if (result.kind !== "files") throw new Error("Expected file list")
@@ -92,26 +109,35 @@ test("one diff deadline spans every page and caller cancellation still aborts in
       const before = deadlines
       let requests = 0
       let shared: RequestBudget | undefined
-      const load = createGitHubDiff(transport(async (_path, _accept, options) => {
-        const budget = options?.budget
-        if (!budget) throw new Error("Missing diff budget")
-        expect(options?.signal).toBe(budget.signal)
-        if (shared) expect(budget).toBe(shared)
-        shared = budget
-        budget.takeRequest()
-        if (++requests < 3) return JSON.stringify(Array.from({ length: 100 }, (_, index) => ({
-          filename: `${requests}-${index}.txt`, status: "modified", additions: 1, deletions: 1,
-        })))
-        return new Promise<string>((_resolve, reject) => {
-          budget.signal.addEventListener("abort", () => reject(budget.signal.reason), { once: true })
-          if (reason === "deadline") {
-            if (!expire) throw new Error("Missing 60-second deadline")
-            expire() // Fire the real budget's deadline without waiting a minute.
-          } else controller.abort(new Error("Cancelled by caller"))
-        })
-      }))
-      await expect(load("owner/repo", { kind: "pull", number: 1 }, controller.signal, true))
-        .rejects.toThrow(reason === "deadline" ? "60 second limit" : "Cancelled by caller")
+      const load = createGitHubDiff(
+        transport(async (_path, _accept, options) => {
+          const budget = options?.budget
+          if (!budget) throw new Error("Missing diff budget")
+          expect(options?.signal).toBe(budget.signal)
+          if (shared) expect(budget).toBe(shared)
+          shared = budget
+          budget.takeRequest()
+          if (++requests < 3)
+            return JSON.stringify(
+              Array.from({ length: 100 }, (_, index) => ({
+                filename: `${requests}-${index}.txt`,
+                status: "modified",
+                additions: 1,
+                deletions: 1,
+              })),
+            )
+          return new Promise<string>((_resolve, reject) => {
+            budget.signal.addEventListener("abort", () => reject(budget.signal.reason), { once: true })
+            if (reason === "deadline") {
+              if (!expire) throw new Error("Missing 60-second deadline")
+              expire() // Fire the real budget's deadline without waiting a minute.
+            } else controller.abort(new Error("Cancelled by caller"))
+          })
+        }),
+      )
+      await expect(load("owner/repo", { kind: "pull", number: 1 }, controller.signal, true)).rejects.toThrow(
+        reason === "deadline" ? "60 second limit" : "Cancelled by caller",
+      )
       expect(requests).toBe(3)
       expect(deadlines - before).toBe(1)
       expect(controller.signal.aborted).toBe(reason === "cancel")
@@ -119,37 +145,59 @@ test("one diff deadline spans every page and caller cancellation still aborts in
     const before = deadlines
     const budget = createRequestBudget()
     const seen: RequestBudget[] = []
-    const load = createGitHubDiff(transport(async (_path, _accept, options) => {
-      seen.push(options!.budget!)
-      return JSON.stringify([{ filename: "a.txt", status: "modified", additions: 1, deletions: 1 }])
-    }))
+    const load = createGitHubDiff(
+      transport(async (_path, _accept, options) => {
+        seen.push(options!.budget!)
+        return JSON.stringify([{ filename: "a.txt", status: "modified", additions: 1, deletions: 1 }])
+      }),
+    )
     await load("owner/repo", { kind: "pull", number: 1 }, budget.signal, true, budget)
     expect(seen).toEqual([budget])
     expect(deadlines).toBe(before + 1)
     expect(budget.signal.aborted).toBe(false)
     budget.dispose()
-  } finally { timers.mockRestore() }
+  } finally {
+    timers.mockRestore()
+  }
 })
 
 test("object targets keep patches and degraded files on A after name reuse", async () => {
   const paths: string[] = []
-  const load = createGitHubDiff(transport(async (path, accept) => {
-    paths.push(path)
-    return accept === "application/vnd.github.diff" ? "A patch"
-      : !path.includes("?") ? JSON.stringify({ head: "a".repeat(40), base: "b".repeat(40) }) : "[]"
-  }))
+  const load = createGitHubDiff(
+    transport(async (path, accept) => {
+      paths.push(path)
+      return accept === "application/vnd.github.diff"
+        ? "A patch"
+        : !path.includes("?")
+          ? JSON.stringify({ head: "a".repeat(40), base: "b".repeat(40) })
+          : "[]"
+    }),
+  )
   const repository = { id: 71, nodeId: "R_A", nameWithOwner: "owner/repo" }
   const signal = new AbortController().signal
-  expect(await load(repository, { kind: "pull", number: 42 }, signal)).toEqual({ kind: "patch", patch: "A patch", headSha: "a".repeat(40), baseSha: "b".repeat(40) })
+  expect(await load(repository, { kind: "pull", number: 42 }, signal)).toEqual({
+    kind: "patch",
+    patch: "A patch",
+    headSha: "a".repeat(40),
+    baseSha: "b".repeat(40),
+  })
   await load(repository, { kind: "pull", number: 42 }, signal, true)
   await load(repository, { kind: "commit", sha: "abc" }, signal, true)
-  expect(paths).toEqual(["repositories/71/pulls/42", "repositories/71/pulls/42", "repositories/71/pulls/42", "repositories/71/pulls/42/files?per_page=100&page=1", "repositories/71/commits/abc?per_page=100&page=1"])
+  expect(paths).toEqual([
+    "repositories/71/pulls/42",
+    "repositories/71/pulls/42",
+    "repositories/71/pulls/42",
+    "repositories/71/pulls/42/files?per_page=100&page=1",
+    "repositories/71/commits/abc?per_page=100&page=1",
+  ])
   await expect(load({ ...repository, id: 0 }, { kind: "pull", number: 42 }, signal)).rejects.toThrow("Repository ID")
   expect(paths).toHaveLength(5)
 })
 
 test("Hunk adapter preserves metadata-only changes and reports malformed hunks", () => {
-  const patch = patchFixture + `diff --git a/old.txt b/new.txt
+  const patch =
+    patchFixture +
+    `diff --git a/old.txt b/new.txt
 similarity index 100%
 rename from old.txt
 rename to new.txt
@@ -173,15 +221,17 @@ Binary files a/image.png and b/image.png differ
   expect(parseDiff({ kind: "patch", patch: "" }).files).toEqual([])
 })
 
- test("PR diffs reject a changing head or base rather than attaching review comments to stale lines", async () => {
+test("PR diffs reject a changing head or base rather than attaching review comments to stale lines", async () => {
   for (const changed of ["head", "base"]) {
     let reads = 0
-    const load = createGitHubDiff(transport(async (_path, accept) => {
-      if (accept === "application/vnd.github.diff") return patchFixture
-      const refs = { head: "a".repeat(40), base: "b".repeat(40) }
-      if (++reads === 2) refs[changed as "head" | "base"] = "c".repeat(40)
-      return JSON.stringify(refs)
-    }))
+    const load = createGitHubDiff(
+      transport(async (_path, accept) => {
+        if (accept === "application/vnd.github.diff") return patchFixture
+        const refs = { head: "a".repeat(40), base: "b".repeat(40) }
+        if (++reads === 2) refs[changed as "head" | "base"] = "c".repeat(40)
+        return JSON.stringify(refs)
+      }),
+    )
     await expect(load("owner/repo", { kind: "pull", number: 42 }, new AbortController().signal)).rejects.toThrow("changed while loading")
   }
 })
@@ -197,13 +247,58 @@ test("agent patch files keep original sections with Hunk paths and hunk metadata
     "diff --git a/empty b/empty\nnew file mode 100644\nindex 0000000..e69de29\n",
   ]
   const files = parsePatchFiles(sections.join(""))
-  expect(files.map(file => file.patch)).toEqual(sections)
+  expect(files.map((file) => file.patch)).toEqual(sections)
   expect(files.map(({ patch: _patch, hunks: _hunks, ...file }) => file)).toEqual([
-    { path: "dir/sp ace é.txt", previousPath: null, status: "modified", additions: 2, deletions: 1, binary: false, mode: "100644", previousMode: null },
-    { path: "new name.ts", previousPath: "old name.ts", status: "renamed", additions: 1, deletions: 1, binary: false, mode: "100644", previousMode: null },
-    { path: "gone.ts", previousPath: null, status: "removed", additions: 0, deletions: 1, binary: false, mode: "100644", previousMode: null },
-    { path: "img.png", previousPath: null, status: "modified", additions: 0, deletions: 0, binary: true, mode: "100644", previousMode: null },
-    { path: "mode.sh", previousPath: null, status: "modified", additions: 0, deletions: 0, binary: false, mode: "100755", previousMode: "100644" },
+    {
+      path: "dir/sp ace é.txt",
+      previousPath: null,
+      status: "modified",
+      additions: 2,
+      deletions: 1,
+      binary: false,
+      mode: "100644",
+      previousMode: null,
+    },
+    {
+      path: "new name.ts",
+      previousPath: "old name.ts",
+      status: "renamed",
+      additions: 1,
+      deletions: 1,
+      binary: false,
+      mode: "100644",
+      previousMode: null,
+    },
+    {
+      path: "gone.ts",
+      previousPath: null,
+      status: "removed",
+      additions: 0,
+      deletions: 1,
+      binary: false,
+      mode: "100644",
+      previousMode: null,
+    },
+    {
+      path: "img.png",
+      previousPath: null,
+      status: "modified",
+      additions: 0,
+      deletions: 0,
+      binary: true,
+      mode: "100644",
+      previousMode: null,
+    },
+    {
+      path: "mode.sh",
+      previousPath: null,
+      status: "modified",
+      additions: 0,
+      deletions: 0,
+      binary: false,
+      mode: "100755",
+      previousMode: "100644",
+    },
     { path: "b", previousPath: "a", status: "copied", additions: 0, deletions: 0, binary: false, mode: null, previousMode: null },
     { path: "empty", previousPath: null, status: "added", additions: 0, deletions: 0, binary: false, mode: "100644", previousMode: null },
   ])
@@ -217,10 +312,18 @@ test("agent patch files keep original sections with Hunk paths and hunk metadata
 test("agent patch parsing rejects unsupported or desynchronized sections", () => {
   const file = "diff --git a/a b/a\n--- a/a\n+++ b/a\n@@ -1 +1 @@\n-x\n+y\n"
   for (const patch of [
-    "diff --cc a\n", `preamble\n${file}`, "diff --git a/a b/a\n", "diff --git a/a b/a\nnot a diff\n",
-    "diff --git a/a b/a\nindex 1111111..2222222 100644\n", "diff --git a/a b/a\n--- a/a\n+++ b/a\n", `${file}\\ invalid marker\n`,
-    `${file}trailing\n`, `${file}\x1b[0m${file}`, "diff --git a/a b/a\n--- a/a\n+++ b/a\n@@ -1,3 +1 @@\n-x\n+y\n",
+    "diff --cc a\n",
+    `preamble\n${file}`,
+    "diff --git a/a b/a\n",
+    "diff --git a/a b/a\nnot a diff\n",
+    "diff --git a/a b/a\nindex 1111111..2222222 100644\n",
+    "diff --git a/a b/a\n--- a/a\n+++ b/a\n",
+    `${file}\\ invalid marker\n`,
+    `${file}trailing\n`,
+    `${file}\x1b[0m${file}`,
+    "diff --git a/a b/a\n--- a/a\n+++ b/a\n@@ -1,3 +1 @@\n-x\n+y\n",
     file + "\n".repeat(MAX_PATCH_LINES),
-  ]) expect(() => parsePatchFiles(patch)).toThrow()
+  ])
+    expect(() => parsePatchFiles(patch)).toThrow()
   expect(parsePatchFiles("")).toEqual([])
 })

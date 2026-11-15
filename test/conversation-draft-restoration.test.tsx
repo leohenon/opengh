@@ -11,7 +11,14 @@ import { Root } from "../src/root"
 import { App } from "../src/ui/app"
 import { createSignal } from "solid-js"
 import type { IssueActionState } from "../src/repository-state"
-import { commitDetailFixture, githubDataFixture, issueCommentsFixture, issueDetailFixture, pullContextFixture, repositoryOperationsFixture } from "./fixtures/github-data"
+import {
+  commitDetailFixture,
+  githubDataFixture,
+  issueCommentsFixture,
+  issueDetailFixture,
+  pullContextFixture,
+  repositoryOperationsFixture,
+} from "./fixtures/github-data"
 import { clickControl } from "./fixtures/mouse"
 import { createTestReviewSession } from "./fixtures/reviews"
 import { waitForText } from "./fixtures/wait"
@@ -22,17 +29,43 @@ function loaders(overrides: Partial<RepositoryLoaders> = {}, canComment = true):
   return {
     metadata: async (name) => ({ ...githubDataFixture.repo, nameWithOwner: name }),
     workCounts: async () => ({ issues: 0, pulls: 0 }),
-    documents: async () => [], document: async () => "", branches: async () => ({ items: [], hasMore: false }),
-    commits: async () => ({ items: [], hasMore: false }), commitCount: async () => 0, commit: async () => commitDetailFixture,
-    issue: async (_repo, number) => ({ ...issueDetailFixture, number, commentCount: 0,
-      permissions: { ...issueDetailFixture.permissions!, comment: canComment } }),
-    issueComments: async () => ({ items: [], hasMore: false }), issueReferences: async () => [],
-    issues: async () => ({ items: [], hasMore: false }), pulls: async () => ({ items: [], hasMore: false }),
-    pull: async (_repo, number) => ({ ...githubDataFixture.pulls.open.value!.items[0]!, number,
-      url: `${githubDataFixture.repo.url}/pull/${number}`, body: "PR description", updatedAt: "2026-01-01T00:00:00Z",
-      baseBranch: "main", headBranch: "feature", additions: 1, deletions: 0, changedFiles: 1, commitCount: 0,
-      commentCount: 0, labels: [], assignees: [], reviewers: [], mergeable: null, permissions: { comment: canComment } }),
-    pullCommits: async () => [], pullContext: async () => pullContextFixture,
+    documents: async () => [],
+    document: async () => "",
+    branches: async () => ({ items: [], hasMore: false }),
+    commits: async () => ({ items: [], hasMore: false }),
+    commitCount: async () => 0,
+    commit: async () => commitDetailFixture,
+    issue: async (_repo, number) => ({
+      ...issueDetailFixture,
+      number,
+      commentCount: 0,
+      permissions: { ...issueDetailFixture.permissions!, comment: canComment },
+    }),
+    issueComments: async () => ({ items: [], hasMore: false }),
+    issueReferences: async () => [],
+    issues: async () => ({ items: [], hasMore: false }),
+    pulls: async () => ({ items: [], hasMore: false }),
+    pull: async (_repo, number) => ({
+      ...githubDataFixture.pulls.open.value!.items[0]!,
+      number,
+      url: `${githubDataFixture.repo.url}/pull/${number}`,
+      body: "PR description",
+      updatedAt: "2026-01-01T00:00:00Z",
+      baseBranch: "main",
+      headBranch: "feature",
+      additions: 1,
+      deletions: 0,
+      changedFiles: 1,
+      commitCount: 0,
+      commentCount: 0,
+      labels: [],
+      assignees: [],
+      reviewers: [],
+      mergeable: null,
+      permissions: { comment: canComment },
+    }),
+    pullCommits: async () => [],
+    pullContext: async () => pullContextFixture,
     runs: async () => ({ items: [], hasMore: false }),
     createIssueComment: async (_repo, _number, body) => ({ ...issueCommentsFixture[0]!, body }),
     ...overrides,
@@ -51,19 +84,39 @@ for (const parent of ["issue", "pull"] as const) {
         const disk = createDiskDraftStore(directory)
         const session = createRepositorySession(loaders({}, !readOnly), disk)
         sessions.push(session)
-        const view = await testRender(() => <Root repositoryArgument={repository} initialDetail={{ kind: parent, number }} cwd="/work"
-          services={{ createRepositorySession: () => session, createPullReviewSession: createTestReviewSession,
-            resolveRepository: async () => repository, resolveLocalRepository: async () => undefined,
-            loadRecentRepositories: async () => [], rememberRepository: async () => {},
-            loadRepositoryTabs: async () => ({}), saveRepositoryTabs: async () => {},
-            loadConfig: async () => ({ ...defaultConfig }), saveConfig: async () => {} }} />, { width: 120, height: 45 })
+        const view = await testRender(
+          () => (
+            <Root
+              repositoryArgument={repository}
+              initialDetail={{ kind: parent, number }}
+              cwd="/work"
+              services={{
+                createRepositorySession: () => session,
+                createPullReviewSession: createTestReviewSession,
+                resolveRepository: async () => repository,
+                resolveLocalRepository: async () => undefined,
+                loadRecentRepositories: async () => [],
+                rememberRepository: async () => {},
+                loadRepositoryTabs: async () => ({}),
+                saveRepositoryTabs: async () => {},
+                loadConfig: async () => ({ ...defaultConfig }),
+                saveConfig: async () => {},
+              }}
+            />
+          ),
+          { width: 120, height: 45 },
+        )
         views.push(view)
-        const settle = async () => { await Bun.sleep(40); await view.flush() }
+        const settle = async () => {
+          await Bun.sleep(40)
+          await view.flush()
+        }
         await settle()
         await waitForText(view, parent === "issue" ? issueDetailFixture.title : githubDataFixture.pulls.open.value!.items[0]!.title)
         return { session, view, disk, settle }
       }
-      const editor = (view: Awaited<ReturnType<typeof testRender>>) => view.renderer.root.findDescendantById(`${parent}-comment-editor`) as TextareaRenderable | undefined
+      const editor = (view: Awaited<ReturnType<typeof testRender>>) =>
+        view.renderer.root.findDescendantById(`${parent}-comment-editor`) as TextareaRenderable | undefined
       try {
         const first = await launch()
         first.view.mockInput.pressKey("c")
@@ -71,8 +124,8 @@ for (const parent of ["issue", "pull"] as const) {
         expect(editor(first.view)?.focused).toBe(true)
         await first.view.mockInput.typeText(body)
         await first.settle()
-        const count = (node: Renderable, id: string): number => Number(node.id === id)
-          + node.getChildren().reduce((total, child) => total + count(child, id), 0)
+        const count = (node: Renderable, id: string): number =>
+          Number(node.id === id) + node.getChildren().reduce((total, child) => total + count(child, id), 0)
         const presentation = (inline: number, expanded: number, saved: number) => {
           expect(count(first.view.renderer.root, `${parent}-comment-editor`)).toBe(inline)
           expect(count(first.view.renderer.root, "issue-comment-writer")).toBe(expanded)
@@ -108,7 +161,7 @@ for (const parent of ["issue", "pull"] as const) {
         }
         expect(first.session.flushDrafts!()).toBe(true)
         expect(first.disk.load(key)?.generation).toBe(generation)
-        expect(readdirSync(directory).filter(file => file.endsWith(".json"))).toHaveLength(1)
+        expect(readdirSync(directory).filter((file) => file.endsWith(".json"))).toHaveLength(1)
         first.view.mockInput.pressEscape()
         await first.settle()
         await waitForText(first.view, "Draft saved · Resume")
@@ -228,7 +281,10 @@ test("passive restoration keeps action slots, dirty edits and publication genera
     expect(reader.commentDraft!(number)).toBe("Newer remote edit")
     expect(reader.flushDrafts!()).toBe(true)
 
-    const replacement = createRepositorySession(loaders({ metadata: async () => ({ ...githubDataFixture.repo, id: githubDataFixture.repo.id! + 1 }) }), disk)
+    const replacement = createRepositorySession(
+      loaders({ metadata: async () => ({ ...githubDataFixture.repo, id: githubDataFixture.repo.id! + 1 }) }),
+      disk,
+    )
     sessions.push(replacement)
     await replacement.load(repository, "detail")
     await replacement.loadIssue(number)
@@ -245,10 +301,13 @@ test("draft read failure does not block details and can recover on refresh", asy
   const key = `${repository.toLowerCase()}@${githubDataFixture.repo.id}#${number}:comment`
   disk.save(key, { generation: "saved", body: "Restored after retry", reason: "completed" }, undefined)
   let failed = true
-  const session = createRepositorySession(loaders(), { ...disk, load: key => {
-    if (failed) throw new Error("Draft unavailable")
-    return disk.load(key)
-  } })
+  const session = createRepositorySession(loaders(), {
+    ...disk,
+    load: (key) => {
+      if (failed) throw new Error("Draft unavailable")
+      return disk.load(key)
+    },
+  })
   try {
     await session.load(repository, "detail")
     await session.loadIssue(number)
@@ -268,14 +327,31 @@ test("draft read failure does not block details and can recover on refresh", asy
 })
 
 test("legacy action state does not expose a close draft as a conversation draft", async () => {
-  const [action, setAction] = createSignal<IssueActionState>({ body: "Close explanation", reason: "completed", operation: { status: "idle" } })
-  const view = await testRender(() => <App data={githubDataFixture} operations={repositoryOperationsFixture}
-    initialNavigation={{ detail: { kind: "issue", number } }}
-    issueDetail={{ number, resource: { status: "ready", value: issueDetailFixture },
-      comments: { status: "ready", value: { items: [], page: 1, hasMore: false } }, references: { status: "ready", value: [] } }}
-    getIssueAction={() => action()} onPrepareIssueAction={() => setAction(current => ({ ...current, body: "Saved comment" }))}
-    onIssueDraftChange={(_number, draft) => setAction(current => ({ ...current, ...draft }))}
-    onSubmitIssueAction={async () => ({})} />, { width: 120, height: 40 })
+  const [action, setAction] = createSignal<IssueActionState>({
+    body: "Close explanation",
+    reason: "completed",
+    operation: { status: "idle" },
+  })
+  const view = await testRender(
+    () => (
+      <App
+        data={githubDataFixture}
+        operations={repositoryOperationsFixture}
+        initialNavigation={{ detail: { kind: "issue", number } }}
+        issueDetail={{
+          number,
+          resource: { status: "ready", value: issueDetailFixture },
+          comments: { status: "ready", value: { items: [], page: 1, hasMore: false } },
+          references: { status: "ready", value: [] },
+        }}
+        getIssueAction={() => action()}
+        onPrepareIssueAction={() => setAction((current) => ({ ...current, body: "Saved comment" }))}
+        onIssueDraftChange={(_number, draft) => setAction((current) => ({ ...current, ...draft }))}
+        onSubmitIssueAction={async () => ({})}
+      />
+    ),
+    { width: 120, height: 40 },
+  )
   try {
     await view.flush()
     expect(!!view.renderer.root.findDescendantById("issue-comment-resume")).toBe(false)
@@ -285,9 +361,11 @@ test("legacy action state does not expose a close draft as a conversation draft"
     view.mockInput.pressEscape()
     await Bun.sleep(40)
     await waitForText(view, "Draft saved · Resume")
-    setAction(current => ({ ...current, body: "Another close explanation" }))
+    setAction((current) => ({ ...current, body: "Another close explanation" }))
     await view.flush()
     await clickControl(view, "issue-comment-resume")
     expect((view.renderer.root.findDescendantById("issue-comment-editor") as TextareaRenderable).plainText).toBe("Saved comment")
-  } finally { view.renderer.destroy() }
+  } finally {
+    view.renderer.destroy()
+  }
 })

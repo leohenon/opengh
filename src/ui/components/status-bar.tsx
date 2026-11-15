@@ -77,16 +77,28 @@ export function StatusBar(props: { kind?: StatusKind; detail?: string; error?: s
       backgroundColor={colors.canvas}
     >
       <Show when={props.error}>
-        {(message) => <text height={1} flexShrink={1} wrapMode="none" fg={colors.red}>× {message()}</text>}
+        {(message) => (
+          <text height={1} flexShrink={1} wrapMode="none" fg={colors.red}>
+            × {message()}
+          </text>
+        )}
       </Show>
       <Show when={!props.error && loadingMessage()}>
         {(message) => (
-          <box width={Math.min(Bun.stringWidth(message()) + 2, Math.max(0, dimensions().width - 4))} height={1} flexShrink={0} overflow="hidden">
+          <box
+            width={Math.min(Bun.stringWidth(message()) + 2, Math.max(0, dimensions().width - 4))}
+            height={1}
+            flexShrink={0}
+            overflow="hidden"
+          >
             <LoadingText text={message()} />
           </box>
         )}
       </Show>
-      <text height={1} wrapMode="none" fg={colors.muted}>{(props.error || loadingMessage()) && hint() ? " · " : ""}{hint()}</text>
+      <text height={1} wrapMode="none" fg={colors.muted}>
+        {(props.error || loadingMessage()) && hint() ? " · " : ""}
+        {hint()}
+      </text>
     </box>
   )
 }

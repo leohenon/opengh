@@ -36,7 +36,10 @@ export function choosePage(
     }
     const onClose = () => finish()
     input.on("keypress", onKey)
-    menu.on("SIGINT", () => { output.write("\n"); finish() })
+    menu.on("SIGINT", () => {
+      output.write("\n")
+      finish()
+    })
     menu.on("close", onClose)
     menu.on("line", (line) => {
       const choice = line.trim()

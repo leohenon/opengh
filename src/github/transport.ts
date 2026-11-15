@@ -38,11 +38,11 @@ function readOnlyGraphQL(query: string) {
 function requestSignal(options?: RequestOptions) {
   return options?.signal && options.budget
     ? AbortSignal.any([options.signal, options.budget.signal])
-    : options?.signal ?? options?.budget?.signal
+    : (options?.signal ?? options?.budget?.signal)
 }
 
 function writeRequest([path, , fields, mutation]: RequestArguments) {
-  const query = path === "graphql" ? fields?.query ?? mutation?.body.query : undefined
+  const query = path === "graphql" ? (fields?.query ?? mutation?.body.query) : undefined
   return query === undefined ? Boolean(fields || mutation) : typeof query !== "string" || !readOnlyGraphQL(query)
 }
 
@@ -50,10 +50,18 @@ function validateEndpoint(path: string) {
   // --hostname does not constrain absolute gh api URLs. Only accept relative
   // endpoints, without path traversal or CLI-option/URL interpretation.
   let route: string
-  try { route = decodeURIComponent(path.split("?")[0]!) } catch { throw new Error("Invalid GitHub API endpoint") }
-  if (!/^[a-z\d]/i.test(path) || /^[a-z][a-z\d+.-]*:/i.test(path)
-    || /[\\\s#\x00-\x1f\x7f]/.test(path) || /[\\\x00-\x1f\x7f]/.test(route)
-    || route.split("/").some((part) => part === "." || part === ".."))
+  try {
+    route = decodeURIComponent(path.split("?")[0]!)
+  } catch {
+    throw new Error("Invalid GitHub API endpoint")
+  }
+  if (
+    !/^[a-z\d]/i.test(path) ||
+    /^[a-z][a-z\d+.-]*:/i.test(path) ||
+    /[\\\s#\x00-\x1f\x7f]/.test(path) ||
+    /[\\\x00-\x1f\x7f]/.test(route) ||
+    route.split("/").some((part) => part === "." || part === "..")
+  )
     throw new Error("Only relative GitHub API endpoints without path traversal are allowed")
 }
 
@@ -87,11 +95,16 @@ async function request(scheduler: GitHubRequestScheduler, ...[path, accept, fiel
   } catch (error) {
     // No child was dispatched. Errors while reading its response below remain
     // ambiguous, even if the same budget or signal caused them.
-    if (write) throw new GitHubRequestNotSentError(error instanceof Error ? error.message : "GitHub request could not be started; no changes were sent.")
+    if (write)
+      throw new GitHubRequestNotSentError(
+        error instanceof Error ? error.message : "GitHub request could not be started; no changes were sent.",
+      )
     throw error
   }
   let finished = false
-  const exited = process.exited.finally(() => { finished = true })
+  const exited = process.exited.finally(() => {
+    finished = true
+  })
   const abort = () => process.kill()
   signal?.addEventListener("abort", abort, { once: true })
   let timedOut = false
@@ -102,8 +115,13 @@ async function request(scheduler: GitHubRequestScheduler, ...[path, accept, fiel
 
   try {
     const [output, error, code] = await Promise.all([
-      readLimited(process.stdout, (options?.maxBytes ?? MAX_RESPONSE_BYTES) + HEADER_ALLOWANCE_BYTES, abort,
-        options?.limitMessage ?? "GitHub response exceeds the viewing limit. Open it on GitHub.", options?.budget),
+      readLimited(
+        process.stdout,
+        (options?.maxBytes ?? MAX_RESPONSE_BYTES) + HEADER_ALLOWANCE_BYTES,
+        abort,
+        options?.limitMessage ?? "GitHub response exceeds the viewing limit. Open it on GitHub.",
+        options?.budget,
+      ),
       readLimited(process.stderr, MAX_DIAGNOSTIC_BYTES, abort, "GitHub diagnostic output exceeds the viewing limit.", options?.budget),
       exited,
     ])
@@ -118,18 +136,31 @@ async function request(scheduler: GitHubRequestScheduler, ...[path, accept, fiel
         const value = JSON.parse(body)
         if (!message && typeof value.message === "string") message = value.message
         if (path === "graphql" && Array.isArray(value.errors)) {
-          const limit = value.errors.find((item: { type?: string; message?: string } | null) =>
-            item?.type === "RATE_LIMITED" || (typeof item?.message === "string" && RATE_LIMIT_MESSAGE.test(item.message)))
-          if (limit) { graphqlLimited = true; message ||= limit.message || "GraphQL rate limit exceeded" }
+          const limit = value.errors.find(
+            (item: { type?: string; message?: string } | null) =>
+              item?.type === "RATE_LIMITED" || (typeof item?.message === "string" && RATE_LIMIT_MESSAGE.test(item.message)),
+          )
+          if (limit) {
+            graphqlLimited = true
+            message ||= limit.message || "GraphQL rate limit exceeded"
+          }
         }
-      } catch { /* Non-JSON API errors still have status/headers and gh stderr. */ }
+      } catch {
+        /* Non-JSON API errors still have status/headers and gh stderr. */
+      }
     }
-    const limited = graphqlLimited || status === 429
-      || ((status === 403 || code !== 0) && (RATE_LIMIT_MESSAGE.test(message)
-        || headers.get("x-ratelimit-remaining") === "0" || headers.has("retry-after")))
+    const limited =
+      graphqlLimited ||
+      status === 429 ||
+      ((status === 403 || code !== 0) &&
+        (RATE_LIMIT_MESSAGE.test(message) || headers.get("x-ratelimit-remaining") === "0" || headers.has("retry-after")))
     scheduler.observe(headers, limited)
     if (code !== 0 || (status !== undefined && status >= 400) || limited)
-      throw new GitHubApiError(path, message || (limited ? "GitHub rate limit exceeded" : `gh api failed (${code})`), limited ? (status === 403 ? 403 : 429) : status)
+      throw new GitHubApiError(
+        path,
+        message || (limited ? "GitHub rate limit exceeded" : `gh api failed (${code})`),
+        limited ? (status === 403 ? 403 : 429) : status,
+      )
     if (Buffer.byteLength(body) > (options?.maxBytes ?? MAX_RESPONSE_BYTES)) {
       abort()
       throw new ResponseLimitError(options?.limitMessage ?? "GitHub response exceeds the viewing limit. Open it on GitHub.")
@@ -147,7 +178,13 @@ async function request(scheduler: GitHubRequestScheduler, ...[path, accept, fiel
   }
 }
 
-async function readLimited(stream: ReadableStream<Uint8Array>, maxBytes: number, kill: () => void, message: string, budget?: RequestBudget) {
+async function readLimited(
+  stream: ReadableStream<Uint8Array>,
+  maxBytes: number,
+  kill: () => void,
+  message: string,
+  budget?: RequestBudget,
+) {
   const reader = stream.getReader()
   const chunks: Uint8Array[] = []
   let size = 0
@@ -179,8 +216,14 @@ function awaitWithAbort<T>(promise: Promise<T>, signal?: AbortSignal): Promise<T
     }
     signal.addEventListener("abort", abort, { once: true })
     promise.then(
-      (value) => { signal.removeEventListener("abort", abort); resolve(value) },
-      (error) => { signal.removeEventListener("abort", abort); reject(error) },
+      (value) => {
+        signal.removeEventListener("abort", abort)
+        resolve(value)
+      },
+      (error) => {
+        signal.removeEventListener("abort", abort)
+        reject(error)
+      },
     )
     if (signal.aborted) abort()
   })
@@ -192,10 +235,14 @@ export function createGitHubTransport(scheduler: GitHubRequestScheduler = github
   type Viewer = { id: number; login: string }
   let initialViewer: Promise<Viewer> | undefined
   async function viewer(load = send, options?: RequestOptions): Promise<Viewer> {
-    const value = JSON.parse(await load("user", undefined, undefined, undefined, {
-      ...options, jq: undefined, maxBytes: MAX_DIAGNOSTIC_BYTES,
-      limitMessage: "GitHub account response exceeds the verification limit.",
-    }))
+    const value = JSON.parse(
+      await load("user", undefined, undefined, undefined, {
+        ...options,
+        jq: undefined,
+        maxBytes: MAX_DIAGNOSTIC_BYTES,
+        limitMessage: "GitHub account response exceeds the verification limit.",
+      }),
+    )
     if (!value || !Number.isSafeInteger(value.id) || value.id <= 0 || typeof value.login !== "string" || !value.login.trim())
       throw new Error("GitHub account could not be verified; no changes were sent.")
     return { id: value.id, login: value.login }
@@ -210,26 +257,41 @@ export function createGitHubTransport(scheduler: GitHubRequestScheduler = github
       signal?.throwIfAborted()
       // Remember the account that loaded this session, not its credentials. A failed
       // initial login remains retryable after authenticating outside the app.
-      initialViewer ??= viewer().catch((error) => { initialViewer = undefined; throw error })
+      initialViewer ??= viewer().catch((error) => {
+        initialViewer = undefined
+        throw error
+      })
       // Cancel this caller's wait, not the shared probe needed by other requests.
       expected = await awaitWithAbort(initialViewer, signal)
     } catch (error) {
-      if (write) throw new GitHubRequestNotSentError(error instanceof Error ? error.message : "GitHub account could not be verified; no changes were sent.")
+      if (write)
+        throw new GitHubRequestNotSentError(
+          error instanceof Error ? error.message : "GitHub account could not be verified; no changes were sent.",
+        )
       throw error
     }
     if (!write) return send(...args)
-    return scheduler.run(path, async () => {
-      // Reserve one slot for the probe and write together: never verify the
-      // account and then leave the write waiting in the request queue.
-      try {
-        const actual = await viewer(direct, options)
-        if (actual.id !== expected.id)
-          throw new Error(`GitHub account changed from @${expected.login} to @${actual.login}. Restart opengh before continuing; no changes were sent.`)
-      } catch (error) {
-        throw new GitHubRequestNotSentError(error instanceof Error ? error.message : "GitHub account could not be verified; no changes were sent.")
-      }
-      return direct(...args)
-    }, signal, true)
+    return scheduler.run(
+      path,
+      async () => {
+        // Reserve one slot for the probe and write together: never verify the
+        // account and then leave the write waiting in the request queue.
+        try {
+          const actual = await viewer(direct, options)
+          if (actual.id !== expected.id)
+            throw new Error(
+              `GitHub account changed from @${expected.login} to @${actual.login}. Restart opengh before continuing; no changes were sent.`,
+            )
+        } catch (error) {
+          throw new GitHubRequestNotSentError(
+            error instanceof Error ? error.message : "GitHub account could not be verified; no changes were sent.",
+          )
+        }
+        return direct(...args)
+      },
+      signal,
+      true,
+    )
   }
 
   return {
@@ -241,7 +303,9 @@ export function createGitHubTransport(scheduler: GitHubRequestScheduler = github
     },
     async graphql<T>(query: string, variables: Record<string, string>, options?: RequestOptions) {
       // Do not expose query variables or mutation bodies in process listings.
-      return JSON.parse(await authenticatedRequest("graphql", undefined, undefined, { method: "POST", body: { query, variables } }, options)) as T
+      return JSON.parse(
+        await authenticatedRequest("graphql", undefined, undefined, { method: "POST", body: { query, variables } }, options),
+      ) as T
     },
     text(path: string, accept?: string, options?: RequestOptions) {
       return authenticatedRequest(path, accept, undefined, undefined, options)
@@ -252,23 +316,35 @@ export function createGitHubTransport(scheduler: GitHubRequestScheduler = github
       if (target.origin !== "https://github.com" || target.username || target.password)
         throw new Error("Only anonymous GitHub.com pages are supported")
       const signal = requestSignal(options)
-      return scheduler.run(url, async () => {
-        signal?.throwIfAborted()
-        options?.budget?.takeRequest()
-        const controller = new AbortController()
-        const response = await fetch(target, {
-          headers: { Accept: "text/html", "User-Agent": "opengh" },
-          redirect: "error",
-          signal: AbortSignal.any([controller.signal, AbortSignal.timeout(10_000), ...(signal ? [signal] : [])]),
-        })
-        const limited = response.status === 429 || (response.status === 403 && response.headers.has("retry-after"))
-        scheduler.observe(response.headers, limited)
-        if (!response.ok) {
-          await response.body?.cancel()
-          throw new GitHubApiError(url, `GitHub page failed (HTTP ${response.status})`)
-        }
-        return response.body ? readLimited(response.body, 2 * 1024 * 1024, () => controller.abort(), "GitHub page exceeds the viewing limit.", options?.budget) : ""
-      }, signal)
+      return scheduler.run(
+        url,
+        async () => {
+          signal?.throwIfAborted()
+          options?.budget?.takeRequest()
+          const controller = new AbortController()
+          const response = await fetch(target, {
+            headers: { Accept: "text/html", "User-Agent": "opengh" },
+            redirect: "error",
+            signal: AbortSignal.any([controller.signal, AbortSignal.timeout(10_000), ...(signal ? [signal] : [])]),
+          })
+          const limited = response.status === 429 || (response.status === 403 && response.headers.has("retry-after"))
+          scheduler.observe(response.headers, limited)
+          if (!response.ok) {
+            await response.body?.cancel()
+            throw new GitHubApiError(url, `GitHub page failed (HTTP ${response.status})`)
+          }
+          return response.body
+            ? readLimited(
+                response.body,
+                2 * 1024 * 1024,
+                () => controller.abort(),
+                "GitHub page exceeds the viewing limit.",
+                options?.budget,
+              )
+            : ""
+        },
+        signal,
+      )
     },
   }
 }

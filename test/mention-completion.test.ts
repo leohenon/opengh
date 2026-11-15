@@ -11,7 +11,22 @@ test("detects prose mentions at the caret and replaces the whole containing user
 })
 
 test("does not complete emails, URLs, escaped mentions, code or invalid/oversized tokens", () => {
-  for (const text of ["user@ali", "person.name@ali", "https://user:@ali", "\\@ali", "    @ali", "`code @ali", "``code ` @ali", "`code\n@ali", "```ts\n@ali", "~~~\n@ali", "@" + "a".repeat(40), "@@ali", "@ali_", "@ali/"]) {
+  for (const text of [
+    "user@ali",
+    "person.name@ali",
+    "https://user:@ali",
+    "\\@ali",
+    "    @ali",
+    "`code @ali",
+    "``code ` @ali",
+    "`code\n@ali",
+    "```ts\n@ali",
+    "~~~\n@ali",
+    "@" + "a".repeat(40),
+    "@@ali",
+    "@ali_",
+    "@ali/",
+  ]) {
     expect(detectMention(text, text.length)).toBeUndefined()
   }
   expect(detectMention("`code` @ali", 11)?.query).toBe("ali")
@@ -25,7 +40,7 @@ test("does not complete emails, URLs, escaped mentions, code or invalid/oversize
 
 test("maps UTF-16 cursor indices using native grapheme widths, tabs and newline offsets", () => {
   const text = "界\t👩‍💻 @ali\nsecond @bob"
-  const measure = (value: string) => value === "\t" ? 4 : Bun.stringWidth(value)
+  const measure = (value: string) => (value === "\t" ? 4 : Bun.stringWidth(value))
   expect(mentionCursorIndex(text, 0, 13, measure)).toBe(text.indexOf("\n"))
   expect(mentionCursorIndex(text, 1, 11, measure)).toBe(text.length)
   expect(mentionCursorIndex(text, 0, 3, measure)).toBeUndefined()
@@ -34,9 +49,19 @@ test("maps UTF-16 cursor indices using native grapheme widths, tabs and newline 
 })
 
 test("prioritizes matching participants, deduplicates safely and bounds remote suggestions", () => {
-  expect(mergeMentionUsers(["Alice", "alex", "bob", "alice", "bad name"], ["ALICE", "albert", "jane"], "al"))
-    .toEqual(["Alice", "alex", "albert", "jane"])
-  expect(mergeMentionUsers([], Array.from({ length: 40 }, (_, i) => `user${i}`), "")).toHaveLength(30)
+  expect(mergeMentionUsers(["Alice", "alex", "bob", "alice", "bad name"], ["ALICE", "albert", "jane"], "al")).toEqual([
+    "Alice",
+    "alex",
+    "albert",
+    "jane",
+  ])
+  expect(
+    mergeMentionUsers(
+      [],
+      Array.from({ length: 40 }, (_, i) => `user${i}`),
+      "",
+    ),
+  ).toHaveLength(30)
   expect(mergeMentionUsers(["dependabot[bot]", "-bad"], [], "")).toEqual(["dependabot[bot]"])
 })
 

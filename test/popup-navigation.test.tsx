@@ -8,46 +8,63 @@ import { ReactionPicker } from "../src/ui/components/reaction-picker"
 
 test("popups have no Back buttons and retain outside-click dismissal", async () => {
   const [screen, setScreen] = createSignal("help")
-  const view = await testRender(() => (
-    <Switch>
-      <Match when={screen() === "help"}>
-        <Help view="diff" onClose={() => setScreen("settings")} />
-      </Match>
-      <Match when={screen() === "settings"}>
-        <Settings config={defaultConfig} onChange={async () => {}} onClose={() => setScreen("reactions")} />
-      </Match>
-      <Match when={screen() === "reactions"}>
-        <ReactionPicker message={{ target: { kind: "issue", number: 1 }, state: {} }}
-          action={() => ({ operation: { status: "idle" } })} showScrollbar={false}
-          onAdd={() => {}} onClose={() => setScreen("done")} />
-      </Match>
-      <Match when={screen() === "done"}><text>Returned</text></Match>
-    </Switch>
-  ), { width: 60, height: 14 })
+  const view = await testRender(
+    () => (
+      <Switch>
+        <Match when={screen() === "help"}>
+          <Help view="diff" onClose={() => setScreen("settings")} />
+        </Match>
+        <Match when={screen() === "settings"}>
+          <Settings config={defaultConfig} onChange={async () => {}} onClose={() => setScreen("reactions")} />
+        </Match>
+        <Match when={screen() === "reactions"}>
+          <ReactionPicker
+            message={{ target: { kind: "issue", number: 1 }, state: {} }}
+            action={() => ({ operation: { status: "idle" } })}
+            showScrollbar={false}
+            onAdd={() => {}}
+            onClose={() => setScreen("done")}
+          />
+        </Match>
+        <Match when={screen() === "done"}>
+          <text>Returned</text>
+        </Match>
+      </Switch>
+    ),
+    { width: 60, height: 14 },
+  )
   try {
     await view.flush()
     expect(view.captureCharFrame()).toContain("close diff")
     expect(view.renderer.root.findDescendantById("help-back")).toBeUndefined()
-    await view.mockMouse.click(0, 0); await view.flush()
+    await view.mockMouse.click(0, 0)
+    await view.flush()
     expect(view.captureCharFrame()).toContain("Settings")
     expect(view.renderer.root.findDescendantById("settings-close")).toBeUndefined()
     expect(view.captureCharFrame()).not.toContain("Close")
     // Narrow Settings is fullscreen: its top-left corner is inside, not a backdrop.
-    await view.mockMouse.click(0, 0); await view.flush()
+    await view.mockMouse.click(0, 0)
+    await view.flush()
     expect(screen()).toBe("settings")
     expect(view.captureCharFrame()).toContain("Settings")
     // At the split-layout breakpoint Settings has a real outside-click target.
-    view.resize(120, 40); await view.flush()
+    view.resize(120, 40)
+    await view.flush()
     const lines = view.captureCharFrame().split("\n")
     const titleRow = lines.findIndex((line) => line.includes("Settings"))
     expect(titleRow).toBeGreaterThan(-1)
-    await view.mockMouse.click(lines[titleRow]!.indexOf("Settings"), titleRow); await view.flush()
+    await view.mockMouse.click(lines[titleRow]!.indexOf("Settings"), titleRow)
+    await view.flush()
     expect(screen()).toBe("settings")
-    await view.mockMouse.click(0, 0); await view.flush()
+    await view.mockMouse.click(0, 0)
+    await view.flush()
     expect(screen()).toBe("reactions")
     expect(view.captureCharFrame()).toContain("Reactions")
     expect(view.renderer.root.findDescendantById("reaction-picker-back")).toBeUndefined()
-    await view.mockMouse.click(0, 0); await view.flush()
+    await view.mockMouse.click(0, 0)
+    await view.flush()
     expect(view.captureCharFrame()).toContain("Returned")
-  } finally { view.renderer.destroy() }
+  } finally {
+    view.renderer.destroy()
+  }
 })

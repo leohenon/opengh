@@ -4,7 +4,8 @@ import { referenceLinkChunks, repositoryUrlFromCommitUrl } from "../src/ui/refer
 const repositoryUrl = "https://github.com/owner/repo"
 
 test("plain inline chunks retain source text and independent reference targets", () => {
-  const text = "Fix #42 with abc1234 and other/project@deadbee; thanks @octocat. See [guide](https://example.com/docs) or https://example.com/path(foo)."
+  const text =
+    "Fix #42 with abc1234 and other/project@deadbee; thanks @octocat. See [guide](https://example.com/docs) or https://example.com/path(foo)."
   const chunks = referenceLinkChunks(text, repositoryUrl)
   expect(chunks.map((chunk) => chunk.text).join("")).toBe(text)
   expect(chunks.filter((chunk) => chunk.href)).toEqual([
@@ -19,7 +20,9 @@ test("plain inline chunks retain source text and independent reference targets",
 })
 
 test("strict commit boundaries, code, comments and emails are not references", () => {
-  const text = "deadbee 1234567 abc123 abc1234z xabc1234 /abc1234 abc1234_name abc1234.txt name@octocat.com @bad--login `abc1234` ```text\nabc1234 `@octocat`\n``` <!-- abc1234 @octocat --> " + "a".repeat(41)
+  const text =
+    "deadbee 1234567 abc123 abc1234z xabc1234 /abc1234 abc1234_name abc1234.txt name@octocat.com @bad--login `abc1234` ```text\nabc1234 `@octocat`\n``` <!-- abc1234 @octocat --> " +
+    "a".repeat(41)
   const chunks = referenceLinkChunks(text, repositoryUrl)
   expect(chunks.map((chunk) => chunk.text).join("")).toBe(text)
   expect(chunks.some((chunk) => chunk.href)).toBe(false)
@@ -33,7 +36,12 @@ test("strict commit boundaries, code, comments and emails are not references", (
 test("timeline repository context is inferred only from GitHub commit entity URLs", () => {
   expect(repositoryUrlFromCommitUrl(`${repositoryUrl}/commit/abc1234`)).toBe(repositoryUrl)
   expect(repositoryUrlFromCommitUrl(`${repositoryUrl}/pull/42/commits/abc1234`)).toBe(repositoryUrl)
-  for (const url of ["https://example.com/owner/repo/commit/abc1234", `${repositoryUrl}/pull/42`, `${repositoryUrl}/commit/not-a-sha`, "javascript:alert(1)"]) {
+  for (const url of [
+    "https://example.com/owner/repo/commit/abc1234",
+    `${repositoryUrl}/pull/42`,
+    `${repositoryUrl}/commit/not-a-sha`,
+    "javascript:alert(1)",
+  ]) {
     expect(repositoryUrlFromCommitUrl(url)).toBeUndefined()
   }
 })

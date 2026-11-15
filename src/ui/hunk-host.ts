@@ -4,10 +4,16 @@ import { createElement, Fragment, useLayoutEffect, useSyncExternalStore } from "
 import { configureHunkHighlightWorker, HunkDiffBody, type HunkDiffBodyProps } from "hunkdiff/opentui"
 
 type Pane = { host: BoxRenderable; props: HunkDiffBodyProps; id: number; onCommit?: () => void }
-type Bridge = { mount(host: BoxRenderable, props: HunkDiffBodyProps, onCommit?: () => void): {
-  update(props: HunkDiffBodyProps): void
-  dispose(): void
-} }
+type Bridge = {
+  mount(
+    host: BoxRenderable,
+    props: HunkDiffBodyProps,
+    onCommit?: () => void,
+  ): {
+    update(props: HunkDiffBodyProps): void
+    dispose(): void
+  }
+}
 const bridges = new WeakMap<CliRenderer, Bridge>()
 
 /** Bootstrap before Solid attaches ANY root children. React owns only portals thereafter.
@@ -24,10 +30,17 @@ export function initializeHunk(renderer: CliRenderer, highlightWorker = new URL(
   let panes: Pane[] = []
   let nextId = 0
   const listeners = new Set<() => void>()
-  const subscribe = (listener: () => void) => { listeners.add(listener); return () => { listeners.delete(listener) } }
+  const subscribe = (listener: () => void) => {
+    listeners.add(listener)
+    return () => {
+      listeners.delete(listener)
+    }
+  }
   const snapshot = () => panes
   function PanePortal({ value }: { value: Pane }) {
-    useLayoutEffect(() => { value.onCommit?.() }, [value])
+    useLayoutEffect(() => {
+      value.onCommit?.()
+    }, [value])
     return createPortal(createElement(HunkDiffBody, value.props), value.host, null, String(value.id))
   }
   function Portals() {
@@ -37,8 +50,14 @@ export function initializeHunk(renderer: CliRenderer, highlightWorker = new URL(
   const root = createRoot(renderer)
   flushSync(() => root.render(createElement(Portals)))
   const publish = (value: Pane[]) => {
-    if (renderer.isDestroyed) { panes = []; return }
-    flushSync(() => { panes = value; for (const listener of listeners) listener() })
+    if (renderer.isDestroyed) {
+      panes = []
+      return
+    }
+    flushSync(() => {
+      panes = value
+      for (const listener of listeners) listener()
+    })
   }
   renderer.once(CliRenderEvents.DESTROY, () => {
     // React's root already registers its own renderer-destroy cleanup.
@@ -55,7 +74,7 @@ export function initializeHunk(renderer: CliRenderer, highlightWorker = new URL(
       return {
         update(props) {
           if (!disposed && !host.isDestroyed && panes.some((pane) => pane.id === id))
-            publish(panes.map((pane) => pane.id === id ? { ...pane, props } : pane))
+            publish(panes.map((pane) => (pane.id === id ? { ...pane, props } : pane)))
         },
         dispose() {
           if (disposed) return

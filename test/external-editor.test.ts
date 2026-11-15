@@ -7,8 +7,12 @@ test("external editing imports saved Markdown and restores the terminal on failu
   const calls: string[] = []
   const renderer = {
     isDestroyed: false,
-    suspend: async () => { calls.push("suspend") },
-    resume: async () => { calls.push("resume") },
+    suspend: async () => {
+      calls.push("suspend")
+    },
+    resume: async () => {
+      calls.push("resume")
+    },
   } as unknown as CliRenderer
   try {
     process.env.VISUAL = "printf '# Edited\\n' >"

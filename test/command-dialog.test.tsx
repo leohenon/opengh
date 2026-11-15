@@ -15,24 +15,48 @@ test("command overlay isolates destination input and retains logs; Ctrl+C cancel
   let cancel: (() => void) | undefined
   let complete!: (result: CommandResult) => void
   let calls = 0
-  const view = await testRender(() => {
-    // Mirrors Root's earlier listener and its command cancellation coordination.
-    useKeyboard((event) => {
-      if (event.ctrl && event.name === "c") { event.stopPropagation(); if (cancel) cancel(); else quit++ }
-    })
-    return <App
-      data={githubDataFixture} operations={repositoryOperationsFixture} cwd="/tmp"
-      config={{ ...defaultConfig, showStatusBarHints: hints() }}
-      onQuit={() => quit++} onRefresh={() => refresh++}
-      onCommandCaptureCancel={(callback) => { cancel = callback }}
-      onCopyToClipboard={async (output) => { copies = output; return true }}
-      onRunCommand={async (_spec, output) => {
-        calls++
-        output("stdout\nstderr\rprogress\n")
-        return { cancel: () => { complete({ exitCode: 143, cancelled: true }) }, result: new Promise((done) => { complete = done }) }
-      }}
-    />
-  }, { width: 100, height: 32, exitOnCtrlC: false })
+  const view = await testRender(
+    () => {
+      // Mirrors Root's earlier listener and its command cancellation coordination.
+      useKeyboard((event) => {
+        if (event.ctrl && event.name === "c") {
+          event.stopPropagation()
+          if (cancel) cancel()
+          else quit++
+        }
+      })
+      return (
+        <App
+          data={githubDataFixture}
+          operations={repositoryOperationsFixture}
+          cwd="/tmp"
+          config={{ ...defaultConfig, showStatusBarHints: hints() }}
+          onQuit={() => quit++}
+          onRefresh={() => refresh++}
+          onCommandCaptureCancel={(callback) => {
+            cancel = callback
+          }}
+          onCopyToClipboard={async (output) => {
+            copies = output
+            return true
+          }}
+          onRunCommand={async (_spec, output) => {
+            calls++
+            output("stdout\nstderr\rprogress\n")
+            return {
+              cancel: () => {
+                complete({ exitCode: 143, cancelled: true })
+              },
+              result: new Promise((done) => {
+                complete = done
+              }),
+            }
+          }}
+        />
+      )
+    },
+    { width: 100, height: 32, exitOnCtrlC: false },
+  )
   try {
     await view.flush()
     view.mockInput.pressKey("x")
@@ -81,7 +105,8 @@ test("command overlay isolates destination input and retains logs; Ctrl+C cancel
     expect(view.renderer.root.findDescendantById("command-close")).toBeUndefined()
     expect(view.captureCharFrame()).not.toContain("Copy output")
     expect(view.captureCharFrame()).not.toContain("ctrl+c cancel")
-    await view.mockMouse.click(0, 0); await view.flush()
+    await view.mockMouse.click(0, 0)
+    await view.flush()
     expect(view.captureCharFrame()).toContain("Running")
     await view.mockMouse.click(0, 0)
     await view.flush()
@@ -107,7 +132,8 @@ test("command overlay isolates destination input and retains logs; Ctrl+C cancel
     view.mockInput.pressKey("y")
     await view.flush()
     expect(copies).toBe("stdout\nstderr\nprogress\n")
-    await view.mockMouse.click(0, 0); await view.flush()
+    await view.mockMouse.click(0, 0)
+    await view.flush()
     await Bun.sleep(40)
     await view.flush()
     expect(cancel).toBeUndefined()
@@ -118,6 +144,9 @@ test("command overlay isolates destination input and retains logs; Ctrl+C cancel
     await clickControl(view, "command-cancel")
     expect(view.captureCharFrame()).toContain("Cancelled (exit 143)")
     expect(quit).toBe(0)
-    await view.mockMouse.click(0, 0); await view.flush()
-  } finally { view.renderer.destroy() }
+    await view.mockMouse.click(0, 0)
+    await view.flush()
+  } finally {
+    view.renderer.destroy()
+  }
 })

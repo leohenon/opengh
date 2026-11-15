@@ -18,8 +18,13 @@ export function referencedItems(
 ): IssueLinkReference[] {
   const latest = new Map<string, IssueLinkReference>()
   for (const reference of references) {
-    if (reference.kind !== "commit" && currentIssue
-      && reference.repository.toLowerCase() === currentIssue.repository.toLowerCase() && reference.number === currentIssue.number) continue
+    if (
+      reference.kind !== "commit" &&
+      currentIssue &&
+      reference.repository.toLowerCase() === currentIssue.repository.toLowerCase() &&
+      reference.number === currentIssue.number
+    )
+      continue
     const key = referenceKey(reference)
     const previous = latest.get(key)
     if (!previous || Date.parse(reference.createdAt) > Date.parse(previous.createdAt)) latest.set(key, reference)
@@ -32,8 +37,13 @@ export function referencedPulls(references: readonly IssueReference[]): IssuePul
 }
 
 export function pullRequestIcon(pull: Pick<PullRequestSummary, "state" | "merged" | "draft">, icons: IconSet = unicodeIcons) {
-  return pull.merged ? icons.pullRequest.merged : pull.state === "closed" ? icons.pullRequest.closed
-    : pull.draft ? icons.pullRequest.draft : icons.pullRequest.open
+  return pull.merged
+    ? icons.pullRequest.merged
+    : pull.state === "closed"
+      ? icons.pullRequest.closed
+      : pull.draft
+        ? icons.pullRequest.draft
+        : icons.pullRequest.open
 }
 
 export function issueIcon(state: ListState, icons: IconSet = unicodeIcons) {

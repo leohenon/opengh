@@ -28,16 +28,32 @@ const patch = `diff --git a/message.ts b/message.ts
  const after = 3
 `
 const thread: PullReviewThread = {
-  kind: "review-thread", id: "thread", path: "message.ts", line: 2, diffSide: "RIGHT",
-  isResolved: true, isOutdated: false,
-  comments: [{ id: "comment", author: "alice", authorAssociation: "MEMBER", body: "Posted discussion body", createdAt: new Date(Date.now() - 240_000).toISOString(), updatedAt: "", url: "" },
-    { id: "reply", author: "bob", authorAssociation: "MEMBER", body: "A reply in the same thread", createdAt: "", updatedAt: "", url: "" }],
+  kind: "review-thread",
+  id: "thread",
+  path: "message.ts",
+  line: 2,
+  diffSide: "RIGHT",
+  isResolved: true,
+  isOutdated: false,
+  comments: [
+    {
+      id: "comment",
+      author: "alice",
+      authorAssociation: "MEMBER",
+      body: "Posted discussion body",
+      createdAt: new Date(Date.now() - 240_000).toISOString(),
+      updatedAt: "",
+      url: "",
+    },
+    { id: "reply", author: "bob", authorAssociation: "MEMBER", body: "A reply in the same thread", createdAt: "", updatedAt: "", url: "" },
+  ],
 }
 
 test("posted threads expand real Hunk rows, survive highlighting/layout changes, and never become source anchors", async () => {
   const setup = await createTestRenderer({ width: 110, height: 32 })
   initializeHunk(setup.renderer)
-  const [threads, setThreads] = createSignal<readonly PullReviewThread[]>([thread,
+  const [threads, setThreads] = createSignal<readonly PullReviewThread[]>([
+    thread,
     { ...thread, id: "unknown", diffSide: undefined, comments: [{ ...thread.comments[0]!, body: "Unknown side discussion" }] },
     { ...thread, id: "outdated", isOutdated: true, comments: [{ ...thread.comments[0]!, body: "Old discussion" }] },
   ])
@@ -46,11 +62,33 @@ test("posted threads expand real Hunk rows, survive highlighting/layout changes,
   const [markdownStyle, setMarkdownStyle] = createSignal<"rich" | "minimal">("rich")
   const [content, setContent] = createSignal(patch)
   let menu: ContextMenuItem[] = []
-  await render(() => <IconProvider style={iconStyle()}><MarkdownProvider style={markdownStyle()}><DiffScreen target={{ kind: "pull", number: 1 }}
-    resource={{ status: "ready", value: { kind: "patch", patch: content() } }} interactive showScrollbar={false} onLoadFiles={() => {}}
-    threads={threads()} onContextMenu={(_, items) => { menu = items }}
-    review={writable() ? { headSha: "head", comments: [], onComment: () => {}, onOpenReview: () => {} } : undefined} /></MarkdownProvider></IconProvider>, setup.renderer)
-  const settle = async () => { await Bun.sleep(40); await setup.flush(); await setup.renderer.idle(); await setup.flush() }
+  await render(
+    () => (
+      <IconProvider style={iconStyle()}>
+        <MarkdownProvider style={markdownStyle()}>
+          <DiffScreen
+            target={{ kind: "pull", number: 1 }}
+            resource={{ status: "ready", value: { kind: "patch", patch: content() } }}
+            interactive
+            showScrollbar={false}
+            onLoadFiles={() => {}}
+            threads={threads()}
+            onContextMenu={(_, items) => {
+              menu = items
+            }}
+            review={writable() ? { headSha: "head", comments: [], onComment: () => {}, onOpenReview: () => {} } : undefined}
+          />
+        </MarkdownProvider>
+      </IconProvider>
+    ),
+    setup.renderer,
+  )
+  const settle = async () => {
+    await Bun.sleep(40)
+    await setup.flush()
+    await setup.renderer.idle()
+    await setup.flush()
+  }
   const file = parseDiff({ kind: "patch", patch }).files[0]!.body!
   const assertPlacement = (layout: "split" | "unified") => {
     const rows = reviewRows(file, layout)
@@ -81,8 +119,8 @@ test("posted threads expand real Hunk rows, survive highlighting/layout changes,
     const frame = setup.captureCharFrame()
 
     expect(frame.match(/Posted discussion body/g)).toHaveLength(1)
-    expect(frame.indexOf("Posted discussion body")).toBeGreaterThan(frame.indexOf('const changed'))
-    expect(frame.indexOf("Posted discussion body")).toBeLessThan(frame.indexOf('const after'))
+    expect(frame.indexOf("Posted discussion body")).toBeGreaterThan(frame.indexOf("const changed"))
+    expect(frame.indexOf("Posted discussion body")).toBeLessThan(frame.indexOf("const after"))
     expect(frame).toContain("╭─ resolved ─")
     expect(frame).toContain(iconStyle() === "unicode" ? unicodeIcons.comment : nerdIcons.comment)
     expect(frame).toContain("(4m ago)")
@@ -96,7 +134,8 @@ test("posted threads expand real Hunk rows, survive highlighting/layout changes,
     await settle()
     const bodyDeadline = Date.now() + 5000
     while (!setup.captureCharFrame().includes("Posted discussion body") && Date.now() < bodyDeadline) {
-      await Bun.sleep(20); await settle()
+      await Bun.sleep(20)
+      await settle()
     }
     assertPlacement("split") // No writable review prop is needed to read comments.
     setIconStyle("nerd")
@@ -104,13 +143,21 @@ test("posted threads expand real Hunk rows, survive highlighting/layout changes,
     assertPlacement("split")
     // Wait for real asynchronous syntax highlighting, then verify appended children stayed in order.
     const highlighted = () => {
-      const line = setup.captureSpans().lines.find((line) => line.spans.map((span) => span.text).join("").includes("const changed"))
+      const line = setup.captureSpans().lines.find((line) =>
+        line.spans
+          .map((span) => span.text)
+          .join("")
+          .includes("const changed"),
+      )
       const keyword = line?.spans.find((span) => span.text.includes("const"))?.fg
       const literal = line?.spans.find((span) => span.text.includes('"'))?.fg
       return !!keyword && !!literal && !keyword.equals(literal)
     }
     const deadline = Date.now() + 5000
-    while (!highlighted() && Date.now() < deadline) { await Bun.sleep(20); await settle() }
+    while (!highlighted() && Date.now() < deadline) {
+      await Bun.sleep(20)
+      await settle()
+    }
     expect(highlighted()).toBe(true)
     assertPlacement("split")
     setWritable(true)
@@ -152,8 +199,12 @@ test("posted threads expand real Hunk rows, survive highlighting/layout changes,
     expect(setup.renderer.root.findDescendantById("diff-comment-card:thread:divider:1")).toBeDefined()
     setThreads([{ ...thread, comments: [{ ...thread.comments[0]!, body: "**Formatted feedback**\n\n```suggestion\nreturn true\n```" }] }])
     const markdownDeadline = Date.now() + 5000
-    while ((!setup.captureCharFrame().includes("Formatted feedback") || setup.captureCharFrame().includes("```")) && Date.now() < markdownDeadline) {
-      await Bun.sleep(20); await settle()
+    while (
+      (!setup.captureCharFrame().includes("Formatted feedback") || setup.captureCharFrame().includes("```")) &&
+      Date.now() < markdownDeadline
+    ) {
+      await Bun.sleep(20)
+      await settle()
     }
     expect(setup.captureCharFrame()).toContain("Formatted feedback")
     expect(setup.captureCharFrame()).toContain("return true")
@@ -163,7 +214,10 @@ test("posted threads expand real Hunk rows, survive highlighting/layout changes,
     await settle()
     expect(setup.captureCharFrame()).toContain("Formatted feedback")
     expect(setup.captureCharFrame()).not.toContain("```")
-  } finally { setup.renderer.destroy(); await setup.renderer.closed }
+  } finally {
+    setup.renderer.destroy()
+    await setup.renderer.closed
+  }
 }, 10000)
 
 test("z collapses diff threads from either pane, retains summaries across files/layouts, and respects overlays/remapping", async () => {
@@ -172,21 +226,56 @@ test("z collapses diff threads from either pane, retains summaries across files/
   const target = { kind: "pull", number: 1 } as const
   const loading = { status: "loading", phase: "load" } as const
   const [config, setConfig] = createSignal({ ...defaultConfig, showStatusBarHints: true })
-  const other = { ...thread, id: "other", path: "other.ts", isResolved: false,
-    comments: [{ ...thread.comments[0]!, body: "Other file discussion" }] }
-  const threads = [thread, other,
-    { ...thread, id: "unknown", diffSide: undefined },
-    { ...thread, id: "outdated", isOutdated: true },
-  ]
-  await render(() => <App config={config()} data={githubDataFixture} operations={repositoryOperationsFixture}
-    initialNavigation={{ page: "pulls", diff: target }}
-    diffs={{ pull: { target, resource: { status: "ready", value: {
-      kind: "patch", patch: patch + patch.replaceAll("message.ts", "other.ts"), headSha: pullContextFixture.readiness.headSha,
-    } } } }}
-    pullDetail={{ number: 1, resource: loading, comments: loading, references: loading, commits: loading,
-      context: { status: "ready", value: { ...pullContextFixture, threads } } }} />, setup.renderer)
-  const settle = async () => { await Bun.sleep(40); await setup.flush(); await setup.renderer.idle(); await setup.flush() }
-  const key = async (value: string) => { setup.mockInput.pressKey(value); await settle() }
+  const other = {
+    ...thread,
+    id: "other",
+    path: "other.ts",
+    isResolved: false,
+    comments: [{ ...thread.comments[0]!, body: "Other file discussion" }],
+  }
+  const threads = [thread, other, { ...thread, id: "unknown", diffSide: undefined }, { ...thread, id: "outdated", isOutdated: true }]
+  await render(
+    () => (
+      <App
+        config={config()}
+        data={githubDataFixture}
+        operations={repositoryOperationsFixture}
+        initialNavigation={{ page: "pulls", diff: target }}
+        diffs={{
+          pull: {
+            target,
+            resource: {
+              status: "ready",
+              value: {
+                kind: "patch",
+                patch: patch + patch.replaceAll("message.ts", "other.ts"),
+                headSha: pullContextFixture.readiness.headSha,
+              },
+            },
+          },
+        }}
+        pullDetail={{
+          number: 1,
+          resource: loading,
+          comments: loading,
+          references: loading,
+          commits: loading,
+          context: { status: "ready", value: { ...pullContextFixture, threads } },
+        }}
+      />
+    ),
+    setup.renderer,
+  )
+  const settle = async () => {
+    await Bun.sleep(40)
+    await setup.flush()
+    await setup.renderer.idle()
+    await setup.flush()
+  }
+  const key = async (value: string) => {
+    setup.mockInput.pressKey(value)
+    await settle()
+  }
   const card = (id: string) => setup.renderer.root.findDescendantById(`diff-comment-card:${id}`)!
   const file = parseDiff({ kind: "patch", patch }).files[0]!.body!
   const rowId = (layout: "split" | "unified") => reviewRows(file, layout).find((row) => row.right?.line === 2)!.id
@@ -249,17 +338,36 @@ test("z collapses diff threads from either pane, retains summaries across files/
     expect(frame).toContain("Posted discussion body")
     expect(frame).toContain("A reply in the same thread")
     expect(frame).toContain("f2 collapse")
-  } finally { setup.renderer.destroy(); await setup.renderer.closed }
+  } finally {
+    setup.renderer.destroy()
+    await setup.renderer.closed
+  }
 }, 10000)
 
 test("wide split sides hold their own cards and composer, aligned like full-width cards elsewhere", async () => {
   const setup = await createTestRenderer({ width: 200, height: 36 })
   initializeHunk(setup.renderer)
-  await render(() => <DiffScreen target={{ kind: "pull", number: 1 }} threads={[thread, { ...thread, id: "left", diffSide: "LEFT" }]}
-    resource={{ status: "ready", value: { kind: "patch", patch } }} interactive showScrollbar={false} onLoadFiles={() => {}}
-    draft={{ anchor: { path: "message.ts", side: "RIGHT", line: 3 }, body: "" }}
-    review={{ headSha: "head", comments: [], onComment: () => {}, onOpenReview: () => {} }} />, setup.renderer)
-  const settle = async () => { await Bun.sleep(40); await setup.flush(); await setup.renderer.idle(); await setup.flush() }
+  await render(
+    () => (
+      <DiffScreen
+        target={{ kind: "pull", number: 1 }}
+        threads={[thread, { ...thread, id: "left", diffSide: "LEFT" }]}
+        resource={{ status: "ready", value: { kind: "patch", patch } }}
+        interactive
+        showScrollbar={false}
+        onLoadFiles={() => {}}
+        draft={{ anchor: { path: "message.ts", side: "RIGHT", line: 3 }, body: "" }}
+        review={{ headSha: "head", comments: [], onComment: () => {}, onOpenReview: () => {} }}
+      />
+    ),
+    setup.renderer,
+  )
+  const settle = async () => {
+    await Bun.sleep(40)
+    await setup.flush()
+    await setup.renderer.idle()
+    await setup.flush()
+  }
   const file = parseDiff({ kind: "patch", patch }).files[0]!.body!
   const card = (id: string) => setup.renderer.root.findDescendantById(id)!
   const assertBoxes = (layout: "split" | "unified", docked: boolean) => {
@@ -268,7 +376,11 @@ test("wide split sides hold their own cards and composer, aligned like full-widt
     const full = { x: row.x + 4, width: Math.min(100, row.width - 4) }
     const right = docked ? { x: row.x + boundary + 4, width: Math.min(100, row.width - boundary - 4) } : full
     const left = docked ? { x: row.x + 4, width: Math.min(100, boundary - 5) } : full
-    for (const [id, expected] of [["diff-comment-card:thread", right], ["diff-comment-card:left", left], ["inline-comment-composer-card", right]] as const)
+    for (const [id, expected] of [
+      ["diff-comment-card:thread", right],
+      ["diff-comment-card:left", left],
+      ["inline-comment-composer-card", right],
+    ] as const)
       expect({ id, x: card(id).x, width: card(id).width }).toEqual({ id, ...expected })
   }
   try {
@@ -283,5 +395,8 @@ test("wide split sides hold their own cards and composer, aligned like full-widt
     setup.resize(140, 36)
     await settle()
     assertBoxes("split", false) // Narrower sides would wrap comments heavily.
-  } finally { setup.renderer.destroy(); await setup.renderer.closed }
+  } finally {
+    setup.renderer.destroy()
+    await setup.renderer.closed
+  }
 })

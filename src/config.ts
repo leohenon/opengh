@@ -79,30 +79,28 @@ function normalizeConfig(value: unknown): Config {
   }
   const input = value as Record<string, unknown>
   return {
-    showScrollbars: typeof input.showScrollbars === "boolean"
-      ? input.showScrollbars
-      : defaultConfig.showScrollbars,
+    showScrollbars: typeof input.showScrollbars === "boolean" ? input.showScrollbars : defaultConfig.showScrollbars,
     theme: input.theme === "github-light" ? "github" : isThemeName(input.theme) ? input.theme : defaultConfig.theme,
-    colorMode: input.colorMode === "system" || input.colorMode === "dark" || input.colorMode === "light"
-      ? input.colorMode
-      : input.theme === "github-light" ? "light" : defaultConfig.colorMode,
+    colorMode:
+      input.colorMode === "system" || input.colorMode === "dark" || input.colorMode === "light"
+        ? input.colorMode
+        : input.theme === "github-light"
+          ? "light"
+          : defaultConfig.colorMode,
     reducedMotion: typeof input.reducedMotion === "boolean" ? input.reducedMotion : defaultConfig.reducedMotion,
     markdownStyle: input.markdownStyle === "rich" || input.markdownStyle === "minimal" ? input.markdownStyle : defaultConfig.markdownStyle,
-    detailLayout: input.detailLayout === "centered" || input.detailLayout === "wide"
-      ? input.detailLayout
-      : defaultConfig.detailLayout,
-    detailsPlacement: input.detailsPlacement === "auto" || input.detailsPlacement === "inline"
-      ? input.detailsPlacement
-      : defaultConfig.detailsPlacement,
-    diffLayout: input.diffLayout === "auto" || input.diffLayout === "split" || input.diffLayout === "unified"
-      ? input.diffLayout
-      : defaultConfig.diffLayout,
+    detailLayout: input.detailLayout === "centered" || input.detailLayout === "wide" ? input.detailLayout : defaultConfig.detailLayout,
+    detailsPlacement:
+      input.detailsPlacement === "auto" || input.detailsPlacement === "inline" ? input.detailsPlacement : defaultConfig.detailsPlacement,
+    diffLayout:
+      input.diffLayout === "auto" || input.diffLayout === "split" || input.diffLayout === "unified"
+        ? input.diffLayout
+        : defaultConfig.diffLayout,
     diffWrap: typeof input.diffWrap === "boolean" ? input.diffWrap : defaultConfig.diffWrap,
     diffFullscreen: typeof input.diffFullscreen === "boolean" ? input.diffFullscreen : defaultConfig.diffFullscreen,
-    showStatusBarHints: typeof input.showStatusBarHints === "boolean"
-      ? input.showStatusBarHints
-      : defaultConfig.showStatusBarHints,
-    iconStyle: input.iconStyle === "unicode" || input.iconStyle === "nerd" || input.iconStyle === "none" ? input.iconStyle : defaultConfig.iconStyle,
+    showStatusBarHints: typeof input.showStatusBarHints === "boolean" ? input.showStatusBarHints : defaultConfig.showStatusBarHints,
+    iconStyle:
+      input.iconStyle === "unicode" || input.iconStyle === "nerd" || input.iconStyle === "none" ? input.iconStyle : defaultConfig.iconStyle,
     compactHeader: typeof input.compactHeader === "boolean" ? input.compactHeader : defaultConfig.compactHeader,
     hideDocumentsTab: typeof input.hideDocumentsTab === "boolean" ? input.hideDocumentsTab : defaultConfig.hideDocumentsTab,
     showTabShortcuts: typeof input.showTabShortcuts === "boolean" ? input.showTabShortcuts : defaultConfig.showTabShortcuts,
@@ -125,7 +123,8 @@ export async function saveConfig(config: Config, path = configPath()): Promise<v
   try {
     // Follow intentional config links only through trusted intermediate paths.
     const destination = await trustedConfigDestination(path)
-    const output = { ...config,
+    const output = {
+      ...config,
       ...(config.keybindings === undefined ? {} : { keybindings: normalizeKeybindings(config.keybindings) }),
       ...(config.diffViewerCommand === undefined ? {} : { diffViewerCommand: validateExternalCommand(config.diffViewerCommand) }),
     }

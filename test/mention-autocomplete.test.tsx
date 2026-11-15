@@ -10,23 +10,55 @@ import { clickControl } from "./fixtures/mouse"
 
 async function setupEditor(search?: MentionSearch, overrides?: KeybindingOverrides) {
   let editor!: TextareaRenderable
-  let closes = 0, submissions = 0
+  let closes = 0,
+    submissions = 0
   const [focused, setFocused] = createSignal(true)
   const [identity, setIdentity] = createSignal("repo-one")
   const [users, setUsers] = createSignal(["alice", "alex", "bob"])
   function Editor() {
-    useKeyActions({ "dialog.close": () => { closes++ }, "dialog.submit": () => { submissions++ } }, { priority: 50, modal: true })
-    return <box width="100%" height="100%" flexDirection="column">
-      <text>Conversation</text>
-      <box id="clipping-editor-container" width="100%" height={3} overflow="hidden">
-        <MarkdownTextarea id="mention-editor" ref={value => { editor = value }} focused={focused()} width="100%" height={2} />
+    useKeyActions(
+      {
+        "dialog.close": () => {
+          closes++
+        },
+        "dialog.submit": () => {
+          submissions++
+        },
+      },
+      { priority: 50, modal: true },
+    )
+    return (
+      <box width="100%" height="100%" flexDirection="column">
+        <text>Conversation</text>
+        <box id="clipping-editor-container" width="100%" height={3} overflow="hidden">
+          <MarkdownTextarea
+            id="mention-editor"
+            ref={(value) => {
+              editor = value
+            }}
+            focused={focused()}
+            width="100%"
+            height={2}
+          />
+        </box>
       </box>
-    </box>
+    )
   }
-  const view = await testRender(() => <KeybindingsProvider overrides={overrides}><MentionProvider identity={identity()} users={users()} search={search}>
-    <Editor />
-  </MentionProvider></KeybindingsProvider>, { width: 50, height: 14 })
-  const settle = async () => { await view.flush(); await view.renderer.idle(); await view.flush() }
+  const view = await testRender(
+    () => (
+      <KeybindingsProvider overrides={overrides}>
+        <MentionProvider identity={identity()} users={users()} search={search}>
+          <Editor />
+        </MentionProvider>
+      </KeybindingsProvider>
+    ),
+    { width: 50, height: 14 },
+  )
+  const settle = async () => {
+    await view.flush()
+    await view.renderer.idle()
+    await view.flush()
+  }
   const menu = () => view.renderer.root.findDescendantById("mention-completions")
   return { view, editor, settle, menu, setFocused, setIdentity, setUsers, closes: () => closes, submissions: () => submissions }
 }
@@ -115,7 +147,9 @@ test("mention picking is caret-aware, undoable, mouse/keyboard accessible and no
     await settle()
     expect(editor.plainText).toBe("@bob ")
     expect(setup.submissions()).toBe(0)
-  } finally { view.renderer.destroy() }
+  } finally {
+    view.renderer.destroy()
+  }
 })
 
 test("Tab and Shift+Tab navigate suggestions without accepting or changing the draft", async () => {
@@ -147,7 +181,9 @@ test("Tab and Shift+Tab navigate suggestions without accepting or changing the d
     expect(menu()).toBeUndefined()
     expect(setup.closes()).toBe(0)
     expect(setup.submissions()).toBe(0)
-  } finally { view.renderer.destroy() }
+  } finally {
+    view.renderer.destroy()
+  }
 })
 
 test("Tab and Shift+Tab wrap around the suggestion list", async () => {
@@ -178,7 +214,9 @@ test("Tab and Shift+Tab wrap around the suggestion list", async () => {
     expect(editor.plainText).toBe("@alex ")
     expect(menu()).toBeUndefined()
     expect(setup.submissions()).toBe(0)
-  } finally { view.renderer.destroy() }
+  } finally {
+    view.renderer.destroy()
+  }
 })
 
 test("lookup is debounced, cancels stale queries, and drops results on blur/repository changes", async () => {
@@ -196,13 +234,13 @@ test("lookup is debounced, cancels stale queries, and drops results on blur/repo
     expect(requests).toHaveLength(0)
     await Bun.sleep(210)
     await settle()
-    expect(requests.map(request => request.query)).toEqual(["z"])
+    expect(requests.map((request) => request.query)).toEqual(["z"])
     await view.mockInput.typeText("o")
     await settle()
     expect(requests[0]!.signal.aborted).toBe(true)
     await Bun.sleep(210)
     await settle()
-    expect(requests.map(request => request.query)).toEqual(["z", "zo"])
+    expect(requests.map((request) => request.query)).toEqual(["z", "zo"])
     requests[0]!.result.resolve(["stale-user"])
     requests[1]!.result.resolve(["zoe"])
     await settle()
@@ -218,11 +256,15 @@ test("lookup is debounced, cancels stale queries, and drops results on blur/repo
     await settle()
     expect(menu()).toBeUndefined()
     expect(editor.plainText).toBe("@zo")
-  } finally { view.renderer.destroy() }
+  } finally {
+    view.renderer.destroy()
+  }
 })
 
 test("failed user lookup does not block typing or explicit posting, and disposal cancels requests", async () => {
-  const setup = await setupEditor(async () => { throw new Error("Offline") })
+  const setup = await setupEditor(async () => {
+    throw new Error("Offline")
+  })
   const { view, editor, settle, menu } = setup
   try {
     await settle()
@@ -244,11 +286,16 @@ test("failed user lookup does not block typing or explicit posting, and disposal
     await settle()
     expect(menu()).toBeUndefined()
     expect(setup.closes()).toBe(0)
-  } finally { view.renderer.destroy() }
+  } finally {
+    view.renderer.destroy()
+  }
 
   const result = Promise.withResolvers<readonly string[]>()
   let signal: AbortSignal | undefined
-  const pending = await setupEditor((_query, current) => { signal = current; return result.promise })
+  const pending = await setupEditor((_query, current) => {
+    signal = current
+    return result.promise
+  })
   await pending.settle()
   await pending.view.mockInput.typeText("@a")
   await Bun.sleep(210)
@@ -271,7 +318,9 @@ test("mention navigation and acceptance honor configured shortcuts", async () =>
     expect(setup.editor.plainText).toBe("@alex ")
     expect(setup.menu()).toBeUndefined()
     expect(setup.submissions()).toBe(0)
-  } finally { setup.view.renderer.destroy() }
+  } finally {
+    setup.view.renderer.destroy()
+  }
 })
 
 test("empty suggestions leave Enter, Tab and caret navigation to the editor", async () => {
@@ -301,7 +350,9 @@ test("empty suggestions leave Enter, Tab and caret navigation to the editor", as
     expect(menu()).toBeUndefined()
     expect(setup.closes()).toBe(0)
     expect(setup.submissions()).toBe(0)
-  } finally { view.renderer.destroy() }
+  } finally {
+    view.renderer.destroy()
+  }
 })
 
 test("completing an existing bot mention replaces its suffix exactly once", async () => {
@@ -322,5 +373,7 @@ test("completing an existing bot mention replaces its suffix exactly once", asyn
     expect(editor.logicalCursor.col).toBe(21)
     expect(setup.menu()).toBeUndefined()
     expect(setup.submissions()).toBe(0)
-  } finally { view.renderer.destroy() }
+  } finally {
+    view.renderer.destroy()
+  }
 })

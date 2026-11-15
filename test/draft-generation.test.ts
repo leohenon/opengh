@@ -188,10 +188,10 @@ test("an exact save retries file and directory fsync after a published write rep
   `
   const child = Bun.spawn([process.execPath, "--eval", script], { stdout: "pipe", stderr: "pipe" })
   const timeout = setTimeout(() => child.kill("SIGKILL"), 10_000)
-  const stdout = new Response(child.stdout).text(), stderr = new Response(child.stderr).text()
+  const stdout = new Response(child.stdout).text(),
+    stderr = new Response(child.stderr).text()
   try {
-    expect({ code: await child.exited, stdout: await stdout, stderr: await stderr })
-      .toEqual({ code: 0, stdout: "", stderr: "" })
+    expect({ code: await child.exited, stdout: await stdout, stderr: await stderr }).toEqual({ code: 0, stdout: "", stderr: "" })
   } finally {
     clearTimeout(timeout)
     if (child.exitCode === null) child.kill("SIGKILL")
@@ -205,8 +205,12 @@ test("the async publication guard excludes sync writes and rejects a generation 
   store.save(key, original, undefined)
   const other = createDiskDraftStore(directory)
   let entered!: () => void, release!: () => void
-  const started = new Promise<void>(resolve => { entered = resolve })
-  const pause = new Promise<void>(resolve => { release = resolve })
+  const started = new Promise<void>((resolve) => {
+    entered = resolve
+  })
+  const pause = new Promise<void>((resolve) => {
+    release = resolve
+  })
   let published = false
   const publishing = store.withCurrent(key, original.generation, original.body, async () => {
     entered()
@@ -219,15 +223,23 @@ test("the async publication guard excludes sync writes and rejects a generation 
     expect(() => other.save(key, cleared, original.generation)).toThrow("storage is locked")
     expect(other.load(key)).toEqual(original)
     expect(published).toBe(false)
-  } finally { release(); await publishing }
+  } finally {
+    release()
+    await publishing
+  }
   expect(published).toBe(true)
 
   let unauthorized = false
-  const late = other.withCurrent(key, original.generation, original.body, async () => { unauthorized = true })
+  const late = other.withCurrent(key, original.generation, original.body, async () => {
+    unauthorized = true
+  })
   store.save(key, cleared, original.generation)
   await expect(late).rejects.toThrow(DraftConflictError)
-  await expect(other.withCurrent(key, cleared.generation, original.body, async () => { unauthorized = true }))
-    .rejects.toThrow(DraftConflictError)
+  await expect(
+    other.withCurrent(key, cleared.generation, original.body, async () => {
+      unauthorized = true
+    }),
+  ).rejects.toThrow(DraftConflictError)
   expect(unauthorized).toBe(false)
   await store.withCurrent(key, cleared.generation, cleared.body, async () => {})
 })

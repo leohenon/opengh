@@ -6,9 +6,9 @@ import { commandEnvironment } from "./command-actions"
 import type { DiffContent } from "./models"
 
 export function validateExternalCommand(value: unknown): string[] {
-  if (!Array.isArray(value) || !value.length || value.some(arg => typeof arg !== "string" || arg.includes("\0")) || !value[0].trim())
+  if (!Array.isArray(value) || !value.length || value.some((arg) => typeof arg !== "string" || arg.includes("\0")) || !value[0].trim())
     throw new TypeError("Use JSON argument arrays with a nonempty executable and no NUL bytes")
-  if (value.some(arg => /\{(repo|base|head|file|line)\}/.test(arg)))
+  if (value.some((arg) => /\{(repo|base|head|file|line)\}/.test(arg)))
     throw new TypeError("Use {patch}; checkout placeholders are not supported")
   if (["sh", "bash", "zsh", "dash", "ksh", "fish"].includes(basename(value[0]))) {
     const index = value.findIndex((arg, index) => index > 0 && /^-[a-z]*c[a-z]*$/.test(arg))
@@ -18,7 +18,7 @@ export function validateExternalCommand(value: unknown): string[] {
   return [...value]
 }
 export function expandExternalCommand(command: string[], patch: string) {
-  return validateExternalCommand(command).map(arg => arg.replace(/\{patch\}/g, () => patch))
+  return validateExternalCommand(command).map((arg) => arg.replace(/\{patch\}/g, () => patch))
 }
 
 export class DiffViewerSetupRequiredError extends Error {
@@ -38,7 +38,11 @@ export function resolveDiffViewerCommand(command?: string[], findExecutable = Bu
 export type Terminal = { suspend(): void | Promise<void>; resume(): void | Promise<void>; isDestroyed: boolean }
 const busy = new WeakSet<Terminal>()
 // Acquire before any async preparation, so repeated keys cannot race terminal suspension.
-export async function terminalHandoff<T>(terminal: Terminal, work: (launch: (args: string[], cwd: string) => Promise<void>) => Promise<T>, runner = runExternal) {
+export async function terminalHandoff<T>(
+  terminal: Terminal,
+  work: (launch: (args: string[], cwd: string) => Promise<void>) => Promise<T>,
+  runner = runExternal,
+) {
   if (busy.has(terminal)) throw new Error("An external tool is already running")
   busy.add(terminal)
   let suspended = false
@@ -51,29 +55,45 @@ export async function terminalHandoff<T>(terminal: Terminal, work: (launch: (arg
       await runner(args, cwd)
     })
   } finally {
-    try { if (suspended && !terminal.isDestroyed) await terminal.resume() }
-    finally { busy.delete(terminal) }
+    try {
+      if (suspended && !terminal.isDestroyed) await terminal.resume()
+    } finally {
+      busy.delete(terminal)
+    }
   }
 }
 export async function runExternal(args: string[], cwd: string) {
   await new Promise<void>((done, reject) => {
     const child = spawn(args[0]!, args.slice(1), { cwd, env: commandEnvironment(), stdio: "inherit" })
     child.once("error", reject)
-    child.once("close", (code, signal) => code === 0 ? done() : reject(new Error(`External tool ${signal ? `stopped by ${signal}` : `exited with status ${code}`}`)))
+    child.once("close", (code, signal) =>
+      code === 0 ? done() : reject(new Error(`External tool ${signal ? `stopped by ${signal}` : `exited with status ${code}`}`)),
+    )
   })
 }
-export async function openExternalDiff(options: {
-  terminal: Terminal; command?: string[]; content?: DiffContent
-}, runner = runExternal) {
-  return terminalHandoff(options.terminal, async launch => {
-    const command = resolveDiffViewerCommand(options.command)
-    if (!command.some(arg => arg.includes("{patch}"))) throw new Error("Add {patch} to diffViewerCommand.")
-    if (options.content?.kind !== "patch") throw new Error("Patch unavailable. Reload the full diff.")
-    const directory = await mkdtemp(join(tmpdir(), "opengh-diff-"))
-    try {
-      const patch = join(directory, "diff.patch")
-      await writeFile(patch, options.content.patch, { mode: 0o600 })
-      await launch(expandExternalCommand(command, patch), directory)
-    } finally { await rm(directory, { recursive: true, force: true }) }
-  }, runner)
+export async function openExternalDiff(
+  options: {
+    terminal: Terminal
+    command?: string[]
+    content?: DiffContent
+  },
+  runner = runExternal,
+) {
+  return terminalHandoff(
+    options.terminal,
+    async (launch) => {
+      const command = resolveDiffViewerCommand(options.command)
+      if (!command.some((arg) => arg.includes("{patch}"))) throw new Error("Add {patch} to diffViewerCommand.")
+      if (options.content?.kind !== "patch") throw new Error("Patch unavailable. Reload the full diff.")
+      const directory = await mkdtemp(join(tmpdir(), "opengh-diff-"))
+      try {
+        const patch = join(directory, "diff.patch")
+        await writeFile(patch, options.content.patch, { mode: 0o600 })
+        await launch(expandExternalCommand(command, patch), directory)
+      } finally {
+        await rm(directory, { recursive: true, force: true })
+      }
+    },
+    runner,
+  )
 }

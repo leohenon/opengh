@@ -4,8 +4,14 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { defaultConfig, loadConfig, saveConfig } from "../src/config"
 import {
-  canonicalKey, formatBinding, formatHints, matchesKey, normalizeKeybindings,
-  keybindingContexts, resolveKeybindings, validateKeybindingConflicts,
+  canonicalKey,
+  formatBinding,
+  formatHints,
+  matchesKey,
+  normalizeKeybindings,
+  keybindingContexts,
+  resolveKeybindings,
+  validateKeybindingConflicts,
 } from "../src/keybindings"
 
 describe("keybindings", () => {
@@ -17,7 +23,10 @@ describe("keybindings", () => {
     expect(canonicalKey("É")).toBe("É")
     expect(matchesKey({ name: "", sequence: "É" }, "É")).toBe(true)
     expect(matchesKey({ name: "", sequence: "é" }, "É")).toBe(false)
-    for (const event of [{ name: "G", sequence: "G" }, { name: "g", shift: true, sequence: "g" }]) {
+    for (const event of [
+      { name: "G", sequence: "G" },
+      { name: "g", shift: true, sequence: "g" },
+    ]) {
       expect(matchesKey(event, "G")).toBe(true)
       expect(matchesKey(event, "g")).toBe(false)
     }
@@ -47,12 +56,28 @@ describe("keybindings", () => {
     expect(bindings["navigation.up"]).toEqual(["up", "k"])
     expect(formatBinding(bindings, "global.help")).toBe("f1")
     expect(formatBinding(bindings, "navigation.down", true)).toBe("m/↓")
-    expect(formatHints(bindings, [["global.quit", "quit"], ["global.help", "help"]])).toBe("f1 help")
+    expect(
+      formatHints(bindings, [
+        ["global.quit", "quit"],
+        ["global.help", "help"],
+      ]),
+    ).toBe("f1 help")
   })
 
   test("rejects invalid keys/actions and ambiguous simultaneous actions, not disjoint scopes", () => {
     expect(() => validateKeybindingConflicts(resolveKeybindings())).not.toThrow()
-    for (const invalid of [null, [], { nope: [] }, { "global.help": "f1" }, { "global.help": [42] }, { "global.help": ["ctrl+wat"] }, { "global.help": [" "] }, { "global.help": ["shift+6"] }, { "global.help": ["ctrl+"] }, { "global.help": ["\u0000"] }]) {
+    for (const invalid of [
+      null,
+      [],
+      { nope: [] },
+      { "global.help": "f1" },
+      { "global.help": [42] },
+      { "global.help": ["ctrl+wat"] },
+      { "global.help": [" "] },
+      { "global.help": ["shift+6"] },
+      { "global.help": ["ctrl+"] },
+      { "global.help": ["\u0000"] },
+    ]) {
       expect(() => normalizeKeybindings(invalid)).toThrow()
     }
     expect(() => normalizeKeybindings({ "navigation.down": ["k"] })).toThrow("navigation.up")
@@ -90,14 +115,29 @@ describe("keybindings", () => {
     expect(defaults["search.start"]).toEqual(["/"])
     expect(defaults["search.next"]).toEqual(["n"])
     expect(defaults["search.previous"]).toEqual(["N"])
-    for (const event of [{ name: "N", sequence: "N" }, { name: "n", shift: true }]) {
+    for (const event of [
+      { name: "N", sequence: "N" },
+      { name: "n", shift: true },
+    ]) {
       expect(matchesKey(event, defaults["search.previous"][0]!)).toBe(true)
       expect(matchesKey(event, defaults["search.next"][0]!)).toBe(false)
     }
     expect(matchesKey({ name: "n" }, defaults["search.next"][0]!)).toBe(true)
     for (const action of ["search.start", "search.next", "search.previous"] as const) {
       for (const [context, actions] of Object.entries(keybindingContexts)) {
-        const browsing = ["overview", "commits", "work", "actions", "commit", "issue", "pull", "run", "diffFiles", "diffBody", "settings"].includes(context)
+        const browsing = [
+          "overview",
+          "commits",
+          "work",
+          "actions",
+          "commit",
+          "issue",
+          "pull",
+          "run",
+          "diffFiles",
+          "diffBody",
+          "settings",
+        ].includes(context)
         expect(actions.includes(action)).toBe(browsing)
       }
     }
@@ -108,11 +148,21 @@ describe("keybindings", () => {
     expect(() => normalizeKeybindings({ "dialog.close": ["ctrl+a"] })).toThrow("searchInput")
     expect(() => normalizeKeybindings({ "input.submit": ["esc"] })).toThrow("searchInput")
     expect(() => normalizeKeybindings({ "search.start": ["esc"] })).toThrow("navigation.back")
-    const remapped = resolveKeybindings(normalizeKeybindings({
-      "search.start": ["f3"], "search.next": [], "search.previous": ["f4"], "navigation.down": ["n"],
-    }))
+    const remapped = resolveKeybindings(
+      normalizeKeybindings({
+        "search.start": ["f3"],
+        "search.next": [],
+        "search.previous": ["f4"],
+        "navigation.down": ["n"],
+      }),
+    )
     expect(formatBinding(remapped, "search.start")).toBe("f3")
-    expect(formatHints(remapped, [["search.next", "next"], ["search.previous", "previous"]])).toBe("f4 previous")
+    expect(
+      formatHints(remapped, [
+        ["search.next", "next"],
+        ["search.previous", "previous"],
+      ]),
+    ).toBe("f4 previous")
     expect(() => normalizeKeybindings({ "picker.down": ["n"], "editor.move-down": ["n"] })).not.toThrow()
   })
 

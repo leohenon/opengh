@@ -22,7 +22,10 @@ function packageDirectory(name: string, from: string): string | undefined {
   }
 }
 
-const licenseFiles = (directory: string) => readdirSync(directory).filter((name) => /^(licen[cs]e|copying|notice)/i.test(name)).sort()
+const licenseFiles = (directory: string) =>
+  readdirSync(directory)
+    .filter((name) => /^(licen[cs]e|copying|notice)/i.test(name))
+    .sort()
 
 // The executable contains every runtime dependency, so their notices ship beside it.
 function thirdPartyNotices(nativePackage: string): string {
@@ -57,7 +60,8 @@ function thirdPartyNotices(nativePackage: string): string {
   for (const [id, { directory, license }] of [...packages].sort(([a], [b]) => a.localeCompare(b))) section(id, license, directory)
   const parsers = join(root, "src/ui/parsers")
   for (const language of readdirSync(parsers).sort()) {
-    if (existsSync(join(parsers, language, "LICENSE"))) section(`tree-sitter-${language} (bundled grammar)`, "MIT", join(parsers, language), ["LICENSE"])
+    if (existsSync(join(parsers, language, "LICENSE")))
+      section(`tree-sitter-${language} (bundled grammar)`, "MIT", join(parsers, language), ["LICENSE"])
   }
   section("OpenCode themes (bundled)", "MIT", join(root, "src/theme"), ["LICENSE-opencode"])
   return `${sections.join("\n")}\n`
@@ -100,7 +104,9 @@ async function build(name: string) {
   const archive = `opengh-${name}.tar.gz`
   const tar = Bun.spawnSync(["tar", "-czf", archive, `opengh-${name}`], { cwd: dist, stderr: "inherit" })
   if (tar.exitCode !== 0) throw new Error(`Could not create ${archive}`)
-  const digest = createHash("sha256").update(await readFile(join(dist, archive))).digest("hex")
+  const digest = createHash("sha256")
+    .update(await readFile(join(dist, archive)))
+    .digest("hex")
   await writeFile(join(dist, `${archive}.sha256`), `${digest}  ${archive}\n`)
   console.log(`${name}: dist/opengh-${name}/opengh, dist/${archive}`)
 }

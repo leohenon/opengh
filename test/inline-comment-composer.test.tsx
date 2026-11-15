@@ -21,27 +21,77 @@ const patch = `diff --git a/review.txt b/review.txt
 -old two
 +new one
 `
-const thread: PullReviewThread = { kind: "review-thread", id: "thread", path: "review.txt", line: 21, diffSide: "RIGHT",
-  isResolved: false, isOutdated: false, comments: [{ id: "comment", author: "alice", authorAssociation: "", body: "Existing thread",
-    createdAt: "", updatedAt: "", url: "" }] }
+const thread: PullReviewThread = {
+  kind: "review-thread",
+  id: "thread",
+  path: "review.txt",
+  line: 21,
+  diffSide: "RIGHT",
+  isResolved: false,
+  isOutdated: false,
+  comments: [{ id: "comment", author: "alice", authorAssociation: "", body: "Existing thread", createdAt: "", updatedAt: "", url: "" }],
+}
 
 test("Hunk's [+] opens opengh's markdown editor as a full-width card that owns typing until posted, cancelled or blurred", async () => {
   const setup = await createTestRenderer({ width: 140, height: 30 })
   initializeHunk(setup.renderer)
   const file = parseDiff({ kind: "patch", patch }).files[0]!.body!
   const comments: ReviewAnchor[] = []
-  const inputs: string[] = [], saved: string[] = []
-  let cancelled = 0, expanded = 0
+  const inputs: string[] = [],
+    saved: string[] = []
+  let cancelled = 0,
+    expanded = 0
   const [draft, setDraft] = createSignal<{ anchor: ReviewAnchor; body: string }>()
   const [interactive, setInteractive] = createSignal(true)
-  await render(() => <DiffScreen target={{ kind: "pull", number: 1 }} threads={[thread]}
-    resource={{ status: "ready", value: { kind: "patch", patch } }} interactive={interactive()} showScrollbar={false} onLoadFiles={() => {}}
-    draft={draft()} onDraftInput={(body) => { inputs.push(body) }} review={{ headSha: "head", comments: [], onOpenReview: () => {},
-      onComment: (anchor) => { comments.push(anchor); setDraft({ anchor, body: "" }) }, onDraftSave: (body) => { saved.push(body) },
-      onDraftCancel: () => { cancelled++; setDraft() }, onDraftExpand: () => { expanded++ } }} />, setup.renderer)
-  const settle = async () => { await Bun.sleep(20); await setup.flush(); await setup.renderer.idle(); await setup.flush() }
-  const escape = async () => { setup.mockInput.pressEscape(); await Bun.sleep(30); await settle() }
-  const row = (index: number, layout: "split" | "unified" = "split") => setup.renderer.root.findDescendantById(reviewRows(file, layout)[index]!.id)!
+  await render(
+    () => (
+      <DiffScreen
+        target={{ kind: "pull", number: 1 }}
+        threads={[thread]}
+        resource={{ status: "ready", value: { kind: "patch", patch } }}
+        interactive={interactive()}
+        showScrollbar={false}
+        onLoadFiles={() => {}}
+        draft={draft()}
+        onDraftInput={(body) => {
+          inputs.push(body)
+        }}
+        review={{
+          headSha: "head",
+          comments: [],
+          onOpenReview: () => {},
+          onComment: (anchor) => {
+            comments.push(anchor)
+            setDraft({ anchor, body: "" })
+          },
+          onDraftSave: (body) => {
+            saved.push(body)
+          },
+          onDraftCancel: () => {
+            cancelled++
+            setDraft()
+          },
+          onDraftExpand: () => {
+            expanded++
+          },
+        }}
+      />
+    ),
+    setup.renderer,
+  )
+  const settle = async () => {
+    await Bun.sleep(20)
+    await setup.flush()
+    await setup.renderer.idle()
+    await setup.flush()
+  }
+  const escape = async () => {
+    setup.mockInput.pressEscape()
+    await Bun.sleep(30)
+    await settle()
+  }
+  const row = (index: number, layout: "split" | "unified" = "split") =>
+    setup.renderer.root.findDescendantById(reviewRows(file, layout)[index]!.id)!
   const editor = () => setup.renderer.root.findDescendantById("inline-comment-editor") as TextareaRenderable | undefined
   const card = () => setup.renderer.root.findDescendantById("inline-comment-composer-card")!
   const frame = () => setup.captureCharFrame()
@@ -167,7 +217,9 @@ test("Hunk's [+] opens opengh's markdown editor as a full-width card that owns t
     await escape()
     await addButton(2) // The [+] release must not reselect the single line under the button.
     expect(comments.at(-1)).toEqual({ path: "review.txt", side: "LEFT", line: 12, startLine: 11, startSide: "LEFT" })
-  } finally { setup.renderer.destroy() }
+  } finally {
+    setup.renderer.destroy()
+  }
 })
 
 test("the composer retains editor focus and stays mounted, without [+], while review is briefly withheld", async () => {
@@ -176,11 +228,30 @@ test("the composer retains editor focus and stays mounted, without [+], while re
   const file = parseDiff({ kind: "patch", patch }).files[0]!.body!
   let text = "seed"
   const [available, setAvailable] = createSignal(true)
-  await render(() => <DiffScreen target={{ kind: "pull", number: 1 }} commentable
-    draft={{ anchor: { path: "review.txt", side: "RIGHT", line: 21 }, body: text }} onDraftInput={(body) => { text = body }}
-    resource={{ status: "ready", value: { kind: "patch", patch } }} interactive showScrollbar={false} onLoadFiles={() => {}}
-    review={available() ? { headSha: "head", comments: [], onComment: () => {}, onOpenReview: () => {} } : undefined} />, setup.renderer)
-  const settle = async () => { await Bun.sleep(20); await setup.flush(); await setup.renderer.idle(); await setup.flush() }
+  await render(
+    () => (
+      <DiffScreen
+        target={{ kind: "pull", number: 1 }}
+        commentable
+        draft={{ anchor: { path: "review.txt", side: "RIGHT", line: 21 }, body: text }}
+        onDraftInput={(body) => {
+          text = body
+        }}
+        resource={{ status: "ready", value: { kind: "patch", patch } }}
+        interactive
+        showScrollbar={false}
+        onLoadFiles={() => {}}
+        review={available() ? { headSha: "head", comments: [], onComment: () => {}, onOpenReview: () => {} } : undefined}
+      />
+    ),
+    setup.renderer,
+  )
+  const settle = async () => {
+    await Bun.sleep(20)
+    await setup.flush()
+    await setup.renderer.idle()
+    await setup.flush()
+  }
   const editor = () => setup.renderer.root.findDescendantById("inline-comment-editor") as TextareaRenderable | undefined
   const row = (index: number) => setup.renderer.root.findDescendantById(reviewRows(file, "split")[index]!.id)!
   try {
@@ -227,15 +298,19 @@ test("the composer retains editor focus and stays mounted, without [+], while re
     setup.mockInput.pressKey("w")
     await settle()
     expect(editor()!.plainText).toBe("seed")
-  } finally { setup.renderer.destroy() }
+  } finally {
+    setup.renderer.destroy()
+  }
 })
 
 test("the [+] column appears only when commenting is available, and wrapped search geometry matches rendering", async () => {
   const file = parseDiff({ kind: "patch", patch }).files[0]!.body!
   const wide = `diff --git a/wrap.txt b/wrap.txt\n--- a/wrap.txt\n+++ b/wrap.txt\n@@ -1 +1 @@\n-short\n+${Array.from({ length: 12 }, (_, i) => `word${i}`).join(" ")}\n`
   const wrapped = parseDiff({ kind: "patch", patch: wide }).files[0]!.body!
-  const visualLines = (onAddNote?: () => void) => getHunkDiffSearchCells({ file: wrapped, width: 60, canonicalLayout: "split", wrapLines: true, onAddNote })
-    .find((cell) => cell.side === "right")!.visualLines
+  const visualLines = (onAddNote?: () => void) =>
+    getHunkDiffSearchCells({ file: wrapped, width: 60, canonicalLayout: "split", wrapLines: true, onAddNote }).find(
+      (cell) => cell.side === "right",
+    )!.visualLines
   expect(visualLines(() => {})).not.toEqual(visualLines()) // The reserved [+] column changes wrapping...
   const host = await createTestRenderer({ width: 60, height: 12 })
   initializeHunk(host.renderer)
@@ -243,22 +318,42 @@ test("the [+] column appears only when commenting is available, and wrapped sear
   host.renderer.root.add(box)
   mountHunk(host.renderer, box, { file: wrapped, width: 60, canonicalLayout: "split", wrapLines: true, onAddNote: () => {} })
   try {
-    await host.flush(); await host.renderer.idle(); await host.flush()
+    await host.flush()
+    await host.renderer.idle()
+    await host.flush()
     const frame = host.captureCharFrame() // ...and search segments match what Hunk renders with it.
     for (const line of visualLines(() => {})) expect(frame).toContain(line.trimEnd())
-  } finally { host.renderer.destroy() }
+  } finally {
+    host.renderer.destroy()
+  }
 
   const setup = await createTestRenderer({ width: 110, height: 20 })
   initializeHunk(setup.renderer)
-  await render(() => <DiffScreen target={{ kind: "commit", sha: "abc" }}
-    resource={{ status: "ready", value: { kind: "patch", patch } }} interactive showScrollbar={false} onLoadFiles={() => {}} />, setup.renderer)
+  await render(
+    () => (
+      <DiffScreen
+        target={{ kind: "commit", sha: "abc" }}
+        resource={{ status: "ready", value: { kind: "patch", patch } }}
+        interactive
+        showScrollbar={false}
+        onLoadFiles={() => {}}
+      />
+    ),
+    setup.renderer,
+  )
   try {
-    await setup.flush(); await setup.renderer.idle(); await setup.flush()
+    await setup.flush()
+    await setup.renderer.idle()
+    await setup.flush()
     const row = setup.renderer.root.findDescendantById(reviewRows(file, "split")[1]!.id)!
     await setup.mockMouse.moveTo(row.x + 5, row.y)
-    await setup.flush(); await setup.renderer.idle(); await setup.flush()
+    await setup.flush()
+    await setup.renderer.idle()
+    await setup.flush()
     expect(setup.captureCharFrame()).not.toContain("[+]")
-  } finally { setup.renderer.destroy() }
+  } finally {
+    setup.renderer.destroy()
+  }
 })
 
 test("a growing composer keeps its end in view", async () => {
@@ -268,22 +363,45 @@ test("a growing composer keeps its end in view", async () => {
   initializeHunk(setup.renderer)
   const file = parseDiff({ kind: "patch", patch: tall }).files[0]!.body!
   const [draft, setDraft] = createSignal<{ anchor: ReviewAnchor; body: string }>()
-  await render(() => <DiffScreen target={{ kind: "pull", number: 1 }} draft={draft()}
-    resource={{ status: "ready", value: { kind: "patch", patch: tall } }} interactive showScrollbar={false} onLoadFiles={() => {}}
-    review={{ headSha: "head", comments: [], onOpenReview: () => {}, onComment: (anchor) => setDraft({ anchor, body: "" }) }} />, setup.renderer)
-  const settle = async () => { await Bun.sleep(20); await setup.flush(); await setup.renderer.idle(); await setup.flush() }
+  await render(
+    () => (
+      <DiffScreen
+        target={{ kind: "pull", number: 1 }}
+        draft={draft()}
+        resource={{ status: "ready", value: { kind: "patch", patch: tall } }}
+        interactive
+        showScrollbar={false}
+        onLoadFiles={() => {}}
+        review={{ headSha: "head", comments: [], onOpenReview: () => {}, onComment: (anchor) => setDraft({ anchor, body: "" }) }}
+      />
+    ),
+    setup.renderer,
+  )
+  const settle = async () => {
+    await Bun.sleep(20)
+    await setup.flush()
+    await setup.renderer.idle()
+    await setup.flush()
+  }
   try {
     await settle()
     const viewport = (setup.renderer.root.findDescendantById("diff-body-scroll") as import("@opentui/core").ScrollBoxRenderable).viewport
-    const last = reviewRows(file, "split").map((row) => setup.renderer.root.findDescendantById(row.id)!)
-      .filter((row) => row.y + row.height <= viewport.y + viewport.height).at(-1)!
+    const last = reviewRows(file, "split")
+      .map((row) => setup.renderer.root.findDescendantById(row.id)!)
+      .filter((row) => row.y + row.height <= viewport.y + viewport.height)
+      .at(-1)!
     await setup.mockMouse.moveTo(last.x + 5, last.y)
     await settle()
     await setup.mockMouse.click(last.x + last.width - 2, last.y)
     await settle()
-    for (let index = 0; index < 6; index++) { await setup.mockInput.typeText(`line ${index}`); setup.mockInput.pressEnter() }
+    for (let index = 0; index < 6; index++) {
+      await setup.mockInput.typeText(`line ${index}`)
+      setup.mockInput.pressEnter()
+    }
     await settle()
     const card = setup.renderer.root.findDescendantById("inline-comment-composer-card")!
     expect(card.y + card.height).toBeLessThanOrEqual(viewport.y + viewport.height)
-  } finally { setup.renderer.destroy() }
+  } finally {
+    setup.renderer.destroy()
+  }
 })

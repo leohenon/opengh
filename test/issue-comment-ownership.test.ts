@@ -7,7 +7,8 @@ import type { GitHubTransport } from "../src/github/transport"
 
 const repository = { id: 71, nodeId: "R_71", nameWithOwner: "owner/repo" }
 const input = { accountId: 7, repositoryId: 71, number: 42, body: "Exact shared comment" }
-const draftKey = "owner/repo@71#42:comment", otherDraft = "owner/repo@71#42:close"
+const draftKey = "owner/repo@71#42:comment",
+  otherDraft = "owner/repo@71#42:close"
 const directories: string[] = []
 const children: Bun.Subprocess[] = []
 afterEach(async () => {
@@ -15,7 +16,7 @@ afterEach(async () => {
     if (child.exitCode === null) child.kill("SIGKILL")
     await child.exited
   }
-  await Promise.all(directories.splice(0).map(path => rm(path, { recursive: true, force: true })))
+  await Promise.all(directories.splice(0).map((path) => rm(path, { recursive: true, force: true })))
 })
 async function fixture() {
   const directory = await mkdtemp(join(tmpdir(), "opengh-comment-owner-"))
@@ -25,7 +26,11 @@ async function fixture() {
 
 function worker(directory: string, script: string, alreadyPosted = false) {
   const module = new URL("../src/github/issue-comments.ts", import.meta.url).pathname
-  const child = Bun.spawn([process.execPath, "--eval", `
+  const child = Bun.spawn(
+    [
+      process.execPath,
+      "--eval",
+      `
     import { createInterface } from "node:readline"
     import { createIssueComments, createIssueCommentStorage } from ${JSON.stringify(module)}
     const commands = createInterface({ input: process.stdin })[Symbol.asyncIterator]()
@@ -55,21 +60,30 @@ function worker(directory: string, script: string, alreadyPosted = false) {
     }
     const create = createIssueComments(transport, storage)
     ${script}
-  `], { stdin: "pipe", stdout: "pipe", stderr: "pipe" })
+  `,
+    ],
+    { stdin: "pipe", stdout: "pipe", stderr: "pipe" },
+  )
   children.push(child)
   const errors = new Response(child.stderr).text()
-  const output = child.stdout.getReader(), decoder = new TextDecoder()
+  const output = child.stdout.getReader(),
+    decoder = new TextDecoder()
   let buffer = ""
   return {
-    child, errors,
-    send() { child.stdin.write("continue\n"); child.stdin.flush() },
+    child,
+    errors,
+    send() {
+      child.stdin.write("continue\n")
+      child.stdin.flush()
+    },
     async next() {
       while (!buffer.includes("\n")) {
         const chunk = await output.read()
         if (chunk.done) throw new Error(`Worker exited before reporting: ${await errors}`)
         buffer += decoder.decode(chunk.value, { stream: true })
       }
-      const end = buffer.indexOf("\n"), line = buffer.slice(0, end)
+      const end = buffer.indexOf("\n"),
+        line = buffer.slice(0, end)
       buffer = buffer.slice(end + 1)
       return JSON.parse(line)
     },
@@ -84,15 +98,22 @@ function blockedClient(directory: string) {
       if (path === "user") return { id: 7 } as T
       throw new Error("Recovery must not start before ownership is claimed")
     },
-    async text() { throw new Error("Unexpected text request") },
-    async mutate() { requests.push("POST"); throw new Error("Unexpected POST") },
+    async text() {
+      throw new Error("Unexpected text request")
+    },
+    async mutate() {
+      requests.push("POST")
+      throw new Error("Unexpected POST")
+    },
   }
   return { requests, create: createIssueComments(transport, createIssueCommentStorage(directory)) }
 }
 
 test("a live owner's pending acknowledgement blocks both drafts and a failed callback retries without another POST", async () => {
   const { directory, storage } = await fixture()
-  const origin = worker(directory, `
+  const origin = worker(
+    directory,
+    `
     try {
       await create(repository, 42, input.body, async () => {
         state.callbacks++
@@ -106,14 +127,35 @@ test("a live owner's pending acknowledgement blocks both drafts and a failed cal
     const result = await create(repository, 42, input.body, (_comment, recovery) => { state.callbacks++; recovered = recovery }, draftKey)
     emit({ event: "retried", id: result.id, recovered, posts: state.posts, callbacks: state.callbacks, marker: await storage.load(input) ?? null })
     process.exit(0)
-  `)
+  `,
+  )
   expect(await origin.next()).toEqual({ event: "pending" })
-  const attempt = await storage.load(input) as IssueCommentAttempt
+  const attempt = (await storage.load(input)) as IssueCommentAttempt
   expect(attempt.owner).toEqual({ pid: origin.child.pid, hostname: hostname(), draftKey })
   const contender = blockedClient(directory)
   let callbacks = 0
-  await expect(contender.create(repository, 42, input.body, () => { callbacks++ }, draftKey)).rejects.toThrow("originating process")
-  await expect(contender.create(repository, 42, input.body, () => { callbacks++ }, otherDraft)).rejects.toThrow("another draft")
+  await expect(
+    contender.create(
+      repository,
+      42,
+      input.body,
+      () => {
+        callbacks++
+      },
+      draftKey,
+    ),
+  ).rejects.toThrow("originating process")
+  await expect(
+    contender.create(
+      repository,
+      42,
+      input.body,
+      () => {
+        callbacks++
+      },
+      otherDraft,
+    ),
+  ).rejects.toThrow("another draft")
   await expect(storage.remove(attempt)).rejects.toThrow("originating process")
   await expect(storage.update(attempt, { ...attempt, phase: "rejected" })).rejects.toThrow("originating process")
   expect(contender.requests).toEqual(["user", "user"])
@@ -132,19 +174,36 @@ test("a live owner's pending acknowledgement blocks both drafts and a failed cal
 
 test("after owner exit only the original draft can recover, and competing subprocesses cannot both claim its receipt", async () => {
   const { directory, storage } = await fixture()
-  const origin = worker(directory, `
+  const origin = worker(
+    directory,
+    `
     await create(repository, 42, input.body, undefined, draftKey)
     emit({ event: "posted", posts: state.posts })
     process.exit(0)
-  `)
+  `,
+  )
   expect(await origin.next()).toEqual({ event: "posted", posts: 1 })
   expect(await origin.child.exited).toBe(0)
   expect(await origin.errors).toBe("")
-  const attempt = await storage.load(input) as IssueCommentAttempt
+  const attempt = (await storage.load(input)) as IssueCommentAttempt
   const contender = blockedClient(directory)
   let callbacks = 0
-  await expect(contender.create(repository, 42, input.body, () => { callbacks++ }, otherDraft)).rejects.toThrow("another draft")
-  await expect(contender.create(repository, 42, input.body, () => { callbacks++ })).rejects.toThrow("another draft")
+  await expect(
+    contender.create(
+      repository,
+      42,
+      input.body,
+      () => {
+        callbacks++
+      },
+      otherDraft,
+    ),
+  ).rejects.toThrow("another draft")
+  await expect(
+    contender.create(repository, 42, input.body, () => {
+      callbacks++
+    }),
+  ).rejects.toThrow("another draft")
   await expect(storage.remove(attempt)).rejects.toThrow("originating process")
   await expect(storage.update(attempt, { ...attempt, phase: "rejected" })).rejects.toThrow("originating process")
   expect(contender.requests).toEqual(["user", "user"])
@@ -173,12 +232,13 @@ test("after owner exit only the original draft can recover, and competing subpro
   const candidates = [worker(directory, recover, true), worker(directory, recover, true)]
   for (const candidate of candidates) expect(await candidate.next()).toEqual({ event: "ready" })
   for (const candidate of candidates) candidate.send()
-  const results = await Promise.all(candidates.map(candidate => candidate.next()))
-  expect(results.map(result => result.event).sort()).toEqual(["blocked", "claimed"])
-  const winnerIndex = results.findIndex(result => result.event === "claimed"), winner = candidates[winnerIndex]!
+  const results = await Promise.all(candidates.map((candidate) => candidate.next()))
+  expect(results.map((result) => result.event).sort()).toEqual(["blocked", "claimed"])
+  const winnerIndex = results.findIndex((result) => result.event === "claimed"),
+    winner = candidates[winnerIndex]!
   const claimed = results[winnerIndex].attempt as IssueCommentAttempt
   expect(claimed).toEqual({ ...attempt, owner: { pid: winner.child.pid, hostname: hostname(), draftKey } })
-  expect(results.find(result => result.event === "blocked")).toMatchObject({ posts: 0, reads: 0, callbacks: 0 })
+  expect(results.find((result) => result.event === "blocked")).toMatchObject({ posts: 0, reads: 0, callbacks: 0 })
   expect(await winner.next()).toEqual({ event: "recovering", id: 10, recovered: true, count: 1 })
   expect(await storage.load(input)).toEqual(claimed)
   await expect(storage.claim(attempt, draftKey)).rejects.toThrow("changed")

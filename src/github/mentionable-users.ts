@@ -11,9 +11,13 @@ export function createMentionableUserLoader(transport: GitHubTransport) {
     const selector = repositorySelector(repository)
     if (!transport.graphql) throw new Error("GitHub transport does not support GraphQL.")
     // Suggestions only: intentionally fetch a single bounded page, not a complete user list.
-    const response = await transport.graphql<unknown>(`query MentionableUsers(${selector.declarations}, $query: String!) {
+    const response = await transport.graphql<unknown>(
+      `query MentionableUsers(${selector.declarations}, $query: String!) {
       ${selector.select("mentionableUsers(first: 30, query: $query) { nodes { login } }")}
-    }`, { ...selector.variables, query }, options)
+    }`,
+      { ...selector.variables, query },
+      options,
+    )
     if (!record(response) || (response.errors !== undefined && (!Array.isArray(response.errors) || response.errors.length > 0))) {
       throw new Error("GitHub mentionable users query failed.")
     }

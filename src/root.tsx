@@ -24,11 +24,7 @@ import { MouseSurface } from "./ui/components/mouse-surface"
 import { SelectionClipboard } from "./ui/components/selection-clipboard"
 import { Toast } from "./ui/components/toast"
 import { SwitchRepositoryScreen } from "./ui/pages/switch-repository"
-import {
-  LoadingScreen,
-  RepositoryLoadError,
-  RepositoryPicker,
-} from "./ui/launcher"
+import { LoadingScreen, RepositoryLoadError, RepositoryPicker } from "./ui/launcher"
 
 type View = "resolving" | "picker" | "repository" | "switch" | "launch-error"
 type LaunchRequest = { repository: string; detail?: LaunchDetail; page?: Page }
@@ -105,14 +101,20 @@ export function Root(props: {
     const snapshot = { ...dirtyTabs }
     if (!Object.keys(snapshot).length) return
     const updates = Object.fromEntries(Object.entries(snapshot).map(([repository, entry]) => [repository, entry.page]))
-    pendingTabSave = Promise.resolve().then(() => services.saveRepositoryTabs(updates)).then(() => {
-      for (const [repository, entry] of Object.entries(snapshot)) {
-        // A newer navigation, even back to the same tab, must still be saved.
-        if (dirtyTabs[repository] === entry) delete dirtyTabs[repository]
-      }
-    }).catch(() => {
-      // Keep failed updates dirty for the next navigation or exit flush.
-    }).finally(() => { pendingTabSave = undefined })
+    pendingTabSave = Promise.resolve()
+      .then(() => services.saveRepositoryTabs(updates))
+      .then(() => {
+        for (const [repository, entry] of Object.entries(snapshot)) {
+          // A newer navigation, even back to the same tab, must still be saved.
+          if (dirtyTabs[repository] === entry) delete dirtyTabs[repository]
+        }
+      })
+      .catch(() => {
+        // Keep failed updates dirty for the next navigation or exit flush.
+      })
+      .finally(() => {
+        pendingTabSave = undefined
+      })
     return pendingTabSave
   }
   const rememberTab = (repository: string, page: Page) => {
@@ -121,9 +123,13 @@ export function Root(props: {
     setRepositoryTabs((current) => ({ ...current, [key]: page }))
     dirtyTabs[key] = { page }
     clearTimeout(tabSaveTimer)
-    tabSaveTimer = setTimeout(() => { void flushRepositoryTabs() }, 250)
+    tabSaveTimer = setTimeout(() => {
+      void flushRepositoryTabs()
+    }, 250)
   }
-  onCleanup(() => { void flushRepositoryTabs() })
+  onCleanup(() => {
+    void flushRepositoryTabs()
+  })
   const [configSaving, setConfigSaving] = createSignal(false)
   const [configReloading, setConfigReloading] = createSignal(false)
   const [configReloaded, setConfigReloaded] = createSignal(false)
@@ -133,7 +139,9 @@ export function Root(props: {
   const [configWarningDismissed, setConfigWarningDismissed] = createSignal(false)
   const session = services.createRepositorySession()
   const [dismissedDraftError, setDismissedDraftError] = createSignal<string>()
-  createEffect(() => { if (!session.draftSaveError?.()) setDismissedDraftError(undefined) })
+  createEffect(() => {
+    if (!session.draftSaveError?.()) setDismissedDraftError(undefined)
+  })
   onCleanup(() => session.flushDrafts?.())
   const reviews = services.createPullReviewSession()
   const inlineComments = services.createInlineComments()
@@ -141,7 +149,9 @@ export function Root(props: {
   const [quitDraftSaveError, setQuitDraftSaveError] = createSignal(false)
   const [localRepository, setLocalRepository] = createSignal<LocalRepository>()
   let commandCancel: (() => void) | undefined
-  const refreshLocalRepository = async () => { setLocalRepository(await services.resolveLocalRepository(props.cwd)) }
+  const refreshLocalRepository = async () => {
+    setLocalRepository(await services.resolveLocalRepository(props.cwd))
+  }
   let quitting = false
 
   const flushDraftsForQuit = () => {
@@ -160,14 +170,17 @@ export function Root(props: {
     setQuitDraftSaveError(false)
     if (!flushDraftsForQuit()) return
     const tabs = flushRepositoryTabs()
-    void Promise.all([tabs, reviews.flush()]).then(() => {
-      // Tab saves can outlast the first drain, and a review may first open
-      // while quitting. Always drain again before the synchronous final flush.
-      return reviews.flush()
-    }).then(finishQuit).catch((error) => {
-      quitting = false
-      setReviewSaveError(error instanceof Error ? error.message : "Could not save the review draft.")
-    })
+    void Promise.all([tabs, reviews.flush()])
+      .then(() => {
+        // Tab saves can outlast the first drain, and a review may first open
+        // while quitting. Always drain again before the synchronous final flush.
+        return reviews.flush()
+      })
+      .then(finishQuit)
+      .catch((error) => {
+        quitting = false
+        setReviewSaveError(error instanceof Error ? error.message : "Could not save the review draft.")
+      })
   }
 
   const reloadConfig = async () => {
@@ -185,7 +198,9 @@ export function Root(props: {
       if (!renderer.isDestroyed) {
         setConfigReloadFailed(true)
         setConfigWarningDismissed(false)
-        setConfigError(`${error instanceof Error ? error.message : "Could not reload config"}. Previous settings remain active. Fix the file and reload configuration before saving settings.`)
+        setConfigError(
+          `${error instanceof Error ? error.message : "Could not reload config"}. Previous settings remain active. Fix the file and reload configuration before saving settings.`,
+        )
       }
     } finally {
       setConfigReloading(false)
@@ -227,7 +242,11 @@ export function Root(props: {
   })
   createEffect(() => {
     const repository = accessibleRepository()
-    if (repository) void services.rememberRepository(repository).catch(() => {}).then(refreshRecent)
+    if (repository)
+      void services
+        .rememberRepository(repository)
+        .catch(() => {})
+        .then(refreshRecent)
   })
   type RepositoryReturn = { repository: string; state: NavigationState; entry?: NavigationState }
   const [repositoryReturns, setRepositoryReturns] = createSignal<RepositoryReturn[]>([])
@@ -235,12 +254,18 @@ export function Root(props: {
   let pendingNavigation: (InitialNavigation & { repository: string }) | undefined
   let loadScope: RepositoryScope = "full"
   const open = (repository: string, initial?: InitialNavigation, followingLink = false) => {
-    if (!followingLink) { setRepositoryReturns([]); pendingState = undefined }
+    if (!followingLink) {
+      setRepositoryReturns([])
+      pendingState = undefined
+    }
     pendingNavigation = initial ? { ...initial, repository } : undefined
     setLaunchError(undefined)
     const restored = pendingState?.state
-    loadScope = !focus() ? "full" : initial?.detail || initial?.diff || restored?.details?.[restored.page] || restored?.diffs?.[restored.page]
-      ? "detail" : initial?.page ?? restored?.page ?? repositoryTabs()[repository.toLowerCase()] ?? "overview"
+    loadScope = !focus()
+      ? "full"
+      : initial?.detail || initial?.diff || restored?.details?.[restored.page] || restored?.diffs?.[restored.page]
+        ? "detail"
+        : (initial?.page ?? restored?.page ?? repositoryTabs()[repository.toLowerCase()] ?? "overview")
     void session.load(repository, loadScope)
     setView("repository")
   }
@@ -271,9 +296,10 @@ export function Root(props: {
     setView("resolving")
     let detail: DetailTarget | undefined
     try {
-      detail = request.detail?.kind === "number"
-        ? { kind: await services.loadIssueKind(request.repository, request.detail.number), number: request.detail.number }
-        : request.detail
+      detail =
+        request.detail?.kind === "number"
+          ? { kind: await services.loadIssueKind(request.repository, request.detail.number), number: request.detail.number }
+          : request.detail
     } catch (error) {
       if (renderer.isDestroyed) return
       const target = request.detail?.kind === "number" ? `#${request.detail.number}` : ""
@@ -288,18 +314,21 @@ export function Root(props: {
   onMount(() => {
     void refreshLocalRepository().catch(() => setLocalRepository(undefined))
     void Promise.all([
-      (savedResume ? Promise.resolve(savedResume.repository)
-        : services.resolveRepository(props.repositoryArgument, props.cwd)).catch((error) => {
-        if (!renderer.isDestroyed) setPickerError(error instanceof Error ? error.message : "Could not resolve GitHub repository")
-        return undefined
-      }),
+      (savedResume ? Promise.resolve(savedResume.repository) : services.resolveRepository(props.repositoryArgument, props.cwd)).catch(
+        (error) => {
+          if (!renderer.isDestroyed) setPickerError(error instanceof Error ? error.message : "Could not resolve GitHub repository")
+          return undefined
+        },
+      ),
       services.loadRecentRepositories().catch(() => []),
       services.loadRepositoryTabs().catch(() => ({})),
-      props.initialConfig ? Promise.resolve(props.initialConfig) : services.loadConfig().catch((error) => {
-        const message = error instanceof Error ? error.message : "Could not load config"
-        setConfigError(configLoadWarning(message))
-        return { ...defaultConfig }
-      }),
+      props.initialConfig
+        ? Promise.resolve(props.initialConfig)
+        : services.loadConfig().catch((error) => {
+            const message = error instanceof Error ? error.message : "Could not load config"
+            setConfigError(configLoadWarning(message))
+            return { ...defaultConfig }
+          }),
     ]).then(([resolved, repositories, savedTabs, loadedConfig]) => {
       if (renderer.isDestroyed) return
       setRecent(repositories)
@@ -312,9 +341,12 @@ export function Root(props: {
       }
       if (resolved) return resolveLaunch({ repository: resolved, detail: props.initialDetail, page: props.initialPage })
       if (!pickerError()) {
-        if (props.repositoryArgument === ".") setPickerError(props.initialDetail
-          ? "No GitHub repository found in the current directory. Pass owner/repo explicitly."
-          : "No GitHub repository found")
+        if (props.repositoryArgument === ".")
+          setPickerError(
+            props.initialDetail
+              ? "No GitHub repository found in the current directory. Pass owner/repo explicitly."
+              : "No GitHub repository found",
+          )
         else if (props.repositoryArgument) setPickerError(`Invalid repository: “${props.repositoryArgument}”`)
       }
       setView("picker")
@@ -323,199 +355,239 @@ export function Root(props: {
 
   return (
     <KeybindingsProvider overrides={config().keybindings}>
-    <RootShortcuts onInterrupt={() => commandCancel ? commandCancel() : quit()} onQuit={quit} onReload={() => void reloadConfig()}
-      onBack={() => view() === "repository" && session.state().status !== "ready" ? returnToRepository() : false} />
-    <ThemeProvider name={config().theme} mode={config().colorMode}>
-      <MotionProvider reduced={config().reducedMotion}>
-      <MouseSurface>
-      <SelectionClipboard onCopy={services.copyToHostClipboard} />
-      <Show
-        when={view() === "repository" && !loadingMessage()}
-      fallback={
-        <Switch>
-          {/* Stays mounted from repository discovery through session loading. */}
-          <Match when={loadingMessage()}>
-            <LoadingScreen message={loadingMessage() ?? ""}
-              onSwitchRepository={view() === "repository" ? showSwitcher : undefined} />
-          </Match>
-          <Match when={view() === "launch-error" && launchError()}>
-            {(current) => <RepositoryLoadError
-              title="Issue/PR unavailable"
-              repository={current().repository}
-              message={current().message}
-              onRetry={() => void resolveLaunch(current())}
-              onSwitchRepository={showSwitcher}
-              showStatusBarHints={config().showStatusBarHints}
-              onQuit={quit}
-            />}
-          </Match>
-          <Match when={view() === "switch"}>
-            <SwitchRepositoryScreen recent={recent()} showScrollbar={config().showScrollbars}
-              showStatusBarHints={config().showStatusBarHints}
-              onOpen={open} onClose={() => setView(switchReturn)} />
-          </Match>
-          <Match when={view() === "picker"}>
-            <RepositoryPicker recent={recent()} error={pickerError()} onOpen={open} onQuit={quit} />
-          </Match>
-        </Switch>
-      }
-    >
-      <Switch>
-        <Match when={session.state().status === "error" ? session.state() as ErrorState : undefined}>
-          {(current) => (
-            <RepositoryLoadError
-              repository={current().repository}
-              message={current().message}
-              onRetry={() => void session.load(current().repository, loadScope)}
-              onSwitchRepository={showSwitcher}
-              showStatusBarHints={config().showStatusBarHints}
-              onQuit={quit}
-            />
-          )}
-        </Match>
-        <Match when={session.state().status === "ready" ? session.state() as ReadyState : undefined}>
-          {(current) => (
-            <Show when={current().repository} keyed>
-              {(repositoryName) => {
-                // Consume only when this repository actually mounts, preserving intent across metadata retries.
-                const initialNavigation = pendingNavigation?.repository.toLowerCase() === repositoryName.toLowerCase()
-                  ? pendingNavigation : undefined
-                if (initialNavigation) pendingNavigation = undefined
-                const restored = pendingState?.repository.toLowerCase() === repositoryName.toLowerCase() ? pendingState : undefined
-                if (restored) pendingState = undefined
-                return <App
-              data={() => current().data}
-              operations={() => current().operations}
-              initialPage={repositoryTabs()[repositoryName.toLowerCase()]}
-              initialNavigation={initialNavigation}
-              focus={focus()}
-              onOpenFullApp={() => setFocus(false)}
-              onEnsureResources={(scope) => { void session.ensure?.(scope) }}
-              initialState={restored?.state}
-              resume={!!restored && restored === savedResume}
-              onNavigationChange={(state) => props.onNavigationChange?.(resumeLocation(repositoryName, state))}
-              repositoryEntry={restored?.entry}
-              onReturnToRepository={repositoryReturns().length ? () => { returnToRepository() } : undefined}
-              onOpenLocation={followRepository}
-              onResolveIssueKind={services.loadIssueKind}
-              onOpenUrl={services.openUrl}
-              onPageChange={(page) => { if (!focus()) rememberTab(repositoryName, page) }}
-              config={config()}
-              configSaving={configSaving() || configReloading()}
-              configError={configError()}
-              onConfigChange={updateConfig}
-              cwd={props.cwd}
-              localRepository={localRepository()}
-              onCommandCaptureCancel={(cancel) => { commandCancel = cancel }}
-              onRunCommand={async (spec, output, signal) => {
-                if (signal.aborted) throw new Error("Command cancelled before execution")
-                return services.runCommand(spec, output)
-              }}
-              onQuit={quit}
-              onRefresh={() => void session.refresh()}
-              recentRepositories={recent()}
-              onRefreshRecentRepositories={refreshRecent}
-              onSwitchRepository={open}
-              onOpenReference={(repository, detail) => open(repository, { detail })}
-              onRetryResource={(resource) => void session.retryResource(resource)}
-              canSwitchBranch={session.canSwitchBranch()}
-              onBranchChange={(branch) => void session.switchBranch(branch)}
-              onLoadMoreBranches={session.loadMoreBranches}
-              onLoadMoreCommits={session.loadMoreCommits}
-              diffs={session.diffs?.()}
-              onLoadDiff={session.loadDiff}
-              onCloseDiff={session.clearDiff}
-              runDetail={session.runDetail()}
-              onLoadRun={session.loadRun}
-              onLoadMoreRunJobs={session.loadMoreRunJobs}
-              onCloseRun={session.clearRun}
-              commitDetail={session.commitDetail()}
-              onLoadCommit={session.loadCommit}
-              onLoadMoreCommitFiles={session.loadMoreCommitFiles}
-              onCloseCommit={session.clearCommit}
-              getReactionAction={session.reactionAction}
-              onAddReaction={session.addReaction}
-              issueDetail={session.issueDetail()}
-              onLoadIssue={session.loadIssue}
-              onLoadMoreIssueComments={session.loadMoreIssueComments}
-              onRetryIssueReferences={session.retryIssueReferences}
-              onCloseIssue={session.clearIssue}
-              assignableUsers={session.assignableUsers?.()}
-              onLoadAssignableUsers={session.loadAssignableUsers}
-              onReloadAssignableUsers={session.reloadAssignableUsers}
-              onSearchMentionUsers={session.searchMentionableUsers}
-              getCommentDraft={session.commentDraft}
-              getIssueAction={session.issueAction}
-              onPrepareIssueAction={session.prepareIssueAction}
-              onIssueDraftChange={session.updateIssueDraft}
-              onDiscardIssueDraft={session.discardIssueDraft}
-              onSubmitIssueAction={session.submitIssueAction}
-              reviews={reviews}
-              onPostInlineComment={inlineComments.post}
-              onMergePull={session.mergePull}
-              onUpdatePullDraft={session.updatePullDraft}
-              onLoadPullMergeMessage={session.loadPullMergeMessage}
-              pullDetail={session.pullDetail()}
-              onLoadPull={session.loadPull}
-              onLoadMorePullComments={session.loadMorePullComments}
-              onRetryPullReferences={session.retryPullReferences}
-              onRetryPullCommits={session.retryPullCommits}
-              onRetryPullContext={session.retryPullContext}
-              onClosePull={session.clearPull}
-              onInvalidatePull={session.invalidatePull}
-              onOpenInBrowser={(target, repository, view) => services.openGitHub(repository ?? repositoryName, target, view)}
-              onCopyToClipboard={services.copyToHostClipboard}
-              onLoadMoreRuns={session.loadMoreRuns}
-              onLoadMoreIssues={session.loadMoreIssues}
-              onLoadMorePulls={session.loadMorePulls}
-            />
-              }}
+      <RootShortcuts
+        onInterrupt={() => (commandCancel ? commandCancel() : quit())}
+        onQuit={quit}
+        onReload={() => void reloadConfig()}
+        onBack={() => (view() === "repository" && session.state().status !== "ready" ? returnToRepository() : false)}
+      />
+      <ThemeProvider name={config().theme} mode={config().colorMode}>
+        <MotionProvider reduced={config().reducedMotion}>
+          <MouseSurface>
+            <SelectionClipboard onCopy={services.copyToHostClipboard} />
+            <Show
+              when={view() === "repository" && !loadingMessage()}
+              fallback={
+                <Switch>
+                  {/* Stays mounted from repository discovery through session loading. */}
+                  <Match when={loadingMessage()}>
+                    <LoadingScreen
+                      message={loadingMessage() ?? ""}
+                      onSwitchRepository={view() === "repository" ? showSwitcher : undefined}
+                    />
+                  </Match>
+                  <Match when={view() === "launch-error" && launchError()}>
+                    {(current) => (
+                      <RepositoryLoadError
+                        title="Issue/PR unavailable"
+                        repository={current().repository}
+                        message={current().message}
+                        onRetry={() => void resolveLaunch(current())}
+                        onSwitchRepository={showSwitcher}
+                        showStatusBarHints={config().showStatusBarHints}
+                        onQuit={quit}
+                      />
+                    )}
+                  </Match>
+                  <Match when={view() === "switch"}>
+                    <SwitchRepositoryScreen
+                      recent={recent()}
+                      showScrollbar={config().showScrollbars}
+                      showStatusBarHints={config().showStatusBarHints}
+                      onOpen={open}
+                      onClose={() => setView(switchReturn)}
+                    />
+                  </Match>
+                  <Match when={view() === "picker"}>
+                    <RepositoryPicker recent={recent()} error={pickerError()} onOpen={open} onQuit={quit} />
+                  </Match>
+                </Switch>
+              }
+            >
+              <Switch>
+                <Match when={session.state().status === "error" ? (session.state() as ErrorState) : undefined}>
+                  {(current) => (
+                    <RepositoryLoadError
+                      repository={current().repository}
+                      message={current().message}
+                      onRetry={() => void session.load(current().repository, loadScope)}
+                      onSwitchRepository={showSwitcher}
+                      showStatusBarHints={config().showStatusBarHints}
+                      onQuit={quit}
+                    />
+                  )}
+                </Match>
+                <Match when={session.state().status === "ready" ? (session.state() as ReadyState) : undefined}>
+                  {(current) => (
+                    <Show when={current().repository} keyed>
+                      {(repositoryName) => {
+                        // Consume only when this repository actually mounts, preserving intent across metadata retries.
+                        const initialNavigation =
+                          pendingNavigation?.repository.toLowerCase() === repositoryName.toLowerCase() ? pendingNavigation : undefined
+                        if (initialNavigation) pendingNavigation = undefined
+                        const restored = pendingState?.repository.toLowerCase() === repositoryName.toLowerCase() ? pendingState : undefined
+                        if (restored) pendingState = undefined
+                        return (
+                          <App
+                            data={() => current().data}
+                            operations={() => current().operations}
+                            initialPage={repositoryTabs()[repositoryName.toLowerCase()]}
+                            initialNavigation={initialNavigation}
+                            focus={focus()}
+                            onOpenFullApp={() => setFocus(false)}
+                            onEnsureResources={(scope) => {
+                              void session.ensure?.(scope)
+                            }}
+                            initialState={restored?.state}
+                            resume={!!restored && restored === savedResume}
+                            onNavigationChange={(state) => props.onNavigationChange?.(resumeLocation(repositoryName, state))}
+                            repositoryEntry={restored?.entry}
+                            onReturnToRepository={
+                              repositoryReturns().length
+                                ? () => {
+                                    returnToRepository()
+                                  }
+                                : undefined
+                            }
+                            onOpenLocation={followRepository}
+                            onResolveIssueKind={services.loadIssueKind}
+                            onOpenUrl={services.openUrl}
+                            onPageChange={(page) => {
+                              if (!focus()) rememberTab(repositoryName, page)
+                            }}
+                            config={config()}
+                            configSaving={configSaving() || configReloading()}
+                            configError={configError()}
+                            onConfigChange={updateConfig}
+                            cwd={props.cwd}
+                            localRepository={localRepository()}
+                            onCommandCaptureCancel={(cancel) => {
+                              commandCancel = cancel
+                            }}
+                            onRunCommand={async (spec, output, signal) => {
+                              if (signal.aborted) throw new Error("Command cancelled before execution")
+                              return services.runCommand(spec, output)
+                            }}
+                            onQuit={quit}
+                            onRefresh={() => void session.refresh()}
+                            recentRepositories={recent()}
+                            onRefreshRecentRepositories={refreshRecent}
+                            onSwitchRepository={open}
+                            onOpenReference={(repository, detail) => open(repository, { detail })}
+                            onRetryResource={(resource) => void session.retryResource(resource)}
+                            canSwitchBranch={session.canSwitchBranch()}
+                            onBranchChange={(branch) => void session.switchBranch(branch)}
+                            onLoadMoreBranches={session.loadMoreBranches}
+                            onLoadMoreCommits={session.loadMoreCommits}
+                            diffs={session.diffs?.()}
+                            onLoadDiff={session.loadDiff}
+                            onCloseDiff={session.clearDiff}
+                            runDetail={session.runDetail()}
+                            onLoadRun={session.loadRun}
+                            onLoadMoreRunJobs={session.loadMoreRunJobs}
+                            onCloseRun={session.clearRun}
+                            commitDetail={session.commitDetail()}
+                            onLoadCommit={session.loadCommit}
+                            onLoadMoreCommitFiles={session.loadMoreCommitFiles}
+                            onCloseCommit={session.clearCommit}
+                            getReactionAction={session.reactionAction}
+                            onAddReaction={session.addReaction}
+                            issueDetail={session.issueDetail()}
+                            onLoadIssue={session.loadIssue}
+                            onLoadMoreIssueComments={session.loadMoreIssueComments}
+                            onRetryIssueReferences={session.retryIssueReferences}
+                            onCloseIssue={session.clearIssue}
+                            assignableUsers={session.assignableUsers?.()}
+                            onLoadAssignableUsers={session.loadAssignableUsers}
+                            onReloadAssignableUsers={session.reloadAssignableUsers}
+                            onSearchMentionUsers={session.searchMentionableUsers}
+                            getCommentDraft={session.commentDraft}
+                            getIssueAction={session.issueAction}
+                            onPrepareIssueAction={session.prepareIssueAction}
+                            onIssueDraftChange={session.updateIssueDraft}
+                            onDiscardIssueDraft={session.discardIssueDraft}
+                            onSubmitIssueAction={session.submitIssueAction}
+                            reviews={reviews}
+                            onPostInlineComment={inlineComments.post}
+                            onMergePull={session.mergePull}
+                            onUpdatePullDraft={session.updatePullDraft}
+                            onLoadPullMergeMessage={session.loadPullMergeMessage}
+                            pullDetail={session.pullDetail()}
+                            onLoadPull={session.loadPull}
+                            onLoadMorePullComments={session.loadMorePullComments}
+                            onRetryPullReferences={session.retryPullReferences}
+                            onRetryPullCommits={session.retryPullCommits}
+                            onRetryPullContext={session.retryPullContext}
+                            onClosePull={session.clearPull}
+                            onInvalidatePull={session.invalidatePull}
+                            onOpenInBrowser={(target, repository, view) => services.openGitHub(repository ?? repositoryName, target, view)}
+                            onCopyToClipboard={services.copyToHostClipboard}
+                            onLoadMoreRuns={session.loadMoreRuns}
+                            onLoadMoreIssues={session.loadMoreIssues}
+                            onLoadMorePulls={session.loadMorePulls}
+                          />
+                        )
+                      }}
+                    </Show>
+                  )}
+                </Match>
+              </Switch>
             </Show>
-          )}
-        </Match>
-        </Switch>
-      </Show>
-      <Show when={!quitDraftSaveError() && session.draftSaveError?.() && session.draftSaveError?.() !== dismissedDraftError()}>
-        <Toast title="Draft not saved locally" message={session.draftSaveError?.() ?? ""}
-          zIndex={400} onDismiss={() => setDismissedDraftError(session.draftSaveError?.())} />
-      </Show>
-      <Show when={quitDraftSaveError()}>
-        <Toast title="Draft not saved — quit cancelled"
-          message="Your draft is retained in memory. Fix local storage and quit again to retry."
-          zIndex={400} onDismiss={() => setQuitDraftSaveError(false)} />
-      </Show>
-      <Show when={reviewSaveError()}>
-        <Toast title="Review draft not saved — quit cancelled" message={reviewSaveError()!} onDismiss={() => setReviewSaveError(undefined)} />
-      </Show>
-      <Show when={configReloaded()}>
-        <Toast
-          title="Config reloaded"
-          message=""
-          tone="success"
-          duration={2000}
-          zIndex={400}
-          onDismiss={() => setConfigReloaded(false)}
-        />
-      </Show>
-      <Show when={view() !== "resolving" && configError() && !configWarningDismissed()}>
-        <Toast
-          title={configReloadFailed() ? "Config reload failed" : "Using default settings"}
-          message={configReloadFailed() ? "" : configError()}
-          onDismiss={() => setConfigWarningDismissed(true)}
-        />
-      </Show>
-      </MouseSurface>
-      </MotionProvider>
-    </ThemeProvider>
+            <Show when={!quitDraftSaveError() && session.draftSaveError?.() && session.draftSaveError?.() !== dismissedDraftError()}>
+              <Toast
+                title="Draft not saved locally"
+                message={session.draftSaveError?.() ?? ""}
+                zIndex={400}
+                onDismiss={() => setDismissedDraftError(session.draftSaveError?.())}
+              />
+            </Show>
+            <Show when={quitDraftSaveError()}>
+              <Toast
+                title="Draft not saved — quit cancelled"
+                message="Your draft is retained in memory. Fix local storage and quit again to retry."
+                zIndex={400}
+                onDismiss={() => setQuitDraftSaveError(false)}
+              />
+            </Show>
+            <Show when={reviewSaveError()}>
+              <Toast
+                title="Review draft not saved — quit cancelled"
+                message={reviewSaveError()!}
+                onDismiss={() => setReviewSaveError(undefined)}
+              />
+            </Show>
+            <Show when={configReloaded()}>
+              <Toast
+                title="Config reloaded"
+                message=""
+                tone="success"
+                duration={2000}
+                zIndex={400}
+                onDismiss={() => setConfigReloaded(false)}
+              />
+            </Show>
+            <Show when={view() !== "resolving" && configError() && !configWarningDismissed()}>
+              <Toast
+                title={configReloadFailed() ? "Config reload failed" : "Using default settings"}
+                message={configReloadFailed() ? "" : configError()}
+                onDismiss={() => setConfigWarningDismissed(true)}
+              />
+            </Show>
+          </MouseSurface>
+        </MotionProvider>
+      </ThemeProvider>
     </KeybindingsProvider>
   )
 }
 
 function RootShortcuts(props: { onInterrupt(): void; onQuit(): void; onReload(): void; onBack(): boolean }) {
-  useKeyActions({
-    "global.interrupt": () => props.onInterrupt(),
-    "global.reloadConfig": () => props.onReload(),
-  }, { priority: 1000 })
+  useKeyActions(
+    {
+      "global.interrupt": () => props.onInterrupt(),
+      "global.reloadConfig": () => props.onReload(),
+    },
+    { priority: 1000 },
+  )
   useKeyActions({ "global.quit": () => props.onQuit(), "navigation.back": () => props.onBack() }, { priority: -100 })
   return null
 }

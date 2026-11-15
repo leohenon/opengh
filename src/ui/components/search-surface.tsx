@@ -20,11 +20,30 @@ export function SearchSurface(props: { active: boolean; children: JSX.Element })
     position: () => adapter?.position() ?? 0,
   })
   onCleanup(() => adapter?.dispose())
-  return <box ref={(root: BoxRenderable) => { adapter = createRenderedSearch(root, {
-      get matchBackground() { return RGBA.fromHex(colors.searchMatchBg) },
-      get matchForeground() { return RGBA.fromHex(colors.searchMatchFg) },
-      get activeBackground() { return RGBA.fromHex(colors.searchCurrentMatchBg) },
-      get activeForeground() { return RGBA.fromHex(colors.searchCurrentMatchFg) },
-    }) }} visible={props.active}
-    flexGrow={1} minHeight={0} flexDirection="column">{props.children}</box>
+  return (
+    <box
+      ref={(root: BoxRenderable) => {
+        adapter = createRenderedSearch(root, {
+          get matchBackground() {
+            return RGBA.fromHex(colors.searchMatchBg)
+          },
+          get matchForeground() {
+            return RGBA.fromHex(colors.searchMatchFg)
+          },
+          get activeBackground() {
+            return RGBA.fromHex(colors.searchCurrentMatchBg)
+          },
+          get activeForeground() {
+            return RGBA.fromHex(colors.searchCurrentMatchFg)
+          },
+        })
+      }}
+      visible={props.active}
+      flexGrow={1}
+      minHeight={0}
+      flexDirection="column"
+    >
+      {props.children}
+    </box>
+  )
 }

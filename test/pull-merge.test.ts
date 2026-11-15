@@ -7,50 +7,161 @@ import { githubDataFixture } from "./fixtures/github-data"
 
 const head = "a".repeat(40)
 const date = "2026-01-01T00:00:00Z"
-const context: PullContext = { threads: [], warnings: [], readiness: {
-  headSha: head, isDraft: false, mergeable: "MERGEABLE", mergeStateStatus: "CLEAN",
-  reviewDecision: null, checks: [], checksComplete: true,
-} }
-const raw = { node_id: "PR1", number: 1, state: "open", title: "PR", user: { login: "me" },
-  created_at: date, updated_at: date, merged_at: null, closed_at: null, draft: false, locked: false,
-  html_url: "https://github.com/o/r/pull/1", body: "", base: { ref: "main" }, head: { ref: "feature", sha: head, repo: null },
-  additions: 1, deletions: 0, changed_files: 1, commits: 1, comments: 0, review_comments: 0,
-  labels: [], assignees: [], requested_reviewers: [], requested_teams: [], mergeable: true, mergeable_state: "clean" }
-function clientFixture(options: { permission?: unknown; queue?: unknown; state?: string; failedCheckRequired?: boolean; method?: unknown; confirmed?: boolean; message?: PullMergeMessage; defaults?: Record<string, unknown>; errors?: unknown } = {}) {
+const context: PullContext = {
+  threads: [],
+  warnings: [],
+  readiness: {
+    headSha: head,
+    isDraft: false,
+    mergeable: "MERGEABLE",
+    mergeStateStatus: "CLEAN",
+    reviewDecision: null,
+    checks: [],
+    checksComplete: true,
+  },
+}
+const raw = {
+  node_id: "PR1",
+  number: 1,
+  state: "open",
+  title: "PR",
+  user: { login: "me" },
+  created_at: date,
+  updated_at: date,
+  merged_at: null,
+  closed_at: null,
+  draft: false,
+  locked: false,
+  html_url: "https://github.com/o/r/pull/1",
+  body: "",
+  base: { ref: "main" },
+  head: { ref: "feature", sha: head, repo: null },
+  additions: 1,
+  deletions: 0,
+  changed_files: 1,
+  commits: 1,
+  comments: 0,
+  review_comments: 0,
+  labels: [],
+  assignees: [],
+  requested_reviewers: [],
+  requested_teams: [],
+  mergeable: true,
+  mergeable_state: "clean",
+}
+function clientFixture(
+  options: {
+    permission?: unknown
+    queue?: unknown
+    state?: string
+    failedCheckRequired?: boolean
+    method?: unknown
+    confirmed?: boolean
+    message?: PullMergeMessage
+    defaults?: Record<string, unknown>
+    errors?: unknown
+  } = {},
+) {
   let writes = 0
   let reads = 0
   const empty = { nodes: [], pageInfo: { hasNextPage: false } }
   const client = createGitHubClient({
-    async text() { return "" },
-    async json<T>() { if (writes) throw new Error("Post-merge reads unavailable"); reads++; return raw as T },
+    async text() {
+      return ""
+    },
+    async json<T>() {
+      if (writes) throw new Error("Post-merge reads unavailable")
+      reads++
+      return raw as T
+    },
     async graphql<T>(query: string, variables: Record<string, string>) {
       if (query.startsWith("mutation")) {
         writes++
-        expect(variables).toEqual({ id: "PR1", head, method: "SQUASH",
-          ...(options.message ? { commitHeadline: options.message.headline, commitBody: options.message.body } : {}) })
+        expect(variables).toEqual({
+          id: "PR1",
+          head,
+          method: "SQUASH",
+          ...(options.message ? { commitHeadline: options.message.headline, commitBody: options.message.body } : {}),
+        })
         expect(query.includes("commitHeadline: $commitHeadline")).toBe(!!options.message)
         expect(query.includes("commitBody: $commitBody")).toBe(!!options.message)
         expect(query).not.toContain("enqueue")
-        return { data: { mergePullRequest: { pullRequest: { id: "PR1", number: 1, headRefOid: head,
-          state: options.confirmed === false ? "OPEN" : "MERGED", merged: true, mergedAt: date, updatedAt: date, closedAt: date } } } } as T
+        return {
+          data: {
+            mergePullRequest: {
+              pullRequest: {
+                id: "PR1",
+                number: 1,
+                headRefOid: head,
+                state: options.confirmed === false ? "OPEN" : "MERGED",
+                merged: true,
+                mergedAt: date,
+                updatedAt: date,
+                closedAt: date,
+              },
+            },
+          },
+        } as T
       }
       if (query.includes("viewerMergeHeadlineText")) {
         expect(query).toContain("viewerMergeHeadlineText(mergeType: SQUASH)")
         expect(query).toContain("viewerMergeBodyText(mergeType: SQUASH)")
-        return { errors: options.errors, data: { repository: { pullRequest: {
-          id: "PR1", number: 1, headRefOid: head, viewerMergeHeadlineText: options.message?.headline ?? "Server title",
-          viewerMergeBodyText: options.message?.body ?? "Server body", ...options.defaults,
-        } } } } as T
+        return {
+          errors: options.errors,
+          data: {
+            repository: {
+              pullRequest: {
+                id: "PR1",
+                number: 1,
+                headRefOid: head,
+                viewerMergeHeadlineText: options.message?.headline ?? "Server title",
+                viewerMergeBodyText: options.message?.body ?? "Server body",
+                ...options.defaults,
+              },
+            },
+          },
+        } as T
       }
       let pull: Record<string, unknown> = {}
-      if (query.includes("query PullContext(")) pull = { headRefOid: head, isDraft: false, mergeable: "MERGEABLE", mergeStateStatus: options.state ?? "CLEAN", reviewDecision: null }
+      if (query.includes("query PullContext("))
+        pull = {
+          headRefOid: head,
+          isDraft: false,
+          mergeable: "MERGEABLE",
+          mergeStateStatus: options.state ?? "CLEAN",
+          reviewDecision: null,
+        }
       else if (query.includes("query PullThreads(")) pull = { headRefOid: head, reviewThreads: empty }
-      else if (query.includes("query PullChecks(")) pull = { headRefOid: head, commits: { nodes: [{ commit: {
-        statusCheckRollup: options.failedCheckRequired === undefined ? null : { contexts: { ...empty, nodes: [{
-          __typename: "CheckRun", id: "failed-check", name: "expected-failure", status: "COMPLETED",
-          conclusion: "FAILURE", isRequired: options.failedCheckRequired,
-        }] } },
-      } }] } }
+      else if (query.includes("query PullChecks("))
+        pull = {
+          headRefOid: head,
+          commits: {
+            nodes: [
+              {
+                commit: {
+                  statusCheckRollup:
+                    options.failedCheckRequired === undefined
+                      ? null
+                      : {
+                          contexts: {
+                            ...empty,
+                            nodes: [
+                              {
+                                __typename: "CheckRun",
+                                id: "failed-check",
+                                name: "expected-failure",
+                                status: "COMPLETED",
+                                conclusion: "FAILURE",
+                                isRequired: options.failedCheckRequired,
+                              },
+                            ],
+                          },
+                        },
+                },
+              },
+            ],
+          },
+        }
       else if (query.includes("query PullProjects(")) pull = { projectItems: empty }
       else if (query.includes("query PullClosingIssues(")) pull = { closingIssuesReferences: empty }
       else if (query.includes("viewerPermission")) {
@@ -58,18 +169,38 @@ function clientFixture(options: { permission?: unknown; queue?: unknown; state?:
         expect(query).not.toContain("viewerCanMerge")
         pull = { id: "PR1", isMergeQueueEnabled: "queue" in options ? options.queue : false }
       }
-      return { data: { repository: { isArchived: false, viewerPermission: "permission" in options ? options.permission : "WRITE",
-        mergeCommitAllowed: false, squashMergeAllowed: "method" in options ? options.method : true, rebaseMergeAllowed: false, pullRequest: pull } } } as T
+      return {
+        data: {
+          repository: {
+            isArchived: false,
+            viewerPermission: "permission" in options ? options.permission : "WRITE",
+            mergeCommitAllowed: false,
+            squashMergeAllowed: "method" in options ? options.method : true,
+            rebaseMergeAllowed: false,
+            pullRequest: pull,
+          },
+        },
+      } as T
     },
   })
   return { client, writes: () => writes, reads: () => reads }
 }
 
 test("fresh preflight rejects unauthorized, unknown, queue, blocked, method and head without mutations", async () => {
-  for (const options of [{ permission: "READ" }, { permission: null }, { permission: "UNKNOWN" }, { queue: true },
-    { queue: undefined }, { method: undefined }, { method: false }, { state: "BLOCKED" }, { state: "BEHIND" },
-    { permission: "ADMIN", state: "BLOCKED" }, { permission: "ADMIN", queue: true },
-    { state: "UNSTABLE", failedCheckRequired: true }]) {
+  for (const options of [
+    { permission: "READ" },
+    { permission: null },
+    { permission: "UNKNOWN" },
+    { queue: true },
+    { queue: undefined },
+    { method: undefined },
+    { method: false },
+    { state: "BLOCKED" },
+    { state: "BEHIND" },
+    { permission: "ADMIN", state: "BLOCKED" },
+    { permission: "ADMIN", queue: true },
+    { state: "UNSTABLE", failedCheckRequired: true },
+  ]) {
     const f = clientFixture(options)
     await expect(f.client.mergePull("o/r", 1, "squash", head)).rejects.toThrow()
     expect(f.writes()).toBe(0)
@@ -83,7 +214,12 @@ test("fresh preflight rejects unauthorized, unknown, queue, blocked, method and 
 test("confirmed mutation returns merged snapshot without a fallible follow-up read", async () => {
   for (const options of [{}, { state: "UNSTABLE", failedCheckRequired: false }]) {
     const f = clientFixture(options)
-    expect(await f.client.mergePull("o/r", 1, "squash", head)).toMatchObject({ state: "closed", merged: true, mergedAt: date, headSha: head })
+    expect(await f.client.mergePull("o/r", 1, "squash", head)).toMatchObject({
+      state: "closed",
+      merged: true,
+      mergedAt: date,
+      headSha: head,
+    })
     expect(f.writes()).toBe(1)
     expect(f.reads()).toBe(1)
   }
@@ -104,8 +240,13 @@ test("server-generated squash messages are passed verbatim, including an empty b
 })
 
 test("merge defaults reject errors, malformed data and changed heads; invalid custom messages never mutate", async () => {
-  for (const options of [{ errors: [{ message: "offline" }] }, { defaults: { headRefOid: "b".repeat(40) } },
-    { defaults: { number: 2 } }, { defaults: { id: "" } }, { defaults: { viewerMergeBodyText: null } }]) {
+  for (const options of [
+    { errors: [{ message: "offline" }] },
+    { defaults: { headRefOid: "b".repeat(40) } },
+    { defaults: { number: 2 } },
+    { defaults: { id: "" } },
+    { defaults: { viewerMergeBodyText: null } },
+  ]) {
     await expect(clientFixture(options).client.pullMergeMessage("o/r", 1, head)).rejects.toThrow()
   }
   const f = clientFixture()
@@ -125,19 +266,42 @@ test("helper requires complete readiness but does not block optional unresolved 
   expect(pullMergeBlocker({ ...pull, draft: true }, context)).toContain("ready for review")
   expect(pullMergeBlocker({ ...pull, draft: undefined }, context)).toContain("Draft status unavailable")
   expect(pullMergeBlocker(pull, { ...context, readiness: { ...context.readiness, checksComplete: false } })).toContain("incomplete")
-  expect(pullMergeBlocker(pull, { ...context, readiness: { ...context.readiness, reviewDecision: "REVIEW_REQUIRED" } })).toContain("approvals")
-  expect(pullMergeBlocker(pull, { ...context, threads: [{ kind: "review-thread", id: "t", path: "x", isResolved: false, isOutdated: false, comments: [] }] })).toBeUndefined()
+  expect(pullMergeBlocker(pull, { ...context, readiness: { ...context.readiness, reviewDecision: "REVIEW_REQUIRED" } })).toContain(
+    "approvals",
+  )
+  expect(
+    pullMergeBlocker(pull, {
+      ...context,
+      threads: [{ kind: "review-thread", id: "t", path: "x", isResolved: false, isOutdated: false, comments: [] }],
+    }),
+  ).toBeUndefined()
 })
 
 async function sessionFixture(overrides: Partial<RepositoryLoaders> = {}) {
   const pull = await clientFixture().client.pull("o/r", 1)
   const empty = async () => ({ items: [], hasMore: false })
   const loaders: RepositoryLoaders = {
-    metadata: async () => githubDataFixture.repo, workCounts: async () => ({ issues: 0, pulls: 1 }),
-    documents: async () => [], document: async () => "", branches: empty, commits: empty, commitCount: async () => 0,
-    commit: async () => { throw new Error("unused") }, issue: async () => { throw new Error("unused") },
-    issueComments: empty, issueReferences: async () => [], issues: empty, pulls: empty,
-    pull: async () => pull, pullCommits: async () => [], pullContext: async () => context, runs: empty,
+    metadata: async () => githubDataFixture.repo,
+    workCounts: async () => ({ issues: 0, pulls: 1 }),
+    documents: async () => [],
+    document: async () => "",
+    branches: empty,
+    commits: empty,
+    commitCount: async () => 0,
+    commit: async () => {
+      throw new Error("unused")
+    },
+    issue: async () => {
+      throw new Error("unused")
+    },
+    issueComments: empty,
+    issueReferences: async () => [],
+    issues: empty,
+    pulls: empty,
+    pull: async () => pull,
+    pullCommits: async () => [],
+    pullContext: async () => context,
+    runs: empty,
     ...overrides,
   }
   const session = createRepositorySession(loaders)
@@ -148,11 +312,13 @@ async function sessionFixture(overrides: Partial<RepositoryLoaders> = {}) {
 
 test("failed merges preserve comment drafts and invalid headlines never reach the loader", async () => {
   let writes = 0
-  const { session } = await sessionFixture({ mergePull: async (_repo, _number, _method, _head, message) => {
-    writes++
-    expect(message).toEqual({ headline: "Edited", body: "" })
-    throw new Error("Merge refused")
-  } })
+  const { session } = await sessionFixture({
+    mergePull: async (_repo, _number, _method, _head, message) => {
+      writes++
+      expect(message).toEqual({ headline: "Edited", body: "" })
+      throw new Error("Merge refused")
+    },
+  })
   const draft = { headline: "Edited", body: "", headSha: head }
   session.updateIssueDraft(1, { body: "independent" }, "pull")
   await expect(session.mergePull(1, "squash", head, { headline: draft.headline, body: draft.body })).rejects.toThrow("Merge refused")
@@ -165,10 +331,14 @@ test("failed merges preserve comment drafts and invalid headlines never reach th
 test("defaults are fetched anew and late responses cannot cross repository scope", async () => {
   let release!: (message: PullMergeMessage) => void
   let reads = 0
-  const { session } = await sessionFixture({ pullMergeMessage: async () => {
-    reads++
-    return new Promise(resolve => { release = resolve })
-  } })
+  const { session } = await sessionFixture({
+    pullMergeMessage: async () => {
+      reads++
+      return new Promise((resolve) => {
+        release = resolve
+      })
+    },
+  })
   const first = session.loadPullMergeMessage(1, head)
   release({ headline: "First default", body: "" })
   expect(await first).toEqual({ headline: "First default", body: "", headSha: head })
@@ -187,8 +357,14 @@ test("defaults can retry after failure and are unavailable while a shared action
   let attempts = 0
   let release!: (pull: PullRequestDetail) => void
   const { session, pull } = await sessionFixture({
-    pullMergeMessage: async () => { if (++attempts === 1) throw new Error("offline"); return { headline: "Server", body: "" } },
-    mergePull: async () => new Promise(resolve => { release = resolve }),
+    pullMergeMessage: async () => {
+      if (++attempts === 1) throw new Error("offline")
+      return { headline: "Server", body: "" }
+    },
+    mergePull: async () =>
+      new Promise((resolve) => {
+        release = resolve
+      }),
   })
   session.updateIssueDraft(1, { body: "keep" }, "pull")
   await expect(session.loadPullMergeMessage(1, head)).rejects.toThrow("offline")
@@ -205,15 +381,41 @@ test("session confirms merge, preserves independent drafts, and does not fail on
   const pull = await clientFixture().client.pull("o/r", 1)
   let merged = false
   let release!: (value: PullRequestDetail) => void
-  const pending = new Promise<PullRequestDetail>(resolve => { release = resolve })
+  const pending = new Promise<PullRequestDetail>((resolve) => {
+    release = resolve
+  })
   const empty = async () => ({ items: [], hasMore: false })
   const loaders: RepositoryLoaders = {
-    metadata: async () => githubDataFixture.repo, workCounts: async () => { if (merged) throw new Error("offline"); return { issues: 0, pulls: 1 } },
-    documents: async () => [], document: async () => "", branches: empty, commits: empty, commitCount: async () => 0,
-    commit: async () => { throw new Error("unused") }, issue: async () => { throw new Error("unused") },
-    issueComments: empty, issueReferences: async () => { if (merged) throw new Error("offline"); return [] },
-    issues: empty, pulls: async () => { if (merged) throw new Error("offline"); return { items: [pull], hasMore: false } },
-    pull: async () => pull, pullCommits: async () => [], pullContext: async () => context, runs: empty,
+    metadata: async () => githubDataFixture.repo,
+    workCounts: async () => {
+      if (merged) throw new Error("offline")
+      return { issues: 0, pulls: 1 }
+    },
+    documents: async () => [],
+    document: async () => "",
+    branches: empty,
+    commits: empty,
+    commitCount: async () => 0,
+    commit: async () => {
+      throw new Error("unused")
+    },
+    issue: async () => {
+      throw new Error("unused")
+    },
+    issueComments: empty,
+    issueReferences: async () => {
+      if (merged) throw new Error("offline")
+      return []
+    },
+    issues: empty,
+    pulls: async () => {
+      if (merged) throw new Error("offline")
+      return { items: [pull], hasMore: false }
+    },
+    pull: async () => pull,
+    pullCommits: async () => [],
+    pullContext: async () => context,
+    runs: empty,
     mergePull: async () => pending,
   }
   const session = createRepositorySession(loaders)

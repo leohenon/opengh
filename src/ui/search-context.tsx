@@ -68,7 +68,7 @@ export function SearchProvider(props: { identity: string; enabled: boolean; scop
     else selected ??= found[0]
     if (previous !== selected?.id) setSession((session) => ({ ...session, current: selected?.id }))
     owner.highlight(selected?.id)
-    if (reveal || draft() && selected?.id !== previous) selected?.reveal()
+    if (reveal || (draft() && selected?.id !== previous)) selected?.reveal()
   }
   const switchTarget = (target: SearchTarget | undefined, key: string) => {
     if (key === identity && target === owner) return
@@ -89,9 +89,15 @@ export function SearchProvider(props: { identity: string; enabled: boolean; scop
   }
   createEffect(() => {
     ownerVersion()
-    if (!props.enabled) { untrack(cancel); return }
+    if (!props.enabled) {
+      untrack(cancel)
+      return
+    }
     const focused = active()
-    const target = retaining() && viewIdentity === props.identity && owner?.scope === props.scope && owner?.retain?.() && targets().includes(owner) ? owner : focused
+    const target =
+      retaining() && viewIdentity === props.identity && owner?.scope === props.scope && owner?.retain?.() && targets().includes(owner)
+        ? owner
+        : focused
     const key = targetIdentity(target)
     untrack(() => switchTarget(target, key))
   })
@@ -99,8 +105,13 @@ export function SearchProvider(props: { identity: string; enabled: boolean; scop
   // dependencies. Adapters cache their index and poll native revision/content
   // identities here; unchanged results do not publish a new search session.
   // Reconcile loaded content and geometry only while searching.
-  const timer = setInterval(() => { if (query() && props.enabled) refresh(false) }, 150)
-  onCleanup(() => { clearInterval(timer); owner?.clear() })
+  const timer = setInterval(() => {
+    if (query() && props.enabled) refresh(false)
+  }, 150)
+  onCleanup(() => {
+    clearInterval(timer)
+    owner?.clear()
+  })
 
   const start = () => {
     const target = active()
@@ -118,9 +129,10 @@ export function SearchProvider(props: { identity: string; enabled: boolean; scop
     let result: SearchResult | undefined = matches[wrapSearchIndex(index, delta, matches.length)]
     if (selection !== undefined && index < 0) {
       const cursor = owner?.position?.() ?? 0
-      result = delta > 0
-        ? matches.find((result) => (result.position ?? 0) > cursor) ?? matches[0]
-        : matches.findLast((result) => (result.position ?? 0) < cursor) ?? matches.at(-1)
+      result =
+        delta > 0
+          ? (matches.find((result) => (result.position ?? 0) > cursor) ?? matches[0])
+          : (matches.findLast((result) => (result.position ?? 0) < cursor) ?? matches.at(-1))
     }
     setSession((session) => ({ ...session, current: result?.id }))
     owner?.highlight(result?.id)
@@ -132,30 +144,59 @@ export function SearchProvider(props: { identity: string; enabled: boolean; scop
     owner?.clear()
     setResults([])
   }
-  useKeyActions({
-    "search.start": start,
-    "search.next": () => move(1),
-    "search.previous": () => move(-1),
-    "navigation.back": () => props.scope === undefined ? clear() : false,
-    "dialog.close": () => props.scope !== undefined ? clear() : false,
-  }, { when: () => props.enabled && !draft(), get priority() { return props.scope === undefined ? 20 : 150 } })
-  useKeyActions({
-    "dialog.close": cancel,
-    "input.submit": () => {
-      setSession((session) => ({ ...session, query: draft()!.query }))
-      setDraft(undefined)
+  useKeyActions(
+    {
+      "search.start": start,
+      "search.next": () => move(1),
+      "search.previous": () => move(-1),
+      "navigation.back": () => (props.scope === undefined ? clear() : false),
+      "dialog.close": () => (props.scope !== undefined ? clear() : false),
     },
-  }, { when: () => props.enabled && !!draft(), priority: 200, modal: true })
+    {
+      when: () => props.enabled && !draft(),
+      get priority() {
+        return props.scope === undefined ? 20 : 150
+      },
+    },
+  )
+  useKeyActions(
+    {
+      "dialog.close": cancel,
+      "input.submit": () => {
+        setSession((session) => ({ ...session, query: draft()!.query }))
+        setDraft(undefined)
+      },
+    },
+    { when: () => props.enabled && !!draft(), priority: 200, modal: true },
+  )
 
-  return <SearchContext.Provider value={{ register(target) {
-    setTargets((targets) => [...targets, target])
-    return () => { target.clear(); setTargets((targets) => targets.filter((entry) => entry !== target)) }
-  } }}>
-    {props.children}
-    <Show when={props.enabled && !statusPrompt?.prompt() && (!!draft() || !!session().query)} fallback={props.footer}>
-      <SearchBar query={query()} editing={!!draft()} current={currentIndex() + 1} total={results().length} truncated={truncated()}
-        zIndex={props.scope === undefined ? 0 : 350}
-        onInput={(query) => { setDraft((draft) => draft && { ...draft, query }); refresh(true) }} />
-    </Show>
-  </SearchContext.Provider>
+  return (
+    <SearchContext.Provider
+      value={{
+        register(target) {
+          setTargets((targets) => [...targets, target])
+          return () => {
+            target.clear()
+            setTargets((targets) => targets.filter((entry) => entry !== target))
+          }
+        },
+      }}
+    >
+      {props.children}
+      <Show when={props.enabled && !statusPrompt?.prompt() && (!!draft() || !!session().query)} fallback={props.footer}>
+        <SearchBar
+          query={query()}
+          editing={!!draft()}
+          current={currentIndex() + 1}
+          total={results().length}
+          truncated={truncated()}
+          zIndex={props.scope === undefined ? 0 : 350}
+          onInput={(query) => {
+            setDraft((draft) => draft && { ...draft, query })
+            refresh(true)
+          }}
+        />
+      </Show>
+    </SearchContext.Provider>
+  )
 }

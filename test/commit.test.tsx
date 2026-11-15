@@ -16,16 +16,26 @@ test("abbreviated startup commits copy the resolved full SHA through remapped bi
   const [detail, setDetail] = createSignal<CommitDetailState>()
   const loads: string[] = []
   const copies: string[] = []
-  const view = await testRender(() => <App
-    initialNavigation={{ detail: { kind: "commit", sha } }}
-    config={{ ...defaultConfig, keybindings: { "item.copy": ["f6"] } }}
-    data={githubDataFixture} operations={repositoryOperationsFixture} commitDetail={detail()}
-    onLoadCommit={async (requested) => {
-      loads.push(requested)
-      setDetail({ sha: requested, resource: { status: "ready", value: commitDetailFixture } })
-    }}
-    onCopyToClipboard={async (value) => { copies.push(value); return true }}
-  />, { width: 120, height: 32 })
+  const view = await testRender(
+    () => (
+      <App
+        initialNavigation={{ detail: { kind: "commit", sha } }}
+        config={{ ...defaultConfig, keybindings: { "item.copy": ["f6"] } }}
+        data={githubDataFixture}
+        operations={repositoryOperationsFixture}
+        commitDetail={detail()}
+        onLoadCommit={async (requested) => {
+          loads.push(requested)
+          setDetail({ sha: requested, resource: { status: "ready", value: commitDetailFixture } })
+        }}
+        onCopyToClipboard={async (value) => {
+          copies.push(value)
+          return true
+        }}
+      />
+    ),
+    { width: 120, height: 32 },
+  )
   active.push(view)
   await view.flush()
   expect(view.captureCharFrame()).toContain("Files changed")
@@ -45,34 +55,54 @@ test("commit tabs retain detail state and Escape restores the list after resizin
     message: `Commit ${index}`,
   }))
   const files = Array.from({ length: 30 }, (_, index) => ({
-    path: `src/module-${index}.ts`, status: "modified", additions: 1, deletions: 0,
+    path: `src/module-${index}.ts`,
+    status: "modified",
+    additions: 1,
+    deletions: 0,
   }))
   const [detail, setDetail] = createSignal<CommitDetailState>()
   const opened: string[] = []
   let refreshes = 0
   let moreFiles = 0
   const copies: string[] = []
-  const view = await testRender(() => (
-    <App
-      config={{ ...defaultConfig, showStatusBarHints: true }}
-      data={{ ...githubDataFixture, commits: { status: "ready", value: { items: commits, page: 1, hasMore: false } } }}
-      operations={repositoryOperationsFixture}
-      commitDetail={detail()}
-      onLoadCommit={async (sha) => {
-        opened.push(sha)
-        const commit = commits.find((item) => item.sha === sha)!
-        setDetail({ sha, resource: { status: "ready", value: {
-          ...commit, fullMessage: `${commit.message}\n\nA full commit message body.`,
-          files: { items: files, page: 1, hasMore: false },
-        } } })
-      }}
-      onCloseCommit={() => setDetail(undefined)}
-      onRefresh={() => { refreshes++ }}
-      onLoadMoreCommitFiles={async () => { moreFiles++ }}
-    />
-  ), { width: 120, height: 28 })
+  const view = await testRender(
+    () => (
+      <App
+        config={{ ...defaultConfig, showStatusBarHints: true }}
+        data={{ ...githubDataFixture, commits: { status: "ready", value: { items: commits, page: 1, hasMore: false } } }}
+        operations={repositoryOperationsFixture}
+        commitDetail={detail()}
+        onLoadCommit={async (sha) => {
+          opened.push(sha)
+          const commit = commits.find((item) => item.sha === sha)!
+          setDetail({
+            sha,
+            resource: {
+              status: "ready",
+              value: {
+                ...commit,
+                fullMessage: `${commit.message}\n\nA full commit message body.`,
+                files: { items: files, page: 1, hasMore: false },
+              },
+            },
+          })
+        }}
+        onCloseCommit={() => setDetail(undefined)}
+        onRefresh={() => {
+          refreshes++
+        }}
+        onLoadMoreCommitFiles={async () => {
+          moreFiles++
+        }}
+      />
+    ),
+    { width: 120, height: 28 },
+  )
   active.push(view)
-  view.renderer.copyToClipboardOSC52 = (value) => { copies.push(value); return true }
+  view.renderer.copyToClipboardOSC52 = (value) => {
+    copies.push(value)
+    return true
+  }
   await view.flush()
   view.mockInput.pressKey("2")
   await view.flush()
@@ -162,35 +192,47 @@ test("overview, commit, and PR shortcuts open GitHub and copy the active URL or 
   let nativeClipboard = true
   let copyFails = false
   let terminalCopies = 0
-  const view = await testRender(() => (
-    <App
-      config={{ ...defaultConfig, showStatusBarHints: true }}
-      data={githubDataFixture}
-      operations={repositoryOperationsFixture}
-      commitDetail={detail()}
-      onLoadCommit={async () => {
-        loads++
-        setDetail({ sha, resource: loads === 1
-          ? { status: "loading", phase: "load" }
-          : { status: "ready", value: { ...commitDetailFixture, files: { ...commitDetailFixture.files, hasMore: true } } },
-        })
-      }}
-      onLoadMoreCommitFiles={async () => { more++ }}
-      onOpenInBrowser={async (value) => {
-        if (browserFails) throw new Error("Browser unavailable")
-        browserSha = value
-      }}
-      onCloseCommit={() => setDetail(undefined)}
-      onCopyToClipboard={async (value) => {
-        if (copyFails) throw new Error("Native clipboard unavailable")
-        if (!nativeClipboard) return false
-        copiedSha = value
-        return true
-      }}
-    />
-  ), { width: 100, height: 28 })
+  const view = await testRender(
+    () => (
+      <App
+        config={{ ...defaultConfig, showStatusBarHints: true }}
+        data={githubDataFixture}
+        operations={repositoryOperationsFixture}
+        commitDetail={detail()}
+        onLoadCommit={async () => {
+          loads++
+          setDetail({
+            sha,
+            resource:
+              loads === 1
+                ? { status: "loading", phase: "load" }
+                : { status: "ready", value: { ...commitDetailFixture, files: { ...commitDetailFixture.files, hasMore: true } } },
+          })
+        }}
+        onLoadMoreCommitFiles={async () => {
+          more++
+        }}
+        onOpenInBrowser={async (value) => {
+          if (browserFails) throw new Error("Browser unavailable")
+          browserSha = value
+        }}
+        onCloseCommit={() => setDetail(undefined)}
+        onCopyToClipboard={async (value) => {
+          if (copyFails) throw new Error("Native clipboard unavailable")
+          if (!nativeClipboard) return false
+          copiedSha = value
+          return true
+        }}
+      />
+    ),
+    { width: 100, height: 28 },
+  )
   active.push(view)
-  view.renderer.copyToClipboardOSC52 = (value) => { terminalCopies++; copiedSha = value; return true }
+  view.renderer.copyToClipboardOSC52 = (value) => {
+    terminalCopies++
+    copiedSha = value
+    return true
+  }
   await view.flush()
   view.mockInput.pressKey("y")
   await view.flush()

@@ -10,8 +10,7 @@ describe("repository resolution", () => {
     expect(normalizeRepository("anomalyco/opentui")).toBe("anomalyco/opentui")
     expect(normalizeRepository("https://github.com/anomalyco/opentui.git")).toBe("anomalyco/opentui")
     expect(normalizeRepository("not-a-repository")).toBeUndefined()
-    for (const repository of ["../repo", "owner/..", "./repo"])
-      expect(normalizeRepository(repository)).toBeUndefined()
+    for (const repository of ["../repo", "owner/..", "./repo"]) expect(normalizeRepository(repository)).toBeUndefined()
   })
 
   test("explicit repository wins without inspecting the directory", async () => {
@@ -50,10 +49,12 @@ describe("repository resolution", () => {
         ["~/", directory, homedir()],
       ]
       for (const [argument, cwd, expected] of cases) {
-        expect(await resolveRepository(argument, cwd, async (path) => {
-          expect(path).toBe(resolve(expected))
-          return "cli/cli"
-        })).toBe("cli/cli")
+        expect(
+          await resolveRepository(argument, cwd, async (path) => {
+            expect(path).toBe(resolve(expected))
+            return "cli/cli"
+          }),
+        ).toBe("cli/cli")
       }
     } finally {
       await rm(directory, { recursive: true, force: true })
@@ -64,11 +65,17 @@ describe("repository resolution", () => {
     const directory = (await Bun.$`mktemp -d`.text()).trim()
     try {
       await Bun.write(join(directory, "file"), "not a directory")
-      const unexpectedDiscovery = async () => { throw new Error("discovery should not run") }
+      const unexpectedDiscovery = async () => {
+        throw new Error("discovery should not run")
+      }
       await expect(resolveRepository("./missing", directory, unexpectedDiscovery)).rejects.toThrow("Cannot open local repository path")
       await expect(resolveRepository("./file", directory, unexpectedDiscovery)).rejects.toThrow("is not a directory")
       await expect(resolveRepository(".", directory, async () => undefined)).rejects.toThrow("No GitHub repository found")
-      await expect(resolveRepository(".", directory, async () => { throw new Error("no GitHub remote") })).rejects.toThrow("no GitHub remote")
+      await expect(
+        resolveRepository(".", directory, async () => {
+          throw new Error("no GitHub remote")
+        }),
+      ).rejects.toThrow("no GitHub remote")
     } finally {
       await rm(directory, { recursive: true, force: true })
     }

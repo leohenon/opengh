@@ -9,7 +9,7 @@ export function pullMergeBlocker(pull: PullRequestDetail, context?: PullContext)
   if (pull.permissions?.merge !== true) return "Merge permission unavailable or not granted."
   if (!pull.merge) return "Merge methods and queue requirements are unavailable."
   if (pull.merge.queueRequired !== false) return "This pull request requires a merge queue; use GitHub."
-  if (!pull.merge.methods.length || pull.merge.methods.some(method => !["merge", "squash", "rebase"].includes(method)))
+  if (!pull.merge.methods.length || pull.merge.methods.some((method) => !["merge", "squash", "rebase"].includes(method)))
     return "No verified merge method is available."
   if (!pull.headSha || !/^[a-f\d]{40}$/i.test(pull.headSha)) return "Head commit unavailable; refresh the pull request."
   if (!context) return "Merge readiness unavailable; wait for checks or refresh."

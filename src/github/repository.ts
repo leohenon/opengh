@@ -1,109 +1,91 @@
-import { normalizeRepository } from "../repository-name";
-import { spawnGitHub } from "./process";
-import { GitHubApiError } from "./errors";
-import { configDirectory } from "../paths";
-import { atomicPrivateWrite, ensureTrustedDirectory, readPrivateJson, regularOwnedFile } from "../filesystem";
-import { dirname, join, resolve } from "node:path";
-import { homedir } from "node:os";
-import { stat } from "node:fs/promises";
-import { isRepositoryPath } from "../repository-path";
+import { normalizeRepository } from "../repository-name"
+import { spawnGitHub } from "./process"
+import { GitHubApiError } from "./errors"
+import { configDirectory } from "../paths"
+import { atomicPrivateWrite, ensureTrustedDirectory, readPrivateJson, regularOwnedFile } from "../filesystem"
+import { dirname, join, resolve } from "node:path"
+import { homedir } from "node:os"
+import { stat } from "node:fs/promises"
+import { isRepositoryPath } from "../repository-path"
 
-const MAX_RECENT = 100;
+const MAX_RECENT = 100
 
-export async function repositoryFromDirectory(
-  cwd: string,
-): Promise<string | undefined> {
-  const child = spawnGitHub(
-    ["repo", "view", "--json", "nameWithOwner,url"],
-    cwd,
-  );
-  let timedOut = false;
+export async function repositoryFromDirectory(cwd: string): Promise<string | undefined> {
+  const child = spawnGitHub(["repo", "view", "--json", "nameWithOwner,url"], cwd)
+  let timedOut = false
   const timeout = setTimeout(() => {
-    timedOut = true;
-    child.kill();
-  }, 20_000);
+    timedOut = true
+    child.kill()
+  }, 20_000)
   try {
     const [output, error, exitCode] = await Promise.all([
       new Response(child.stdout).text(),
       new Response(child.stderr).text(),
       child.exited,
-    ]);
-    if (timedOut) throw new GitHubApiError("repository discovery", "Repository discovery timed out");
-    if (exitCode !== 0) throw new GitHubApiError(
-      "repository discovery",
-      error.trim() || `gh repo view failed (${exitCode})`,
-      exitCode === 4 ? 401 : undefined,
-    );
-    const repository = JSON.parse(output) as { nameWithOwner: string; url: string };
+    ])
+    if (timedOut) throw new GitHubApiError("repository discovery", "Repository discovery timed out")
+    if (exitCode !== 0)
+      throw new GitHubApiError(
+        "repository discovery",
+        error.trim() || `gh repo view failed (${exitCode})`,
+        exitCode === 4 ? 401 : undefined,
+      )
+    const repository = JSON.parse(output) as { nameWithOwner: string; url: string }
     // gh repo view can select a host from a Git remote even with GH_HOST set.
     if (!/^https:\/\/github\.com\//i.test(repository.url))
-      throw new Error("Only GitHub.com repositories are supported; GitHub Enterprise remotes cannot be opened.");
-    return normalizeRepository(repository.nameWithOwner);
+      throw new Error("Only GitHub.com repositories are supported; GitHub Enterprise remotes cannot be opened.")
+    return normalizeRepository(repository.nameWithOwner)
   } finally {
-    clearTimeout(timeout);
+    clearTimeout(timeout)
   }
 }
 
-export async function resolveRepository(
-  argument: string | undefined,
-  cwd: string,
-  fromDirectory = repositoryFromDirectory,
-) {
-  if (!argument) return undefined;
+export async function resolveRepository(argument: string | undefined, cwd: string, fromDirectory = repositoryFromDirectory) {
+  if (!argument) return undefined
   if (isRepositoryPath(argument)) {
-    const directory = resolve(cwd, argument.startsWith("~/") ? join(homedir(), argument.slice(2)) : argument);
-    let info;
+    const directory = resolve(cwd, argument.startsWith("~/") ? join(homedir(), argument.slice(2)) : argument)
+    let info
     try {
-      info = await stat(directory);
+      info = await stat(directory)
     } catch (error) {
-      throw new Error(`Cannot open local repository path “${directory}”: ${error instanceof Error ? error.message : String(error)}`);
+      throw new Error(`Cannot open local repository path “${directory}”: ${error instanceof Error ? error.message : String(error)}`)
     }
-    if (!info.isDirectory()) throw new Error(`Local repository path “${directory}” is not a directory.`);
-    const repository = await fromDirectory(directory);
-    if (!repository) throw new Error(`No GitHub repository found in “${directory}”.`);
-    return repository;
+    if (!info.isDirectory()) throw new Error(`Local repository path “${directory}” is not a directory.`)
+    const repository = await fromDirectory(directory)
+    if (!repository) throw new Error(`No GitHub repository found in “${directory}”.`)
+    return repository
   }
-  return normalizeRepository(argument);
+  return normalizeRepository(argument)
 }
 
 export function recentRepositoriesPath() {
-  return join(configDirectory(), "recent.json");
+  return join(configDirectory(), "recent.json")
 }
 
-export async function loadRecentRepositories(
-  path = recentRepositoriesPath(),
-): Promise<string[]> {
+export async function loadRecentRepositories(path = recentRepositoriesPath()): Promise<string[]> {
   try {
-    const value = await readPrivateJson(path, { maxBytes: 64 * 1024 });
-    if (!Array.isArray(value)) return [];
-    const seen = new Set<string>();
+    const value = await readPrivateJson(path, { maxBytes: 64 * 1024 })
+    if (!Array.isArray(value)) return []
+    const seen = new Set<string>()
     return value
-      .flatMap((item) =>
-        typeof item === "string" ? [normalizeRepository(item)] : [],
-      )
+      .flatMap((item) => (typeof item === "string" ? [normalizeRepository(item)] : []))
       .filter((repository): repository is string => {
-        if (!repository || seen.has(repository.toLowerCase())) return false;
-        seen.add(repository.toLowerCase());
-        return true;
+        if (!repository || seen.has(repository.toLowerCase())) return false
+        seen.add(repository.toLowerCase())
+        return true
       })
-      .slice(0, MAX_RECENT);
+      .slice(0, MAX_RECENT)
   } catch {
-    return [];
+    return []
   }
 }
 
-export async function rememberRepository(
-  repository: string,
-  path = recentRepositoriesPath(),
-) {
-  const normalized = normalizeRepository(repository);
-  if (!normalized) return;
-  await ensureTrustedDirectory(dirname(path));
-  await regularOwnedFile(path);
-  const recent = await loadRecentRepositories(path);
-  const next = [
-    normalized,
-    ...recent.filter((item) => item.toLowerCase() !== normalized.toLowerCase()),
-  ].slice(0, MAX_RECENT);
-  await atomicPrivateWrite(path, JSON.stringify(next, null, 2) + "\n");
+export async function rememberRepository(repository: string, path = recentRepositoriesPath()) {
+  const normalized = normalizeRepository(repository)
+  if (!normalized) return
+  await ensureTrustedDirectory(dirname(path))
+  await regularOwnedFile(path)
+  const recent = await loadRecentRepositories(path)
+  const next = [normalized, ...recent.filter((item) => item.toLowerCase() !== normalized.toLowerCase())].slice(0, MAX_RECENT)
+  await atomicPrivateWrite(path, JSON.stringify(next, null, 2) + "\n")
 }

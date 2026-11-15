@@ -5,11 +5,11 @@ validation in `src/github/` and async state in the session layer, not UI compone
 
 ## Choose an API
 
-| API | Use for |
-| --- | --- |
-| REST | Repository data, documents, commits, issues, PRs, comments, reviews, Actions. |
-| GraphQL | Connected PR review/check context, reactions, counts, capabilities, merge messages, merging, draft state. |
-| `transport.text()` | Documents and diffs with explicit `Accept` headers. |
+| API                | Use for                                                                                                   |
+| ------------------ | --------------------------------------------------------------------------------------------------------- |
+| REST               | Repository data, documents, commits, issues, PRs, comments, reviews, Actions.                             |
+| GraphQL            | Connected PR review/check context, reactions, counts, capabilities, merge messages, merging, draft state. |
+| `transport.text()` | Documents and diffs with explicit `Accept` headers.                                                       |
 
 Inject the transport into client factories so tests can use fixtures.
 
@@ -42,28 +42,28 @@ some accumulate pages internally. GraphQL uses cursors, including nested connect
 
 ## Limits
 
-| Area | Boundary |
-| --- | --- |
-| Host | GitHub.com only. |
-| Processes | 20-second timeout; JSON, GraphQL, and text requests support cancellation and byte limits. |
-| Responses | 8 MiB default API cap; documents: 1 MiB; diffs: 4 MiB. |
-| Pagination | 20-page automatic limit. |
-| Detail loading | Shared budgets: 60 seconds, 100 requests, 10,000 items, 16 MiB. |
-| GraphQL variables | `Record<string, string>`, sent in a JSON request body through stdin. Other types need explicit transport support. |
-| Scheduling | Four concurrent requests with shared rate-limit cooldowns. No automatic retries. |
-| `transport.page()` | Anonymous GitHub.com HTML fetch; rejects redirects. Not an authenticated API fallback. |
+| Area               | Boundary                                                                                                          |
+| ------------------ | ----------------------------------------------------------------------------------------------------------------- |
+| Host               | GitHub.com only.                                                                                                  |
+| Processes          | 20-second timeout; JSON, GraphQL, and text requests support cancellation and byte limits.                         |
+| Responses          | 8 MiB default API cap; documents: 1 MiB; diffs: 4 MiB.                                                            |
+| Pagination         | 20-page automatic limit.                                                                                          |
+| Detail loading     | Shared budgets: 60 seconds, 100 requests, 10,000 items, 16 MiB.                                                   |
+| GraphQL variables  | `Record<string, string>`, sent in a JSON request body through stdin. Other types need explicit transport support. |
+| Scheduling         | Four concurrent requests with shared rate-limit cooldowns. No automatic retries.                                  |
+| `transport.page()` | Anonymous GitHub.com HTML fetch; rejects redirects. Not an authenticated API fallback.                            |
 
 ## Code map
 
-| Path | Responsibility |
-| --- | --- |
-| `src/github/transport.ts`, `process.ts`, `errors.ts` | Transport, authentication, validation, cancellation, errors. |
-| `src/github/client.ts` | Main API operations and domain mapping. |
-| `src/github/documents.ts`, `diff.ts`, `pull-context.ts`, `reactions.ts`, `reviews.ts` | Documents, diffs, PR context, reactions, review submission. |
-| `src/github/repository.ts` | Discovery and recent history. |
-| `src/github/releases.ts` | Latest stable release validation for `opengh update`; the bundled installer downloads public archives. |
-| `src/repository-session.ts` | Resource state, caching, refresh, pagination, actions. |
-| `src/models.ts`, `src/ui/` | Domain types and presentation. |
+| Path                                                                                  | Responsibility                                                                                         |
+| ------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
+| `src/github/transport.ts`, `process.ts`, `errors.ts`                                  | Transport, authentication, validation, cancellation, errors.                                           |
+| `src/github/client.ts`                                                                | Main API operations and domain mapping.                                                                |
+| `src/github/documents.ts`, `diff.ts`, `pull-context.ts`, `reactions.ts`, `reviews.ts` | Documents, diffs, PR context, reactions, review submission.                                            |
+| `src/github/repository.ts`                                                            | Discovery and recent history.                                                                          |
+| `src/github/releases.ts`                                                              | Latest stable release validation for `opengh update`; the bundled installer downloads public archives. |
+| `src/repository-session.ts`                                                           | Resource state, caching, refresh, pagination, actions.                                                 |
+| `src/models.ts`, `src/ui/`                                                            | Domain types and presentation.                                                                         |
 
 ## References
 

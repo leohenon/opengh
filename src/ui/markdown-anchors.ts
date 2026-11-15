@@ -4,8 +4,11 @@ import type { LineInfo, Renderable, TextTableRenderable } from "@opentui/core"
 export const anchorMarker = (id: string) => `\uE000${encodeURIComponent(id)}\uE001`
 export function anchorMarkers(text: string) {
   return [...text.matchAll(/\uE000([^\uE001]*)\uE001/g)].flatMap((match) => {
-    try { return [{ id: decodeURIComponent(match[1]!), start: match.index!, end: match.index! + match[0].length }] }
-    catch { return [] }
+    try {
+      return [{ id: decodeURIComponent(match[1]!), start: match.index!, end: match.index! + match[0].length }]
+    } catch {
+      return []
+    }
   })
 }
 export const stripAnchorMarkers = (text: string) => text.replace(/\uE000[^\uE001]*\uE001/g, "")
@@ -14,7 +17,6 @@ export type MarkdownAnchorRequest = { document: string; fragment: string; reques
 export type MarkdownAnchorPosition = { line: number; column: number }
 export type MarkdownAnchorTarget = { node: Renderable; row: number }
 export type MarkdownAnchorResolver = (fragment: string) => Promise<MarkdownAnchorTarget | undefined>
-
 
 export type MarkdownRenderedAnchor = {
   node: Renderable
@@ -45,7 +47,6 @@ export function tableAnchorRow(table: TextTableRenderable, cell: { row: number; 
   if (offset === undefined || !Number.isFinite(offset) || !view) return
   return offset + 1 + table.cellPaddingY + anchorVisualRow(view.lineInfo, position)
 }
-
 
 export const sourceLineAnchor = (line: number) => `opengh-source-L${line}`
 export type MarkdownCodeSource = { content: string; start: number; end: number; bodyStart: number; anchors: string[] }

@@ -45,24 +45,44 @@ export function CommitsScreen(props: {
 
   return (
     <PageShell
-      header={(
+      header={
         <box flexGrow={1} minWidth={0} flexDirection="row" alignItems="center" gap={2}>
-          <Show when={props.commits.value !== undefined} fallback={<text fg={colors.text} attributes={TextAttributes.BOLD}>Commits</text>}>
+          <Show
+            when={props.commits.value !== undefined}
+            fallback={
+              <text fg={colors.text} attributes={TextAttributes.BOLD}>
+                Commits
+              </text>
+            }
+          >
             <text flexShrink={0} fg={colors.text} attributes={TextAttributes.BOLD}>
               {countLabel()}
             </text>
           </Show>
-          <box id="branch-dropdown" width={Bun.stringWidth(props.currentBranch) + 4} flexShrink={1} minWidth={0} flexDirection="row" overflow="hidden"
-            {...mouseClick(() => props.onOpenBranches?.(), () => props.active && props.interactive && props.canOpenBranches !== false && Boolean(props.onOpenBranches))}>
+          <box
+            id="branch-dropdown"
+            width={Bun.stringWidth(props.currentBranch) + 4}
+            flexShrink={1}
+            minWidth={0}
+            flexDirection="row"
+            overflow="hidden"
+            {...mouseClick(
+              () => props.onOpenBranches?.(),
+              () => props.active && props.interactive && props.canOpenBranches !== false && Boolean(props.onOpenBranches),
+            )}
+          >
             <box flexGrow={1} flexBasis={0} minWidth={0}>
               <ListLine fg={props.canOpenBranches === false ? colors.muted : colors.blue} attributes={TextAttributes.BOLD}>
                 {(width) => fitText(`${iconPrefix(icons().branch)}${props.currentBranch}`, width)}
               </ListLine>
             </box>
-            <text flexShrink={0} fg={colors.muted}> ▾</text>
+            <text flexShrink={0} fg={colors.muted}>
+              {" "}
+              ▾
+            </text>
           </box>
         </box>
-      )}
+      }
     >
       <ResourceStateView resource={props.commits}>
         {(commits) => (
@@ -83,15 +103,10 @@ export function CommitsScreen(props: {
             {(commit, active) => (
               <>
                 <box height={2} flexGrow={1} flexBasis={0} minWidth={0} flexDirection="column" overflow="hidden">
-                  <ListLine
-                    fg={colors.text}
-                    attributes={active() ? TextAttributes.BOLD : TextAttributes.NONE}
-                  >
+                  <ListLine fg={colors.text} attributes={active() ? TextAttributes.BOLD : TextAttributes.NONE}>
                     {(width) => fitText(commit().message, width)}
                   </ListLine>
-                  <ListLine fg={colors.muted}>
-                    {(width) => fitText(`${commit().author} committed ${ago(commit().date)}`, width)}
-                  </ListLine>
+                  <ListLine fg={colors.muted}>{(width) => fitText(`${commit().author} committed ${ago(commit().date)}`, width)}</ListLine>
                 </box>
                 <Show when={dimensions().width >= 60}>
                   <box height={2} width={10} flexShrink={0} alignItems="center" justifyContent="flex-end" overflow="hidden">

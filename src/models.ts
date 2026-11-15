@@ -33,22 +33,23 @@ export type IssueSummary = {
   createdAt: string
 }
 
-export type IssueDetail = IssueSummary & Partial<ReactionState> & {
-  references?: IssueReference[]
-  nodeId?: string
-  url: string
-  body: string
-  updatedAt: string
-  closedAt?: string
-  stateReason?: string
-  locked: boolean
-  permissions?: Record<IssueActionKind, boolean>
-  permissionsError?: string
-  labels: string[]
-  assignees: string[]
-  milestone?: { title: string; dueAt?: string; url?: string }
-  commentCount: number
-}
+export type IssueDetail = IssueSummary &
+  Partial<ReactionState> & {
+    references?: IssueReference[]
+    nodeId?: string
+    url: string
+    body: string
+    updatedAt: string
+    closedAt?: string
+    stateReason?: string
+    locked: boolean
+    permissions?: Record<IssueActionKind, boolean>
+    permissionsError?: string
+    labels: string[]
+    assignees: string[]
+    milestone?: { title: string; dueAt?: string; url?: string }
+    commentCount: number
+  }
 
 export type IssueActionParent = "issue" | "pull"
 export type IssueCloseReason = "completed" | "not_planned"
@@ -56,7 +57,7 @@ export type IssueActionKind = "comment" | "close" | "reopen" | "duplicate" | "as
 export type IssueActionResult = { comment?: IssueComment; issue?: IssueDetail; pull?: PullRequestDetail; duplicateOf?: number }
 
 export const reactionKinds = ["+1", "-1", "laugh", "hooray", "confused", "heart", "rocket", "eyes"] as const
-export type ReactionKind = typeof reactionKinds[number]
+export type ReactionKind = (typeof reactionKinds)[number]
 export type ReactionCounts = Partial<Record<ReactionKind, number>>
 export type ReactionState = { reactions: ReactionCounts; viewerReactions: ReactionKind[]; canReact: boolean }
 export type ReactionTarget = (
@@ -167,9 +168,7 @@ export type PullDraftEvent = {
   createdAt: string
 }
 
-export type ReviewTarget =
-  | { kind: "user"; login: string }
-  | { kind: "team"; name: string; slug?: string; organization?: string }
+export type ReviewTarget = { kind: "user"; login: string } | { kind: "team"; name: string; slug?: string; organization?: string }
 
 export type PullReviewRequestEvent = {
   kind: "review-request"
@@ -193,8 +192,14 @@ export type PullCommitEvent = {
   timelineIndex?: number
 }
 
-export type IssueTimelineEvent = IssueStateEvent | PullForcePushEvent | PullReviewEvent
-  | PullReviewDismissedEvent | PullDraftEvent | PullReviewRequestEvent | PullCommitEvent
+export type IssueTimelineEvent =
+  | IssueStateEvent
+  | PullForcePushEvent
+  | PullReviewEvent
+  | PullReviewDismissedEvent
+  | PullDraftEvent
+  | PullReviewRequestEvent
+  | PullCommitEvent
 
 export type IssueTimeline = {
   references: IssueReference[]
@@ -266,33 +271,42 @@ export type PullMergeMethod = "merge" | "squash" | "rebase"
 export type PullMergeMessage = { headline: string; body: string }
 export type PullMergeDraft = PullMergeMessage & { headSha: string }
 
-export type PullRequestDetail = PullRequestSummary & Partial<ReactionState> & {
-  references?: IssueReference[]
-  nodeId?: string
-  locked?: boolean
-  permissions?: { comment: boolean; close?: boolean; reopen?: boolean; assignees?: boolean; merge?: boolean; markDraft?: boolean; markReady?: boolean }
-  merge?: { methods: PullMergeMethod[]; queueRequired: boolean }
-  url: string
-  body: string
-  updatedAt: string
-  mergedAt?: string
-  closedAt?: string
-  baseBranch: string
-  headBranch: string
-  headRepository?: string
-  headSha?: string
-  baseSha?: string
-  additions: number
-  deletions: number
-  changedFiles: number
-  commitCount: number
-  commentCount: number
-  labels: string[]
-  assignees: string[]
-  reviewers: string[]
-  reviewerLinks?: { name: string; url: string }[]
-  mergeable: boolean | null
-}
+export type PullRequestDetail = PullRequestSummary &
+  Partial<ReactionState> & {
+    references?: IssueReference[]
+    nodeId?: string
+    locked?: boolean
+    permissions?: {
+      comment: boolean
+      close?: boolean
+      reopen?: boolean
+      assignees?: boolean
+      merge?: boolean
+      markDraft?: boolean
+      markReady?: boolean
+    }
+    merge?: { methods: PullMergeMethod[]; queueRequired: boolean }
+    url: string
+    body: string
+    updatedAt: string
+    mergedAt?: string
+    closedAt?: string
+    baseBranch: string
+    headBranch: string
+    headRepository?: string
+    headSha?: string
+    baseSha?: string
+    additions: number
+    deletions: number
+    changedFiles: number
+    commitCount: number
+    commentCount: number
+    labels: string[]
+    assignees: string[]
+    reviewers: string[]
+    reviewerLinks?: { name: string; url: string }[]
+    mergeable: boolean | null
+  }
 
 export type WorkflowRunSummary = {
   id: number
@@ -362,13 +376,10 @@ export type CommitDetail = CommitSummary & {
   filesTruncated: boolean
 }
 
-export type DiffTarget =
-  | { kind: "commit"; sha: string }
-  | { kind: "pull"; number: number }
+export type DiffTarget = { kind: "commit"; sha: string } | { kind: "pull"; number: number }
 
 export type DiffContent =
-  | { kind: "patch"; patch: string; headSha?: string; baseSha?: string }
-  | { kind: "files"; files: CommitFile[]; truncated: boolean }
+  { kind: "patch"; patch: string; headSha?: string; baseSha?: string } | { kind: "files"; files: CommitFile[]; truncated: boolean }
 
 export type Paginated<T> = {
   items: T[]

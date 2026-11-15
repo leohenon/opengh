@@ -16,14 +16,18 @@ afterEach(async () => {
     if (child.exitCode === null) child.kill("SIGKILL")
     await child.exited
   }
-  await Promise.all(directories.splice(0).map(path => rm(path, { recursive: true, force: true })))
+  await Promise.all(directories.splice(0).map((path) => rm(path, { recursive: true, force: true })))
 })
 
 // Both workers use real sessions, clients and disk stores. Only GitHub is fake;
 // stdin/stdout gates define the interleaving without timing-dependent sleeps.
 function worker(directory: string, role: "A" | "B", mode: "live owner" | "publication race") {
   const module = (path: string) => JSON.stringify(new URL(path, import.meta.url).pathname)
-  const child = Bun.spawn([process.execPath, "--eval", `
+  const child = Bun.spawn(
+    [
+      process.execPath,
+      "--eval",
+      `
     import { readFileSync, writeFileSync } from "node:fs"
     import { createInterface } from "node:readline"
     import { createDiskDraftStore } from ${module("../src/drafts.ts")}
@@ -122,23 +126,32 @@ function worker(directory: string, role: "A" | "B", mode: "live owner" | "public
     session.updateIssueDraft(42, { body })
     await submit("new draft")
     process.exit(0)
-  `], { stdin: "pipe", stdout: "pipe", stderr: "pipe" })
+  `,
+    ],
+    { stdin: "pipe", stdout: "pipe", stderr: "pipe" },
+  )
   children.push(child)
   const timeout = setTimeout(() => child.kill("SIGKILL"), 12_000)
   void child.exited.then(() => clearTimeout(timeout))
   const errors = new Response(child.stderr).text()
-  const output = child.stdout.getReader(), decoder = new TextDecoder()
+  const output = child.stdout.getReader(),
+    decoder = new TextDecoder()
   let buffer = ""
   return {
-    child, errors,
-    send() { child.stdin.write("continue\n"); child.stdin.flush() },
+    child,
+    errors,
+    send() {
+      child.stdin.write("continue\n")
+      child.stdin.flush()
+    },
     async next() {
       while (!buffer.includes("\n")) {
         const chunk = await output.read()
         if (chunk.done) throw new Error(`Worker ${role} exited before reporting: ${await errors}`)
         buffer += decoder.decode(chunk.value, { stream: true })
       }
-      const end = buffer.indexOf("\n"), line = buffer.slice(0, end)
+      const end = buffer.indexOf("\n"),
+        line = buffer.slice(0, end)
       buffer = buffer.slice(end + 1)
       return JSON.parse(line)
     },
@@ -155,7 +168,8 @@ for (const mode of ["live owner", "publication race"] as const) {
     const generation = randomUUID()
     disk.save(draftKey, { generation, body, reason: "completed" }, undefined)
     const remote = async () => JSON.parse(await readFile(join(directory, "remote.json"), "utf8"))
-    const a = worker(directory, "A", mode), b = worker(directory, "B", mode)
+    const a = worker(directory, "A", mode),
+      b = worker(directory, "B", mode)
     for (const process of [a, b]) expect(await process.next()).toEqual({ event: "ready", generation, body })
 
     if (mode === "publication race") {
@@ -193,8 +207,13 @@ for (const mode of ["live owner", "publication race"] as const) {
     // stop this explicit retry from becoming a second POST of the old intent.
     b.send()
     expect(await b.next()).toMatchObject({ event: "retried", error: expect.stringMatching(/draft.*changed/i), body })
-    expect(await b.next()).toEqual({ event: "autosave", flushed: false,
-      error: expect.stringMatching(/draft.*changed/i), body, disk: retired })
+    expect(await b.next()).toEqual({
+      event: "autosave",
+      flushed: false,
+      error: expect.stringMatching(/draft.*changed/i),
+      body,
+      disk: retired,
+    })
     expect(await b.next()).toEqual({ event: "discarded", flushed: true, error: null, body: "", disk: retired })
     expect((await remote()).map((comment: { id: number }) => comment.id)).toEqual([1])
     expect(await storage.load(input)).toBeUndefined()
@@ -202,8 +221,10 @@ for (const mode of ["live owner", "publication race"] as const) {
     expect(await b.next()).toEqual({ event: "new draft", id: 2, body: "" })
     expect(await b.child.exited).toBe(0)
     expect(await b.errors).toBe("")
-    expect((await remote()).map((comment: { id: number; body: string }) => ({ id: comment.id, body: comment.body })))
-      .toEqual([{ id: 1, body }, { id: 2, body }])
+    expect((await remote()).map((comment: { id: number; body: string }) => ({ id: comment.id, body: comment.body }))).toEqual([
+      { id: 1, body },
+      { id: 2, body },
+    ])
     expect(await storage.load(input)).toBeUndefined()
     expect(disk.load(draftKey)?.body).toBe("")
     expect(disk.load(draftKey)?.generation).not.toBe(retired.generation)

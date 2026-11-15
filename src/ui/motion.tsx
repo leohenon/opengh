@@ -21,7 +21,7 @@ export function useSpinner(active: Accessor<boolean>) {
     const timer = setInterval(() => setFrame((value) => (value + 1) % spinnerFrames.length), 125)
     onCleanup(() => clearInterval(timer))
   })
-  return () => reduced() ? spinnerFrames[0] : spinnerFrames[frame()]
+  return () => (reduced() ? spinnerFrames[0] : spinnerFrames[frame()])
 }
 
 export function useLoadingDots(active: Accessor<boolean>) {
@@ -32,5 +32,5 @@ export function useLoadingDots(active: Accessor<boolean>) {
     const timer = setInterval(() => setFrame((value) => (value + 1) % frames.length), 400)
     onCleanup(() => clearInterval(timer))
   })
-  return () => reduced() ? "..." : frames[frame()]
+  return () => (reduced() ? "..." : frames[frame()])
 }

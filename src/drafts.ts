@@ -1,5 +1,17 @@
 import { createHash, randomUUID } from "node:crypto"
-import { closeSync, constants, fstatSync, fsyncSync, lstatSync, mkdirSync, openSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs"
+import {
+  closeSync,
+  constants,
+  fstatSync,
+  fsyncSync,
+  lstatSync,
+  mkdirSync,
+  openSync,
+  readFileSync,
+  renameSync,
+  unlinkSync,
+  writeFileSync,
+} from "node:fs"
 import { join } from "node:path"
 import type { IssueCloseReason } from "./models"
 import { configDirectory } from "./paths"
@@ -28,13 +40,21 @@ export type DraftStore = {
 
 function parseDraft(value: unknown): StoredDraft {
   const draft = value as StoredDraft | null
-  if (!draft || Array.isArray(draft) || typeof draft.body !== "string"
-    || !["completed", "not_planned"].includes(draft.reason)
-    || (draft.retry !== undefined && draft.retry !== "close" && draft.retry !== "reopen")
-    || (draft.generation !== undefined && (typeof draft.generation !== "string" || !draft.generation.trim())))
+  if (
+    !draft ||
+    Array.isArray(draft) ||
+    typeof draft.body !== "string" ||
+    !["completed", "not_planned"].includes(draft.reason) ||
+    (draft.retry !== undefined && draft.retry !== "close" && draft.retry !== "reopen") ||
+    (draft.generation !== undefined && (typeof draft.generation !== "string" || !draft.generation.trim()))
+  )
     throw new Error("Invalid saved draft")
-  return { ...(draft.generation === undefined ? {} : { generation: draft.generation }),
-    body: draft.body, reason: draft.reason, ...(draft.retry ? { retry: draft.retry } : {}) }
+  return {
+    ...(draft.generation === undefined ? {} : { generation: draft.generation }),
+    body: draft.body,
+    reason: draft.reason,
+    ...(draft.retry ? { retry: draft.retry } : {}),
+  }
 }
 
 function openDraft(path: string) {
@@ -44,7 +64,10 @@ function openDraft(path: string) {
     if (!stat.isFile() || (process.getuid !== undefined && (stat.uid !== process.getuid() || (stat.mode & 0o022) !== 0)))
       throw new Error(`Expected an owner-controlled regular draft: ${path}`)
     return fd
-  } catch (error) { closeSync(fd); throw error }
+  } catch (error) {
+    closeSync(fd)
+    throw error
+  }
 }
 
 export function createDiskDraftStore(directory = join(configDirectory(), "drafts")): DraftStore {
@@ -58,22 +81,36 @@ export function createDiskDraftStore(directory = join(configDirectory(), "drafts
   }
   const syncDirectory = () => {
     const fd = openSync(directory, constants.O_RDONLY | (constants.O_DIRECTORY ?? 0) | (constants.O_NOFOLLOW ?? 0))
-    try { fsyncSync(fd) } finally { closeSync(fd) }
+    try {
+      fsyncSync(fd)
+    } finally {
+      closeSync(fd)
+    }
   }
   const syncPublished = (path: string) => {
     const fd = openDraft(path)
-    try { fsyncSync(fd) } finally { closeSync(fd) }
+    try {
+      fsyncSync(fd)
+    } finally {
+      closeSync(fd)
+    }
     syncDirectory()
   }
   const read = (path: string): StoredDraft | undefined => {
     let fd: number
-    try { fd = openDraft(path) } catch (error) {
+    try {
+      fd = openDraft(path)
+    } catch (error) {
       if ((error as NodeJS.ErrnoException).code === "ENOENT") return
       throw error
     }
-    try { return parseDraft(JSON.parse(readFileSync(fd, "utf8"))) }
-    catch (cause) { throw new Error(`Cannot read saved draft at ${path}`, { cause }) }
-    finally { closeSync(fd) }
+    try {
+      return parseDraft(JSON.parse(readFileSync(fd, "utf8")))
+    } catch (cause) {
+      throw new Error(`Cannot read saved draft at ${path}`, { cause })
+    } finally {
+      closeSync(fd)
+    }
   }
   const write = (destination: string, draft: IssueDraft) => {
     const temporary = `${destination}.${randomUUID()}.tmp`
@@ -82,11 +119,15 @@ export function createDiskDraftStore(directory = join(configDirectory(), "drafts
       try {
         writeFileSync(fd, JSON.stringify(draft) + "\n")
         fsyncSync(fd)
-      } finally { closeSync(fd) }
+      } finally {
+        closeSync(fd)
+      }
       renameSync(temporary, destination)
       syncDirectory()
     } finally {
-      try { unlinkSync(temporary) } catch (error) {
+      try {
+        unlinkSync(temporary)
+      } catch (error) {
         if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error
       }
     }
@@ -103,7 +144,8 @@ export function createDiskDraftStore(directory = join(configDirectory(), "drafts
   }
   return {
     load(key) {
-      const path = pathFor(key), draft = read(path)
+      const path = pathFor(key),
+        draft = read(path)
       if (!draft) return
       if (draft.generation !== undefined) return draft as IssueDraft
       ensureDirectory()
@@ -122,15 +164,18 @@ export function createDiskDraftStore(directory = join(configDirectory(), "drafts
       const path = pathFor(key)
       withFileLockSync(path, () => {
         const previous = current(path)
-        const identical = previous !== undefined && previous.generation === draft.generation && previous.body === draft.body
-          && previous.reason === draft.reason && previous.retry === draft.retry
+        const identical =
+          previous !== undefined &&
+          previous.generation === draft.generation &&
+          previous.body === draft.body &&
+          previous.reason === draft.reason &&
+          previous.retry === draft.retry
         if (identical) {
           // A prior rename may have succeeded even though directory fsync failed.
           syncPublished(path)
           return
         }
-        if (previous?.generation !== expectedGeneration || previous?.generation === draft.generation)
-          throw new DraftConflictError()
+        if (previous?.generation !== expectedGeneration || previous?.generation === draft.generation) throw new DraftConflictError()
         // Empty drafts are versioned tombstones, never deleted: cached generations
         // must remain retired after receipts and their associated comments settle.
         write(path, draft as IssueDraft)

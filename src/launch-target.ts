@@ -80,8 +80,7 @@ function positiveNumber(value: string): number {
 }
 
 function commitHash(value: string): string {
-  if (!/^[a-f\d]{4,40}$/i.test(value))
-    throw new Error(`Invalid commit hash: “${value}”. Expected 4–40 hexadecimal characters.`)
+  if (!/^[a-f\d]{4,40}$/i.test(value)) throw new Error(`Invalid commit hash: “${value}”. Expected 4–40 hexadecimal characters.`)
   return value.toLowerCase()
 }
 
@@ -99,10 +98,12 @@ function repositoryLocation(value: string): LaunchOptions | undefined {
     if (/[\x00-\x1f\x7f\\]/.test(value) || rawPath.split("/").some((part) => /^(?:\.|%2e){1,2}$/i.test(part)))
       throw new Error("GitHub URLs must not contain control characters, backslashes, or dot path segments.")
     let url: URL
-    try { url = new URL(/^github\.com/i.test(value) ? `https://${value}` : value) }
-    catch { throw new Error(`Invalid GitHub URL: “${value}”.`) }
-    if (!["https:", "http:"].includes(url.protocol) || url.hostname !== "github.com"
-      || url.port || url.username || url.password)
+    try {
+      url = new URL(/^github\.com/i.test(value) ? `https://${value}` : value)
+    } catch {
+      throw new Error(`Invalid GitHub URL: “${value}”.`)
+    }
+    if (!["https:", "http:"].includes(url.protocol) || url.hostname !== "github.com" || url.port || url.username || url.password)
       throw new Error("Only GitHub.com URLs without credentials or custom ports are supported.")
     const [owner, name, ...path] = url.pathname.replace(/^\/+|\/+$/g, "").split("/")
     const repository = owner && name && normalizeRepository(`${owner}/${name}`)
@@ -143,20 +144,41 @@ export function parseLaunchArguments(args: readonly string[]): LaunchOptions {
   let options = true
   for (let index = 0; index < args.length; index++) {
     const argument = args[index]!
-    if (options && argument === "--") { options = false; continue }
+    if (options && argument === "--") {
+      options = false
+      continue
+    }
     if (options && (argument === "--help" || argument === "-h")) return { help: true }
     if (options && (argument === "--version" || argument === "-v")) return { version: true }
-    if (options && (argument === "--focus" || argument === "-f" || argument === "--standalone")) { focus = true; continue }
-    if (options && argument === "--inline") { inlineMode = true; continue }
-    if (options && argument === "--diff") { diff = true; continue }
-    if (options && argument === "--resume") { resume = true; continue }
-    if (options && (argument === "-i" || argument === "--interactive")) { interactive = true; continue }
+    if (options && (argument === "--focus" || argument === "-f" || argument === "--standalone")) {
+      focus = true
+      continue
+    }
+    if (options && argument === "--inline") {
+      inlineMode = true
+      continue
+    }
+    if (options && argument === "--diff") {
+      diff = true
+      continue
+    }
+    if (options && argument === "--resume") {
+      resume = true
+      continue
+    }
+    if (options && (argument === "-i" || argument === "--interactive")) {
+      interactive = true
+      continue
+    }
     if (options && /^-[if]{2,}$/.test(argument)) {
       focus ||= argument.includes("f")
       interactive ||= argument.includes("i")
       continue
     }
-    if (!options || !argument.startsWith("-")) { positional.push(argument.trim()); continue }
+    if (!options || !argument.startsWith("-")) {
+      positional.push(argument.trim())
+      continue
+    }
     const [option, inline] = argument.split(/=(.*)/s)
     if (option === "--repo") {
       if (explicitRepository !== undefined) throw new Error("Specify --repo only once.")
@@ -175,13 +197,14 @@ export function parseLaunchArguments(args: readonly string[]): LaunchOptions {
       file = value
       continue
     }
-    if (!["--commit", "--issue", "--pr"].includes(option!))
-      throw new Error(`Unknown option: “${option}”.`)
+    if (!["--commit", "--issue", "--pr"].includes(option!)) throw new Error(`Unknown option: “${option}”.`)
     if (explicitDetail) throw new Error("Specify only one of --commit, --issue, or --pr.")
     const value = inline ?? args[++index]
     if (!value || value.startsWith("-")) throw new Error(`${option} requires a ${option === "--commit" ? "commit hash" : "number"}.`)
-    explicitDetail = option === "--commit" ? { kind: "commit", sha: commitHash(value) }
-      : { kind: option === "--pr" ? "pull" : "issue", number: positiveNumber(value) }
+    explicitDetail =
+      option === "--commit"
+        ? { kind: "commit", sha: commitHash(value) }
+        : { kind: option === "--pr" ? "pull" : "issue", number: positiveNumber(value) }
   }
   if (interactive && (resume || inlineMode || explicitDetail))
     throw new Error("--interactive cannot be combined with --resume, --inline, or a detail target.")
@@ -226,11 +249,13 @@ export function parseLaunchArguments(args: readonly string[]): LaunchOptions {
 
   const location = repositoryLocation(positional[0]!)
   if (!location) {
-    if (positional.length > 1 || explicitDetail) throw new Error(`Invalid repository: “${positional[0]}”. Expected owner/repo, a GitHub URL, or a local path.`)
+    if (positional.length > 1 || explicitDetail)
+      throw new Error(`Invalid repository: “${positional[0]}”. Expected owner/repo, a GitHub URL, or a local path.`)
     return finish({ ...mode, repositoryArgument: ".", initialDetail: identifier(positional[0]!) })
   }
   if (positional[1] !== undefined && explicitDetail) throw new Error("Specify a target either positionally or with an option, not both.")
   const detail = explicitDetail ?? (positional[1] !== undefined ? identifier(positional[1]) : undefined)
-  if (detail && (location.initialPage || location.initialDetail)) throw new Error("The URL already selects a page or detail; do not specify another target.")
+  if (detail && (location.initialPage || location.initialDetail))
+    throw new Error("The URL already selects a page or detail; do not specify another target.")
   return finish(detail ? { ...mode, ...location, initialDetail: detail } : { ...mode, ...location })
 }

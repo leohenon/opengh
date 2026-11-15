@@ -33,7 +33,8 @@ export function isSourceRowY(row: Renderable, y: number) {
 }
 
 /** Own only the appended cards, never Hunk's rows or source renderables. Clear before React updates. */
-export function createDiffCommentCards(renderer: RenderContext,
+export function createDiffCommentCards(
+  renderer: RenderContext,
   renderBody: (container: BoxRenderable, comment: ReviewThreadComment) => () => void,
   renderDraft?: (container: BoxRenderable, draft: SavedDiffDraft) => () => void,
 ) {
@@ -49,15 +50,36 @@ export function createDiffCommentCards(renderer: RenderContext,
   }
   return {
     clear,
-    render(host: BoxRenderable, rows: readonly ReviewRow[], path: string | undefined,
-      threads: readonly PullReviewThread[], colors: { text: TextOptions["fg"]; muted: TextOptions["fg"]; panel: TextOptions["fg"]; blue: TextOptions["fg"]; border: TextOptions["fg"] },
-      layout: "split" | "unified", width: number, commentIcon: string, collapsed: boolean, savedDrafts: readonly SavedDiffDraft[] = []) {
+    render(
+      host: BoxRenderable,
+      rows: readonly ReviewRow[],
+      path: string | undefined,
+      threads: readonly PullReviewThread[],
+      colors: {
+        text: TextOptions["fg"]
+        muted: TextOptions["fg"]
+        panel: TextOptions["fg"]
+        blue: TextOptions["fg"]
+        border: TextOptions["fg"]
+      },
+      layout: "split" | "unified",
+      width: number,
+      commentIcon: string,
+      collapsed: boolean,
+      savedDrafts: readonly SavedDiffDraft[] = [],
+    ) {
       clear()
       if (host.isDestroyed) return
       for (const thread of threads) {
         if (thread.path !== path) continue
-        const row = !thread.isOutdated && thread.diffSide && thread.line != null
-          ? rows.find((row) => (thread.diffSide === "LEFT" ? row.left : row.right)?.path === thread.path && (thread.diffSide === "LEFT" ? row.left : row.right)?.line === thread.line) : undefined
+        const row =
+          !thread.isOutdated && thread.diffSide && thread.line != null
+            ? rows.find(
+                (row) =>
+                  (thread.diffSide === "LEFT" ? row.left : row.right)?.path === thread.path &&
+                  (thread.diffSide === "LEFT" ? row.left : row.right)?.line === thread.line,
+              )
+            : undefined
         const anchor = row && host.findDescendantById(row.id)
         const line = thread.line ?? thread.originalLine
         // Cards away from their line say where they belong.
@@ -65,34 +87,73 @@ export function createDiffCommentCards(renderer: RenderContext,
         const count = `${thread.comments.length} ${thread.comments.length === 1 ? "comment" : "comments"}`
         const title = [location, collapsed ? count : "", thread.isResolved ? "resolved" : ""].filter(Boolean).join(" · ")
         const card = new BoxRenderable(renderer, {
-          id: `${prefix}${thread.id}`, ...noteBox(width, layout, anchor ? thread.diffSide : undefined), flexDirection: "column", flexShrink: 0,
-          border: true, borderStyle: "rounded", borderColor: colors.border, title: title ? ` ${title} ` : undefined, titleColor: colors.muted,
-          paddingLeft: 1, paddingRight: 1,
+          id: `${prefix}${thread.id}`,
+          ...noteBox(width, layout, anchor ? thread.diffSide : undefined),
+          flexDirection: "column",
+          flexShrink: 0,
+          border: true,
+          borderStyle: "rounded",
+          borderColor: colors.border,
+          title: title ? ` ${title} ` : undefined,
+          titleColor: colors.muted,
+          paddingLeft: 1,
+          paddingRight: 1,
         })
         const disposeBodies: (() => void)[] = []
         owned.push({ card, disposeBodies })
         const comments = collapsed ? thread.comments.slice(0, 1) : thread.comments
         for (const [index, comment] of comments.entries()) {
-          if (index > 0) card.add(new BoxRenderable(renderer, {
-            id: `${prefix}${thread.id}:divider:${index}`, width: "100%", height: 1, flexShrink: 0,
-            border: ["top"], borderColor: colors.border,
-          }))
+          if (index > 0)
+            card.add(
+              new BoxRenderable(renderer, {
+                id: `${prefix}${thread.id}:divider:${index}`,
+                width: "100%",
+                height: 1,
+                flexShrink: 0,
+                border: ["top"],
+                borderColor: colors.border,
+              }),
+            )
           const header = new BoxRenderable(renderer, {
-            id: `${prefix}${thread.id}:header:${index}`, width: "100%", height: 1, flexShrink: 0, flexDirection: "row", gap: 1,
+            id: `${prefix}${thread.id}:header:${index}`,
+            width: "100%",
+            height: 1,
+            flexShrink: 0,
+            flexDirection: "row",
+            gap: 1,
           })
-          header.add(new TextRenderable(renderer, {
-            id: `${prefix}${thread.id}:author:${index}`,
-            content: `${iconPrefix(commentIcon)}@${comment.author}`,
-            fg: colors.blue, attributes: TextAttributes.BOLD, height: 1, minWidth: 0, flexShrink: 1, wrapMode: "none", truncate: true,
-          }))
-          if (!collapsed && Number.isFinite(Date.parse(comment.createdAt))) header.add(new TextRenderable(renderer, {
-            id: `${prefix}${thread.id}:time:${index}`, content: `(${relativeTime(comment.createdAt)})`,
-            fg: colors.muted, height: 1, flexShrink: 0, wrapMode: "none",
-          }))
+          header.add(
+            new TextRenderable(renderer, {
+              id: `${prefix}${thread.id}:author:${index}`,
+              content: `${iconPrefix(commentIcon)}@${comment.author}`,
+              fg: colors.blue,
+              attributes: TextAttributes.BOLD,
+              height: 1,
+              minWidth: 0,
+              flexShrink: 1,
+              wrapMode: "none",
+              truncate: true,
+            }),
+          )
+          if (!collapsed && Number.isFinite(Date.parse(comment.createdAt)))
+            header.add(
+              new TextRenderable(renderer, {
+                id: `${prefix}${thread.id}:time:${index}`,
+                content: `(${relativeTime(comment.createdAt)})`,
+                fg: colors.muted,
+                height: 1,
+                flexShrink: 0,
+                wrapMode: "none",
+              }),
+            )
           card.add(header)
           if (collapsed) continue
           const body = new BoxRenderable(renderer, {
-            id: `${prefix}${thread.id}:body:${index}`, width: "100%", minWidth: 0, flexShrink: 0, flexDirection: "column",
+            id: `${prefix}${thread.id}:body:${index}`,
+            width: "100%",
+            minWidth: 0,
+            flexShrink: 0,
+            flexDirection: "column",
           })
           card.add(body)
           disposeBodies.push(renderBody(body, comment))
@@ -103,12 +164,19 @@ export function createDiffCommentCards(renderer: RenderContext,
       if (!renderDraft) return
       for (const draft of savedDrafts) {
         if (draft.anchor.path !== path) continue
-        const row = rows.find((row) => (draft.anchor.side === "LEFT" ? row.left : row.right)?.path === draft.anchor.path && (draft.anchor.side === "LEFT" ? row.left : row.right)?.line === draft.anchor.line)
+        const row = rows.find(
+          (row) =>
+            (draft.anchor.side === "LEFT" ? row.left : row.right)?.path === draft.anchor.path &&
+            (draft.anchor.side === "LEFT" ? row.left : row.right)?.line === draft.anchor.line,
+        )
         const anchor = row && host.findDescendantById(row.id)
         if (!anchor) continue
         const card = new BoxRenderable(renderer, {
-          id: `${prefix}draft:${draft.id}`, ...noteBox(width, layout, draft.anchor.side),
-          height: 1, flexShrink: 0, flexDirection: "column",
+          id: `${prefix}draft:${draft.id}`,
+          ...noteBox(width, layout, draft.anchor.side),
+          height: 1,
+          flexShrink: 0,
+          flexDirection: "column",
         })
         owned.push({ card, disposeBodies: [renderDraft(card, draft)] })
         anchor.add(card)

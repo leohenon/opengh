@@ -81,7 +81,7 @@ export const themeNames = [
   "zenburn",
 ] as const
 
-export type ThemeName = typeof themeNames[number]
+export type ThemeName = (typeof themeNames)[number]
 
 export const defaultTheme: ThemeName = "opengh"
 
@@ -227,13 +227,27 @@ export function isThemeName(value: unknown): value is ThemeName {
 
 function ansiColor(code: number) {
   const colors = [
-    "#000000", "#800000", "#008000", "#808000", "#000080", "#800080", "#008080", "#c0c0c0",
-    "#808080", "#ff0000", "#00ff00", "#ffff00", "#0000ff", "#ff00ff", "#00ffff", "#ffffff",
+    "#000000",
+    "#800000",
+    "#008000",
+    "#808000",
+    "#000080",
+    "#800080",
+    "#008080",
+    "#c0c0c0",
+    "#808080",
+    "#ff0000",
+    "#00ff00",
+    "#ffff00",
+    "#0000ff",
+    "#ff00ff",
+    "#00ffff",
+    "#ffffff",
   ]
   if (code < colors.length) return colors[code]!
   if (code < 232) {
     const index = code - 16
-    const component = (value: number) => value === 0 ? 0 : value * 40 + 55
+    const component = (value: number) => (value === 0 ? 0 : value * 40 + 55)
     const r = component(Math.floor(index / 36))
     const g = component(Math.floor(index / 6) % 6)
     const b = component(index % 6)
@@ -279,9 +293,14 @@ function terminalTheme(theme: ThemeJson, mode: Mode, colors?: TerminalThemeColor
   if (backgroundMode(background) !== mode) [foreground, background] = [background, foreground]
   const fg = rgb(foreground)!
   const bg = rgb(background)!
-  const mix = (amount: number) => `#${bg.map((value, index) =>
-    Math.round(value + (fg[index]! - value) * amount).toString(16).padStart(2, "0"),
-  ).join("")}`
+  const mix = (amount: number) =>
+    `#${bg
+      .map((value, index) =>
+        Math.round(value + (fg[index]! - value) * amount)
+          .toString(16)
+          .padStart(2, "0"),
+      )
+      .join("")}`
   return {
     ...theme,
     defs: { foreground, background, muted: mix(0.6), panel: mix(0.08), hover: mix(0.16), border: mix(0.35) },
@@ -305,9 +324,14 @@ function rgb(value: string) {
   const match = value.match(/^#([0-9a-f]{3,4}|[0-9a-f]{6}|[0-9a-f]{8})$/i)
   if (!match) return undefined
   const source = match[1]!
-  const hex = source.length <= 4
-    ? source.slice(0, 3).split("").map((part) => part + part).join("")
-    : source.slice(0, 6)
+  const hex =
+    source.length <= 4
+      ? source
+          .slice(0, 3)
+          .split("")
+          .map((part) => part + part)
+          .join("")
+      : source.slice(0, 6)
   return [0, 2, 4].map((index) => Number.parseInt(hex.slice(index, index + 2), 16))
 }
 

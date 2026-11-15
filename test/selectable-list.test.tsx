@@ -20,21 +20,38 @@ describe("SelectableList", () => {
     const activated: number[] = []
     let selected = -1
     let nested = 0
-    const view = await testRender(() => (
-      <SelectableList items={items()} itemKey={(item) => item.id} active={interactive()} empty="empty"
-        onSelect={(item) => { selected = item.id }} onActivate={(item) => { activated.push(item.id) }}>
-        {(item) => (
-          <box flexGrow={1} flexDirection="column">
-            <text>{item().label}</text>
-            <text onMouseDown={(event) => {
-              event.preventDefault()
-              event.stopPropagation()
-              if (event.button === 0) nested++
-            }}>Nested action</text>
-          </box>
-        )}
-      </SelectableList>
-    ), { width: 50, height: 11 })
+    const view = await testRender(
+      () => (
+        <SelectableList
+          items={items()}
+          itemKey={(item) => item.id}
+          active={interactive()}
+          empty="empty"
+          onSelect={(item) => {
+            selected = item.id
+          }}
+          onActivate={(item) => {
+            activated.push(item.id)
+          }}
+        >
+          {(item) => (
+            <box flexGrow={1} flexDirection="column">
+              <text>{item().label}</text>
+              <text
+                onMouseDown={(event) => {
+                  event.preventDefault()
+                  event.stopPropagation()
+                  if (event.button === 0) nested++
+                }}
+              >
+                Nested action
+              </text>
+            </box>
+          )}
+        </SelectableList>
+      ),
+      { width: 50, height: 11 },
+    )
     active.push(view)
     await view.flush()
 
@@ -88,19 +105,26 @@ describe("SelectableList", () => {
     const [interactive, setInteractive] = createSignal(true)
     let selected = -1
     let endCalls = 0
-    const view = await testRender(() => (
-      <SelectableList
-        items={items()}
-        itemKey={(item) => item.id}
-        active={interactive()}
-        showScrollbar={false}
-        empty="empty"
-        onSelect={(item) => { selected = item.id }}
-        onEndReached={() => { endCalls++ }}
-      >
-        {(item) => <text>{item().label}</text>}
-      </SelectableList>
-    ), { width: 50, height: 17 })
+    const view = await testRender(
+      () => (
+        <SelectableList
+          items={items()}
+          itemKey={(item) => item.id}
+          active={interactive()}
+          showScrollbar={false}
+          empty="empty"
+          onSelect={(item) => {
+            selected = item.id
+          }}
+          onEndReached={() => {
+            endCalls++
+          }}
+        >
+          {(item) => <text>{item().label}</text>}
+        </SelectableList>
+      ),
+      { width: 50, height: 17 },
+    )
     active.push(view)
     await view.flush()
     const list = view.renderer.root.getChildren()[0]!.getChildren()[0] as ScrollBoxRenderable
@@ -136,7 +160,12 @@ describe("SelectableList", () => {
     view.mockInput.pressArrow("down")
     await view.flush()
     expect(selected).toBe(clicked + 1)
-    expect(view.captureCharFrame().split("\n").find((row) => row.includes(`row ${clicked + 1}`))).toContain("▌")
+    expect(
+      view
+        .captureCharFrame()
+        .split("\n")
+        .find((row) => row.includes(`row ${clicked + 1}`)),
+    ).toContain("▌")
 
     setInteractive(false)
     const calls = endCalls
@@ -157,18 +186,16 @@ describe("SelectableList", () => {
 
   test("renders only complete rows for its measured viewport", async () => {
     const items = Array.from({ length: 8 }, (_, id) => ({ id, label: `row ${id}` }))
-    const view = await testRender(() => (
-      <box width="100%" height="100%">
-        <SelectableList
-          items={items}
-          itemKey={(item) => item.id}
-          active
-          empty="empty"
-        >
-          {(item) => <text>{item().label}</text>}
-        </SelectableList>
-      </box>
-    ), { width: 50, height: 17 })
+    const view = await testRender(
+      () => (
+        <box width="100%" height="100%">
+          <SelectableList items={items} itemKey={(item) => item.id} active empty="empty">
+            {(item) => <text>{item().label}</text>}
+          </SelectableList>
+        </box>
+      ),
+      { width: 50, height: 17 },
+    )
     active.push(view)
     await view.flush()
 
@@ -190,7 +217,12 @@ describe("SelectableList", () => {
 
     view.renderer.resize(50, 8)
     await view.flush()
-    expect(view.captureCharFrame().split("\n").find((row) => row.includes("row 7"))).toContain("▌")
+    expect(
+      view
+        .captureCharFrame()
+        .split("\n")
+        .find((row) => row.includes("row 7")),
+    ).toContain("▌")
 
     view.renderer.resize(50, 17)
     await view.flush()
@@ -200,10 +232,20 @@ describe("SelectableList", () => {
 
     view.mockInput.pressKey("d")
     await view.flush()
-    expect(view.captureCharFrame().split("\n").find((row) => row.includes("row 2"))).toContain("▌")
+    expect(
+      view
+        .captureCharFrame()
+        .split("\n")
+        .find((row) => row.includes("row 2")),
+    ).toContain("▌")
 
     view.mockInput.pressKey("u")
     await view.flush()
-    expect(view.captureCharFrame().split("\n").find((row) => row.includes("row 0"))).toContain("▌")
+    expect(
+      view
+        .captureCharFrame()
+        .split("\n")
+        .find((row) => row.includes("row 0")),
+    ).toContain("▌")
   })
 })

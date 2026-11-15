@@ -92,5 +92,4 @@ describe("navigation", () => {
     expect(atRepositoryEntry(detail, origin)).toBe(false)
     expect(atRepositoryEntry(openDiff(origin, { kind: "pull", number: 3 }), origin)).toBe(false)
   })
-
 })

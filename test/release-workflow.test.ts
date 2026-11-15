@@ -6,18 +6,40 @@ import { join } from "node:path"
 // Execute the actual workflow steps with local stand-ins: these tests must never publish anything.
 const workflow = Bun.YAML.parse(await readFile(new URL("../.github/workflows/release.yml", import.meta.url), "utf8")) as {
   concurrency?: { group: string; "cancel-in-progress": boolean; queue: string }
-  jobs: Record<string, { name?: string; uses?: string; needs?: string | string[]; if?: string; permissions?: Record<string, string>; steps?: Array<{ name?: string; run?: string }> }>
+  jobs: Record<
+    string,
+    {
+      name?: string
+      uses?: string
+      needs?: string | string[]
+      if?: string
+      permissions?: Record<string, string>
+      steps?: Array<{ name?: string; run?: string }>
+    }
+  >
 }
 const directories: string[] = []
-afterEach(async () => { await Promise.all(directories.splice(0).map(path => rm(path, { recursive: true, force: true }))) })
+afterEach(async () => {
+  await Promise.all(directories.splice(0).map((path) => rm(path, { recursive: true, force: true })))
+})
 
 async function fixture() {
   const directory = await mkdtemp(join(tmpdir(), "opengh-release-workflow-"))
   directories.push(directory)
   const tools = join(directory, "tools")
   await mkdir(tools)
-  const env = { ...process.env, PATH: `${tools}:${process.env.PATH}`, HOME: directory, GH_TOKEN: "", GITHUB_TOKEN: "", NODE_AUTH_TOKEN: "",
-    GITHUB_REPOSITORY: "fixture/repository", GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_NOSYSTEM: "1", GIT_ALLOW_PROTOCOL: "file" }
+  const env = {
+    ...process.env,
+    PATH: `${tools}:${process.env.PATH}`,
+    HOME: directory,
+    GH_TOKEN: "",
+    GITHUB_TOKEN: "",
+    NODE_AUTH_TOKEN: "",
+    GITHUB_REPOSITORY: "fixture/repository",
+    GIT_CONFIG_GLOBAL: "/dev/null",
+    GIT_CONFIG_NOSYSTEM: "1",
+    GIT_ALLOW_PROTOCOL: "file",
+  }
   async function tool(name: string, body: string) {
     await writeFile(join(tools, name), `#!/bin/sh\nset -eu\n${body}\n`)
     await chmod(join(tools, name), 0o755)
@@ -28,7 +50,7 @@ async function fixture() {
     return { code, out, error }
   }
   async function step(job: string, name: string, cwd: string, version: string, extra: Record<string, string> = {}) {
-    const script = workflow.jobs[job]!.steps?.find(step => step.name === name)?.run
+    const script = workflow.jobs[job]!.steps?.find((step) => step.name === name)?.run
     if (!script) throw new Error(`Missing workflow step ${job}/${name}`)
     return run(["bash", "--noprofile", "--norc", "-eo", "pipefail", "-c", script], cwd, { GITHUB_REF_NAME: `v${version}`, ...extra })
   }
@@ -40,20 +62,26 @@ test("release reporting runs after every stage with isolated issue permissions",
   expect(report.needs).toEqual(["test", "build", "draft", "npm", "publish", "homebrew"])
   expect(report.if).toBe("${{ always() }}")
   expect(report.permissions).toEqual({ contents: "read", issues: "write" })
-  expect(report.steps?.find(step => step.name === "Update the release failure issue")?.run).toBe("node scripts/release-status.mjs")
+  expect(report.steps?.find((step) => step.name === "Update the release failure issue")?.run).toBe("node scripts/release-status.mjs")
 })
 
 async function reportingFixture() {
   const f = await fixture()
   const runtime = Bun.which("node")!
   const registry = join(f.directory, "issues.json")
-  type State = { issues: Array<{ number: number; title: string; body: string; state: string; pull_request?: object }>;
-    calls: string[][]; failLookup?: boolean; loseCreateAcknowledgement?: boolean }
+  type State = {
+    issues: Array<{ number: number; title: string; body: string; state: string; pull_request?: object }>
+    calls: string[][]
+    failLookup?: boolean
+    loseCreateAcknowledgement?: boolean
+  }
   await writeFile(registry, JSON.stringify({ issues: [], calls: [] }))
   const read = async (): Promise<State> => JSON.parse(await readFile(registry, "utf8"))
-  const update = async (values: Partial<State>) => writeFile(registry, JSON.stringify({ ...await read(), ...values }))
+  const update = async (values: Partial<State>) => writeFile(registry, JSON.stringify({ ...(await read()), ...values }))
   const mock = join(f.directory, "gh.mjs")
-  await writeFile(mock, `
+  await writeFile(
+    mock,
+    `
 import fs from "node:fs"
 const file = process.env.ISSUES_FILE, state = JSON.parse(fs.readFileSync(file, "utf8"))
 const args = process.argv.slice(2), value = flag => args[args.indexOf(flag) + 1]
@@ -81,15 +109,23 @@ if (args[0] === "api") {
   }
   save()
 } else throw Error("unexpected gh command")
-`)
+`,
+  )
   await f.tool("gh", `exec ${JSON.stringify(runtime)} ${JSON.stringify(mock)} "$@"`)
   const script = join(f.directory, "report.mjs")
   await writeFile(script, await readFile(new URL("../scripts/release-status.mjs", import.meta.url), "utf8"))
-  const report = (overrides: Record<string, string> = {}) => f.run([runtime, script], f.directory, {
-    ISSUES_FILE: registry, GITHUB_REF_NAME: "v0.0.0-beta.1", GITHUB_RUN_ID: "123", GITHUB_RUN_ATTEMPT: "2",
-    RELEASE_JOBS: JSON.stringify(Object.fromEntries(["test", "build", "draft", "npm", "publish", "homebrew"]
-      .map(key => [key, { result: overrides[key] ?? "success" }]))),
-  })
+  const report = (overrides: Record<string, string> = {}) =>
+    f.run([runtime, script], f.directory, {
+      ISSUES_FILE: registry,
+      GITHUB_REF_NAME: "v0.0.0-beta.1",
+      GITHUB_RUN_ID: "123",
+      GITHUB_RUN_ATTEMPT: "2",
+      RELEASE_JOBS: JSON.stringify(
+        Object.fromEntries(
+          ["test", "build", "draft", "npm", "publish", "homebrew"].map((key) => [key, { result: overrides[key] ?? "success" }]),
+        ),
+      ),
+    })
   return { read, update, report }
 }
 
@@ -111,9 +147,9 @@ test("release failure reporting updates one issue, closes on recovery, and reope
   state = await f.read()
   expect(state.issues[0]!.state).toBe("closed")
   expect(state.issues[0]!.body).toContain("recovered successfully")
-  const mutations = state.calls.filter(args => args[0] === "issue").length
+  const mutations = state.calls.filter((args) => args[0] === "issue").length
   expect((await f.report()).code).toBe(0)
-  expect((await f.read()).calls.filter(args => args[0] === "issue")).toHaveLength(mutations)
+  expect((await f.read()).calls.filter((args) => args[0] === "issue")).toHaveLength(mutations)
   expect((await f.report({ homebrew: "failure" })).code).toBe(0)
   state = await f.read()
   expect(state.issues).toHaveLength(1)
@@ -137,26 +173,29 @@ test("release issue lookup failures stop writes and lost create acknowledgements
   const f = await reportingFixture()
   await f.update({ failLookup: true })
   expect((await f.report({ homebrew: "failure" })).code).not.toBe(0)
-  expect((await f.read()).calls.every(args => args[0] === "api")).toBe(true)
+  expect((await f.read()).calls.every((args) => args[0] === "api")).toBe(true)
   await f.update({ failLookup: false, loseCreateAcknowledgement: true })
   expect((await f.report({ homebrew: "failure" })).code).not.toBe(0)
   expect((await f.read()).issues).toHaveLength(1)
-  expect((await f.read()).calls.filter(args => args[1] === "create")).toHaveLength(1)
+  expect((await f.read()).calls.filter((args) => args[1] === "create")).toHaveLength(1)
   expect((await f.report({ homebrew: "failure" })).code).toBe(0)
   expect((await f.read()).issues).toHaveLength(1)
-  expect((await f.read()).calls.filter(args => args[1] === "create")).toHaveLength(1)
+  expect((await f.read()).calls.filter((args) => args[1] === "create")).toHaveLength(1)
 })
 
 test("release reporting ignores unrelated issues and pull requests", async () => {
   const f = await reportingFixture()
-  const title = "release v0.0.0-beta.1 failed", body = "<!-- opengh-release-failure:v0.0.0-beta.1 -->"
-  await f.update({ issues: [
-    { number: 1, title, body: "Manually written issue", state: "open" },
-    { number: 2, title, body, state: "open", pull_request: {} },
-    { number: 3, title: "release v0.0.0-beta.2 failed", body, state: "open" },
-  ] })
+  const title = "release v0.0.0-beta.1 failed",
+    body = "<!-- opengh-release-failure:v0.0.0-beta.1 -->"
+  await f.update({
+    issues: [
+      { number: 1, title, body: "Manually written issue", state: "open" },
+      { number: 2, title, body, state: "open", pull_request: {} },
+      { number: 3, title: "release v0.0.0-beta.2 failed", body, state: "open" },
+    ],
+  })
   expect((await f.report()).code).toBe(0)
-  expect((await f.read()).calls.every(args => args[0] === "api")).toBe(true)
+  expect((await f.read()).calls.every((args) => args[0] === "api")).toBe(true)
   expect((await f.report({ build: "failure", draft: "skipped", npm: "skipped", publish: "skipped", homebrew: "skipped" })).code).toBe(0)
   expect((await f.read()).issues).toHaveLength(4)
 })
@@ -164,15 +203,19 @@ test("release reporting ignores unrelated issues and pull requests", async () =>
 test("publication retries leave an already published release alone and stop on a lookup error", async () => {
   const f = await fixture()
   const calls = join(f.directory, "edits")
-  await f.tool("gh", `
+  await f.tool(
+    "gh",
+    `
 case "$1 $2" in
   'release view')
     case "$RELEASE_STATE" in error) echo 'lookup failed' >&2; exit 1;; *) printf '%s\\n' "$RELEASE_STATE";; esac ;;
   'release edit') printf '%s\\n' "$*" >> "$CALLS" ;;
   'api --paginate') printf '%s\\n' "" ;;
   *) exit 2 ;;
-esac`)
-  const publish = (version: string, state: string) => f.step("publish", "Publish the staged release", f.directory, version, { RELEASE_STATE: state, CALLS: calls })
+esac`,
+  )
+  const publish = (version: string, state: string) =>
+    f.step("publish", "Publish the staged release", f.directory, version, { RELEASE_STATE: state, CALLS: calls })
   // A newer release is already latest. Retrying this older version must not invoke `--latest`.
   expect((await publish("0.0.1", "false")).code).toBe(0)
   expect(await Bun.file(calls).exists()).toBe(false)
@@ -192,7 +235,8 @@ test("the Homebrew step installs and upgrades but an old release cannot downgrad
   expect(workflow.jobs.homebrew!.needs).toBe("publish")
   const f = await fixture()
   await f.tool("bun", `exec ${JSON.stringify(process.execPath)} "$@"`)
-  const tap = join(f.directory, "tap"), generated = join(f.directory, "dist/homebrew")
+  const tap = join(f.directory, "tap"),
+    generated = join(f.directory, "dist/homebrew")
   await mkdir(tap)
   await mkdir(generated, { recursive: true })
   const remote = join(f.directory, "remote.git")
@@ -240,7 +284,9 @@ test("the Homebrew step installs and upgrades but an old release cannot downgrad
 test("an unfinished older GitHub release is published without downgrading latest", async () => {
   const f = await fixture()
   const calls = join(f.directory, "edits")
-  await f.tool("gh", `
+  await f.tool(
+    "gh",
+    `
 case "$1 $2" in
   'release view') printf '%s\\n' true ;;
   'api --paginate')
@@ -248,9 +294,10 @@ case "$1 $2" in
     printf '%s\\n' "$PUBLISHED" ;;
   'release edit') printf '%s\\n' "$*" >> "$CALLS" ;;
   *) exit 2 ;;
-esac`)
-  const publish = (version: string, published: string, fail = false) => f.step("publish", "Publish the staged release", f.directory, version,
-    { PUBLISHED: published, CALLS: calls, FAIL_LIST: String(fail) })
+esac`,
+  )
+  const publish = (version: string, published: string, fail = false) =>
+    f.step("publish", "Publish the staged release", f.directory, version, { PUBLISHED: published, CALLS: calls, FAIL_LIST: String(fail) })
   expect((await publish("0.0.1", "v0.0.2\nv0.0.10")).code).toBe(0)
   expect((await publish("0.0.3", "v0.0.2\nv0.0.10")).code).toBe(0)
   expect((await publish("0.1.0", "v0.0.2\nv0.0.10")).code).toBe(0)
@@ -275,14 +322,25 @@ test("all release versions share a non-cancelling publication queue", () => {
 // The registry is a JSON file. Only the npm operations used by the workflow are accepted.
 async function npmFixture() {
   const f = await fixture()
-  const registry = join(f.directory, "registry.json"), script = join(f.directory, "registry.cjs")
-  type Registry = { versions: Record<string, string[]>; tags: Record<string, Record<string, string>>;
-    log: string[][]; failPublish?: string; failPromote?: string; failLookup?: boolean
+  const registry = join(f.directory, "registry.json"),
+    script = join(f.directory, "registry.cjs")
+  type Registry = {
+    versions: Record<string, string[]>
+    tags: Record<string, Record<string, string>>
+    log: string[][]
+    failPublish?: string
+    failPromote?: string
+    failLookup?: boolean
     // npm accepts an upload before the version is readable: each new version first fails this many lookups.
-    lag?: number; processing: Record<string, number>; waits: number }
+    lag?: number
+    processing: Record<string, number>
+    waits: number
+  }
   const empty: Registry = { versions: {}, tags: {}, log: [], processing: {}, waits: 0 }
   await writeFile(registry, JSON.stringify(empty))
-  await writeFile(script, `
+  await writeFile(
+    script,
+    `
 const fs = require("node:fs"), path = require("node:path")
 const state = JSON.parse(fs.readFileSync(process.env.REGISTRY, "utf8")), args = process.argv.slice(2)
 const save = () => fs.writeFileSync(process.env.REGISTRY, JSON.stringify(state))
@@ -318,15 +376,21 @@ if (args[0] === "view" && args[2] === "version") {
   ;(state.tags[name] ||= {})[tag] = version
   state.log.push(["promote", name, version, tag]); save()
 } else throw Error("Unexpected npm call: " + args.join(" "))
-`)
+`,
+  )
   await f.tool("npm", `exec ${JSON.stringify(process.execPath)} ${JSON.stringify(script)} "$@"`)
   // Match the pinned runtime running the workflow's semver comparisons, rather than an arbitrary PATH Bun.
   await f.tool("bun", `exec ${JSON.stringify(process.execPath)} "$@"`)
   // Waiting for the registry is counted, not endured.
-  await f.tool("sleep", `exec ${JSON.stringify(process.execPath)} -e 'const fs = require("node:fs"), state = JSON.parse(fs.readFileSync(process.env.REGISTRY, "utf8")); state.waits++; fs.writeFileSync(process.env.REGISTRY, JSON.stringify(state))'`)
+  await f.tool(
+    "sleep",
+    `exec ${JSON.stringify(process.execPath)} -e 'const fs = require("node:fs"), state = JSON.parse(fs.readFileSync(process.env.REGISTRY, "utf8")); state.waits++; fs.writeFileSync(process.env.REGISTRY, JSON.stringify(state))'`,
+  )
   const names = ["opengh-darwin-arm64", "opengh-linux-x64", "@leohenon/opengh"]
   const state = async (): Promise<Registry> => JSON.parse(await readFile(registry, "utf8"))
-  const set = async (fields: Partial<Registry>) => { await writeFile(registry, JSON.stringify({ ...await state(), ...fields })) }
+  const set = async (fields: Partial<Registry>) => {
+    await writeFile(registry, JSON.stringify({ ...(await state()), ...fields }))
+  }
   const publish = async (version: string) => {
     await writeFile(join(f.directory, "package.json"), JSON.stringify({ version }))
     for (const name of names) {
@@ -339,33 +403,37 @@ if (args[0] === "view" && args[2] === "version") {
   return { state, set, names, publish }
 }
 
-test.each(["upload", "promotion"] as const)("retrying incomplete npm %s cannot downgrade latest after a newer release", async failure => {
-  const f = await npmFixture()
-  await f.set(failure === "upload" ? { failPublish: "@leohenon/opengh" } : { failPromote: "@leohenon/opengh" })
-  expect((await f.publish("0.0.1")).code).not.toBe(0)
-  // Finish a newer release before retrying the old one.
-  await f.set({ failPublish: undefined, failPromote: undefined })
-  expect((await f.publish("0.0.2")).code).toBe(0)
-  expect((await f.publish("0.0.1")).code).toBe(0)
-  const state = await f.state()
-  for (const name of f.names) {
-    expect(state.versions[name]).toContain("0.0.1")
-    expect(state.tags[name]!.latest).toBe("0.0.2")
-  }
-  expect(state.log.filter(call => call[0] === "publish").every(call => call[3] === "staged")).toBe(true)
-}, 15_000)
+test.each(["upload", "promotion"] as const)(
+  "retrying incomplete npm %s cannot downgrade latest after a newer release",
+  async (failure) => {
+    const f = await npmFixture()
+    await f.set(failure === "upload" ? { failPublish: "@leohenon/opengh" } : { failPromote: "@leohenon/opengh" })
+    expect((await f.publish("0.0.1")).code).not.toBe(0)
+    // Finish a newer release before retrying the old one.
+    await f.set({ failPublish: undefined, failPromote: undefined })
+    expect((await f.publish("0.0.2")).code).toBe(0)
+    expect((await f.publish("0.0.1")).code).toBe(0)
+    const state = await f.state()
+    for (const name of f.names) {
+      expect(state.versions[name]).toContain("0.0.1")
+      expect(state.tags[name]!.latest).toBe("0.0.2")
+    }
+    expect(state.log.filter((call) => call[0] === "publish").every((call) => call[3] === "staged")).toBe(true)
+  },
+  15_000,
+)
 
 test("npm stages every package before promotion, repairs failed promotion, and does not downgrade next", async () => {
   const f = await npmFixture()
   await f.set({ failPublish: "@leohenon/opengh" })
   expect((await f.publish("0.0.0")).code).not.toBe(0)
-  expect(Object.values((await f.state()).tags).every(tags => !tags.latest && !tags.next)).toBe(true)
+  expect(Object.values((await f.state()).tags).every((tags) => !tags.latest && !tags.next)).toBe(true)
   await f.set({ failPublish: undefined, failPromote: "@leohenon/opengh" })
   expect((await f.publish("0.0.0")).code).not.toBe(0)
-  const publishes = (await f.state()).log.filter(call => call[0] === "publish").length
+  const publishes = (await f.state()).log.filter((call) => call[0] === "publish").length
   await f.set({ failPromote: undefined })
   expect((await f.publish("0.0.0")).code).toBe(0)
-  expect((await f.state()).log.filter(call => call[0] === "publish")).toHaveLength(publishes)
+  expect((await f.state()).log.filter((call) => call[0] === "publish")).toHaveLength(publishes)
   expect((await f.publish("0.0.1-rc.9")).code).toBe(0)
   expect((await f.publish("0.0.1-rc.10")).code).toBe(0)
   expect((await f.publish("0.0.1-rc.8")).code).toBe(0)
@@ -386,8 +454,8 @@ test("npm promotion waits for uploaded versions to become readable, and gives up
   expect(stuck.code).not.toBe(0)
   expect(stuck.out).toContain("opengh-darwin-arm64@0.0.1-rc.2 did not appear on npm")
   state = await f.state()
-  expect(state.log.filter(call => call[0] === "publish" && call[2] === "0.0.1-rc.2")).toHaveLength(f.names.length)
-  expect(state.log.filter(call => call[0] === "promote" && call[2] === "0.0.1-rc.2")).toEqual([])
+  expect(state.log.filter((call) => call[0] === "publish" && call[2] === "0.0.1-rc.2")).toHaveLength(f.names.length)
+  expect(state.log.filter((call) => call[0] === "promote" && call[2] === "0.0.1-rc.2")).toEqual([])
   for (const name of f.names) expect(state.tags[name]!.next).toBe("0.0.1-rc.1")
 }, 30_000)
 
@@ -395,13 +463,15 @@ test("npm does not promote when it cannot determine the current channel version"
   const f = await npmFixture()
   await f.set({ failLookup: true })
   expect((await f.publish("0.0.0")).code).not.toBe(0)
-  expect((await f.state()).log.filter(call => call[0] === "promote")).toEqual([])
-  expect(Object.values((await f.state()).tags).every(tags => !tags.latest && !tags.next)).toBe(true)
+  expect((await f.state()).log.filter((call) => call[0] === "promote")).toEqual([])
+  expect(Object.values((await f.state()).tags).every((tags) => !tags.latest && !tags.next)).toBe(true)
 })
 
 test("the workflow extracts an annotated tag's notes without changing their whitespace", async () => {
   const f = await fixture()
-  const repo = join(f.directory, "repo"), remote = join(f.directory, "remote.git"), output = join(f.directory, "output")
+  const repo = join(f.directory, "repo"),
+    remote = join(f.directory, "remote.git"),
+    output = join(f.directory, "output")
   await Promise.all([mkdir(repo), mkdir(output)])
   const git = async (...args: string[]) => {
     const result = await f.run(["git", ...args], repo)
@@ -427,7 +497,9 @@ test("the workflow extracts an annotated tag's notes without changing their whit
 
 test("staging uses the tag notes for new and existing drafts but never edits a published release", async () => {
   const f = await fixture()
-  const dist = join(f.directory, "dist"), output = join(f.directory, "output"), body = join(f.directory, "release-body.md")
+  const dist = join(f.directory, "dist"),
+    output = join(f.directory, "output"),
+    body = join(f.directory, "release-body.md")
   await Promise.all([mkdir(dist), mkdir(output)])
   await writeFile(join(dist, "opengh-linux-x64.tar.gz"), "fixture archive")
   await writeFile(join(dist, "opengh-linux-x64.tar.gz.sha256"), "fixture checksum")
@@ -435,7 +507,9 @@ test("staging uses the tag notes for new and existing drafts but never edits a p
   // Checksums are unrelated to this test; the Ubuntu-only command is replaced to keep it portable.
   await f.tool("sha256sum", 'test "$1" = --check')
   const calls = join(f.directory, "mutations")
-  await f.tool("gh", `
+  await f.tool(
+    "gh",
+    `
 case "$1 $2" in
   'release view')
     if [ "$RELEASE_STATE" = missing ]; then exit 1; fi
@@ -450,11 +524,18 @@ case "$1 $2" in
     done
     echo 'missing --notes-file' >&2; exit 2 ;;
   *) exit 2 ;;
-esac`)
+esac`,
+  )
   const notes = "    indented note\n\n<!-- Author comment -->\nNew release notes.  \n"
   await writeFile(join(output, "notes.md"), notes)
-  const stage = (state: string, fail = false) => f.step("draft", "Stage the release as a draft", f.directory, "0.0.0",
-    { RELEASE_STATE: state, RUNNER_TEMP: output, BODY: body, CALLS: calls, FAIL_NOTES: String(fail) })
+  const stage = (state: string, fail = false) =>
+    f.step("draft", "Stage the release as a draft", f.directory, "0.0.0", {
+      RELEASE_STATE: state,
+      RUNNER_TEMP: output,
+      BODY: body,
+      CALLS: calls,
+      FAIL_NOTES: String(fail),
+    })
   for (const state of ["missing", "true"]) {
     await writeFile(body, "Outdated draft notes.")
     const result = await stage(state)
@@ -480,9 +561,8 @@ test("reusable release CI cannot be cancelled by main-branch CI", async () => {
     concurrency: { group: string }
   }
   expect(ci.on).toHaveProperty("workflow_call")
-  const group = (name: string, ref: string) => ci.concurrency.group
-    .replaceAll("${{ github.workflow }}", name)
-    .replaceAll("${{ github.ref }}", ref)
+  const group = (name: string, ref: string) =>
+    ci.concurrency.group.replaceAll("${{ github.workflow }}", name).replaceAll("${{ github.ref }}", ref)
   expect(group("Release", "refs/tags/v0.1.0")).not.toBe(group("CI", "refs/heads/main"))
   expect(group("Release", "refs/tags/v0.1.0")).not.toBe(group("Release", "refs/tags/v0.2.0"))
   expect(group("Release", "refs/tags/v0.1.0")).not.toBe(workflow.concurrency!.group)

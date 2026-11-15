@@ -6,7 +6,13 @@ import type { PullDetailState } from "../src/repository-state"
 import { App } from "../src/ui/app"
 import { PullReadinessPanel } from "../src/ui/components/pull-context-panel"
 import { relativeTime } from "../src/ui/format"
-import { githubDataFixture, issueCommentsFixture, issuePullReferenceFixture, repositoryOperationsFixture, pullContextFixture } from "./fixtures/github-data"
+import {
+  githubDataFixture,
+  issueCommentsFixture,
+  issuePullReferenceFixture,
+  repositoryOperationsFixture,
+  pullContextFixture,
+} from "./fixtures/github-data"
 
 test("pull request details map GitHub data and preserve list navigation across narrow layouts", async () => {
   const summary = githubDataFixture.pulls.open.value!.items[1]!
@@ -14,45 +20,87 @@ test("pull request details map GitHub data and preserve list navigation across n
     async json<T>(path: string) {
       expect(path).toBe(`repos/anomalyco/opentui/pulls/${summary.number}`)
       return {
-        number: summary.number, state: "open", title: summary.title, user: { login: summary.author },
-        created_at: summary.createdAt, updated_at: summary.createdAt,
+        number: summary.number,
+        state: "open",
+        title: summary.title,
+        user: { login: summary.author },
+        created_at: summary.createdAt,
+        updated_at: summary.createdAt,
         html_url: `https://github.com/anomalyco/opentui/pull/${summary.number}`,
-        body: "## Summary\n\nKeep focus during layout changes.", draft: true,
-        merged_at: null, closed_at: null, mergeable: false, mergeable_state: "dirty",
-        base: { ref: "main" }, head: { ref: "fix/focus", repo: { full_name: "contributor/opentui" } },
-        additions: 18, deletions: 7, changed_files: 2, commits: 3, comments: 2, review_comments: 4,
-        labels: [{ name: "accessibility" }], assignees: [{ login: "max" }],
-        requested_reviewers: [{ login: "jane" }], requested_teams: [{ name: "UI team" }],
+        body: "## Summary\n\nKeep focus during layout changes.",
+        draft: true,
+        merged_at: null,
+        closed_at: null,
+        mergeable: false,
+        mergeable_state: "dirty",
+        base: { ref: "main" },
+        head: { ref: "fix/focus", repo: { full_name: "contributor/opentui" } },
+        additions: 18,
+        deletions: 7,
+        changed_files: 2,
+        commits: 3,
+        comments: 2,
+        review_comments: 4,
+        labels: [{ name: "accessibility" }],
+        assignees: [{ login: "max" }],
+        requested_reviewers: [{ login: "jane" }],
+        requested_teams: [{ name: "UI team" }],
       } as T
     },
-    async text() { return "" },
+    async text() {
+      return ""
+    },
   })
   const [detail, setDetail] = createSignal<PullDetailState>()
   const loaded: number[] = []
   const opened: Array<string | number | undefined> = []
   let copied = ""
-  const view = await testRender(() => (
-    <App
-      data={githubDataFixture}
-      operations={repositoryOperationsFixture}
-      pullDetail={detail()}
-      onLoadPull={async (number) => {
-        loaded.push(number)
-        setDetail({ number, resource: { status: "ready", value: await client.pull("anomalyco/opentui", number) },
-          commits: { status: "ready", value: githubDataFixture.commits.value!.items.slice(0, 3).map((commit) => ({ ...commit, committedAt: commit.date })) },
-          context: { status: "ready", value: pullContextFixture },
-          comments: { status: "ready", value: { items: issueCommentsFixture, page: 1, hasMore: false } },
-          references: { status: "ready", value: [issuePullReferenceFixture] },
-          events: [{ kind: "force-push", event: "head_ref_force_pushed", id: "force-push:900", actor: "alice-dev", createdAt: "2026-04-14T12:00:00Z",
-            beforeCommit: { sha: "a".repeat(40), url: `https://github.com/anomalyco/opentui/commit/${"a".repeat(40)}` },
-            afterCommit: { sha: githubDataFixture.commits.value!.items[0]!.sha,
-              url: `https://github.com/anomalyco/opentui/commit/${githubDataFixture.commits.value!.items[0]!.sha}` } }] })
-      }}
-      onClosePull={() => setDetail(undefined)}
-      onCopyToClipboard={async (value) => { copied = value; return true }}
-      onOpenInBrowser={async (target) => { opened.push(target) }}
-    />
-  ), { width: 120, height: 64 })
+  const view = await testRender(
+    () => (
+      <App
+        data={githubDataFixture}
+        operations={repositoryOperationsFixture}
+        pullDetail={detail()}
+        onLoadPull={async (number) => {
+          loaded.push(number)
+          setDetail({
+            number,
+            resource: { status: "ready", value: await client.pull("anomalyco/opentui", number) },
+            commits: {
+              status: "ready",
+              value: githubDataFixture.commits.value!.items.slice(0, 3).map((commit) => ({ ...commit, committedAt: commit.date })),
+            },
+            context: { status: "ready", value: pullContextFixture },
+            comments: { status: "ready", value: { items: issueCommentsFixture, page: 1, hasMore: false } },
+            references: { status: "ready", value: [issuePullReferenceFixture] },
+            events: [
+              {
+                kind: "force-push",
+                event: "head_ref_force_pushed",
+                id: "force-push:900",
+                actor: "alice-dev",
+                createdAt: "2026-04-14T12:00:00Z",
+                beforeCommit: { sha: "a".repeat(40), url: `https://github.com/anomalyco/opentui/commit/${"a".repeat(40)}` },
+                afterCommit: {
+                  sha: githubDataFixture.commits.value!.items[0]!.sha,
+                  url: `https://github.com/anomalyco/opentui/commit/${githubDataFixture.commits.value!.items[0]!.sha}`,
+                },
+              },
+            ],
+          })
+        }}
+        onClosePull={() => setDetail(undefined)}
+        onCopyToClipboard={async (value) => {
+          copied = value
+          return true
+        }}
+        onOpenInBrowser={async (target) => {
+          opened.push(target)
+        }}
+      />
+    ),
+    { width: 120, height: 64 },
+  )
   const settle = async () => {
     await view.flush()
     await Bun.sleep(60) // Markdown content renders asynchronously.
@@ -118,9 +166,15 @@ test("pull request details map GitHub data and preserve list navigation across n
     view.mockInput.pressKey("4")
     await settle()
     expect(loaded).toHaveLength(1)
-    setDetail((current) => ({ ...current!, resource: {
-      status: "error", phase: "load", message: "Could not refresh PR", value: current!.resource.value,
-    } }))
+    setDetail((current) => ({
+      ...current!,
+      resource: {
+        status: "error",
+        phase: "load",
+        message: "Could not refresh PR",
+        value: current!.resource.value,
+      },
+    }))
     await settle()
     expect(view.captureCharFrame()).toContain("Keep focus during layout changes.")
     const failedFrame = view.captureCharFrame().split("\n")
@@ -171,12 +225,19 @@ test("pull request details map GitHub data and preserve list navigation across n
 })
 
 test("merge conflicts remain visible in the merge-readiness section", async () => {
-  const context = { ...pullContextFixture, readiness: { ...pullContextFixture.readiness,
-    isDraft: false, mergeable: "CONFLICTING" as const, mergeStateStatus: "DIRTY" as const } }
-  const view = await testRender(() => <PullReadinessPanel context={context} expectedHeadSha={context.readiness.headSha} />, { width: 90, height: 20 })
+  const context = {
+    ...pullContextFixture,
+    readiness: { ...pullContextFixture.readiness, isDraft: false, mergeable: "CONFLICTING" as const, mergeStateStatus: "DIRTY" as const },
+  }
+  const view = await testRender(() => <PullReadinessPanel context={context} expectedHeadSha={context.readiness.headSha} />, {
+    width: 90,
+    height: 20,
+  })
   try {
     await view.flush()
     expect(view.captureCharFrame()).toContain("Merge blocked")
     expect(view.captureCharFrame()).toContain("Branch: Conflicts reported")
-  } finally { view.renderer.destroy() }
+  } finally {
+    view.renderer.destroy()
+  }
 })

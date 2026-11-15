@@ -11,9 +11,12 @@ export type LinkTarget =
 
 // Validate before URL parsing strips controls or normalizes paths.
 export function parseSafeUrl(value: string): URL | undefined {
-  if (!/^(?:https?:\/\/|mailto:)/i.test(value)
-    || /[\s\x00-\x1f\x7f\\]/.test(value)
-    || /%(?![a-f\d]{2})|%(?:0[a-f\d]|1[a-f\d]|7f)/i.test(value)) return undefined
+  if (
+    !/^(?:https?:\/\/|mailto:)/i.test(value) ||
+    /[\s\x00-\x1f\x7f\\]/.test(value) ||
+    /%(?![a-f\d]{2})|%(?:0[a-f\d]|1[a-f\d]|7f)/i.test(value)
+  )
+    return undefined
   try {
     const url = new URL(value)
     if (url.username || url.password) return undefined
@@ -40,26 +43,34 @@ export function resolveLinkTarget(value: string): LinkTarget | undefined {
   const url = parseSafeUrl(value)
   if (!url) return undefined
   const external: LinkTarget = { kind: "external", url: value }
-  if (url.protocol === "mailto:" || url.hostname !== "github.com" || url.port || url.search || url.hash)
-    return external
+  if (url.protocol === "mailto:" || url.hostname !== "github.com" || url.port || url.search || url.hash) return external
 
   const [owner, name, ...path] = url.pathname.replace(/^\/|\/$/g, "").split("/")
-  if (owner && ["apps", "orgs", "users", "settings", "sponsors", "marketplace", "topics", "collections", "features", "site"].includes(owner.toLowerCase())) return external
+  if (
+    owner &&
+    ["apps", "orgs", "users", "settings", "sponsors", "marketplace", "topics", "collections", "features", "site"].includes(
+      owner.toLowerCase(),
+    )
+  )
+    return external
   const repository = owner && name && normalizeRepository(`${owner}/${name}`)
   if (!repository) return external
   if (!path.length) return { kind: "page", repository, page: "overview" }
 
   const [route, target] = path
   const pages: Record<string, Page> = { issues: "issues", pulls: "pulls", commits: "commits", actions: "actions" }
-  if (path.length === 1 && Object.hasOwn(pages, route!))
-    return { kind: "page", repository, page: pages[route!]! }
+  if (path.length === 1 && Object.hasOwn(pages, route!)) return { kind: "page", repository, page: pages[route!]! }
   if (path.length === 2) {
     if (route === "issues" || route === "pull") {
       if (route === "pull" && /^[1-9]\d*\.(?:diff|patch)$/.test(target!)) return external
       const number = positiveNumber(target!)
-      return number === undefined ? undefined : {
-        kind: "detail", repository, detail: { kind: route === "issues" ? "number" : "pull", number },
-      }
+      return number === undefined
+        ? undefined
+        : {
+            kind: "detail",
+            repository,
+            detail: { kind: route === "issues" ? "number" : "pull", number },
+          }
     }
     if (route === "commit") {
       if (/^[a-f\d]{4,40}\.(?:diff|patch)$/i.test(target!)) return external

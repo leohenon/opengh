@@ -58,10 +58,12 @@ export function detectMention(text: string, cursor: number): MentionToken | unde
 export function mergeMentionUsers(local: readonly string[], remote: readonly string[], query: string, limit = 30) {
   const seen = new Set<string>()
   const prefix = query.toLowerCase()
-  return [...local.filter(login => login.toLowerCase().startsWith(prefix)), ...remote].filter(login => {
-    const key = login.toLowerCase()
-    if (!/^[a-z\d][a-z\d-]{0,38}(?:\[bot\])?$/i.test(login) || seen.has(key)) return false
-    seen.add(key)
-    return true
-  }).slice(0, limit)
+  return [...local.filter((login) => login.toLowerCase().startsWith(prefix)), ...remote]
+    .filter((login) => {
+      const key = login.toLowerCase()
+      if (!/^[a-z\d][a-z\d-]{0,38}(?:\[bot\])?$/i.test(login) || seen.has(key)) return false
+      seen.add(key)
+      return true
+    })
+    .slice(0, limit)
 }

@@ -45,14 +45,13 @@ describe("BranchPicker", () => {
     expect(view.renderer.root.findDescendantById("picker-submit")).toBeUndefined()
     expect(view.renderer.root.findDescendantById("picker-cancel")).toBeUndefined()
     expect(view.renderer.root.findDescendantById("picker-back")).toBeUndefined()
-    await view.mockMouse.click(0, 0); await view.flush()
+    await view.mockMouse.click(0, 0)
+    await view.flush()
     expect(closes).toBe(1)
   })
 
   test("loads and retries from the final row without hiding loaded branches", async () => {
-    const [branches, setBranches] = createSignal<ResourceState<Paginated<string>>>(
-      readyBranches(["main", "next"], true),
-    )
+    const [branches, setBranches] = createSignal<ResourceState<Paginated<string>>>(readyBranches(["main", "next"], true))
     let loads = 0
     let selected = ""
     const view = await testRender(
@@ -61,7 +60,9 @@ describe("BranchPicker", () => {
           branches={branches()}
           current="main"
           showScrollbar={false}
-          onSelect={(branch) => { selected = branch }}
+          onSelect={(branch) => {
+            selected = branch
+          }}
           onLoadMore={async () => {
             loads++
             setBranches({ status: "loading", phase: "pagination", value: branches().value })
@@ -120,7 +121,9 @@ describe("BranchPicker", () => {
           showScrollbar={false}
           onSelect={() => {}}
           onLoadMore={async () => {}}
-          onRetry={() => { retries++ }}
+          onRetry={() => {
+            retries++
+          }}
           onClose={() => {}}
         />
       ),
@@ -141,9 +144,7 @@ describe("BranchPicker", () => {
   })
 
   test("preserves the query and selected branch when pages append", async () => {
-    const [branches, setBranches] = createSignal<ResourceState<Paginated<string>>>(
-      readyBranches(["main", "next", "feature"], true),
-    )
+    const [branches, setBranches] = createSignal<ResourceState<Paginated<string>>>(readyBranches(["main", "next", "feature"], true))
     const view = await testRender(
       () => (
         <BranchPicker
@@ -182,7 +183,9 @@ describe("BranchPicker", () => {
           current="main"
           showScrollbar={false}
           onSelect={() => {}}
-          onLoadMore={async () => { loads++ }}
+          onLoadMore={async () => {
+            loads++
+          }}
           onRetry={() => {}}
           onClose={() => {}}
         />
@@ -212,7 +215,9 @@ describe("BranchPicker", () => {
           branches={readyBranches(["main", "next"])}
           current="main"
           showScrollbar={false}
-          onSelect={(branch) => { selected = branch }}
+          onSelect={(branch) => {
+            selected = branch
+          }}
           onLoadMore={async () => {}}
           onRetry={() => {}}
           onClose={() => {}}
@@ -223,7 +228,10 @@ describe("BranchPicker", () => {
     active.push(view)
     await view.flush()
 
-    const row = view.captureCharFrame().split("\n").findIndex((line) => line.includes("next"))
+    const row = view
+      .captureCharFrame()
+      .split("\n")
+      .findIndex((line) => line.includes("next"))
     expect(row).toBeGreaterThan(-1)
     await view.mockMouse.click(50, row)
     await view.flush()

@@ -8,14 +8,31 @@ import { initializeHunk } from "../src/ui/hunk-host"
 test("comma and period navigate bounded filtered files regardless of sidebar visibility or mouse selection", async () => {
   const setup = await createTestRenderer({ width: 105, height: 18 })
   initializeHunk(setup.renderer)
-  const patch = ["alpha.ts", "beta.ts", "other.ts", "gamma.ts"].map((name) =>
-    `diff --git a/${name} b/${name}\n--- a/${name}\n+++ b/${name}\n@@ -1 +1 @@\n-old-${name}\n+new-${name}\n`).join("")
-  await render(() => <StatusPromptProvider><box width="100%" height="100%" flexDirection="column">
-    <DiffScreen target={{ kind: "commit", sha: "nav" }} resource={{ status: "ready", value: { kind: "patch", patch } }}
-      interactive showScrollbar={false} onLoadFiles={() => {}} />
-    <StatusPromptBar fallback={<text height={1}>status</text>} />
-  </box></StatusPromptProvider>, setup.renderer)
-  const settle = async () => { await setup.flush(); await setup.renderer.idle(); await setup.flush() }
+  const patch = ["alpha.ts", "beta.ts", "other.ts", "gamma.ts"]
+    .map((name) => `diff --git a/${name} b/${name}\n--- a/${name}\n+++ b/${name}\n@@ -1 +1 @@\n-old-${name}\n+new-${name}\n`)
+    .join("")
+  await render(
+    () => (
+      <StatusPromptProvider>
+        <box width="100%" height="100%" flexDirection="column">
+          <DiffScreen
+            target={{ kind: "commit", sha: "nav" }}
+            resource={{ status: "ready", value: { kind: "patch", patch } }}
+            interactive
+            showScrollbar={false}
+            onLoadFiles={() => {}}
+          />
+          <StatusPromptBar fallback={<text height={1}>status</text>} />
+        </box>
+      </StatusPromptProvider>
+    ),
+    setup.renderer,
+  )
+  const settle = async () => {
+    await setup.flush()
+    await setup.renderer.idle()
+    await setup.flush()
+  }
   const selected = () => setup.captureCharFrame().split("\n")[0]!
   try {
     await settle()
@@ -74,7 +91,10 @@ test("comma and period navigate bounded filtered files regardless of sidebar vis
     setup.mockInput.pressKey(".")
     await settle()
     expect(selected()).toContain("gamma.ts")
-  } finally { setup.renderer.destroy(); await setup.renderer.closed }
+  } finally {
+    setup.renderer.destroy()
+    await setup.renderer.closed
+  }
 })
 
 test("keyboard file navigation reveals the selected row beyond the sidebar viewport", async () => {
@@ -84,11 +104,25 @@ test("keyboard file navigation reveals the selected row beyond the sidebar viewp
     const name = `file${index}.ts`
     return `diff --git a/${name} b/${name}\n--- a/${name}\n+++ b/${name}\n@@ -1 +1 @@\n-old\n+new\n`
   }).join("")
-  await render(() => <box width="100%" height="100%">
-    <DiffScreen target={{ kind: "commit", sha: "long-nav" }} resource={{ status: "ready", value: { kind: "patch", patch } }}
-      interactive showScrollbar={false} onLoadFiles={() => {}} />
-  </box>, setup.renderer)
-  const settle = async () => { await setup.flush(); await setup.renderer.idle(); await setup.flush() }
+  await render(
+    () => (
+      <box width="100%" height="100%">
+        <DiffScreen
+          target={{ kind: "commit", sha: "long-nav" }}
+          resource={{ status: "ready", value: { kind: "patch", patch } }}
+          interactive
+          showScrollbar={false}
+          onLoadFiles={() => {}}
+        />
+      </box>
+    ),
+    setup.renderer,
+  )
+  const settle = async () => {
+    await setup.flush()
+    await setup.renderer.idle()
+    await setup.flush()
+  }
   try {
     await settle()
     for (let i = 0; i < 20; i++) setup.mockInput.pressKey(".")
@@ -104,5 +138,8 @@ test("keyboard file navigation reveals the selected row beyond the sidebar viewp
     for (let i = 0; i < 21; i++) setup.mockInput.pressKey(",")
     await settle()
     expect(setup.captureCharFrame()).toContain("▌ file0.ts")
-  } finally { setup.renderer.destroy(); await setup.renderer.closed }
+  } finally {
+    setup.renderer.destroy()
+    await setup.renderer.closed
+  }
 })

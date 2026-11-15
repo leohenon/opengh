@@ -9,7 +9,11 @@ describe("GitHub Markdown normalization", () => {
   test("rejects container-prefix attacks before parsing, under a parent-enforced deadline", () => {
     // A regression must not block the test runner's event loop. This is a hang
     // backstop, not a latency benchmark; assertions identify the pre-parse guard.
-    const result = spawnSync(process.execPath, ["--eval", `
+    const result = spawnSync(
+      process.execPath,
+      [
+        "--eval",
+        `
       import { strict as assert } from "node:assert"
       import { GitHubMarkdownError, normalizeGitHubMarkdown, assertGitHubMarkdownSource } from "./src/ui/github-markdown"
       const attacks = [
@@ -26,7 +30,10 @@ describe("GitHub Markdown normalization", () => {
         assert.throws(() => normalizeGitHubMarkdown(source), error =>
           error instanceof GitHubMarkdownError && error.message === "Markdown is too complex (container prefixes before parsing)")
       }
-    `], { cwd: new URL("..", import.meta.url), timeout: 10_000, encoding: "utf8" })
+    `,
+      ],
+      { cwd: new URL("..", import.meta.url), timeout: 10_000, encoding: "utf8" },
+    )
     expect(result.error).toBeUndefined()
     expect(result.signal).toBeNull()
     expect(result.stderr).toBe("")
@@ -34,8 +41,10 @@ describe("GitHub Markdown normalization", () => {
   })
 
   test("prefix guard preserves ordinary README lists, fences, links, and alerts", () => {
-    const source = "# Guide\r\n\r\n" + "- [Guide](https://example.com/)\r\n  1. Child\r\n".repeat(500)
-      + "\r\n> [!NOTE]\r\n> Read this.\r\n\r\n```text\r\n>>> sample\r\n- 1. literal\r\n```"
+    const source =
+      "# Guide\r\n\r\n" +
+      "- [Guide](https://example.com/)\r\n  1. Child\r\n".repeat(500) +
+      "\r\n> [!NOTE]\r\n> Read this.\r\n\r\n```text\r\n>>> sample\r\n- 1. literal\r\n```"
     const markdown = normalizeGitHubMarkdown(source)
     expect(markdown.match(/\[Guide\]/g)).toHaveLength(500)
     expect(markdown).toContain("> **Note**")
@@ -44,18 +53,23 @@ describe("GitHub Markdown normalization", () => {
 
   test("bounds source size and tree complexity before recursive conversion", () => {
     const attack = "<a>" + "<span>".repeat(12_000) + "hello" + "</span>".repeat(12_000) + "</a>"
-    for (const source of [attack, "> ".repeat(80) + "deep", "*x* ".repeat(10_001), "<template>".repeat(80) + "hello" + "</template>".repeat(80)])
+    for (const source of [
+      attack,
+      "> ".repeat(80) + "deep",
+      "*x* ".repeat(10_001),
+      "<template>".repeat(80) + "hello" + "</template>".repeat(80),
+    ])
       expect(() => normalizeGitHubMarkdown(source)).toThrow("Markdown is too complex")
     for (const source of ["x".repeat(1024 * 1024 + 1), "界".repeat(400_000)])
       expect(() => normalizeGitHubMarkdown(source)).toThrow("Markdown is too large")
     for (const ending of ["\n", "\r\n", "\r"])
-      expect(() => normalizeGitHubMarkdown("```text\n" + ("x" + ending).repeat(10_000) + "```"))
-        .toThrow("too many lines")
+      expect(() => normalizeGitHubMarkdown("```text\n" + ("x" + ending).repeat(10_000) + "```")).toThrow("too many lines")
     const expansion = "[a][r] ".repeat(1000) + "\n\n[r]: https://example.com/" + "x".repeat(8000)
     expect(() => normalizeGitHubMarkdown(expansion)).toThrow("expansion exceeds")
-    expect(() => normalizeGitHubMarkdown("#1 ".repeat(10_000), { context: { repositoryUrl: "https://github.com/owner/repo" } }))
-      .toThrow("Markdown is too complex")
-    const fallback = gitHubMarkdownFallback(("hello\u001b\u0085\n").repeat(10_000), new Error("private detail"))
+    expect(() => normalizeGitHubMarkdown("#1 ".repeat(10_000), { context: { repositoryUrl: "https://github.com/owner/repo" } })).toThrow(
+      "Markdown is too complex",
+    )
+    const fallback = gitHubMarkdownFallback("hello\u001b\u0085\n".repeat(10_000), new Error("private detail"))
     expect(fallback).toContain("Markdown conversion failed. Showing a plain-text preview.")
     expect(fallback).not.toContain("private detail")
     expect(fallback).not.toMatch(/[\u001b\u0085]/)
@@ -70,8 +84,7 @@ describe("GitHub Markdown normalization", () => {
     expect(() => normalizeGitHubMarkdown(attack)).toThrow("Markdown is too complex (table expansion)")
     const modestTable = "|" + "h|".repeat(40) + "\n|" + "-|".repeat(40) + "\n" + "|x|\n".repeat(100)
     expect(normalizeGitHubMarkdown(modestTable)).toContain("| h")
-    expect(() => normalizeGitHubMarkdown((modestTable + "\n").repeat(3)))
-      .toThrow("Markdown is too complex (table expansion)")
+    expect(() => normalizeGitHubMarkdown((modestTable + "\n").repeat(3))).toThrow("Markdown is too complex (table expansion)")
     const ragged = "| Name | Status |\n| :--- | ---: |\n| Ada |\n| Bob | Ready | ignored |"
     const padded = "| Name | Status |\n| :--- | ---: |\n| Ada | |\n| Bob | Ready |"
     expect(normalizeGitHubMarkdown(ragged)).toBe(normalizeGitHubMarkdown(padded))
@@ -79,8 +92,9 @@ describe("GitHub Markdown normalization", () => {
     const longColumn = normalizeGitHubMarkdown(`| ${longCell} |\n| --- |\n` + "|x|\n".repeat(1000))
     expect(longColumn).toContain(longCell)
     expect(longColumn.length).toBeLessThan(30_000) // No longest-cell padding across every serialized row.
-    expect(() => normalizeGitHubMarkdown('<table><tr><td colspan="1000000000">x</td></tr></table>'))
-      .toThrow("Markdown is too complex (table expansion)")
+    expect(() => normalizeGitHubMarkdown('<table><tr><td colspan="1000000000">x</td></tr></table>')).toThrow(
+      "Markdown is too complex (table expansion)",
+    )
     const rowSpan = (span: number) => `<table><tr><td rowspan="${span}">x</td></tr></table>`
     expect(normalizeGitHubMarkdown(rowSpan(1_000_000_000))).toBe(normalizeGitHubMarkdown(rowSpan(1)))
     const spanning = '<table><tr><th colspan="2">Heading</th></tr><tr><td rowspan="2">A</td><td>B</td></tr><tr><td>C</td></tr></table>'
@@ -90,11 +104,16 @@ describe("GitHub Markdown normalization", () => {
   test("control-bearing Markdown and HTML links remain text", () => {
     for (const control of ["\u007f", "\u0080", "\u0085", "\u009f"]) {
       const source = `[Unsafe](https://example.com/${control}path) and <a href="https://example.com/${control}path">HTML unsafe</a>`
-      for (const markdown of [normalizeGitHubMarkdown(source), normalizeGitHubMarkdown(source, { context: { repositoryUrl: "https://github.com/owner/repo" } })]) {
+      for (const markdown of [
+        normalizeGitHubMarkdown(source),
+        normalizeGitHubMarkdown(source, { context: { repositoryUrl: "https://github.com/owner/repo" } }),
+      ]) {
         expect(markdown).toContain("Unsafe")
         expect(markdown).toContain("HTML unsafe")
         const links: unknown[] = []
-        visit(unified().use(remarkParse).parse(markdown), ["link", "definition"], (node) => { links.push(node) })
+        visit(unified().use(remarkParse).parse(markdown), ["link", "definition"], (node) => {
+          links.push(node)
+        })
         expect(links).toEqual([])
       }
     }
@@ -103,16 +122,19 @@ describe("GitHub Markdown normalization", () => {
   test("malformed destinations become inert labels without losing valid neighboring links", () => {
     for (const context of [undefined, { repositoryUrl: "https://github.com/o/r" }]) {
       for (const target of ["//[", "https://[", "//example.com:bad", "https://%zz/"]) {
-        const source = `[broken](${target}) [reference][bad] <a href="${target}">HTML</a> ![image](${target})`
-          + `\n\n[bad]: ${target}`
+        const source = `[broken](${target}) [reference][bad] <a href="${target}">HTML</a> ![image](${target})` + `\n\n[bad]: ${target}`
         const markdown = normalizeGitHubMarkdown(source, { context })
         expect(markdown).toBe("broken reference HTML ▧ image")
         const links: unknown[] = []
-        visit(unified().use(remarkParse).parse(markdown), ["link", "definition", "linkReference"], (node) => { links.push(node) })
+        visit(unified().use(remarkParse).parse(markdown), ["link", "definition", "linkReference"], (node) => {
+          links.push(node)
+        })
         expect(links).toEqual([])
       }
-      const markdown = normalizeGitHubMarkdown('[broken](//[) [valid][good] <a href="//example.com/docs">HTML</a>'
-        + '\n\n[good]: https://example.com/guide', { context })
+      const markdown = normalizeGitHubMarkdown(
+        '[broken](//[) [valid][good] <a href="//example.com/docs">HTML</a>' + "\n\n[good]: https://example.com/guide",
+        { context },
+      )
       expect(markdown).toContain("broken [valid](https://example.com/guide)")
       expect(markdown).toContain(`[HTML](${context ? "https:" : ""}//example.com/docs)`)
     }
@@ -123,23 +145,25 @@ describe("GitHub Markdown normalization", () => {
     const source = `<datalist id="d">${options}</datalist>` + '<input list="d" multiple>'.repeat(100)
     expect(Buffer.byteLength(source)).toBeLessThan(85_000)
     expect(normalizeGitHubMarkdown(source)).toBe("")
-    const controls = '<form>Static <button>button text<input list="d"></button>'
-      + '<select><optgroup><option>Hidden option</option></optgroup></select>'
-      + '<textarea>Hidden textarea</textarea><output>Hidden output</output>'
-      + '<input value="Hidden input"></form>'
+    const controls =
+      '<form>Static <button>button text<input list="d"></button>' +
+      "<select><optgroup><option>Hidden option</option></optgroup></select>" +
+      "<textarea>Hidden textarea</textarea><output>Hidden output</output>" +
+      '<input value="Hidden input"></form>'
     const markdown = normalizeGitHubMarkdown(controls)
     expect(markdown).toContain("Static button text")
     expect(markdown).not.toContain("Hidden")
   })
 
   test("converter and context generated destinations are always sanitized", () => {
-    const source = '<base href="file:///tmp/"><a href="relative">Relative</a>'
-      + '<input type="image" src="file:///tmp/local-file" alt="Open">'
-      + '<input type="url" value="file:///tmp/local-file">'
-      + '<input type="url" value="javascript:alert(1)">'
-      + '<input type="email" value="hidden@example.com">'
-      + '\n\n[Unsafe reference][bad] ![Unsafe image][bad]\n\n[bad]: file:///tmp/local-file'
-      + '\n\n[Safe](https://example.com/) ![Screenshot](https://example.com/ui.png)'
+    const source =
+      '<base href="file:///tmp/"><a href="relative">Relative</a>' +
+      '<input type="image" src="file:///tmp/local-file" alt="Open">' +
+      '<input type="url" value="file:///tmp/local-file">' +
+      '<input type="url" value="javascript:alert(1)">' +
+      '<input type="email" value="hidden@example.com">' +
+      "\n\n[Unsafe reference][bad] ![Unsafe image][bad]\n\n[bad]: file:///tmp/local-file" +
+      "\n\n[Safe](https://example.com/) ![Screenshot](https://example.com/ui.png)"
     for (const context of [undefined, { repositoryUrl: "https://github.com/owner/repo" }]) {
       const markdown = normalizeGitHubMarkdown(source, { context })
       expect(markdown).toContain("Relative")
@@ -168,21 +192,25 @@ describe("GitHub Markdown normalization", () => {
   test("task states stay readable and fenced control markup stays literal", () => {
     const tasks = "- [x] Complete\n- [ ] Pending"
     expect(normalizeGitHubMarkdown(tasks)).toBe(tasks)
-    const markup = '<base href="file:///tmp/"><input type="image" src="file:///tmp/local-file">\n'
-      + '<datalist id="d"><option value="literal"></option></datalist><input list="d">'
+    const markup =
+      '<base href="file:///tmp/"><input type="image" src="file:///tmp/local-file">\n' +
+      '<datalist id="d"><option value="literal"></option></datalist><input list="d">'
     for (const codePanels of [true, false])
-      expect(normalizeGitHubMarkdown("```html\n" + markup + "\n```", { codePanels }))
-        .toBe("```html\n" + markup + "\n```")
-    const checks = normalizeGitHubMarkdown('<p><input type="checkbox" checked disabled list="d"> Done '
-      + '<input type="radio" disabled list="d"> Pending</p>')
+      expect(normalizeGitHubMarkdown("```html\n" + markup + "\n```", { codePanels })).toBe("```html\n" + markup + "\n```")
+    const checks = normalizeGitHubMarkdown(
+      '<p><input type="checkbox" checked disabled list="d"> Done ' + '<input type="radio" disabled list="d"> Pending</p>',
+    )
     const labels: string[] = []
-    visit(unified().use(remarkParse).parse(checks), "text", (node) => { labels.push(node.value) })
+    visit(unified().use(remarkParse).parse(checks), "text", (node) => {
+      labels.push(node.value)
+    })
     expect(labels.join("")).toContain("[x] Done")
     expect(labels.join("")).toContain("[ ] Pending")
   })
 
   test("repository links and issue references resolve without changing code or existing links", () => {
-    const markdown = normalizeGitHubMarkdown(`[Guide](CONTRIBUTING.md) [details](#details) [license](../LICENSE) [root](/SECURITY.md).
+    const markdown = normalizeGitHubMarkdown(
+      `[Guide](CONTRIBUTING.md) [details](#details) [license](../LICENSE) [root](/SECURITY.md).
 
 Fix #11126 and \\#11128, alongside other/repo#42 and [#99](https://example.com/custom).
 
@@ -192,7 +220,9 @@ C#123abc and #123abc aren't issue references. Inline \`#7\` stays code.
 
 \`\`\`text
 #8 stays code
-\`\`\``, { context: { repositoryUrl: "https://github.com/qdrant/qdrant", ref: "feature/nested", path: "docs/README.md" } })
+\`\`\``,
+      { context: { repositoryUrl: "https://github.com/qdrant/qdrant", ref: "feature/nested", path: "docs/README.md" } },
+    )
     expect(markdown).toContain("[Guide](https://github.com/qdrant/qdrant/blob/feature%2Fnested/docs/CONTRIBUTING.md)")
     expect(markdown).toContain("[details](https://github.com/qdrant/qdrant/blob/feature%2Fnested/docs/README.md#details)")
     expect(markdown).toContain("[license](https://github.com/qdrant/qdrant/blob/feature%2Fnested/LICENSE)")
@@ -206,14 +236,20 @@ C#123abc and #123abc aren't issue references. Inline \`#7\` stays code.
     expect(markdown).not.toContain("/issues/8")
     expect(markdown).toContain("![Web UI](https://github.com/qdrant/qdrant/blob/feature%2Fnested/docs/web-ui.png)")
     expect(markdown).toContain("#8 stays code")
-    expect(normalizeGitHubMarkdown("[comment](#issuecomment-123)", { context: {
-      repositoryUrl: "https://github.com/qdrant/qdrant", sourceUrl: "https://github.com/qdrant/qdrant/issues/10",
-    } })).toContain("https://github.com/qdrant/qdrant/issues/10#issuecomment-123")
+    expect(
+      normalizeGitHubMarkdown("[comment](#issuecomment-123)", {
+        context: {
+          repositoryUrl: "https://github.com/qdrant/qdrant",
+          sourceUrl: "https://github.com/qdrant/qdrant/issues/10",
+        },
+      }),
+    ).toContain("https://github.com/qdrant/qdrant/issues/10#issuecomment-123")
   })
 
   test("commit references and mentions link only in prose, without wrapping existing links", () => {
     const full = "a".repeat(40)
-    const markdown = normalizeGitHubMarkdown(`Use abc1234, other/repo@deadbee, ${full}, and @octocat.
+    const markdown = normalizeGitHubMarkdown(
+      `Use abc1234, other/repo@deadbee, ${full}, and @octocat.
 
 Leave deadbee, 1234567, abc123, abc1234z, xabc1234, abc1234_name, and name@octocat.com alone.
 
@@ -225,7 +261,9 @@ Inline \`abc1234 @octocat\` and ![abc1234](https://example.com/image.png).
 
 \`\`\`text
 other/repo@abc1234 @hidden
-\`\`\``, { context: { repositoryUrl: "https://github.com/owner/repo" }, preserveImages: true })
+\`\`\``,
+      { context: { repositoryUrl: "https://github.com/owner/repo" }, preserveImages: true },
+    )
     expect(markdown).toContain("[abc1234](https://github.com/owner/repo/commit/abc1234)")
     expect(markdown).toContain("[other/repo@deadbee](https://github.com/other/repo/commit/deadbee)")
     expect(markdown).toContain(`[${full}](https://github.com/owner/repo/commit/${full})`)
@@ -238,7 +276,9 @@ other/repo@abc1234 @hidden
   })
 
   test("GitHub alerts become readable quote headings without changing code or literal markers", () => {
-    const markdown = normalizeGitHubMarkdown("> [!WARNING]\n> Read the **migration guide**.\n\n[!NOTE] is literal here.\n\n```text\n> [!NOTE]\n```")
+    const markdown = normalizeGitHubMarkdown(
+      "> [!WARNING]\n> Read the **migration guide**.\n\n[!NOTE] is literal here.\n\n```text\n> [!NOTE]\n```",
+    )
     expect(markdown).toContain("> **Warning**\n>\n> Read the **migration guide**.")
     expect(markdown).toContain("\\[!NOTE] is literal here.")
     expect(markdown).toContain("```text\n> [!NOTE]\n```")
@@ -246,35 +286,33 @@ other/repo@abc1234 @hidden
 
   test("standalone images retain image identity while inline images and badges stay compact", () => {
     expect(normalizeGitHubMarkdown("![Screenshot](ui.png)")).toBe("![Screenshot](ui.png)")
-    expect(normalizeGitHubMarkdown('[![Screenshot](ui.png)](https://example.com/view)'))
-      .toBe("![Screenshot](https://example.com/view)")
-    expect(normalizeGitHubMarkdown('<p><picture><source srcset="dark.png"><img alt="Screenshot" src="ui.png"></picture></p>'))
-      .toBe("![Screenshot](ui.png)")
-    expect(normalizeGitHubMarkdown("Before ![Inline](ui.png) after"))
-      .toBe("Before ▧ [Inline](ui.png) after")
-    expect(normalizeGitHubMarkdown('<div>Before <img alt="Inline" src="ui.png"> after</div>'))
-      .toBe("Before ▧ [Inline](ui.png) after")
-    expect(normalizeGitHubMarkdown("- ![Nested](ui.png)"))
-      .toBe("- ▧ [Nested](ui.png)")
-    expect(normalizeGitHubMarkdown("![Build status](https://img.shields.io/build/status)", { preserveImages: true }))
-      .toBe("▧ [Build status](https://img.shields.io/build/status)")
-    expect(normalizeGitHubMarkdown('![Unsafe](javascript:alert)'))
-      .toBe("▧ Unsafe")
+    expect(normalizeGitHubMarkdown("[![Screenshot](ui.png)](https://example.com/view)")).toBe("![Screenshot](https://example.com/view)")
+    expect(normalizeGitHubMarkdown('<p><picture><source srcset="dark.png"><img alt="Screenshot" src="ui.png"></picture></p>')).toBe(
+      "![Screenshot](ui.png)",
+    )
+    expect(normalizeGitHubMarkdown("Before ![Inline](ui.png) after")).toBe("Before ▧ [Inline](ui.png) after")
+    expect(normalizeGitHubMarkdown('<div>Before <img alt="Inline" src="ui.png"> after</div>')).toBe("Before ▧ [Inline](ui.png) after")
+    expect(normalizeGitHubMarkdown("- ![Nested](ui.png)")).toBe("- ▧ [Nested](ui.png)")
+    expect(normalizeGitHubMarkdown("![Build status](https://img.shields.io/build/status)", { preserveImages: true })).toBe(
+      "▧ [Build status](https://img.shields.io/build/status)",
+    )
+    expect(normalizeGitHubMarkdown("![Unsafe](javascript:alert)")).toBe("▧ Unsafe")
   })
 
   test("standalone images keep descriptions separate from filename fallbacks", () => {
-    expect(normalizeGitHubMarkdown('![](images/screen%20shot.png?token=secret)'))
-      .toBe('![](images/screen%20shot.png?token=secret "screen shot.png")')
-    expect(normalizeGitHubMarkdown('[![](images/screen.png)](https://example.com/view)'))
-      .toBe('![](https://example.com/view "screen.png")')
-    expect(normalizeGitHubMarkdown('![](https://example.com/)'))
-      .toBe('![](https://example.com/ "open image")')
-    expect(normalizeGitHubMarkdown('<img alt=" " title="Useful description" src="screen.png">'))
-      .toBe('![Useful description](screen.png)')
+    expect(normalizeGitHubMarkdown("![](images/screen%20shot.png?token=secret)")).toBe(
+      '![](images/screen%20shot.png?token=secret "screen shot.png")',
+    )
+    expect(normalizeGitHubMarkdown("[![](images/screen.png)](https://example.com/view)")).toBe('![](https://example.com/view "screen.png")')
+    expect(normalizeGitHubMarkdown("![](https://example.com/)")).toBe('![](https://example.com/ "open image")')
+    expect(normalizeGitHubMarkdown('<img alt=" " title="Useful description" src="screen.png">')).toBe("![Useful description](screen.png)")
   })
 
   test("issue attachments preserve branding and badge images as links", () => {
-    const markdown = normalizeGitHubMarkdown(`![Broken logo](https://example.com/logo.png)\n\n![Build status](https://img.shields.io/build/status)\n\n![Qdrant](https://example.com/docs/logo.svg)`, { preserveImages: true })
+    const markdown = normalizeGitHubMarkdown(
+      `![Broken logo](https://example.com/logo.png)\n\n![Build status](https://img.shields.io/build/status)\n\n![Qdrant](https://example.com/docs/logo.svg)`,
+      { preserveImages: true },
+    )
     expect(markdown).toContain("▧ [Broken logo](https://example.com/logo.png)")
     expect(markdown).toContain("▧ [Build status](https://img.shields.io/build/status)")
     expect(markdown).toContain("▧ [Qdrant](https://example.com/docs/logo.svg)")

@@ -13,7 +13,10 @@ export function createEditorHistory(editor: TextareaRenderable, onRestore: () =>
   let groupUntil = 0
   let lastGroup: EditGroup
   const snapshot = (): Snapshot => ({ text: editor.plainText, cursor: editor.cursorOffset, selection: editor.getSelection() })
-  const boundary = () => { groupUntil = 0; lastGroup = undefined }
+  const boundary = () => {
+    groupUntil = 0
+    lastGroup = undefined
+  }
   const sync = () => {
     // An external value change starts a new editing session.
     if (editor.plainText !== expected) {
@@ -47,7 +50,10 @@ export function createEditorHistory(editor: TextareaRenderable, onRestore: () =>
       operation()
       if (editor.isDestroyed) return
       const after = snapshot()
-      if (before.text === after.text) { boundary(); return }
+      if (before.text === after.text) {
+        boundary()
+        return
+      }
       const previous = undo.at(-1)
       const canGroup = group !== undefined && !before.selection && !after.selection
       if (canGroup && group === lastGroup && now < groupUntil && previous?.after.cursor === before.cursor) {

@@ -2,14 +2,21 @@ import { describe, expect, test } from "bun:test"
 import { createCacheBudget, createDetailCache, estimateBytes } from "../src/detail-cache"
 import type { RepositoryLoaders } from "../src/repository-session"
 import { createRepositorySession } from "../src/repository-session"
-import { commitDetailFixture, githubDataFixture, issueCommentsFixture, issueDetailFixture, pullContextFixture } from "./fixtures/github-data"
+import {
+  commitDetailFixture,
+  githubDataFixture,
+  issueCommentsFixture,
+  issueDetailFixture,
+  pullContextFixture,
+} from "./fixtures/github-data"
 
 function loaders(overrides: Partial<RepositoryLoaders> = {}): RepositoryLoaders {
   return {
     metadata: async () => structuredClone(githubDataFixture.repo),
     workCounts: async () => ({ issues: 1, pulls: 1 }),
     commitCount: async () => 4,
-    documents: async () => [], document: async () => "",
+    documents: async () => [],
+    document: async () => "",
     branches: async () => ({ items: ["main"], hasMore: false }),
     commits: async () => ({ items: [], hasMore: false }),
     commit: async () => structuredClone(commitDetailFixture),
@@ -18,11 +25,26 @@ function loaders(overrides: Partial<RepositoryLoaders> = {}): RepositoryLoaders 
     issueReferences: async () => [],
     issues: async () => ({ items: [], hasMore: false }),
     pulls: async () => ({ items: [], hasMore: false }),
-    pull: async (_repository, number) => ({ ...githubDataFixture.pulls.open.value!.items[0]!, number,
-      url: `https://github.com/o/r/pull/${number}`, body: "PR body", updatedAt: "2026-01-01T00:00:00Z",
-      baseBranch: "main", headBranch: "next", additions: 1, deletions: 0, changedFiles: 1, commitCount: 0, commentCount: 1,
-      labels: [], assignees: [], reviewers: [], mergeable: true }),
-    pullCommits: async () => [], pullContext: async () => structuredClone(pullContextFixture),
+    pull: async (_repository, number) => ({
+      ...githubDataFixture.pulls.open.value!.items[0]!,
+      number,
+      url: `https://github.com/o/r/pull/${number}`,
+      body: "PR body",
+      updatedAt: "2026-01-01T00:00:00Z",
+      baseBranch: "main",
+      headBranch: "next",
+      additions: 1,
+      deletions: 0,
+      changedFiles: 1,
+      commitCount: 0,
+      commentCount: 1,
+      labels: [],
+      assignees: [],
+      reviewers: [],
+      mergeable: true,
+    }),
+    pullCommits: async () => [],
+    pullContext: async () => structuredClone(pullContextFixture),
     runs: async () => ({ items: [], hasMore: false }),
     ...overrides,
   }
@@ -32,7 +54,8 @@ describe("detail cache", () => {
   test("bounded LRU evicts by count, estimated bytes and idle time while reporting freshness", () => {
     let time = 0
     const cache = createDetailCache<string>({ maxEntries: 2, maxBytes: 40, freshMs: 10, retainMs: 100, now: () => time })
-    cache.set("a", "aaaa"); cache.set("b", "bbbb")
+    cache.set("a", "aaaa")
+    cache.set("b", "bbbb")
     expect(cache.get("a")?.stale).toBe(false)
     cache.set("c", "cccc")
     expect(cache.get("b")).toBeUndefined() // least recently used
@@ -53,12 +76,23 @@ describe("detail cache", () => {
   test("reopening a recently closed issue reuses retained data, then revalidates only once stale", async () => {
     let time = 0
     let detailCalls = 0
-    const session = createRepositorySession(loaders({
-      metadata: async (repository) => ({ ...structuredClone(githubDataFixture.repo),
-        id: githubDataFixture.repo.id + (repository === "owner/other" ? 1 : 0), nodeId: `R_${repository}`,
-        nameWithOwner: repository, url: `https://github.com/${repository}` }),
-      issue: async (_repository, number) => { detailCalls++; return { ...structuredClone(issueDetailFixture), number, title: `Load ${detailCalls}` } },
-    }), undefined, { freshMs: 30_000, now: () => time })
+    const session = createRepositorySession(
+      loaders({
+        metadata: async (repository) => ({
+          ...structuredClone(githubDataFixture.repo),
+          id: githubDataFixture.repo.id + (repository === "owner/other" ? 1 : 0),
+          nodeId: `R_${repository}`,
+          nameWithOwner: repository,
+          url: `https://github.com/${repository}`,
+        }),
+        issue: async (_repository, number) => {
+          detailCalls++
+          return { ...structuredClone(issueDetailFixture), number, title: `Load ${detailCalls}` }
+        },
+      }),
+      undefined,
+      { freshMs: 30_000, now: () => time },
+    )
     await session.load("owner/repo")
     await session.loadIssue(1)
     expect(detailCalls).toBe(1)
@@ -90,9 +124,16 @@ describe("detail cache", () => {
 
   test("pull requests reopen from cache and repository refresh marks retained details stale", async () => {
     let pullCalls = 0
-    const session = createRepositorySession(loaders({
-      pull: async (repository, number) => { pullCalls++; return (await loaders().pull!(repository, number)) },
-    }), undefined, { freshMs: 60_000 })
+    const session = createRepositorySession(
+      loaders({
+        pull: async (repository, number) => {
+          pullCalls++
+          return await loaders().pull!(repository, number)
+        },
+      }),
+      undefined,
+      { freshMs: 60_000 },
+    )
     await session.load("owner/repo")
     await session.loadPull(7)
     session.clearPull()
@@ -109,7 +150,9 @@ describe("detail cache", () => {
 describe("detail cache invalidation", () => {
   function deferred<T>() {
     let resolve!: (value: T) => void
-    const promise = new Promise<T>((done) => { resolve = done })
+    const promise = new Promise<T>((done) => {
+      resolve = done
+    })
     return { promise, resolve }
   }
 
@@ -117,11 +160,18 @@ describe("detail cache invalidation", () => {
     const pending = deferred<(typeof issueCommentsFixture)[number]>()
     const posted = { ...issueCommentsFixture[0]!, id: 9009, body: "Posted after closing" }
     let detailCalls = 0
-    const session = createRepositorySession(loaders({
-      issue: async (_repository, number) => { detailCalls++; return { ...structuredClone(issueDetailFixture), number, commentCount: 1 } },
-      issueComments: async () => ({ items: [issueCommentsFixture[0]!], hasMore: false }),
-      createIssueComment: async () => pending.promise,
-    }), undefined, { freshMs: 60_000 })
+    const session = createRepositorySession(
+      loaders({
+        issue: async (_repository, number) => {
+          detailCalls++
+          return { ...structuredClone(issueDetailFixture), number, commentCount: 1 }
+        },
+        issueComments: async () => ({ items: [issueCommentsFixture[0]!], hasMore: false }),
+        createIssueComment: async () => pending.promise,
+      }),
+      undefined,
+      { freshMs: 60_000 },
+    )
     await session.load("owner/repo")
     await session.loadIssue(1)
     session.updateIssueDraft(1, { body: posted.body })
@@ -136,9 +186,11 @@ describe("detail cache invalidation", () => {
     expect(session.issueDetail()?.comments.value?.items.map((comment) => comment.id)).toContain(posted.id)
   })
 
-  test.each((["issue", "pull"] as const).flatMap(parent =>
-    (["offscreen", "returned", "replaced", "read failure"] as const).map(scenario => [parent, scenario] as const),
-  ))("a %s close confirmed %s revalidates only the origin overview", async (parent, scenario) => {
+  test.each(
+    (["issue", "pull"] as const).flatMap((parent) =>
+      (["offscreen", "returned", "replaced", "read failure"] as const).map((scenario) => [parent, scenario] as const),
+    ),
+  )("a %s close confirmed %s revalidates only the origin overview", async (parent, scenario) => {
     const pending = deferred<void>()
     const started = deferred<void>()
     const oldReads = deferred<void>()
@@ -160,32 +212,58 @@ describe("detail cache invalidation", () => {
     }
     const metadataCalls: Record<string, number> = {}
     const issue = { ...structuredClone(issueDetailFixture), number: 1, state: "open" as const }
-    const pull = { ...await loaders().pull!({ ...githubDataFixture.repo, nameWithOwner: "owner/first" }, 1), state: "open" as const,
-      merged: false, permissions: { comment: true, close: true, reopen: true, assignees: true } }
+    const pull = {
+      ...(await loaders().pull!({ ...githubDataFixture.repo, nameWithOwner: "owner/first" }, 1)),
+      state: "open" as const,
+      merged: false,
+      permissions: { comment: true, close: true, reopen: true, assignees: true },
+    }
     const list: RepositoryLoaders["pulls"] = async (repository, state) => {
       const wasClosed = closed
       await waitForRead(wasClosed)
-      return { items: repository.nameWithOwner === "owner/first" && state === (wasClosed ? "closed" : "open")
-        ? [{ ...pull, state }] : [], hasMore: false }
+      return {
+        items: repository.nameWithOwner === "owner/first" && state === (wasClosed ? "closed" : "open") ? [{ ...pull, state }] : [],
+        hasMore: false,
+      }
     }
-    const session = createRepositorySession(loaders({
-      metadata: async (repository) => {
-        metadataCalls[repository] = (metadataCalls[repository] ?? 0) + 1
-        return { ...structuredClone(githubDataFixture.repo), nameWithOwner: repository,
-          id: repository === "owner/first" ? firstId : 2, nodeId: `R_${repository}` }
-      },
-      issue: async () => ({ ...issue, state: closed ? "closed" : "open" }),
-      pull: async () => ({ ...pull, state: closed ? "closed" : "open" }),
-      ...(parent === "issue" ? { issues: list } : { pulls: list }),
-      workCounts: async (repository) => {
-        const wasClosed = closed
-        await waitForRead(wasClosed)
-        return { issues: parent === "issue" && repository.nameWithOwner === "owner/first" && !wasClosed ? 1 : 0,
-          pulls: parent === "pull" && repository.nameWithOwner === "owner/first" && !wasClosed ? 1 : 0 }
-      },
-      updateIssueState: async () => { started.resolve(); await pending.promise; closed = true; return { ...issue, state: "closed" } },
-      updatePullState: async () => { started.resolve(); await pending.promise; closed = true; return { ...pull, state: "closed" } },
-    }), undefined, { freshMs: 60_000, now: () => now })
+    const session = createRepositorySession(
+      loaders({
+        metadata: async (repository) => {
+          metadataCalls[repository] = (metadataCalls[repository] ?? 0) + 1
+          return {
+            ...structuredClone(githubDataFixture.repo),
+            nameWithOwner: repository,
+            id: repository === "owner/first" ? firstId : 2,
+            nodeId: `R_${repository}`,
+          }
+        },
+        issue: async () => ({ ...issue, state: closed ? "closed" : "open" }),
+        pull: async () => ({ ...pull, state: closed ? "closed" : "open" }),
+        ...(parent === "issue" ? { issues: list } : { pulls: list }),
+        workCounts: async (repository) => {
+          const wasClosed = closed
+          await waitForRead(wasClosed)
+          return {
+            issues: parent === "issue" && repository.nameWithOwner === "owner/first" && !wasClosed ? 1 : 0,
+            pulls: parent === "pull" && repository.nameWithOwner === "owner/first" && !wasClosed ? 1 : 0,
+          }
+        },
+        updateIssueState: async () => {
+          started.resolve()
+          await pending.promise
+          closed = true
+          return { ...issue, state: "closed" }
+        },
+        updatePullState: async () => {
+          started.resolve()
+          await pending.promise
+          closed = true
+          return { ...pull, state: "closed" }
+        },
+      }),
+      undefined,
+      { freshMs: 60_000, now: () => now },
+    )
     const section = parent === "issue" ? "issues" : "pulls"
     await session.load("owner/first")
     const initial = session.state()
@@ -198,7 +276,10 @@ describe("detail cache invalidation", () => {
     const closing = session.submitIssueAction(1, "close", parent)
     await started.promise
     await session.load("owner/second")
-    if (scenario === "replaced") { firstId = 3; now = 60_001 }
+    if (scenario === "replaced") {
+      firstId = 3
+      now = 60_001
+    }
     if (scenario !== "offscreen") await session.load("owner/first")
     if (scenario === "replaced") {
       expect(session.state().status).toBe("error")
@@ -228,7 +309,7 @@ describe("detail cache invalidation", () => {
       expect(revalidating.data.workCounts).toMatchObject({ status: "loading", value: { [section]: 1 } })
       freshReads.resolve()
       // Let the background list/count reads settle, without starting another refresh.
-      await new Promise(resolve => setTimeout(resolve, 0))
+      await new Promise((resolve) => setTimeout(resolve, 0))
     }
     if (scenario === "read failure") {
       const failed = session.state()
@@ -264,9 +345,16 @@ describe("detail cache invalidation", () => {
 
   test("failed sections are retained as errors, never as fresh empty data", async () => {
     let failComments = true
-    const session = createRepositorySession(loaders({
-      issueComments: async () => { if (failComments) throw new Error("Comments offline"); return { items: issueCommentsFixture, hasMore: false } },
-    }), undefined, { freshMs: 60_000 })
+    const session = createRepositorySession(
+      loaders({
+        issueComments: async () => {
+          if (failComments) throw new Error("Comments offline")
+          return { items: issueCommentsFixture, hasMore: false }
+        },
+      }),
+      undefined,
+      { freshMs: 60_000 },
+    )
     await session.load("owner/repo")
     await session.loadIssue(1)
     expect(session.issueDetail()?.comments.status).toBe("error")
@@ -280,9 +368,13 @@ describe("detail cache invalidation", () => {
 
   test("a cache hit retires an in-flight load for another issue", async () => {
     const slow = deferred<typeof issueDetailFixture>()
-    const session = createRepositorySession(loaders({
-      issue: async (_repository, number) => number === 5 ? slow.promise : { ...structuredClone(issueDetailFixture), number },
-    }), undefined, { freshMs: 60_000 })
+    const session = createRepositorySession(
+      loaders({
+        issue: async (_repository, number) => (number === 5 ? slow.promise : { ...structuredClone(issueDetailFixture), number }),
+      }),
+      undefined,
+      { freshMs: 60_000 },
+    )
     await session.load("owner/repo")
     await session.loadIssue(7)
     session.clearIssue()
@@ -299,16 +391,40 @@ describe("repository cache", () => {
   test("returning to a recent repository reuses its overview data and revalidates only when stale", async () => {
     let time = 0
     const calls: Record<string, number> = {}
-    const count = (name: string) => { calls[name] = (calls[name] ?? 0) + 1 }
+    const count = (name: string) => {
+      calls[name] = (calls[name] ?? 0) + 1
+    }
     const base = loaders()
-    const session = createRepositorySession(loaders({
-      metadata: async (repository) => { count("metadata"); return { ...structuredClone(githubDataFixture.repo), nameWithOwner: repository, url: `https://github.com/${repository}` } },
-      issues: async (...args) => { count("issues"); return base.issues(...args) },
-      pulls: async (...args) => { count("pulls"); return base.pulls(...args) },
-      branches: async (...args) => { count("branches"); return base.branches(...args) },
-      documents: async (...args) => { count("documents"); return base.documents(...args) },
-      workCounts: async (...args) => { count("workCounts"); return base.workCounts(...args) },
-    }), undefined, { freshMs: 30_000, now: () => time })
+    const session = createRepositorySession(
+      loaders({
+        metadata: async (repository) => {
+          count("metadata")
+          return { ...structuredClone(githubDataFixture.repo), nameWithOwner: repository, url: `https://github.com/${repository}` }
+        },
+        issues: async (...args) => {
+          count("issues")
+          return base.issues(...args)
+        },
+        pulls: async (...args) => {
+          count("pulls")
+          return base.pulls(...args)
+        },
+        branches: async (...args) => {
+          count("branches")
+          return base.branches(...args)
+        },
+        documents: async (...args) => {
+          count("documents")
+          return base.documents(...args)
+        },
+        workCounts: async (...args) => {
+          count("workCounts")
+          return base.workCounts(...args)
+        },
+      }),
+      undefined,
+      { freshMs: 30_000, now: () => time },
+    )
     await session.load("owner/first")
     await session.load("owner/second")
     const before = { ...calls }
@@ -341,11 +457,19 @@ describe("repository cache", () => {
 describe("diff, run and commit caches", () => {
   test("commit diffs reopen from cache while PR diffs require the PR's base and head commits to match", async () => {
     let diffCalls = 0
-    let pullHead = "a".repeat(40), pullBase = "b".repeat(40)
-    const session = createRepositorySession(loaders({
-      diff: async (_repository, target) => { diffCalls++; return target.kind === "commit" ? { kind: "patch", patch: `commit ${diffCalls}` } : { kind: "patch", patch: `pr ${diffCalls}`, headSha: pullHead, baseSha: pullBase } },
-      pull: async (repository, number) => ({ ...(await loaders().pull!(repository, number)), headSha: pullHead, baseSha: pullBase }),
-    }))
+    let pullHead = "a".repeat(40),
+      pullBase = "b".repeat(40)
+    const session = createRepositorySession(
+      loaders({
+        diff: async (_repository, target) => {
+          diffCalls++
+          return target.kind === "commit"
+            ? { kind: "patch", patch: `commit ${diffCalls}` }
+            : { kind: "patch", patch: `pr ${diffCalls}`, headSha: pullHead, baseSha: pullBase }
+        },
+        pull: async (repository, number) => ({ ...(await loaders().pull!(repository, number)), headSha: pullHead, baseSha: pullBase }),
+      }),
+    )
     await session.load("owner/repo")
     const sha = "c".repeat(40)
     await session.loadDiff!({ kind: "commit", sha })
@@ -380,13 +504,24 @@ describe("diff, run and commit caches", () => {
 
   test("in-progress workflow runs always revalidate while completed runs and commits reopen instantly", async () => {
     const { workflowRunFixture, workflowJobFixture } = await import("./fixtures/workflow-run")
-    let runCalls = 0, commitCalls = 0
+    let runCalls = 0,
+      commitCalls = 0
     let status = "in_progress"
-    const session = createRepositorySession(loaders({
-      run: async () => { runCalls++; return { ...workflowRunFixture, status, conclusion: status === "completed" ? "success" : "" } },
-      runJobs: async () => ({ items: [workflowJobFixture], hasMore: false }),
-      commit: async () => { commitCalls++; return structuredClone(commitDetailFixture) },
-    }), undefined, { freshMs: 60_000 })
+    const session = createRepositorySession(
+      loaders({
+        run: async () => {
+          runCalls++
+          return { ...workflowRunFixture, status, conclusion: status === "completed" ? "success" : "" }
+        },
+        runJobs: async () => ({ items: [workflowJobFixture], hasMore: false }),
+        commit: async () => {
+          commitCalls++
+          return structuredClone(commitDetailFixture)
+        },
+      }),
+      undefined,
+      { freshMs: 60_000 },
+    )
     await session.load("owner/repo")
     await session.loadRun(workflowRunFixture.id)
     session.clearRun()
@@ -412,10 +547,14 @@ test("the shared budget evicts the globally least recently used entry and sweeps
   const budget = createCacheBudget(60)
   const issues = createDetailCache<string>({ budget, retainMs: 100, now: () => time })
   const diffs = createDetailCache<string>({ budget, retainMs: 100, now: () => time })
-  diffs.set("diff", "x".repeat(10)); time = 1
-  issues.set("old", "x".repeat(10)); time = 2
-  diffs.get("diff"); time = 3 // the diff is now more recent than the issue
-  issues.set("new", "x".repeat(10)); time = 4
+  diffs.set("diff", "x".repeat(10))
+  time = 1
+  issues.set("old", "x".repeat(10))
+  time = 2
+  diffs.get("diff")
+  time = 3 // the diff is now more recent than the issue
+  issues.set("new", "x".repeat(10))
+  time = 4
   issues.set("newest", "x".repeat(10))
   expect(issues.get("old")).toBeUndefined()
   expect(diffs.get("diff")?.value).toBe("x".repeat(10))
@@ -427,10 +566,17 @@ test("the shared budget evicts the globally least recently used entry and sweeps
 
 test("external PR changes invalidate a retained PR; reactions on an open page do not force a refetch", async () => {
   let pullCalls = 0
-  const session = createRepositorySession(loaders({
-    pull: async (repository, number) => { pullCalls++; return { ...(await loaders().pull!(repository, number)), canReact: true, nodeId: "PR_7" } },
-    addReaction: async () => ({ reactions: { heart: 1 }, viewerReactions: ["heart"], canReact: true }),
-  }), undefined, { freshMs: 60_000 })
+  const session = createRepositorySession(
+    loaders({
+      pull: async (repository, number) => {
+        pullCalls++
+        return { ...(await loaders().pull!(repository, number)), canReact: true, nodeId: "PR_7" }
+      },
+      addReaction: async () => ({ reactions: { heart: 1 }, viewerReactions: ["heart"], canReact: true }),
+    }),
+    undefined,
+    { freshMs: 60_000 },
+  )
   await session.load("owner/repo")
   await session.loadPull(7)
   await session.addReaction({ kind: "pull", number: 7 }, "heart")
@@ -454,9 +600,16 @@ test("external PR changes invalidate a retained PR; reactions on an open page do
 
 test("a completed repository refresh is retained as fresh", async () => {
   let metadataCalls = 0
-  const session = createRepositorySession(loaders({
-    metadata: async (repository) => { metadataCalls++; return { ...structuredClone(githubDataFixture.repo), nameWithOwner: repository } },
-  }), undefined, { freshMs: 60_000 })
+  const session = createRepositorySession(
+    loaders({
+      metadata: async (repository) => {
+        metadataCalls++
+        return { ...structuredClone(githubDataFixture.repo), nameWithOwner: repository }
+      },
+    }),
+    undefined,
+    { freshMs: 60_000 },
+  )
   await session.load("owner/first")
   await session.refresh()
   await session.load("owner/second")

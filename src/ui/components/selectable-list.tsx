@@ -56,7 +56,7 @@ export function SelectableList<T>(props: {
   const listHeight = () => Math.floor(Math.max(0, containerHeight()) / rowHeight()) * rowHeight()
   const updateContainerHeight = () => {
     const height = container?.height ?? 0
-    setContainerHeight((current) => current === height ? current : height)
+    setContainerHeight((current) => (current === height ? current : height))
   }
   // Appending a page must not reveal an unchanged selection after wheel browsing.
   const indexOfSelection = createMemo(() => {
@@ -66,7 +66,12 @@ export function SelectableList<T>(props: {
 
   const revealSelection = () => {
     const index = indexOfSelection()
-    if (followSelection && (props.active || props.selectedItemKey !== undefined || searchSelection() && props.searchRetain?.()) && list && index >= 0) {
+    if (
+      followSelection &&
+      (props.active || props.selectedItemKey !== undefined || (searchSelection() && props.searchRetain?.())) &&
+      list &&
+      index >= 0
+    ) {
       scrollRowIntoView(list, index, rowHeight())
       // Selection-driven scrolling emits the same native change event as the mouse.
       followSelection = true
@@ -95,7 +100,7 @@ export function SelectableList<T>(props: {
     active: () => props.active,
     retain: () => props.searchRetain?.() ?? false,
     position: () => Math.max(0, indexOfSelection()),
-    selection: () => indexOfSelection() < 0 ? undefined : String(props.selectedItemKey ?? selectedKey()),
+    selection: () => (indexOfSelection() < 0 ? undefined : String(props.selectedItemKey ?? selectedKey())),
     search: (query) => {
       matchingRows.clear()
       return props.items.flatMap((item, index) => {
@@ -110,7 +115,9 @@ export function SelectableList<T>(props: {
     highlight: (id) => {
       for (const [key, row] of matchingRows) row.adapter.highlight(key === id ? row.first : undefined)
     },
-    clear: () => { for (const adapter of searchRows.values()) adapter.clear() },
+    clear: () => {
+      for (const adapter of searchRows.values()) adapter.clear()
+    },
     snapshot: () => {
       const key = props.selectedItemKey ?? selectedKey()
       const top = list?.scrollTop ?? 0
@@ -130,8 +137,12 @@ export function SelectableList<T>(props: {
   }
   const halfPage = () => Math.max(1, Math.floor(listHeight() / rowHeight() / 2))
 
-  createEffect(() => { if (!mouseActive()) mousePress = undefined })
-  useKeyboard(() => { mousePress = undefined })
+  createEffect(() => {
+    if (!mouseActive()) mousePress = undefined
+  })
+  useKeyboard(() => {
+    mousePress = undefined
+  })
 
   const activate = (callback: ((item: T) => void) | undefined) => {
     mousePress = undefined
@@ -139,27 +150,33 @@ export function SelectableList<T>(props: {
     if (!callback || item === undefined) return false
     callback(item)
   }
-  useKeyActions({
-    "navigation.up": () => move(-1),
-    "navigation.down": () => move(1),
-    "navigation.halfPageUp": () => move(-halfPage()),
-    "navigation.halfPageDown": () => move(halfPage()),
-    "navigation.pageUp": () => move(-Math.max(1, Math.floor(listHeight() / rowHeight()))),
-    "navigation.pageDown": () => move(Math.max(1, Math.floor(listHeight() / rowHeight()))),
-    "navigation.first": () => selectIndex(0),
-    "navigation.last": () => selectIndex(props.items.length - 1),
-    "navigation.activate": () => activate(props.onActivate),
-    "item.open": () => activate(props.onOpenInBrowser),
-    "item.copy": () => activate(props.onCopy),
-    "item.diff": () => activate(props.onDiff),
-  }, { when: () => props.active })
+  useKeyActions(
+    {
+      "navigation.up": () => move(-1),
+      "navigation.down": () => move(1),
+      "navigation.halfPageUp": () => move(-halfPage()),
+      "navigation.halfPageDown": () => move(halfPage()),
+      "navigation.pageUp": () => move(-Math.max(1, Math.floor(listHeight() / rowHeight()))),
+      "navigation.pageDown": () => move(Math.max(1, Math.floor(listHeight() / rowHeight()))),
+      "navigation.first": () => selectIndex(0),
+      "navigation.last": () => selectIndex(props.items.length - 1),
+      "navigation.activate": () => activate(props.onActivate),
+      "item.open": () => activate(props.onOpenInBrowser),
+      "item.copy": () => activate(props.onCopy),
+      "item.diff": () => activate(props.onDiff),
+    },
+    { when: () => props.active },
+  )
 
   createEffect(() => {
     const items = props.items
     const resetKey = props.resetKey
     if (resetKey !== previousResetKey) {
       previousResetKey = resetKey
-      if (props.selectedItemKey === undefined) { selectIndex(0); return }
+      if (props.selectedItemKey === undefined) {
+        selectIndex(0)
+        return
+      }
     }
 
     const current = indexOfSelection()
@@ -170,11 +187,16 @@ export function SelectableList<T>(props: {
   createEffect(revealSelection)
   // External navigation reveals its row without emitting an onSelect feedback loop.
   // Observe only key changes so wheel browsing can leave an unchanged selection offscreen.
-  createEffect(on(() => props.selectedItemKey, (key) => {
-    if (key === undefined) return
-    followSelection = true
-    revealSelection()
-  }))
+  createEffect(
+    on(
+      () => props.selectedItemKey,
+      (key) => {
+        if (key === undefined) return
+        followSelection = true
+        revealSelection()
+      },
+    ),
+  )
 
   const onScrollChange = () => {
     // Native wheel/scrollbar browsing may intentionally leave the selected row offscreen.
@@ -191,8 +213,7 @@ export function SelectableList<T>(props: {
   createEffect(() => {
     const index = indexOfSelection()
     const threshold = props.endThreshold ?? 3
-    if (!searchSelection() && props.active && (props.items.length === 0 || index >= props.items.length - threshold))
-      props.onEndReached?.()
+    if (!searchSelection() && props.active && (props.items.length === 0 || index >= props.items.length - threshold)) props.onEndReached?.()
   })
 
   return (
@@ -217,25 +238,34 @@ export function SelectableList<T>(props: {
           list.verticalScrollBar.on("change", onScrollChange)
         }}
         focusable={false}
-        scrollbarOptions={{ trackOptions: { onMouse: (event) => {
-          if (event.type === "down" && event.button === MouseButton.LEFT && mouseActive()) {
-            setSearchSelection(false)
-            props.onMouseFocus?.()
-          }
-        } } }}
+        scrollbarOptions={{
+          trackOptions: {
+            onMouse: (event) => {
+              if (event.type === "down" && event.button === MouseButton.LEFT && mouseActive()) {
+                setSearchSelection(false)
+                props.onMouseFocus?.()
+              }
+            },
+          },
+        }}
         onMouse={(event) => {
           // The previous hit target's hover-out can arrive after a new press at these cells.
           if (event.type === "out" && mousePress?.x === event.x && mousePress?.y === event.y) return
-          if (event.type === "down" || event.type === "up" || event.type === "drag"
-            || event.type === "scroll" || event.type === "out") mousePress = undefined
+          if (event.type === "down" || event.type === "up" || event.type === "drag" || event.type === "scroll" || event.type === "out")
+            mousePress = undefined
         }}
         onMouseScroll={(event) => {
           setSearchSelection(false)
           if (mouseActive()) props.onMouseFocus?.()
           event.stopPropagation()
           // An underfilled list or a wheel at the bottom may not emit a position change.
-          if (event.scroll?.direction === "down" && !event.modifiers.shift && list
-            && list.scrollTop + list.viewport.height >= list.scrollHeight) onScrollChange()
+          if (
+            event.scroll?.direction === "down" &&
+            !event.modifiers.shift &&
+            list &&
+            list.scrollTop + list.viewport.height >= list.scrollHeight
+          )
+            onScrollChange()
         }}
         height={listHeight()}
         flexShrink={0}
@@ -246,26 +276,42 @@ export function SelectableList<T>(props: {
       >
         <Show
           when={props.items.length > 0}
-          fallback={(
+          fallback={
             <box width="100%" minWidth={0} height={rowHeight()} alignItems="center" paddingLeft={2}>
               <ListLine fg={colors.muted}>{(width) => fitText(props.empty, width)}</ListLine>
             </box>
-          )}
+          }
         >
           <Index each={props.items}>
             {(item, index) => {
               const active = () => (props.selectedItemKey ?? selectedKey()) === props.itemKey(item())
               const hover = mouseHover(mouseActive, () => props.itemKey(item()))
-              onCleanup(() => { searchRows.get(index)?.dispose(); searchRows.delete(index) })
+              onCleanup(() => {
+                searchRows.get(index)?.dispose()
+                searchRows.delete(index)
+              })
               return (
                 <box
-                  ref={(row) => { searchRows.set(index, createRenderedSearch(row, {
-                    exclude: (node) => node === row.getChildren()[0],
-                    get matchBackground() { return RGBA.fromHex(colors.searchMatchBg) },
-                    get matchForeground() { return RGBA.fromHex(colors.searchMatchFg) },
-                    get activeBackground() { return RGBA.fromHex(colors.searchCurrentMatchBg) },
-                    get activeForeground() { return RGBA.fromHex(colors.searchCurrentMatchFg) },
-                  })) }}
+                  ref={(row) => {
+                    searchRows.set(
+                      index,
+                      createRenderedSearch(row, {
+                        exclude: (node) => node === row.getChildren()[0],
+                        get matchBackground() {
+                          return RGBA.fromHex(colors.searchMatchBg)
+                        },
+                        get matchForeground() {
+                          return RGBA.fromHex(colors.searchMatchFg)
+                        },
+                        get activeBackground() {
+                          return RGBA.fromHex(colors.searchCurrentMatchBg)
+                        },
+                        get activeForeground() {
+                          return RGBA.fromHex(colors.searchCurrentMatchFg)
+                        },
+                      }),
+                    )
+                  }}
                   width="100%"
                   minWidth={0}
                   overflow="hidden"
@@ -276,10 +322,14 @@ export function SelectableList<T>(props: {
                   paddingRight={1}
                   {...hover.handlers}
                   opacity={active() && props.dimSelection ? 0.55 : 1}
-                  backgroundColor={active() ? colors.panelHover : hover.hovered() ? colors.panel : props.backgroundColor ?? colors.canvas}
+                  backgroundColor={active() ? colors.panelHover : hover.hovered() ? colors.panel : (props.backgroundColor ?? colors.canvas)}
                   onMouseDown={(event) => {
                     mousePress = undefined
-                    if (!mouseActive() || (event.button !== MouseButton.LEFT && (event.button !== MouseButton.RIGHT || !props.onContextMenu))) return
+                    if (
+                      !mouseActive() ||
+                      (event.button !== MouseButton.LEFT && (event.button !== MouseButton.RIGHT || !props.onContextMenu))
+                    )
+                      return
                     event.preventDefault()
                     event.stopPropagation()
                     props.onMouseFocus?.()
@@ -289,8 +339,15 @@ export function SelectableList<T>(props: {
                     const press = mousePress
                     mousePress = undefined
                     const clicked = item()
-                    if (!press || !mouseActive() || event.button !== press.button
-                      || press.key !== props.itemKey(clicked) || press.x !== event.x || press.y !== event.y) return
+                    if (
+                      !press ||
+                      !mouseActive() ||
+                      event.button !== press.button ||
+                      press.key !== props.itemKey(clicked) ||
+                      press.x !== event.x ||
+                      press.y !== event.y
+                    )
+                      return
                     event.preventDefault()
                     event.stopPropagation()
                     selectIndex(index)
@@ -298,7 +355,9 @@ export function SelectableList<T>(props: {
                     else props.onActivate?.(clicked)
                   }}
                 >
-                  <text width={2} fg={colors.blue}>{active() ? "▌" : " "}</text>
+                  <text width={2} fg={colors.blue}>
+                    {active() ? "▌" : " "}
+                  </text>
                   {props.children(item, active)}
                 </box>
               )

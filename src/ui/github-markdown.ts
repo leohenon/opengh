@@ -59,7 +59,7 @@ function assertMarkdownParseComplexity(value: string) {
     while (index < line.length) {
       const startColumn = column
       while (line[index] === " " || line[index] === "\t") {
-        column += line[index++] === "\t" ? 4 - column % 4 : 1
+        column += line[index++] === "\t" ? 4 - (column % 4) : 1
       }
       indentation += column - startColumn
       const start = index
@@ -78,7 +78,7 @@ function assertMarkdownParseComplexity(value: string) {
         throw new GitHubMarkdownError("Markdown is too complex (container prefixes before parsing)")
       // One separator belongs to the marker, not continuation indentation.
       if (line[index] === " " || line[index] === "\t") {
-        column += line[index++] === "\t" ? 4 - column % 4 : 1
+        column += line[index++] === "\t" ? 4 - (column % 4) : 1
       }
     }
   }
@@ -87,9 +87,17 @@ function assertMarkdownParseComplexity(value: string) {
 // Both unist and parse5 trees are checked iteratively, before recursive visitors
 // or the parse5-to-HAST converter can see attacker-controlled nesting.
 type BoundedNode = {
-  type?: string; nodeName?: string; tagName?: string; value?: string; url?: string; title?: string | null
-  properties?: Record<string, unknown>; attrs?: { name: string; value: string }[]
-  children?: BoundedNode[]; childNodes?: BoundedNode[]; content?: BoundedNode
+  type?: string
+  nodeName?: string
+  tagName?: string
+  value?: string
+  url?: string
+  title?: string | null
+  properties?: Record<string, unknown>
+  attrs?: { name: string; value: string }[]
+  children?: BoundedNode[]
+  childNodes?: BoundedNode[]
+  content?: BoundedNode
 }
 function assertBoundedTree(root: BoundedNode) {
   const pending = [{ node: root, depth: 0 }]
@@ -112,8 +120,14 @@ function assertBoundedTree(root: BoundedNode) {
     charge(node.url)
     charge(node.title)
     charge(node.tagName ?? node.nodeName)
-    for (const [name, value] of Object.entries(node.properties ?? {})) { charge(name); charge(value) }
-    for (const attribute of node.attrs ?? []) { charge(attribute.name); charge(attribute.value) }
+    for (const [name, value] of Object.entries(node.properties ?? {})) {
+      charge(name)
+      charge(value)
+    }
+    for (const attribute of node.attrs ?? []) {
+      charge(attribute.name)
+      charge(attribute.value)
+    }
     const children = node.children ?? node.childNodes ?? []
     const additional = children.length + (node.content ? 1 : 0)
     count += additional
@@ -220,8 +234,12 @@ function boundedHtml() {
 export function gitHubMarkdownFallback(value: string, error: unknown): string {
   const notice = error instanceof GitHubMarkdownError ? error.message : "Markdown conversion failed"
   // Never send rejected input back through a Markdown parser or terminal escapes.
-  const preview = value.slice(0, 4096).replace(/[\u0000-\u0008\u000b-\u001f\u007f-\u009f]/g, "�")
-    .split("\n").slice(0, 40).join("\n")
+  const preview = value
+    .slice(0, 4096)
+    .replace(/[\u0000-\u0008\u000b-\u001f\u007f-\u009f]/g, "�")
+    .split("\n")
+    .slice(0, 40)
+    .join("\n")
   return `${notice}. Showing a plain-text preview.\n\n${preview}\n\n[Preview limited to 4096 characters / 40 lines]`
 }
 
@@ -248,8 +266,10 @@ function firstDescendant(element: Element, tagName: string): Element | undefined
 
 function isBadgeImage(element: Element, label: string) {
   const source = property(element, "src")
-  return /(?:img\.shields\.io|badge\.fury\.io|badgen\.net|codecov\.io|coveralls\.io|\/badge(?:\.svg|\/))/i.test(source)
-    || /\b(?:build status|coverage|npm version|package version|downloads? badge)\b/i.test(label)
+  return (
+    /(?:img\.shields\.io|badge\.fury\.io|badgen\.net|codecov\.io|coveralls\.io|\/badge(?:\.svg|\/))/i.test(source) ||
+    /\b(?:build status|coverage|npm version|package version|downloads? badge)\b/i.test(label)
+  )
 }
 
 function isDecorativeImage(element: Element, label: string) {
@@ -282,7 +302,9 @@ function replacement(label: string, target?: string): ElementContent {
 
 function imageCaption(label: string, target?: string): ElementContent {
   return {
-    type: "element", tagName: "span", properties: {},
+    type: "element",
+    tagName: "span",
+    properties: {},
     children: [{ type: "text", value: "▧ " }, replacement(label, target)],
   }
 }
@@ -294,10 +316,13 @@ function isImageLink(node: ElementContent): node is Element {
 function isPresentationGroup(element: Element) {
   if (!["div", "center", "p"].includes(element.tagName)) return false
   const links = element.children.filter(isImageLink)
-  return links.length > 1 && element.children.every((child) =>
-    child.type === "element" && child.tagName === "br"
-    || isImageLink(child)
-    || child.type === "text" && child.value.trim() === "")
+  return (
+    links.length > 1 &&
+    element.children.every(
+      (child) =>
+        (child.type === "element" && child.tagName === "br") || isImageLink(child) || (child.type === "text" && child.value.trim() === ""),
+    )
+  )
 }
 
 function readOnlyHtml() {
@@ -308,8 +333,10 @@ function readOnlyHtml() {
       const tag = element.tagName
       // Remove controls before rehype-remark builds elementById or dereferences
       // input lists. This renderer needs static content, not form projections.
-      if (["base", "datalist", "select", "textarea", "option", "optgroup", "output"].includes(tag)
-        || tag === "input" && !["checkbox", "radio"].includes(property(element, "type"))) {
+      if (
+        ["base", "datalist", "select", "textarea", "option", "optgroup", "output"].includes(tag) ||
+        (tag === "input" && !["checkbox", "radio"].includes(property(element, "type")))
+      ) {
         parent.children.splice(index, 1)
         return [SKIP, index]
       }
@@ -344,10 +371,20 @@ function terminalMedia(options: { preserveImages?: boolean } = {}) {
         if (parent.type === "element" && ["li", "td", "th", "h1", "h2", "h3", "h4", "h5", "h6"].includes(parent.tagName)) return false
         if (parent.type === "root") return true
         if (["blockquote", "div", "center"].includes(parent.tagName))
-          return child.tagName === "p" || parent.children.every((sibling) => sibling === child || sibling.type === "text" && !sibling.value.trim())
+          return (
+            child.tagName === "p" ||
+            parent.children.every((sibling) => sibling === child || (sibling.type === "text" && !sibling.value.trim()))
+          )
         const picture = parent.tagName === "picture"
-        if (!parent.children.every((sibling) => sibling === child || sibling.type === "text" && !sibling.value.trim()
-          || picture && sibling.type === "element" && sibling.tagName === "source")) return false
+        if (
+          !parent.children.every(
+            (sibling) =>
+              sibling === child ||
+              (sibling.type === "text" && !sibling.value.trim()) ||
+              (picture && sibling.type === "element" && sibling.tagName === "source"),
+          )
+        )
+          return false
         child = parent
         parent = parents.get(child)
       }
@@ -356,11 +393,17 @@ function terminalMedia(options: { preserveImages?: boolean } = {}) {
     const caption = (image: Element, label: string, target: string, element = image): ElementContent => {
       if (!isDecorativeImage(image, label) && standalone(element) && safeTarget(target)) {
         const description = property(image, "alt").trim() || property(image, "title").trim()
-        return { type: "element", tagName: "img", properties: {
-          src: safeTarget(target), alt: description,
-          // A linked image opens its enclosing link, but its filename comes from the image source.
-          ...(!description ? { title: imageFilename(property(image, "src") || target) || "open image" } : {}),
-        }, children: [] }
+        return {
+          type: "element",
+          tagName: "img",
+          properties: {
+            src: safeTarget(target),
+            alt: description,
+            // A linked image opens its enclosing link, but its filename comes from the image source.
+            ...(!description ? { title: imageFilename(property(image, "src") || target) || "open image" } : {}),
+          },
+          children: [],
+        }
       }
       return imageCaption(label, target)
     }
@@ -390,9 +433,10 @@ function terminalMedia(options: { preserveImages?: boolean } = {}) {
             return SKIP
           }
           const link = { ...caption(image, label, href || property(image, "src"), element), position: element.position }
-          parent.children[index] = parent.type === "element" && presentationGroups.has(parent)
-            ? { type: "element", tagName: "p", properties: {}, children: [link], position: element.position }
-            : link
+          parent.children[index] =
+            parent.type === "element" && presentationGroups.has(parent)
+              ? { type: "element", tagName: "p", properties: {}, children: [link], position: element.position }
+              : link
           return SKIP
         }
         if (href) element.properties.href = href
@@ -412,13 +456,12 @@ function terminalMedia(options: { preserveImages?: boolean } = {}) {
           parent.children[index] = { type: "text", value: "", position: element.position }
           return
         }
-        const pictureSource = parent.type === "element" && parent.tagName === "picture"
-          ? firstDescendant(parent, "source")
-          : undefined
-        const target = property(element, "src")
-          || property(pictureSource ?? element, "src")
-          || property(pictureSource ?? element, "srcSet").split(/[ ,]/)[0]
-          || ""
+        const pictureSource = parent.type === "element" && parent.tagName === "picture" ? firstDescendant(parent, "source") : undefined
+        const target =
+          property(element, "src") ||
+          property(pictureSource ?? element, "src") ||
+          property(pictureSource ?? element, "srcSet").split(/[ ,]/)[0] ||
+          ""
         parent.children[index] = { ...caption(element, label, target), position: element.position }
         return SKIP
       }
@@ -427,11 +470,12 @@ function terminalMedia(options: { preserveImages?: boolean } = {}) {
         const kind = tag === "video" ? "Video" : tag === "audio" ? "Audio" : "Embedded content"
         const label = property(element, "title") || textContent(element).trim() || kind.toLowerCase()
         const source = firstDescendant(element, "source")
-        const target = property(element, "src")
-          || property(element, "data")
-          || property(source ?? element, "src")
-          || property(source ?? element, "srcSet").split(/[ ,]/)[0]
-          || ""
+        const target =
+          property(element, "src") ||
+          property(element, "data") ||
+          property(source ?? element, "src") ||
+          property(source ?? element, "srcSet").split(/[ ,]/)[0] ||
+          ""
         parent.children[index] = { ...replacement(`${kind}: ${label}`, target), position: element.position }
         return
       }
@@ -454,8 +498,13 @@ function sourcePositions() {
       if (!node.position) return
       const start = node.position.start.line
       const raw = source.slice(node.position.start.offset, node.position.end.offset)
-      code.push({ content: node.value.replace(/\n+$/, ""), start, end: node.position.end.line,
-        bodyStart: start + (/^ {0,3}(?:`{3,}|~{3,})/.test(raw) ? 1 : 0), anchors: [] })
+      code.push({
+        content: node.value.replace(/\n+$/, ""),
+        start,
+        end: node.position.end.line,
+        bodyStart: start + (/^ {0,3}(?:`{3,}|~{3,})/.test(raw) ? 1 : 0),
+        anchors: [],
+      })
     })
     file.data.sourceCode = code
   }
@@ -466,9 +515,16 @@ function documentAnchors() {
     if (!file.data.documentAnchors) return
     visit(tree, (node) => {
       const position = node.position
-      if (position && (!position.start || !position.end
-        || !Number.isSafeInteger(position.start.line) || !Number.isSafeInteger(position.end.line)
-        || position.start.line < 1 || position.end.line < position.start.line)) delete node.position
+      if (
+        position &&
+        (!position.start ||
+          !position.end ||
+          !Number.isSafeInteger(position.start.line) ||
+          !Number.isSafeInteger(position.end.line) ||
+          position.start.line < 1 ||
+          position.end.line < position.start.line)
+      )
+        delete node.position
     })
     const source = String(file.value)
     const sourceMap = file.data.sourceMap as MarkdownSourceMap | undefined
@@ -489,7 +545,8 @@ function documentAnchors() {
       }
     }
     const firstSite = (element: Element): Site | undefined => {
-      if (element.tagName === "code" || element.tagName === "pre") return { element, index: 0, offset: element.position?.start.offset ?? Infinity }
+      if (element.tagName === "code" || element.tagName === "pre")
+        return { element, index: 0, offset: element.position?.start.offset ?? Infinity }
       for (const child of element.children) {
         if (child.type === "text" && child.value.trim()) return { text: child, index: 0, offset: child.position?.start.offset ?? Infinity }
         if (child.type === "element") {
@@ -525,21 +582,34 @@ function documentAnchors() {
             const original = originalCode?.find((code) => code.start === position.start.line && code.end === position.end.line)
             const code = firstDescendant(node, "code")
             const anchors = [property(node, "id"), code ? property(code, "id") : ""].filter(Boolean)
-            sourceMap.code.push(original ? { ...original, anchors } : {
-              content: textContent(node).replace(/\n+$/, ""), start: position.start.line, end: position.end.line,
-              bodyStart: firstText(node)?.position?.start.line ?? position.start.line, anchors,
-            })
+            sourceMap.code.push(
+              original
+                ? { ...original, anchors }
+                : {
+                    content: textContent(node).replace(/\n+$/, ""),
+                    start: position.start.line,
+                    end: position.end.line,
+                    bodyStart: firstText(node)?.position?.start.line ?? position.start.line,
+                    anchors,
+                  },
+            )
           }
           return
         }
         let id = property(node, "id") || (node.tagName === "a" ? property(node, "name") : "")
         if (!id && /^h[1-6]$/.test(node.tagName)) {
-          const slug = textContent(node).toLowerCase().replace(/[^\p{L}\p{M}\p{N}_\s-]/gu, "").replace(/\s/g, "-")
+          const slug = textContent(node)
+            .toLowerCase()
+            .replace(/[^\p{L}\p{M}\p{N}_\s-]/gu, "")
+            .replace(/\s/g, "-")
           id = slug
           let suffix = 0
           while (used.has(id)) id = `${slug}-${++suffix}`
         }
-        if (id) { used.add(id); insert(site(node), id) }
+        if (id) {
+          used.add(id)
+          insert(site(node), id)
+        }
         if (sourceMap && node.position) {
           const target = site(node)
           lineSite(node.position.start.line, target)
@@ -557,11 +627,13 @@ function documentAnchors() {
         if (split) {
           let index = 0
           parts.forEach((part, offset) => {
-            if (part.trim()) lineSite(node.position!.start.line + offset, { text: node, index, offset: (node.position!.start.offset ?? 0) + index })
+            if (part.trim())
+              lineSite(node.position!.start.line + offset, { text: node, index, offset: (node.position!.start.offset ?? 0) + index })
             index += part.length + 1
           })
-        } else for (let line = node.position.start.line; line <= node.position.end.line; line++)
-          lineSite(line, { text: node, index: 0, offset: node.position.start.offset ?? 0 })
+        } else
+          for (let line = node.position.start.line; line <= node.position.end.line; line++)
+            lineSite(line, { text: node, index: 0, offset: node.position.start.offset ?? 0 })
       }
       if ("children" in node) node.children.forEach((child) => walk(child as ElementContent))
     }
@@ -571,30 +643,33 @@ function documentAnchors() {
       for (const [index, markers] of [...positions].sort(([left], [right]) => right - left))
         text.value = text.value.slice(0, index) + markers.join("") + text.value.slice(index)
     }
-    if (before.size) visit(tree, "element", (element, index, parent) => {
-      const markers = before.get(element)
-      if (!markers || index === undefined || !parent) return
-      parent.children.splice(index, 0, { type: "text", value: markers.join("") })
-      return index + 2
-    })
+    if (before.size)
+      visit(tree, "element", (element, index, parent) => {
+        const markers = before.get(element)
+        if (!markers || index === undefined || !parent) return
+        parent.children.splice(index, 0, { type: "text", value: markers.join("") })
+        return index + 2
+      })
   }
 }
 
 function githubAlerts() {
-  return (tree: MarkdownRoot) => visit(tree, "blockquote", (node) => {
-    const paragraph = node.children[0]
-    const first = paragraph?.type === "paragraph" ? paragraph.children[0] : undefined
-    if (first?.type !== "text") return
-    const marker = first.value.match(/^\[!(NOTE|TIP|IMPORTANT|WARNING|CAUTION)\](?:\s|$)/)
-    if (!marker) return
-    first.value = first.value.slice(marker[0].length).trimStart()
-    const name = marker[1]!.toLowerCase()
-    node.children.unshift({ type: "paragraph", children: [
-      { type: "strong", children: [{ type: "text", value: name[0]!.toUpperCase() + name.slice(1) }] },
-    ] })
-    if (paragraph?.type === "paragraph" && paragraph.children.every((child) => child.type === "text" && !child.value))
-      node.children.splice(1, 1)
-  })
+  return (tree: MarkdownRoot) =>
+    visit(tree, "blockquote", (node) => {
+      const paragraph = node.children[0]
+      const first = paragraph?.type === "paragraph" ? paragraph.children[0] : undefined
+      if (first?.type !== "text") return
+      const marker = first.value.match(/^\[!(NOTE|TIP|IMPORTANT|WARNING|CAUTION)\](?:\s|$)/)
+      if (!marker) return
+      first.value = first.value.slice(marker[0].length).trimStart()
+      const name = marker[1]!.toLowerCase()
+      node.children.unshift({
+        type: "paragraph",
+        children: [{ type: "strong", children: [{ type: "text", value: name[0]!.toUpperCase() + name.slice(1) }] }],
+      })
+      if (paragraph?.type === "paragraph" && paragraph.children.every((child) => child.type === "text" && !child.value))
+        node.children.splice(1, 1)
+    })
 }
 
 function resolveTarget(value: string, context: GitHubMarkdownContext) {
@@ -602,11 +677,10 @@ function resolveTarget(value: string, context: GitHubMarkdownContext) {
   if (!target || /^[a-z][a-z\d+.-]*:/i.test(target)) return target
   const repositoryUrl = context.repositoryUrl.replace(/\/+$/, "")
   const ref = encodeURIComponent(context.ref ?? "HEAD")
-  const documentUrl = context.sourceUrl ?? (context.path
-    ? `${repositoryUrl}/blob/${ref}/${context.path.split("/").map(encodeURIComponent).join("/")}`
-    : `${repositoryUrl}/`)
-  if (target.startsWith("#") || target.startsWith("?") || target.startsWith("//"))
-    return new URL(target, documentUrl).href
+  const documentUrl =
+    context.sourceUrl ??
+    (context.path ? `${repositoryUrl}/blob/${ref}/${context.path.split("/").map(encodeURIComponent).join("/")}` : `${repositoryUrl}/`)
+  if (target.startsWith("#") || target.startsWith("?") || target.startsWith("//")) return new URL(target, documentUrl).href
   const suffixAt = target.search(/[?#]/)
   const path = suffixAt < 0 ? target : target.slice(0, suffixAt)
   const suffix = suffixAt < 0 ? "" : target.slice(suffixAt)
@@ -616,33 +690,39 @@ function resolveTarget(value: string, context: GitHubMarkdownContext) {
 
 function githubLinks(context: GitHubMarkdownContext) {
   let inserted = 0
-  return (tree: MarkdownRoot) => visit(tree, (node, index, parent) => {
-    if (node.type === "link" || node.type === "definition" || node.type === "image") {
-      node.url = resolveTarget(node.url, context)
-      return SKIP
-    }
-    if (node.type === "code" || node.type === "inlineCode" || node.type === "linkReference" || node.type === "imageReference") return SKIP
-    if (node.type !== "text" || index === undefined || !parent || !("children" in parent)) return
-    const chunks = node.value.split(/(\uE000[^\uE001]*\uE001)/g).flatMap((part) => part.startsWith("\uE000")
-      ? [{ text: part }] : referenceLinkChunks(part, context.repositoryUrl))
-    if (!chunks.some((chunk) => chunk.href)) return
-    const children: PhrasingContent[] = []
-    for (const chunk of chunks) {
-      inserted += chunk.href ? 2 : 1
-      if (inserted > MAX_TREE_NODES) throw new GitHubMarkdownError("Markdown is too complex")
-      children.push(chunk.href
-        ? { type: "link", url: chunk.href, children: [{ type: "text", value: chunk.text }] }
-        : { type: "text", value: chunk.text })
-    }
-    // A text node's parent is a phrasing container, not a block-only container.
-    const siblings = parent.children as PhrasingContent[]
-    siblings.splice(index, 1, ...children)
-    return index + children.length
-  })
+  return (tree: MarkdownRoot) =>
+    visit(tree, (node, index, parent) => {
+      if (node.type === "link" || node.type === "definition" || node.type === "image") {
+        node.url = resolveTarget(node.url, context)
+        return SKIP
+      }
+      if (node.type === "code" || node.type === "inlineCode" || node.type === "linkReference" || node.type === "imageReference") return SKIP
+      if (node.type !== "text" || index === undefined || !parent || !("children" in parent)) return
+      const chunks = node.value
+        .split(/(\uE000[^\uE001]*\uE001)/g)
+        .flatMap((part) => (part.startsWith("\uE000") ? [{ text: part }] : referenceLinkChunks(part, context.repositoryUrl)))
+      if (!chunks.some((chunk) => chunk.href)) return
+      const children: PhrasingContent[] = []
+      for (const chunk of chunks) {
+        inserted += chunk.href ? 2 : 1
+        if (inserted > MAX_TREE_NODES) throw new GitHubMarkdownError("Markdown is too complex")
+        children.push(
+          chunk.href
+            ? { type: "link", url: chunk.href, children: [{ type: "text", value: chunk.text }] }
+            : { type: "text", value: chunk.text },
+        )
+      }
+      // A text node's parent is a phrasing container, not a block-only container.
+      const siblings = parent.children as PhrasingContent[]
+      siblings.splice(index, 1, ...children)
+      return index + children.length
+    })
 }
 
 function boundedOutput() {
-  return (tree: MarkdownRoot) => { assertBoundedTree(tree) }
+  return (tree: MarkdownRoot) => {
+    assertBoundedTree(tree)
+  }
 }
 
 function sanitizeDestinations(tree: MarkdownRoot) {
@@ -656,7 +736,10 @@ function sanitizeDestinations(tree: MarkdownRoot) {
     if (index === undefined || !parent) return
     if (node.type === "link" || node.type === "image" || node.type === "definition") {
       const target = safeTarget(node.url)
-      if (target) { node.url = target; return }
+      if (target) {
+        node.url = target
+        return
+      }
       if (node.type === "link") {
         parent.children.splice(index, 1, ...node.children)
       } else if (node.type === "image") {
@@ -666,8 +749,7 @@ function sanitizeDestinations(tree: MarkdownRoot) {
       }
       return [SKIP, index]
     }
-    if ((node.type === "linkReference" || node.type === "imageReference")
-      && removedDefinitions.has(node.identifier.toUpperCase())) {
+    if ((node.type === "linkReference" || node.type === "imageReference") && removedDefinitions.has(node.identifier.toUpperCase())) {
       if (node.type === "linkReference") parent.children.splice(index, 1, ...node.children)
       else parent.children.splice(index, 1, { type: "text", value: node.alt ?? "" })
       return [SKIP, index]
@@ -702,18 +784,35 @@ const processor = unified()
 // Issue attachments are evidence, even when their labels look like README branding.
 const discussionProcessor = processor().use(terminalMedia, { preserveImages: true })
 function plainCodeFences() {
-  return (tree: MarkdownRoot) => visit(tree, "code", (node) => { node.lang ||= "text" })
+  return (tree: MarkdownRoot) =>
+    visit(tree, "code", (node) => {
+      node.lang ||= "text"
+    })
 }
 const panelProcessor = processor().use(plainCodeFences)
 const discussionPanelProcessor = discussionProcessor().use(plainCodeFences)
 
-export function normalizeGitHubMarkdown(value: string, options: { preserveImages?: boolean; codePanels?: boolean; context?: GitHubMarkdownContext; anchors?: boolean; sourceMap?: MarkdownSourceMap } = {}) {
+export function normalizeGitHubMarkdown(
+  value: string,
+  options: {
+    preserveImages?: boolean
+    codePanels?: boolean
+    context?: GitHubMarkdownContext
+    anchors?: boolean
+    sourceMap?: MarkdownSourceMap
+  } = {},
+) {
   // Check before parsing; rejected sources also use the bounded plain-text preview.
   assertGitHubMarkdownSource(value)
   assertMarkdownParseComplexity(value)
-  const selected = options.codePanels !== false
-    ? options.preserveImages ? discussionPanelProcessor : panelProcessor
-    : options.preserveImages ? discussionProcessor : processor
+  const selected =
+    options.codePanels !== false
+      ? options.preserveImages
+        ? discussionPanelProcessor
+        : panelProcessor
+      : options.preserveImages
+        ? discussionProcessor
+        : processor
   const contextual = options.context?.repositoryUrl ? selected().use(githubLinks, options.context) : selected
   const file = { value, data: { documentAnchors: options.anchors, sourceMap: options.sourceMap } }
   const tree = contextual.runSync(contextual.parse(file), file)

@@ -36,15 +36,20 @@ export function ThemePicker(props: {
   const [error, setError] = createSignal("")
   let list: ScrollBoxRenderable | undefined
 
-  const themes = createMemo(() => themeNames
-    .map((theme, index) => ({ theme, index, score: fuzzyScore(theme, query()) }))
-    .filter((entry): entry is { theme: ThemeName; index: number; score: number } => entry.score !== undefined)
-    .sort((left, right) => left.score - right.score || left.theme.localeCompare(right.theme)))
+  const themes = createMemo(() =>
+    themeNames
+      .map((theme, index) => ({ theme, index, score: fuzzyScore(theme, query()) }))
+      .filter((entry): entry is { theme: ThemeName; index: number; score: number } => entry.score !== undefined)
+      .sort((left, right) => left.score - right.score || left.theme.localeCompare(right.theme)),
+  )
 
   const move = (delta: number) => {
     const available = themes()
     if (!available.length) return
-    const current = Math.max(0, available.findIndex((entry) => entry.theme === selected()))
+    const current = Math.max(
+      0,
+      available.findIndex((entry) => entry.theme === selected()),
+    )
     const next = available[Math.max(0, Math.min(available.length - 1, current + delta))]
     if (next) setSelected(next.theme)
   }
@@ -76,19 +81,28 @@ export function ThemePicker(props: {
     }
   }
 
-  const requestClose = () => { if (!busy()) props.onCancel() }
+  const requestClose = () => {
+    if (!busy()) props.onCancel()
+  }
   useKeyActions({}, { when: busy, priority: 200, modal: true })
-  useKeyActions({
-    "dialog.close": requestClose,
-    "picker.up": () => move(-1),
-    "picker.down": () => move(1),
-    "picker.accept": () => { void choose() },
-  }, { when: () => !busy(), priority: 100, modal: true })
+  useKeyActions(
+    {
+      "dialog.close": requestClose,
+      "picker.up": () => move(-1),
+      "picker.down": () => move(1),
+      "picker.accept": () => {
+        void choose()
+      },
+    },
+    { when: () => !busy(), priority: 100, modal: true },
+  )
 
   return (
     <box flexGrow={1} minHeight={0} flexDirection="column" paddingLeft={4} paddingRight={4} paddingBottom={1}>
       <box height={1} flexShrink={0} flexDirection="row" justifyContent="space-between">
-        <text fg={colors.text} attributes={TextAttributes.BOLD}>Themes</text>
+        <text fg={colors.text} attributes={TextAttributes.BOLD}>
+          Themes
+        </text>
       </box>
       <box height={2} flexShrink={0} paddingTop={1}>
         <KeyInput
@@ -118,16 +132,28 @@ export function ThemePicker(props: {
       >
         <Show
           when={themes().length > 0}
-          fallback={<box height={1} paddingLeft={1}><text fg={colors.muted}>No matching themes</text></box>}
+          fallback={
+            <box height={1} paddingLeft={1}>
+              <text fg={colors.muted}>No matching themes</text>
+            </box>
+          }
         >
           <For each={themes()}>
             {(entry) => {
               const active = () => entry.theme === selected()
-              const hover = mouseHover(() => !busy(), () => entry.theme)
+              const hover = mouseHover(
+                () => !busy(),
+                () => entry.theme,
+              )
               return (
                 <box
                   id={`theme-${entry.theme}`}
-                  {...mouseClick(() => void choose(entry.theme), () => !busy(), () => entry.theme, hover)}
+                  {...mouseClick(
+                    () => void choose(entry.theme),
+                    () => !busy(),
+                    () => entry.theme,
+                    hover,
+                  )}
                   height={1}
                   flexShrink={0}
                   flexDirection="row"
@@ -135,7 +161,9 @@ export function ThemePicker(props: {
                   paddingRight={1}
                   backgroundColor={active() || hover.hovered() ? colors.panelHover : colors.panel}
                 >
-                  <text width={2} fg={colors.blue}>{active() ? "›" : " "}</text>
+                  <text width={2} fg={colors.blue}>
+                    {active() ? "›" : " "}
+                  </text>
                   <text
                     flexGrow={1}
                     minWidth={0}

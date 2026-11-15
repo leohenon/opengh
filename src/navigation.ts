@@ -4,10 +4,7 @@ export type Page = "overview" | "commits" | "issues" | "pulls" | "actions"
 
 // Detail routes identify entities, never selected row positions.
 export type DetailTarget =
-  | { kind: "commit"; sha: string }
-  | { kind: "issue"; number: number }
-  | { kind: "pull"; number: number }
-  | { kind: "run"; id: number }
+  { kind: "commit"; sha: string } | { kind: "issue"; number: number } | { kind: "pull"; number: number } | { kind: "run"; id: number }
 
 export type InitialNavigation = {
   page?: Page
@@ -56,9 +53,15 @@ export function openDetail(state: NavigationState, detail: DetailTarget): Naviga
   if (current && sameDetail(current, detail)) return withoutDiff(state, page)
   const next = { ...withoutDiff(state, page), page, details: { ...state.details, [page]: detail } }
   // Tab switches keep their own trails; only detail-to-detail navigation adds a step.
-  return current ? { ...next, history: {
-    ...state.history, [page]: [...(state.history?.[state.page] ?? []), current],
-  } } : next
+  return current
+    ? {
+        ...next,
+        history: {
+          ...state.history,
+          [page]: [...(state.history?.[state.page] ?? []), current],
+        },
+      }
+    : next
 }
 
 export function openPage(state: NavigationState, page: Page, document = state.document): NavigationState {
@@ -69,7 +72,9 @@ export function openPage(state: NavigationState, page: Page, document = state.do
   delete remaining[page]
   delete trails[page]
   return {
-    ...next, page, document,
+    ...next,
+    page,
+    document,
     ...(Object.keys(remaining).length ? { details: remaining } : {}),
     ...(Object.keys(trails).length ? { history: trails } : {}),
     pageOrigin: { page, state },
@@ -80,8 +85,10 @@ export function atRepositoryEntry(state: NavigationState, entry: NavigationState
   if (state.diffs?.[state.page] || state.page !== entry.page || state.pageOrigin !== entry.pageOrigin) return false
   const current = state.details?.[state.page]
   const original = entry.details?.[entry.page]
-  return (current && original ? sameDetail(current, original) : current === original)
-    && (state.history?.[state.page]?.length ?? 0) === (entry.history?.[entry.page]?.length ?? 0)
+  return (
+    (current && original ? sameDetail(current, original) : current === original) &&
+    (state.history?.[state.page]?.length ?? 0) === (entry.history?.[entry.page]?.length ?? 0)
+  )
 }
 
 export function openDiff(state: NavigationState, diff: DiffTarget): NavigationState {
@@ -105,7 +112,8 @@ export function back(state: NavigationState): NavigationState {
     else delete trails[page]
   }
   return {
-    ...origin, page,
+    ...origin,
+    page,
     ...(Object.keys(remaining).length ? { details: remaining } : {}),
     ...(Object.keys(trails).length ? { history: trails } : {}),
   }

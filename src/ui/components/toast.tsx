@@ -32,17 +32,15 @@ export function Toast(props: {
       flexDirection="row"
       backgroundColor={colors.panel}
     >
-      <box width={1} flexShrink={0} backgroundColor={props.tone === "success" ? colors.green : props.tone === "info" ? colors.blue : colors.red} />
       <box
-        flexGrow={1}
-        minWidth={0}
-        flexDirection="column"
-        paddingTop={1}
-        paddingBottom={1}
-        paddingLeft={2}
-        paddingRight={2}
-      >
-        <text selectable={false} flexGrow={1} minWidth={0} fg={colors.text} wrapMode="word">{content()}</text>
+        width={1}
+        flexShrink={0}
+        backgroundColor={props.tone === "success" ? colors.green : props.tone === "info" ? colors.blue : colors.red}
+      />
+      <box flexGrow={1} minWidth={0} flexDirection="column" paddingTop={1} paddingBottom={1} paddingLeft={2} paddingRight={2}>
+        <text selectable={false} flexGrow={1} minWidth={0} fg={colors.text} wrapMode="word">
+          {content()}
+        </text>
       </box>
     </box>
   )

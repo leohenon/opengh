@@ -14,17 +14,27 @@ import { ThemeProvider, useTheme } from "../src/ui/theme"
 import { MarkdownProvider } from "../src/ui/markdown-preferences"
 import { appColors, resolveTheme } from "../src/theme"
 
-function MarkdownSample(props: { content: string; context?: GitHubMarkdownContext; plainText?: boolean; anchorRef?: (resolver: MarkdownAnchorResolver | undefined) => void }) {
+function MarkdownSample(props: {
+  content: string
+  context?: GitHubMarkdownContext
+  plainText?: boolean
+  anchorRef?: (resolver: MarkdownAnchorResolver | undefined) => void
+}) {
   const { colors, theme } = useTheme()
   const style = createReactiveMarkdownStyle(colors, theme)
-  return <GitHubMarkdown content={props.content} syntaxStyle={style()} context={props.context} plainText={props.plainText} anchorRef={props.anchorRef} />
+  return (
+    <GitHubMarkdown
+      content={props.content}
+      syntaxStyle={style()}
+      context={props.context}
+      plainText={props.plainText}
+      anchorRef={props.anchorRef}
+    />
+  )
 }
 
 function codeBlocks(node: Renderable): CodeRenderable[] {
-  return [
-    ...(node instanceof CodeRenderable ? [node] : []),
-    ...node.getChildren().flatMap(codeBlocks),
-  ]
+  return [...(node instanceof CodeRenderable ? [node] : []), ...node.getChildren().flatMap(codeBlocks)]
 }
 
 async function settle(view: Awaited<ReturnType<typeof testRender>>) {
@@ -40,9 +50,21 @@ test("rejected Markdown uses bounded plain text and recovers in rich and minimal
   const [content, setContent] = createSignal("# Initial\n\n```text\nstale code\n```")
   let resolveAnchor: MarkdownAnchorResolver | undefined
   const [style, setStyle] = createSignal<MarkdownStyle>("rich")
-  const view = await testRender(() => <ThemeProvider name="github"><MarkdownProvider style={style()}>
-    <MarkdownSample content={content()} anchorRef={(resolver) => { resolveAnchor = resolver }} />
-  </MarkdownProvider></ThemeProvider>, { width: 120, height: 20 })
+  const view = await testRender(
+    () => (
+      <ThemeProvider name="github">
+        <MarkdownProvider style={style()}>
+          <MarkdownSample
+            content={content()}
+            anchorRef={(resolver) => {
+              resolveAnchor = resolver
+            }}
+          />
+        </MarkdownProvider>
+      </ThemeProvider>
+    ),
+    { width: 120, height: 20 },
+  )
   try {
     await settle(view)
     expect(await resolveAnchor?.("L4")).toBeDefined()
@@ -65,11 +87,12 @@ test("rejected Markdown uses bounded plain text and recovers in rich and minimal
         expect(await resolveAnchor?.("initial")).toBeUndefined()
         expect(frame).not.toContain("stale code")
       }
-      setContent("Recovered **Markdown**.\n\n| Resource | Status |\n| --- | --- |\n| Ragged |\n| Complete | Ready |\n\n```text\nfresh code\n```")
+      setContent(
+        "Recovered **Markdown**.\n\n| Resource | Status |\n| --- | --- |\n| Ragged |\n| Complete | Ready |\n\n```text\nfresh code\n```",
+      )
       await settle(view)
       const recovered = view.captureCharFrame()
-      for (const text of ["Recovered Markdown.", "Resource", "Status", "Ragged", "Complete", "Ready"])
-        expect(recovered).toContain(text)
+      for (const text of ["Recovered Markdown.", "Resource", "Status", "Ragged", "Complete", "Ready"]) expect(recovered).toContain(text)
       expect(recovered).not.toContain("plain-text preview")
       expect(codeBlocks(view.renderer.root).length).toBeGreaterThan(0)
       expect(await resolveAnchor?.("L1")).toBeDefined()
@@ -79,7 +102,9 @@ test("rejected Markdown uses bounded plain text and recovers in rich and minimal
       expect(await resolveAnchor?.("initial")).toBeUndefined()
       expect(recovered).not.toContain("stale code")
     }
-  } finally { view.renderer.destroy() }
+  } finally {
+    view.renderer.destroy()
+  }
 }, 15_000)
 
 test("shared markdown keeps padded code, compact linked labels, and block spacing across resizes and updates", async () => {
@@ -112,7 +137,14 @@ https://example.com/log
 
 End.`)
   const [theme, setTheme] = createSignal("github")
-  const view = await testRender(() => <ThemeProvider name={theme()}><MarkdownSample content={content()} /></ThemeProvider>, { width: 120, height: 60 })
+  const view = await testRender(
+    () => (
+      <ThemeProvider name={theme()}>
+        <MarkdownSample content={content()} />
+      </ThemeProvider>
+    ),
+    { width: 120, height: 60 },
+  )
   try {
     await settle(view)
     for (const width of [120, 40, 120]) {
@@ -136,10 +168,19 @@ End.`)
       expect(json.screenX - json.parent!.screenX).toBe(width < 80 ? 1 : 2)
       const linked = codes.find((block) => block.content.includes("Open PR"))!
       const result = await linked.treeSitterClient.highlightOnce(linked.content, "markdown")
-      const highlights = await linked.onHighlight!(result.highlights ?? [], { content: linked.content, filetype: "markdown", syntaxStyle: linked.syntaxStyle })
+      const highlights = await linked.onHighlight!(result.highlights ?? [], {
+        content: linked.content,
+        filetype: "markdown",
+        syntaxStyle: linked.syntaxStyle,
+      })
       const { treeSitterToTextChunks } = await import("@opentui/core")
       const chunks = treeSitterToTextChunks(linked.content, highlights!, linked.syntaxStyle)
-      const decorated = await linked.onChunks!(chunks, { content: linked.content, filetype: "markdown", syntaxStyle: linked.syntaxStyle, highlights: highlights! })
+      const decorated = await linked.onChunks!(chunks, {
+        content: linked.content,
+        filetype: "markdown",
+        syntaxStyle: linked.syntaxStyle,
+        highlights: highlights!,
+      })
       expect(decorated?.find((chunk) => chunk.text === "x")?.link?.url).toBe("https://example.com/x")
       expect(decorated?.find((chunk) => chunk.text.includes("Open PR"))?.link?.url).toBe("https://example.com/pr")
     }
@@ -230,10 +271,21 @@ test("references, image captions, nested fences, and plain-text documents keep t
 > print("#555 stays code")
 > \`\`\``)
   let resolveAnchor: MarkdownAnchorResolver | undefined
-  const view = await testRender(() => <ThemeProvider name="github"><MarkdownSample
-    content={content()} plainText={plainText()} anchorRef={(resolver) => { resolveAnchor = resolver }}
-    context={{ repositoryUrl: "https://github.com/qdrant/qdrant", ref: "dev", path: "README.md" }}
-  /></ThemeProvider>, { width: 120, height: 60 })
+  const view = await testRender(
+    () => (
+      <ThemeProvider name="github">
+        <MarkdownSample
+          content={content()}
+          plainText={plainText()}
+          anchorRef={(resolver) => {
+            resolveAnchor = resolver
+          }}
+          context={{ repositoryUrl: "https://github.com/qdrant/qdrant", ref: "dev", path: "README.md" }}
+        />
+      </ThemeProvider>
+    ),
+    { width: 120, height: 60 },
+  )
   try {
     for (const width of [120, 40]) {
       view.resize(width, 60)
@@ -280,7 +332,11 @@ test("references, image captions, nested fences, and plain-text documents keep t
 }, 15_000)
 
 test("review comments stay hidden and prose escapes render without changing code", async () => {
-  const view = await testRender(() => <ThemeProvider name="github"><MarkdownSample content={`<!-- walkthrough_start -->
+  const view = await testRender(
+    () => (
+      <ThemeProvider name="github">
+        <MarkdownSample
+          content={`<!-- walkthrough_start -->
 ## Walkthrough
 
 Review <!-- inline marker --> summary.
@@ -298,7 +354,12 @@ Inline code: \`\\~20\`
 \`\`\`text
 <!-- literal code comment -->
 \\~20 minutes
-\`\`\``} /></ThemeProvider>, { width: 100, height: 35 })
+\`\`\``}
+        />
+      </ThemeProvider>
+    ),
+    { width: 100, height: 35 },
+  )
   try {
     await settle(view)
     const frame = view.captureCharFrame()
@@ -317,7 +378,6 @@ Inline code: \`\\~20\`
   }
 }, 15_000)
 
-
 test("overview refresh preserves unchanged Markdown blocks and scroll position", async () => {
   const content = "# Stable README\n\n```ts\nconst example = true\n```\n\n" + "Overview prose.\n\n".repeat(40)
   const initial: RepositoryDocumentState[] = [
@@ -327,10 +387,22 @@ test("overview refresh preserves unchanged Markdown blocks and scroll position",
   const [repo, setRepo] = createSignal(githubDataFixture.repo)
   const [documents, setDocuments] = createSignal<ResourceState<RepositoryDocumentState[]>>({ status: "ready", value: initial })
   let scroll: ScrollBoxRenderable | undefined
-  const view = await testRender(() => <ThemeProvider name="github"><OverviewScreen
-    repo={repo()} documents={documents()} aboutSidebar="hide" showScrollbar={false}
-    scrollRef={(value) => { scroll = value }}
-  /></ThemeProvider>, { width: 120, height: 25 })
+  const view = await testRender(
+    () => (
+      <ThemeProvider name="github">
+        <OverviewScreen
+          repo={repo()}
+          documents={documents()}
+          aboutSidebar="hide"
+          showScrollbar={false}
+          scrollRef={(value) => {
+            scroll = value
+          }}
+        />
+      </ThemeProvider>
+    ),
+    { width: 120, height: 25 },
+  )
   try {
     await settle(view)
     scroll!.scrollTo(5)
@@ -354,39 +426,60 @@ test("overview refresh preserves unchanged Markdown blocks and scroll position",
     await checkStable()
     setDocuments({ status: "loading", phase: "load", value: initial })
     await checkStable()
-    const loading = initial.map((document) => ({ ...document,
+    const loading = initial.map((document) => ({
+      ...document,
       resource: { status: "loading" as const, phase: "load" as const, value: document.resource.value },
     }))
     setDocuments({ status: "ready", value: loading })
     await checkStable()
-    setDocuments({ status: "ready", value: [loading[0]!, { ...initial[1]!, resource: { status: "ready", value: "Updated secondary document" } }] })
+    setDocuments({
+      status: "ready",
+      value: [loading[0]!, { ...initial[1]!, resource: { status: "ready", value: "Updated secondary document" } }],
+    })
     await checkStable()
     setDocuments({ status: "ready", value: initial.map((document) => ({ ...document, resource: { ...document.resource } })) })
     await checkStable()
 
-    setDocuments({ status: "ready", value: [{ ...initial[0]!, resource: { status: "ready", value: "# Updated README\n\n```ts\nconst updated = true\n```" } }] })
+    setDocuments({
+      status: "ready",
+      value: [{ ...initial[0]!, resource: { status: "ready", value: "# Updated README\n\n```ts\nconst updated = true\n```" } }],
+    })
     scroll!.scrollTo(0)
     await settle(view)
     expect(view.captureCharFrame()).toContain("Updated README")
     expect(codeBlocks(view.renderer.root).some((block) => block.content.includes("const updated = true"))).toBe(true)
     expect(codeBlocks(view.renderer.root).some((block) => block.content.includes("const example = true"))).toBe(false)
-  } finally { view.renderer.destroy() }
+  } finally {
+    view.renderer.destroy()
+  }
 })
 
 test("overview still updates relative links and plain-text mode when the document source changes", async () => {
   const [document, setDocument] = createSignal<RepositoryDocumentState>({
-    ...repositoryDocumentsFixture[0]!, resource: { status: "ready", value: "[Guide](guide.md)" },
+    ...repositoryDocumentsFixture[0]!,
+    resource: { status: "ready", value: "[Guide](guide.md)" },
   })
-  const view = await testRender(() => <ThemeProvider name="github"><OverviewScreen
-    repo={githubDataFixture.repo} documents={{ status: "ready", value: [document()] }}
-    aboutSidebar="hide" showScrollbar={false} scrollRef={() => {}}
-  /></ThemeProvider>, { width: 120, height: 15 })
+  const view = await testRender(
+    () => (
+      <ThemeProvider name="github">
+        <OverviewScreen
+          repo={githubDataFixture.repo}
+          documents={{ status: "ready", value: [document()] }}
+          aboutSidebar="hide"
+          showScrollbar={false}
+          scrollRef={() => {}}
+        />
+      </ThemeProvider>
+    ),
+    { width: 120, height: 15 },
+  )
   const links = () => {
     const urls = new Set<string>()
-    for (let y = 0; y < 15; y++) for (let x = 0; x < 120; x++) {
-      const url = view.renderer.getLinkAt(x, y)
-      if (url) urls.add(url)
-    }
+    for (let y = 0; y < 15; y++)
+      for (let x = 0; x < 120; x++) {
+        const url = view.renderer.getLinkAt(x, y)
+        if (url) urls.add(url)
+      }
     return [...urls]
   }
   try {
@@ -405,19 +498,38 @@ test("overview still updates relative links and plain-text mode when the documen
     await settle(view)
     expect(view.captureCharFrame()).toContain("[Guide](guide.md)")
     expect(codeBlocks(view.renderer.root)).toHaveLength(0)
-  } finally { view.renderer.destroy() }
+  } finally {
+    view.renderer.destroy()
+  }
 })
 
 test("overview layout centers documents or uses available width independently of the About sidebar", async () => {
   const [layout, setLayout] = createSignal<DetailLayout>("centered")
   const [sidebar, setSidebar] = createSignal<AboutSidebar>("hide")
-  const documents = [{ ...repositoryDocumentsFixture[0]!, resource: {
-    status: "ready" as const, value: "Overview prose.\n\n```text\nexample code\n```",
-  } }]
-  const view = await testRender(() => <ThemeProvider name="github"><OverviewScreen
-    repo={githubDataFixture.repo} documents={{ status: "ready", value: documents }}
-    detailLayout={layout()} aboutSidebar={sidebar()} showScrollbar={false} scrollRef={() => {}}
-  /></ThemeProvider>, { width: 160, height: 30 })
+  const documents = [
+    {
+      ...repositoryDocumentsFixture[0]!,
+      resource: {
+        status: "ready" as const,
+        value: "Overview prose.\n\n```text\nexample code\n```",
+      },
+    },
+  ]
+  const view = await testRender(
+    () => (
+      <ThemeProvider name="github">
+        <OverviewScreen
+          repo={githubDataFixture.repo}
+          documents={{ status: "ready", value: documents }}
+          detailLayout={layout()}
+          aboutSidebar={sidebar()}
+          showScrollbar={false}
+          scrollRef={() => {}}
+        />
+      </ThemeProvider>
+    ),
+    { width: 160, height: 30 },
+  )
   try {
     for (const about of ["hide", "show"] as const) {
       setSidebar(about)
@@ -448,7 +560,6 @@ test("overview layout centers documents or uses available width independently of
     view.renderer.destroy()
   }
 }, 15_000)
-
 
 test("minimal Markdown switches live without losing structure, links, or literal code", async () => {
   const [style, setStyle] = createSignal<MarkdownStyle>("rich")
@@ -491,11 +602,16 @@ test("minimal Markdown switches live without losing structure, links, or literal
 - removed
 + added
 \`\`\``
-  const view = await testRender(() => (
-    <ThemeProvider name="github" mode={mode()}>
-      <MarkdownProvider style={style()}><MarkdownSample content={content} /></MarkdownProvider>
-    </ThemeProvider>
-  ), { width: 100, height: 60 })
+  const view = await testRender(
+    () => (
+      <ThemeProvider name="github" mode={mode()}>
+        <MarkdownProvider style={style()}>
+          <MarkdownSample content={content} />
+        </MarkdownProvider>
+      </ThemeProvider>
+    ),
+    { width: 100, height: 60 },
+  )
   const json = () => codeBlocks(view.renderer.root).find((block) => block.filetype === "json")!
   try {
     await settle(view)
@@ -509,19 +625,32 @@ test("minimal Markdown switches live without losing structure, links, or literal
       setMode(appearance)
       await settle(view)
       const frame = view.captureCharFrame()
-      for (const text of ["Heading", "Guide and important text.", "Warning", "Keep this warning.", "Nested code:", "Docs", "Ready", "## Literal heading"])
+      for (const text of [
+        "Heading",
+        "Guide and important text.",
+        "Warning",
+        "Keep this warning.",
+        "Nested code:",
+        "Docs",
+        "Ready",
+        "## Literal heading",
+      ])
         expect(frame).toContain(text)
-      for (const text of ["Completed task", "Pending task", "│ Screenshot", "Static form text"])
-        expect(frame).toContain(text)
+      for (const text of ["Completed task", "Pending task", "│ Screenshot", "Static form text"]) expect(frame).toContain(text)
       expect(frame).not.toContain("Hidden control")
       expect(frame).not.toContain("local-file")
-      expect(codeBlocks(view.renderer.root).find((block) => block.filetype === "html")?.plainText)
-        .toBe('<input list="d"><datalist id="d"></datalist>')
+      expect(codeBlocks(view.renderer.root).find((block) => block.filetype === "html")?.plainText).toBe(
+        '<input list="d"><datalist id="d"></datalist>',
+      )
       expect(frame).not.toContain("https://example.com")
       expect(frame).not.toMatch(/[─┌└]/)
       // Image borders identify media even when decorative Markdown borders are off.
-      expect(frame.split("\n").filter((row) => row.includes("│")).map((row) => row.trim()))
-        .toEqual(["│ image", "│ Screenshot"])
+      expect(
+        frame
+          .split("\n")
+          .filter((row) => row.includes("│"))
+          .map((row) => row.trim()),
+      ).toEqual(["│ image", "│ Screenshot"])
       expect(frame.split("\n").some((row) => row.trim() === "json")).toBe(false)
       expect(json().screenY - json().parent!.screenY).toBe(0)
       expect(json().plainText).toBe('{\n  "enabled": true, "count": 12\n}')
@@ -530,7 +659,9 @@ test("minimal Markdown switches live without losing structure, links, or literal
       expect(json().syntaxStyle.getStyle("string")?.fg).toEqual(foreground)
       const spans = view.captureSpans().lines.flatMap((line) => line.spans)
       expect(spans.find((span) => span.text.includes('"enabled"'))?.fg).toEqual(foreground)
-      expect(spans.find((span) => span.text.includes("added"))?.fg.equals(spans.find((span) => span.text.includes("removed"))!.fg)).toBe(false)
+      expect(spans.find((span) => span.text.includes("added"))?.fg.equals(spans.find((span) => span.text.includes("removed"))!.fg)).toBe(
+        false,
+      )
     }
     setStyle("rich")
     await settle(view)
@@ -542,11 +673,14 @@ test("minimal Markdown switches live without losing structure, links, or literal
   }
 }, 15_000)
 
-
 test("task markers, deleted text, and lower headings render semantic styles in rich and minimal Markdown", async () => {
   const [style, setStyle] = createSignal<MarkdownStyle>("rich")
-  const view = await testRender(() => <ThemeProvider name="github"><MarkdownProvider style={style()}>
-    <MarkdownSample content={`#### Fourth
+  const view = await testRender(
+    () => (
+      <ThemeProvider name="github">
+        <MarkdownProvider style={style()}>
+          <MarkdownSample
+            content={`#### Fourth
 
 ##### Fifth
 
@@ -556,8 +690,13 @@ test("task markers, deleted text, and lower headings render semantic styles in r
 
 - [x] Finished
 - [ ] Pending
-  - [x] Nested finished`} />
-  </MarkdownProvider></ThemeProvider>, { width: 80, height: 30 })
+  - [x] Nested finished`}
+          />
+        </MarkdownProvider>
+      </ThemeProvider>
+    ),
+    { width: 80, height: 30 },
+  )
   try {
     for (const preference of ["rich", "minimal", "rich"] as const) {
       setStyle(preference)
@@ -579,11 +718,12 @@ test("task markers, deleted text, and lower headings render semantic styles in r
       expect(checked.attributes & TextAttributes.BOLD).not.toBe(0)
       if (preference === "minimal") {
         const foreground = RGBA.fromHex(resolveTheme("github", "dark").text)
-        for (const text of ["☑", "☐", "Obsolete", "Fourth", "Fifth", "Sixth"])
-          expect(span(text).fg).toEqual(foreground)
+        for (const text of ["☑", "☐", "Obsolete", "Fourth", "Fifth", "Sixth"]) expect(span(text).fg).toEqual(foreground)
       } else expect(checked.fg.equals(unchecked.fg)).toBe(false)
     }
-  } finally { view.renderer.destroy() }
+  } finally {
+    view.renderer.destroy()
+  }
 }, 15_000)
 
 test("Markdown hierarchy, compact examples, and inline padding respect rich and minimal styles", async () => {
@@ -608,9 +748,16 @@ bun install
 const runtime = "bun"
 console.log(runtime)
 \`\`\``
-  const view = await testRender(() => <ThemeProvider name="github"><MarkdownProvider style={style()}>
-    <MarkdownSample content={content} />
-  </MarkdownProvider></ThemeProvider>, { width: 120, height: 50 })
+  const view = await testRender(
+    () => (
+      <ThemeProvider name="github">
+        <MarkdownProvider style={style()}>
+          <MarkdownSample content={content} />
+        </MarkdownProvider>
+      </ThemeProvider>
+    ),
+    { width: 120, height: 50 },
+  )
   try {
     for (const preference of ["rich", "minimal", "rich"] as const) {
       setStyle(preference)
@@ -654,25 +801,37 @@ console.log(runtime)
         expect(frame).not.toContain("https://example.com")
       }
     }
-  } finally { view.renderer.destroy() }
+  } finally {
+    view.renderer.destroy()
+  }
 }, 15_000)
 
 test("GitHub alert borders keep their colors with document source anchors", async () => {
   const [anchored, setAnchored] = createSignal(false)
   const colors = appColors(resolveTheme("opengh"))
-  const alerts = [["NOTE", "Note", colors.blue], ["TIP", "Tip", colors.green],
-    ["IMPORTANT", "Important", colors.purple], ["WARNING", "Warning", colors.yellow],
-    ["CAUTION", "Caution", colors.red]] as const
+  const alerts = [
+    ["NOTE", "Note", colors.blue],
+    ["TIP", "Tip", colors.green],
+    ["IMPORTANT", "Important", colors.purple],
+    ["WARNING", "Warning", colors.yellow],
+    ["CAUTION", "Caution", colors.red],
+  ] as const
   const content = alerts.map(([marker]) => `> [!${marker}]\n> Alert body.`).join("\n\n")
   const Sample = () => {
     const theme = useTheme()
     const style = createReactiveMarkdownStyle(theme.colors, theme.theme)
-    return <GitHubMarkdown content={content} syntaxStyle={style()}
-      anchorRef={anchored() ? () => {} : undefined} />
+    return <GitHubMarkdown content={content} syntaxStyle={style()} anchorRef={anchored() ? () => {} : undefined} />
   }
-  const view = await testRender(() => <ThemeProvider name="opengh"><MarkdownProvider style="rich">
-    <Sample />
-  </MarkdownProvider></ThemeProvider>, { width: 80, height: 32 })
+  const view = await testRender(
+    () => (
+      <ThemeProvider name="opengh">
+        <MarkdownProvider style="rich">
+          <Sample />
+        </MarkdownProvider>
+      </ThemeProvider>
+    ),
+    { width: 80, height: 32 },
+  )
   try {
     for (const anchors of [false, true]) {
       setAnchored(anchors)
@@ -682,13 +841,25 @@ test("GitHub alert borders keep their colors with document source anchors", asyn
         expect(row?.spans.find((span) => span.text.includes("│"))?.fg).toEqual(RGBA.fromHex(color))
       }
     }
-  } finally { view.renderer.destroy() }
+  } finally {
+    view.renderer.destroy()
+  }
 })
 
 test("paragraph spacing settles once per parent, including hidden documents and updates", async () => {
   const [content, setContent] = createSignal(Array.from({ length: 80 }, (_, i) => `## Heading ${i}\n\nBody ${i}.`).join("\n\n"))
-  const view = await testRender(() => <ThemeProvider name="github"><box visible={false}><MarkdownSample content={content()} /></box></ThemeProvider>, { width: 80, height: 10 })
-  const find = (node: Renderable): MarkdownRenderable | undefined => node instanceof MarkdownRenderable ? node : node.getChildren().map(find).find(Boolean)
+  const view = await testRender(
+    () => (
+      <ThemeProvider name="github">
+        <box visible={false}>
+          <MarkdownSample content={content()} />
+        </box>
+      </ThemeProvider>
+    ),
+    { width: 80, height: 10 },
+  )
+  const find = (node: Renderable): MarkdownRenderable | undefined =>
+    node instanceof MarkdownRenderable ? node : node.getChildren().map(find).find(Boolean)
   try {
     await settle(view)
     const markdown = find(view.renderer.root)!
@@ -706,5 +877,7 @@ test("paragraph spacing settles once per parent, including hidden documents and 
     expect(updated[1]!.marginTop).toBe(1)
     expect(updated[3]!.marginTop).toBe(0)
     for (const node of updated) expect(node.onLifecyclePass).toBeNull()
-  } finally { view.renderer.destroy() }
+  } finally {
+    view.renderer.destroy()
+  }
 })

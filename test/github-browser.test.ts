@@ -2,12 +2,23 @@ import { expect, spyOn, test } from "bun:test"
 import { openGitHub } from "../src/github/browser"
 
 test("workflow runs use gh run view while existing browse and diff targets stay unchanged", async () => {
-  const spawn = spyOn(Bun, "spawn").mockImplementation(() => ({
-    stdout: new ReadableStream({ start(controller) { controller.close() } }),
-    stderr: new ReadableStream({ start(controller) { controller.close() } }),
-    exited: Promise.resolve(0),
-    kill() {},
-  }) as unknown as Bun.Subprocess)
+  const spawn = spyOn(Bun, "spawn").mockImplementation(
+    () =>
+      ({
+        stdout: new ReadableStream({
+          start(controller) {
+            controller.close()
+          },
+        }),
+        stderr: new ReadableStream({
+          start(controller) {
+            controller.close()
+          },
+        }),
+        exited: Promise.resolve(0),
+        kill() {},
+      }) as unknown as Bun.Subprocess,
+  )
   try {
     for (const [target, view, args] of [
       ["actions/runs/39596198737", undefined, ["run", "view", "39596198737", "--web"]],

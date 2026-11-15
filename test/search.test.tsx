@@ -14,14 +14,30 @@ import type { RepositoryData } from "../src/repository-state"
 import { githubDataFixture, repositoryOperationsFixture, commitDetailFixture } from "./fixtures/github-data"
 
 test("literal smart-case search retains original Unicode offsets and wraps", () => {
-  expect(searchRanges("foo Foo FOO", "foo")).toEqual([{ start: 0, end: 3 }, { start: 4, end: 7 }, { start: 8, end: 11 }])
+  expect(searchRanges("foo Foo FOO", "foo")).toEqual([
+    { start: 0, end: 3 },
+    { start: 4, end: 7 },
+    { start: 8, end: 11 },
+  ])
   expect(searchRanges("foo Foo FOO", "Foo")).toEqual([{ start: 4, end: 7 }])
   expect(searchRanges("foo Foo FOO", "FOO")).toEqual([{ start: 8, end: 11 }])
-  expect(searchRanges("é É", "é")).toEqual([{ start: 0, end: 1 }, { start: 2, end: 3 }])
+  expect(searchRanges("é É", "é")).toEqual([
+    { start: 0, end: 1 },
+    { start: 2, end: 3 },
+  ])
   expect(searchRanges("é É", "É")).toEqual([{ start: 2, end: 3 }])
-  expect(searchRanges("a.b A.B", ".")).toEqual([{ start: 1, end: 2 }, { start: 5, end: 6 }])
-  expect(searchRanges("🙂中é İ foo FOO", "foo")).toEqual([{ start: 8, end: 11 }, { start: 12, end: 15 }])
-  expect(searchRanges("aaaa", "aa")).toEqual([{ start: 0, end: 2 }, { start: 2, end: 4 }])
+  expect(searchRanges("a.b A.B", ".")).toEqual([
+    { start: 1, end: 2 },
+    { start: 5, end: 6 },
+  ])
+  expect(searchRanges("🙂中é İ foo FOO", "foo")).toEqual([
+    { start: 8, end: 11 },
+    { start: 12, end: 15 },
+  ])
+  expect(searchRanges("aaaa", "aa")).toEqual([
+    { start: 0, end: 2 },
+    { start: 2, end: 4 },
+  ])
   expect(searchRanges("abc", "")).toEqual([])
   const exec = spyOn(RegExp.prototype, "exec")
   try {
@@ -29,7 +45,9 @@ test("literal smart-case search retains original Unicode offsets and wraps", () 
     const calls = exec.mock.calls.length
     expect(capped).toHaveLength(10_000)
     expect(calls).toBeLessThan(10_010) // Stop near the cap, rather than scanning every match before slicing.
-  } finally { exec.mockRestore() }
+  } finally {
+    exec.mockRestore()
+  }
   expect(searchRanges("🙂中é İ foo FOO", "foo", 1)).toEqual([{ start: 8, end: 11 }])
   expect(searchRanges("abc", "a", 0)).toEqual([])
   expect(wrapSearchIndex(0, -1, 3)).toBe(2)
@@ -42,18 +60,37 @@ test("incremental list search selects without filtering or fetching; cancel rest
   const items = Array.from({ length: 20 }, (_, id) => ({ id, label: id === 5 || id === 19 ? `needle ${id}` : `row ${id}` }))
   let selected = -1
   let loads = 0
-  const view = await testRender(() => <KeybindingsProvider><box height="100%" flexDirection="column">
-    <SearchProvider identity={page()} enabled>
-      <SelectableList items={items} itemKey={(item) => item.id} active empty="empty"
-        onSelect={(item) => { selected = item.id }} onEndReached={() => { loads++ }}>
-        {(item) => <text>{item().label}</text>}
-      </SelectableList>
-    </SearchProvider>
-  </box></KeybindingsProvider>, { width: 60, height: 15 })
+  const view = await testRender(
+    () => (
+      <KeybindingsProvider>
+        <box height="100%" flexDirection="column">
+          <SearchProvider identity={page()} enabled>
+            <SelectableList
+              items={items}
+              itemKey={(item) => item.id}
+              active
+              empty="empty"
+              onSelect={(item) => {
+                selected = item.id
+              }}
+              onEndReached={() => {
+                loads++
+              }}
+            >
+              {(item) => <text>{item().label}</text>}
+            </SelectableList>
+          </SearchProvider>
+        </box>
+      </KeybindingsProvider>
+    ),
+    { width: 60, height: 15 },
+  )
   const key = async (key: string) => {
     if (key === "enter") view.mockInput.pressEnter()
-    else if (key === "escape") { view.mockInput.pressEscape(); await Bun.sleep(30) }
-    else view.mockInput.pressKey(key)
+    else if (key === "escape") {
+      view.mockInput.pressEscape()
+      await Bun.sleep(30)
+    } else view.mockInput.pressKey(key)
     await view.flush()
   }
   try {
@@ -98,16 +135,33 @@ test("incremental list search selects without filtering or fetching; cancel rest
     await key("escape")
     expect(view.captureCharFrame()).not.toContain("/needle")
     expect(loads).toBe(0)
-  } finally { view.renderer.destroy() }
+  } finally {
+    view.renderer.destroy()
+  }
 })
 
 test("App searches displayed list/detail content, clears before back, and leaves picker input alone", async () => {
-  const view = await testRender(() => <App data={githubDataFixture} operations={repositoryOperationsFixture}
-    initialPage="commits" onBranchChange={() => {}} config={{ ...defaultConfig, showStatusBarHints: true }}
-    commitDetail={{ sha: commitDetailFixture.sha, resource: { status: "ready", value: commitDetailFixture } }}
-  />, { width: 100, height: 30 })
-  const settle = async () => { await Bun.sleep(35); await view.flush() }
-  const escape = async () => { view.mockInput.pressEscape(); await settle() }
+  const view = await testRender(
+    () => (
+      <App
+        data={githubDataFixture}
+        operations={repositoryOperationsFixture}
+        initialPage="commits"
+        onBranchChange={() => {}}
+        config={{ ...defaultConfig, showStatusBarHints: true }}
+        commitDetail={{ sha: commitDetailFixture.sha, resource: { status: "ready", value: commitDetailFixture } }}
+      />
+    ),
+    { width: 100, height: 30 },
+  )
+  const settle = async () => {
+    await Bun.sleep(35)
+    await view.flush()
+  }
+  const escape = async () => {
+    view.mockInput.pressEscape()
+    await settle()
+  }
   try {
     await settle()
     const beforeSearch = view.captureCharFrame().split("\n")
@@ -144,20 +198,29 @@ test("App searches displayed list/detail content, clears before back, and leaves
     await settle()
     expect(view.captureCharFrame()).toContain("/nN")
     expect(view.captureCharFrame()).not.toContain("No matches")
-  } finally { view.renderer.destroy() }
+  } finally {
+    view.renderer.destroy()
+  }
 })
 
-test.each((["overview", "commits", "issues", "pulls", "actions"] as const).flatMap((page) =>
-  [false, true].map((accepted) => [page, accepted] as const),
-))("%s search survives initial loading (accepted: %s)", async (page, accepted) => {
+test.each(
+  (["overview", "commits", "issues", "pulls", "actions"] as const).flatMap((page) =>
+    [false, true].map((accepted) => [page, accepted] as const),
+  ),
+)("%s search survives initial loading (accepted: %s)", async (page, accepted) => {
   const query = { overview: "TypeScript", commits: "duplicate", issues: "resize", pulls: "retain", actions: "retain" }[page]
-  const [data, setData] = createSignal<RepositoryData>({ ...githubDataFixture,
-    documents: { status: "loading", phase: "load" }, commits: { status: "loading", phase: "load" }, runs: { status: "loading", phase: "load" },
+  const [data, setData] = createSignal<RepositoryData>({
+    ...githubDataFixture,
+    documents: { status: "loading", phase: "load" },
+    commits: { status: "loading", phase: "load" },
+    runs: { status: "loading", phase: "load" },
     issues: { open: { status: "loading", phase: "load" }, closed: { status: "loading", phase: "load" } },
     pulls: { open: { status: "loading", phase: "load" }, closed: { status: "loading", phase: "load" } },
   })
-  const view = await testRender(() => <App data={data()} operations={repositoryOperationsFixture} initialNavigation={{ page }} />,
-    { width: 100, height: 30 })
+  const view = await testRender(() => <App data={data()} operations={repositoryOperationsFixture} initialNavigation={{ page }} />, {
+    width: 100,
+    height: 30,
+  })
   try {
     await view.flush()
     view.mockInput.pressKey("/")
@@ -178,18 +241,27 @@ test.each((["overview", "commits", "issues", "pulls", "actions"] as const).flatM
       await view.flush()
       expect(view.captureCharFrame()).toContain(`/${query}more`)
     }
-  } finally { view.renderer.destroy() }
+  } finally {
+    view.renderer.destroy()
+  }
 })
 
 test("long queries keep the prompt and result count visible without wrapping the footer", async () => {
   const [editing, setEditing] = createSignal(true)
   const [total, setTotal] = createSignal(12)
-  const view = await testRender(() => <KeybindingsProvider>
-    <box height="100%" flexDirection="column">
-      <box flexGrow={1}><text>Page content</text></box>
-      <SearchBar query={"abcdefghijklmnopqrstuvwxyz".repeat(4)} editing={editing()} current={3} total={total()} onInput={() => {}} />
-    </box>
-  </KeybindingsProvider>, { width: 35, height: 5 })
+  const view = await testRender(
+    () => (
+      <KeybindingsProvider>
+        <box height="100%" flexDirection="column">
+          <box flexGrow={1}>
+            <text>Page content</text>
+          </box>
+          <SearchBar query={"abcdefghijklmnopqrstuvwxyz".repeat(4)} editing={editing()} current={3} total={total()} onInput={() => {}} />
+        </box>
+      </KeybindingsProvider>
+    ),
+    { width: 35, height: 5 },
+  )
   try {
     for (const width of [35, 18]) {
       view.resize(width, 5)
@@ -206,16 +278,33 @@ test("long queries keep the prompt and result count visible without wrapping the
         }
       }
     }
-  } finally { view.renderer.destroy() }
+  } finally {
+    view.renderer.destroy()
+  }
 })
 
 test("Settings search selects and highlights rows without changing values or searching the page underneath", async () => {
   const [config, setConfig] = createSignal({ ...defaultConfig, showStatusBarHints: true })
   let writes = 0
-  const view = await testRender(() => <App data={githubDataFixture} operations={repositoryOperationsFixture}
-    initialPage="commits" config={config()} onConfigChange={async (next) => { writes++; setConfig(next) }} />,
-  { width: 100, height: 22 })
-  const settle = async () => { await Bun.sleep(35); await view.flush() }
+  const view = await testRender(
+    () => (
+      <App
+        data={githubDataFixture}
+        operations={repositoryOperationsFixture}
+        initialPage="commits"
+        config={config()}
+        onConfigChange={async (next) => {
+          writes++
+          setConfig(next)
+        }}
+      />
+    ),
+    { width: 100, height: 22 },
+  )
+  const settle = async () => {
+    await Bun.sleep(35)
+    await view.flush()
+  }
   const key = async (value: string) => {
     if (value === "enter") view.mockInput.pressEnter()
     else if (value === "escape") view.mockInput.pressEscape()
@@ -228,7 +317,8 @@ test("Settings search selects and highlights rows without changing values or sea
     await settle()
     await key("enter")
   }
-  const selected = (setting: string) => (view.renderer.root.findDescendantById(`setting-${setting}`)!.getChildren()[0] as TextRenderable).plainText
+  const selected = (setting: string) =>
+    (view.renderer.root.findDescendantById(`setting-${setting}`)!.getChildren()[0] as TextRenderable).plainText
   const footer = () => view.captureCharFrame().split("\n")[21]!
   try {
     await settle()
@@ -243,8 +333,14 @@ test("Settings search selects and highlights rows without changing values or sea
     expect(footer()).not.toContain("select")
     expect(selected("markdown-style")).toBe("›")
     const bg = RGBA.fromHex(appColors(resolveTheme(defaultConfig.theme)).searchCurrentMatchBg)
-    expect(view.captureSpans().lines.flatMap(line => line.spans).filter(span => span.bg.equals(bg))
-      .map(span => span.text).join("")).toContain("style")
+    expect(
+      view
+        .captureSpans()
+        .lines.flatMap((line) => line.spans)
+        .filter((span) => span.bg.equals(bg))
+        .map((span) => span.text)
+        .join(""),
+    ).toContain("style")
     await key("n")
     expect(selected("icon-style")).toBe("›")
     expect(view.captureCharFrame()).toContain("Icon style")
@@ -269,5 +365,7 @@ test("Settings search selects and highlights rows without changing values or sea
     await settle()
     expect(view.captureCharFrame()).toContain("/nN")
     expect(footer()).not.toContain("No matches")
-  } finally { view.renderer.destroy() }
+  } finally {
+    view.renderer.destroy()
+  }
 })

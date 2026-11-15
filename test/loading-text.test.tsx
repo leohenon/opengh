@@ -7,11 +7,14 @@ import { MotionProvider } from "../src/ui/motion"
 
 test("reduced motion preserves delayed loading feedback and toggles animation live", async () => {
   const [reduced, setReduced] = createSignal(true)
-  const view = await testRender(() => (
-    <MotionProvider reduced={reduced()}>
-      <LoadingText text="Loading…" delay={80} />
-    </MotionProvider>
-  ), { width: 30, height: 3 })
+  const view = await testRender(
+    () => (
+      <MotionProvider reduced={reduced()}>
+        <LoadingText text="Loading…" delay={80} />
+      </MotionProvider>
+    ),
+    { width: 30, height: 3 },
+  )
   const dots = () => view.captureCharFrame().match(/Loading([. ]{3})/)?.[1]
 
   try {
@@ -47,14 +50,19 @@ test("refresh indicators hide hints in a fixed footer and respect reduced motion
   const [reduced, setReduced] = createSignal(false)
   const [kind, setKind] = createSignal<"refreshing" | undefined>("refreshing")
   const [error, setError] = createSignal<string>()
-  const view = await testRender(() => (
-    <MotionProvider reduced={reduced()}>
-      <box height={4} flexDirection="column">
-        <box flexGrow={1}><text>Content</text></box>
-        <StatusBar kind={kind()} error={error()} hint="q quit" />
-      </box>
-    </MotionProvider>
-  ), { width: 40, height: 4 })
+  const view = await testRender(
+    () => (
+      <MotionProvider reduced={reduced()}>
+        <box height={4} flexDirection="column">
+          <box flexGrow={1}>
+            <text>Content</text>
+          </box>
+          <StatusBar kind={kind()} error={error()} hint="q quit" />
+        </box>
+      </MotionProvider>
+    ),
+    { width: 40, height: 4 },
+  )
   const footer = () => view.captureCharFrame().split("\n")[3]!
 
   try {
@@ -99,11 +107,14 @@ test("refresh indicators hide hints in a fixed footer and respect reduced motion
 test("loading and mutation statuses hide hints until idle without enabling disabled hints", async () => {
   const [kind, setKind] = createSignal<StatusKind>()
   const [showHints, setShowHints] = createSignal(true)
-  const view = await testRender(() => (
-    <MotionProvider reduced>
-      <StatusBar kind={kind()} detail="pull request" hint={showHints() ? "q quit · ? help" : undefined} />
-    </MotionProvider>
-  ), { width: 80, height: 1 })
+  const view = await testRender(
+    () => (
+      <MotionProvider reduced>
+        <StatusBar kind={kind()} detail="pull request" hint={showHints() ? "q quit · ? help" : undefined} />
+      </MotionProvider>
+    ),
+    { width: 80, height: 1 },
+  )
   const footer = () => view.captureCharFrame().trim()
   const statuses = [
     ["loading-resource", "Loading pull request"],

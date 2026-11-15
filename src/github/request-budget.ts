@@ -34,7 +34,10 @@ export function createRequestBudget(parent?: AbortSignal): RequestBudget {
     controller.abort(error)
     throw error
   }
-  const timeout = setTimeout(() => controller.abort(new RequestBudgetLimitError("Detail loading exceeded the 60 second limit")), DETAIL_TIMEOUT_MS)
+  const timeout = setTimeout(
+    () => controller.abort(new RequestBudgetLimitError("Detail loading exceeded the 60 second limit")),
+    DETAIL_TIMEOUT_MS,
+  )
   timeout.unref?.()
   let requests = 0
   let bytes = 0
@@ -63,6 +66,11 @@ export function createRequestBudget(parent?: AbortSignal): RequestBudget {
 }
 
 export function isRequestInterrupted(error: unknown, options?: { signal?: AbortSignal; budget?: RequestBudget }) {
-  return error instanceof RequestBudgetLimitError || error instanceof ResponseLimitError || options?.signal?.aborted === true || options?.budget?.signal.aborted === true
-    || (error instanceof Error && (error.name === "AbortError" || error.name === "TimeoutError"))
+  return (
+    error instanceof RequestBudgetLimitError ||
+    error instanceof ResponseLimitError ||
+    options?.signal?.aborted === true ||
+    options?.budget?.signal.aborted === true ||
+    (error instanceof Error && (error.name === "AbortError" || error.name === "TimeoutError"))
+  )
 }

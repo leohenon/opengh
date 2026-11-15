@@ -5,13 +5,16 @@ import { TimelineEntry, TimelineItem } from "../src/ui/components/timeline-entry
 
 test("the final timeline connector stops at the icon and extends again when another item follows", async () => {
   const [last, setLast] = createSignal(true)
-  const view = await testRender(() => (
-    <TimelineItem last={last()}>
-      <TimelineEntry icon="o" nodeOffset={2}>
-        <text flexShrink={0}>{"First\nSecond\nThird\nFourth\nFifth"}</text>
-      </TimelineEntry>
-    </TimelineItem>
-  ), { width: 30, height: 9 })
+  const view = await testRender(
+    () => (
+      <TimelineItem last={last()}>
+        <TimelineEntry icon="o" nodeOffset={2}>
+          <text flexShrink={0}>{"First\nSecond\nThird\nFourth\nFifth"}</text>
+        </TimelineEntry>
+      </TimelineItem>
+    ),
+    { width: 30, height: 9 },
+  )
   const connector = (row: number) => view.captureCharFrame().split("\n")[row]![1]
   try {
     await view.flush()
@@ -25,5 +28,7 @@ test("the final timeline connector stops at the icon and extends again when anot
     setLast(true)
     await view.flush()
     expect(connector(4)).toBe(" ")
-  } finally { view.renderer.destroy() }
+  } finally {
+    view.renderer.destroy()
+  }
 })

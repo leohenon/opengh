@@ -5,7 +5,7 @@ import { join } from "node:path"
 import { terminalHandoff } from "../external-actions"
 
 export async function editMarkdownExternally(renderer: CliRenderer, text: string): Promise<string> {
-  return terminalHandoff(renderer, async launch => {
+  return terminalHandoff(renderer, async (launch) => {
     const directory = await mkdtemp(join(tmpdir(), "opengh-draft-"))
     const path = join(directory, "draft.md")
     try {

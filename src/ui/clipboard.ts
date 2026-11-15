@@ -24,21 +24,34 @@ export function copyText(
     try {
       let copied = false
       let hostError: unknown
-      try { copied = await copyToHost?.(value) ?? false } catch (error) { hostError = error }
+      try {
+        copied = (await copyToHost?.(value)) ?? false
+      } catch (error) {
+        hostError = error
+      }
       if (renderer.isDestroyed || !isActive()) return
       if (!copied && !renderer.copyToClipboardOSC52(value))
         throw hostError ?? new Error(`Clipboard unavailable. Enable OSC 52 or copy the ${label} manually.`)
       return copied
         ? { title: `${label} copied to clipboard`, message: "", duration: 2000, tone: "success" }
-        : { title: `${label} sent to terminal`, message: "Copy could not be confirmed. Your terminal/tmux must allow OSC 52 clipboard requests.", duration: 4000, tone: "info" }
+        : {
+            title: `${label} sent to terminal`,
+            message: "Copy could not be confirmed. Your terminal/tmux must allow OSC 52 clipboard requests.",
+            duration: 4000,
+            tone: "info",
+          }
     } catch (error) {
-      if (!renderer.isDestroyed && isActive()) return {
-        title: `Could not copy ${label}`,
-        message: error instanceof Error ? error.message : "Unknown error",
-      }
+      if (!renderer.isDestroyed && isActive())
+        return {
+          title: `Could not copy ${label}`,
+          message: error instanceof Error ? error.message : "Unknown error",
+        }
     }
   })
-  const settled = write.then(() => {}, () => {})
+  const settled = write.then(
+    () => {},
+    () => {},
+  )
   clipboardWrites.set(renderer, settled)
   void settled.then(() => {
     if (clipboardWrites.get(renderer) === settled) clipboardWrites.delete(renderer)

@@ -1,0 +1,5 @@
+dist/
+site/dist/
+.agents/
+src/theme/assets/
+skills-lock.json

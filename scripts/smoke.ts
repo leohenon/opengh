@@ -17,7 +17,9 @@ const marker = join(cwd, "preload-ran")
 await writeFile(join(cwd, "bunfig.toml"), 'preload = ["./preload.ts"]\n')
 await writeFile(join(cwd, "preload.ts"), `require("node:fs").writeFileSync(${JSON.stringify(marker)}, "")\n`)
 // If .env were loaded, the launch directory override would move the GitHub CLI elsewhere.
-const elsewhere = join(cwd, "elsewhere"), tools = join(cwd, "tools"), ghLog = join(cwd, "gh-cwd")
+const elsewhere = join(cwd, "elsewhere"),
+  tools = join(cwd, "tools"),
+  ghLog = join(cwd, "gh-cwd")
 await Promise.all([mkdir(elsewhere), mkdir(tools)])
 await writeFile(join(cwd, ".env"), `OPENGH_LAUNCH_CWD=${elsewhere}\n`)
 // A stand-in GitHub CLI: records where it ran and fails, so nothing reaches the network.
@@ -26,9 +28,15 @@ await chmod(join(tools, "gh"), 0o755)
 
 function run(...args: string[]) {
   const child = Bun.spawnSync([binary, ...args], {
-    cwd, stdin: "ignore", timeout: 30_000,
+    cwd,
+    stdin: "ignore",
+    timeout: 30_000,
     // OPENGH_SMOKE_PATH adds what a wrapper needs, such as Node.js for the npm launcher.
-    env: { PATH: [tools, process.env.OPENGH_SMOKE_PATH, "/usr/bin:/bin"].filter(Boolean).join(":"), HOME: cwd, XDG_CONFIG_HOME: join(cwd, "config") },
+    env: {
+      PATH: [tools, process.env.OPENGH_SMOKE_PATH, "/usr/bin:/bin"].filter(Boolean).join(":"),
+      HOME: cwd,
+      XDG_CONFIG_HOME: join(cwd, "config"),
+    },
   })
   return { code: child.exitCode, stdout: child.stdout.toString(), stderr: child.stderr.toString() }
 }
@@ -43,16 +51,32 @@ try {
   const help = run("--help")
   check("--help prints usage", help.code === 0 && help.stdout.startsWith("Usage:") && help.stderr === "", help)
   const invalid = run("--not-an-option")
-  check("invalid arguments exit 1 with guidance", invalid.code === 1 && invalid.stderr.startsWith("opengh: ") && invalid.stdout === "", invalid)
+  check(
+    "invalid arguments exit 1 with guidance",
+    invalid.code === 1 && invalid.stderr.startsWith("opengh: ") && invalid.stdout === "",
+    invalid,
+  )
   const updateHelp = run("update", "--help")
-  check("update help works without opening the app", updateHelp.code === 0 && updateHelp.stdout.includes("opengh update") && updateHelp.stderr === "", updateHelp)
+  check(
+    "update help works without opening the app",
+    updateHelp.code === 0 && updateHelp.stdout.includes("opengh update") && updateHelp.stderr === "",
+    updateHelp,
+  )
   const invalidUpdate = run("update", "--inline")
   check("update rejects page options", invalidUpdate.code === 1 && invalidUpdate.stderr.startsWith("opengh: "), invalidUpdate)
   const beforeUpdate = await readFile(binary)
   const update = run("update")
-  check("offline or managed updates fail without replacing the executable", update.code === 1 && update.stderr.startsWith("opengh: ") && (await readFile(binary)).equals(beforeUpdate), update)
+  check(
+    "offline or managed updates fail without replacing the executable",
+    update.code === 1 && update.stderr.startsWith("opengh: ") && (await readFile(binary)).equals(beforeUpdate),
+    update,
+  )
   const inline = run(".", "--inline")
-  check("the GitHub CLI runs as a subprocess and its failure is reported", inline.code === 1 && inline.stderr.startsWith("opengh: ") && inline.stdout === "", inline)
+  check(
+    "the GitHub CLI runs as a subprocess and its failure is reported",
+    inline.code === 1 && inline.stderr.startsWith("opengh: ") && inline.stdout === "",
+    inline,
+  )
   const ghCwd = (await readFile(ghLog, "utf8")).trim()
   check(".env in the working directory is not loaded", ghCwd === cwd, { ghCwd, cwd })
   check("bunfig.toml in the working directory is not loaded", !existsSync(marker), marker)

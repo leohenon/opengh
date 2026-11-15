@@ -31,7 +31,10 @@ export function mouseHover(enabled: () => boolean = () => true, identity?: () =>
         const owner = state.owner
         state.owner = undefined
         owner?.setHovered(false)
-        if (owner && !renderer.isDestroyed) { renderer.setMousePointer("default"); renderer.requestRender() }
+        if (owner && !renderer.isDestroyed) {
+          renderer.setMousePointer("default")
+          renderer.requestRender()
+        }
       },
       keyboard: () => state.clear(true),
       releaseKeyboard() {
@@ -49,12 +52,14 @@ export function mouseHover(enabled: () => boolean = () => true, identity?: () =>
   state.users++
   const [hovered, setHovered] = createSignal(false)
   const owner: HoverOwner = { setHovered }
-  const release = (block = false) => { if (state.owner === owner) state.clear(block) }
+  const release = (block = false) => {
+    if (state.owner === owner) state.clear(block)
+  }
   let previous: unknown
   let initialized = false
   createEffect(() => {
     const key = identity?.()
-    if (!enabled() || initialized && key !== previous) release(true)
+    if (!enabled() || (initialized && key !== previous)) release(true)
     previous = key
     initialized = true
   })
@@ -76,12 +81,18 @@ export function mouseHover(enabled: () => boolean = () => true, identity?: () =>
         state.position = { x: event.x, y: event.y }
         if (samePoint(state.blocked, event)) return
         state.blocked = undefined
-        if (!enabled() || event.isDragging) { state.clear(); return }
+        if (!enabled() || event.isDragging) {
+          state.clear()
+          return
+        }
         if (state.owner !== owner) {
           state.clear()
           state.owner = owner
           setHovered(true)
-          if (!renderer.isDestroyed) { renderer.setMousePointer("pointer"); renderer.requestRender() }
+          if (!renderer.isDestroyed) {
+            renderer.setMousePointer("pointer")
+            renderer.requestRender()
+          }
         }
       },
       onMouseOut(event: MouseEvent) {
@@ -91,14 +102,23 @@ export function mouseHover(enabled: () => boolean = () => true, identity?: () =>
         if (!samePoint(state.blocked, event)) state.blocked = undefined
         release()
       },
-      onMouseDrag() { release(true) },
-      onMouseScroll() { release(true) },
+      onMouseDrag() {
+        release(true)
+      },
+      onMouseScroll() {
+        release(true)
+      },
     },
   }
 }
 
 // Controls activate on release, retain input focus, and never pass a click to a parent row.
-export function mouseClick(action: (event: MouseEvent) => void, enabled: () => boolean = () => true, identity?: () => unknown, hover = mouseHover(enabled, identity)) {
+export function mouseClick(
+  action: (event: MouseEvent) => void,
+  enabled: () => boolean = () => true,
+  identity?: () => unknown,
+  hover = mouseHover(enabled, identity),
+) {
   let press: { x: number; y: number; identity: unknown } | undefined
   return {
     ...hover.handlers,
@@ -112,11 +132,24 @@ export function mouseClick(action: (event: MouseEvent) => void, enabled: () => b
       event.stopPropagation()
       const start = press
       press = undefined
-      if (start && event.button === MouseButton.LEFT && start.x === event.x && start.y === event.y
-        && start.identity === identity?.() && enabled()) action(event)
+      if (
+        start &&
+        event.button === MouseButton.LEFT &&
+        start.x === event.x &&
+        start.y === event.y &&
+        start.identity === identity?.() &&
+        enabled()
+      )
+        action(event)
     },
-    onMouseDrag() { press = undefined; hover.handlers.onMouseDrag() },
-    onMouseScroll() { press = undefined; hover.handlers.onMouseScroll() },
+    onMouseDrag() {
+      press = undefined
+      hover.handlers.onMouseDrag()
+    },
+    onMouseScroll() {
+      press = undefined
+      hover.handlers.onMouseScroll()
+    },
     onMouseOut(event: MouseEvent) {
       // Hover-out for the previous hit target can arrive at a newly pressed control.
       if (press && (press.x !== event.x || press.y !== event.y)) press = undefined
@@ -130,7 +163,9 @@ export type MousePosition = { x: number; y: number }
 // A context gesture never changes normal left-click/selection behavior.
 export function mouseContextMenu(action: (position: MousePosition) => void, enabled: () => boolean, identity?: () => unknown) {
   let press: (MousePosition & { identity: unknown }) | undefined
-  const cancel = () => { press = undefined }
+  const cancel = () => {
+    press = undefined
+  }
   return {
     onMouseDown(event: MouseEvent) {
       cancel()
@@ -145,7 +180,8 @@ export function mouseContextMenu(action: (position: MousePosition) => void, enab
       if (event.button !== MouseButton.RIGHT) return
       event.preventDefault()
       event.stopPropagation()
-      if (start && start.x === event.x && start.y === event.y && start.identity === identity?.() && enabled()) action({ x: event.x, y: event.y })
+      if (start && start.x === event.x && start.y === event.y && start.identity === identity?.() && enabled())
+        action({ x: event.x, y: event.y })
     },
     onMouseDrag: cancel,
     onMouseScroll: cancel,
@@ -156,18 +192,36 @@ export function mouseContextMenu(action: (position: MousePosition) => void, enab
 export function mouseDoubleClick(action: () => void, enabled: () => boolean, identity: () => unknown) {
   let press: (MousePosition & { identity: unknown }) | undefined
   let previous: (MousePosition & { identity: unknown; time: number }) | undefined
-  const cancel = () => { press = undefined; previous = undefined }
+  const cancel = () => {
+    press = undefined
+    previous = undefined
+  }
   return {
     onMouseDown(event: MouseEvent) {
-      if (event.button !== MouseButton.LEFT || !enabled() || event.modifiers.ctrl || event.modifiers.alt || event.modifiers.shift) return cancel()
+      if (event.button !== MouseButton.LEFT || !enabled() || event.modifiers.ctrl || event.modifiers.alt || event.modifiers.shift)
+        return cancel()
       press = { x: event.x, y: event.y, identity: identity() }
     },
     onMouseUp(event: MouseEvent) {
       const start = press
       press = undefined
-      if (!start || event.button !== MouseButton.LEFT || start.x !== event.x || start.y !== event.y || start.identity !== identity() || !enabled()) return cancel()
+      if (
+        !start ||
+        event.button !== MouseButton.LEFT ||
+        start.x !== event.x ||
+        start.y !== event.y ||
+        start.identity !== identity() ||
+        !enabled()
+      )
+        return cancel()
       const now = Date.now()
-      if (previous && previous.identity === start.identity && previous.x === start.x && previous.y === start.y && now - previous.time <= 500) {
+      if (
+        previous &&
+        previous.identity === start.identity &&
+        previous.x === start.x &&
+        previous.y === start.y &&
+        now - previous.time <= 500
+      ) {
         cancel()
         event.stopPropagation()
         action()

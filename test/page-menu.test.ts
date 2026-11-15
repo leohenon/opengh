@@ -6,7 +6,9 @@ function fixture() {
   const input = Object.assign(new PassThrough(), { isTTY: true })
   const output = Object.assign(new PassThrough(), { isTTY: true })
   let text = ""
-  output.on("data", (chunk) => { text += chunk.toString() })
+  output.on("data", (chunk) => {
+    text += chunk.toString()
+  })
   return { input, output, text: () => text }
 }
 

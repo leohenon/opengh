@@ -18,9 +18,10 @@ test("list rows truncate the right edge and resize without horizontal overflow",
   data.pulls.open.value!.items[0]!.author = metadata
   data.runs.value!.items[0]!.title = title
   data.runs.value!.items[0]!.name = metadata
-  const view = await testRender(() => (
-    <App data={data} operations={repositoryOperationsFixture} config={{ ...defaultConfig, showScrollbars: true }} />
-  ), { width: 100, height: 26 })
+  const view = await testRender(
+    () => <App data={data} operations={repositoryOperationsFixture} config={{ ...defaultConfig, showScrollbars: true }} />,
+    { width: 100, height: 26 },
+  )
   try {
     await view.flush()
     for (const width of [100, 40, 26, 59, 60, 100]) {
@@ -47,9 +48,10 @@ test("list rows truncate the right edge and resize without horizontal overflow",
         inspect(view.renderer.root)
       }
     }
-  } finally { view.renderer.destroy() }
+  } finally {
+    view.renderer.destroy()
+  }
 })
-
 
 test("list rows keep metadata, selection, and half-page navigation correct through resizes", async () => {
   const data = structuredClone(githubDataFixture)
@@ -60,9 +62,10 @@ test("list rows keep metadata, selection, and half-page navigation correct throu
     author: "octocat",
   }))
   data.commits.value!.hasMore = false
-  const view = await testRender(() => (
-    <App data={data} operations={repositoryOperationsFixture} config={defaultConfig} />
-  ), { width: 100, height: 20 })
+  const view = await testRender(() => <App data={data} operations={repositoryOperationsFixture} config={defaultConfig} />, {
+    width: 100,
+    height: 20,
+  })
   const rows = () => view.captureCharFrame().split("\n")
   try {
     await view.flush()

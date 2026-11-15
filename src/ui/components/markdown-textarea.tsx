@@ -10,7 +10,15 @@ import { createMentionAutocomplete } from "../mention-autocomplete"
 const highlightRef = 0x4d44
 
 export function MarkdownTextarea(props: ComponentProps<typeof KeyTextarea>) {
-  const [local, rest] = splitProps(props, ["ref", "onContentChange", "syntaxStyle", "onCursorChange", "onKeyDown", "onPaste", "onMouseDown"])
+  const [local, rest] = splitProps(props, [
+    "ref",
+    "onContentChange",
+    "syntaxStyle",
+    "onCursorChange",
+    "onKeyDown",
+    "onPaste",
+    "onMouseDown",
+  ])
   const renderer = useRenderer()
   const { colors, theme } = useTheme()
   const sourceStyle = SyntaxStyle.create(renderer.nativeScene)
@@ -113,29 +121,45 @@ export function MarkdownTextarea(props: ComponentProps<typeof KeyTextarea>) {
       if (target.syntaxStyle === sourceStyle) target.syntaxStyle = null
     }
     // Styles can still be borrowed by an in-flight native frame.
-    void renderer.idle().catch(() => {}).finally(() => sourceStyle.destroy())
+    void renderer
+      .idle()
+      .catch(() => {})
+      .finally(() => sourceStyle.destroy())
   })
 
-  return <><KeyTextarea {...rest} ref={(value) => {
-    setEditor(value)
-    if (typeof local.ref === "function") local.ref(value)
-  }} onContentChange={(event) => {
-    schedule()
-    mentions.refresh()
-    local.onContentChange?.(event)
-  }} onCursorChange={event => {
-    mentions.refresh()
-    local.onCursorChange?.(event)
-  }} onKeyDown={event => {
-    local.onKeyDown?.(event)
-    if (!event.defaultPrevented) mentions.onKeyDown(event)
-  }} onPaste={event => {
-    const target = editor()
-    if (target) local.onPaste?.call(target, event)
-    if (!event.defaultPrevented) mentions.suppress()
-  }} onMouseDown={event => {
-    mentions.dismiss()
-    const target = editor()
-    if (target) local.onMouseDown?.call(target, event)
-  }} />{mentions.overlay}</>
+  return (
+    <>
+      <KeyTextarea
+        {...rest}
+        ref={(value) => {
+          setEditor(value)
+          if (typeof local.ref === "function") local.ref(value)
+        }}
+        onContentChange={(event) => {
+          schedule()
+          mentions.refresh()
+          local.onContentChange?.(event)
+        }}
+        onCursorChange={(event) => {
+          mentions.refresh()
+          local.onCursorChange?.(event)
+        }}
+        onKeyDown={(event) => {
+          local.onKeyDown?.(event)
+          if (!event.defaultPrevented) mentions.onKeyDown(event)
+        }}
+        onPaste={(event) => {
+          const target = editor()
+          if (target) local.onPaste?.call(target, event)
+          if (!event.defaultPrevented) mentions.suppress()
+        }}
+        onMouseDown={(event) => {
+          mentions.dismiss()
+          const target = editor()
+          if (target) local.onMouseDown?.call(target, event)
+        }}
+      />
+      {mentions.overlay}
+    </>
+  )
 }

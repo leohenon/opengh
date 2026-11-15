@@ -8,7 +8,13 @@ import type { IssueComment, PullRequestDetail } from "../src/models"
 import { createRepositorySession } from "../src/repository-session"
 import { Root } from "../src/root"
 import { clickControl } from "./fixtures/mouse"
-import { commitDetailFixture, githubDataFixture, issueCommentsFixture, issueDetailFixture, pullContextFixture } from "./fixtures/github-data"
+import {
+  commitDetailFixture,
+  githubDataFixture,
+  issueCommentsFixture,
+  issueDetailFixture,
+  pullContextFixture,
+} from "./fixtures/github-data"
 
 test("Root PR conversation comments use the shared editor, retain drafts, confirm, retry, and reveal the posted comment", async () => {
   const summary = githubDataFixture.pulls.open.value!.items[0]!
@@ -17,38 +23,96 @@ test("Root PR conversation comments use the shared editor, retain drafts, confir
   let pending = Promise.withResolvers<IssueComment>()
   const calls: Array<{ repository: string; number: number; body: string }> = []
   const mentionQueries: string[] = []
-  const comments = Array.from({ length: 12 }, (_, index) => ({ ...issueCommentsFixture[0]!, id: 1000 + index, body: `Earlier PR comment ${index}` }))
+  const comments = Array.from({ length: 12 }, (_, index) => ({
+    ...issueCommentsFixture[0]!,
+    id: 1000 + index,
+    body: `Earlier PR comment ${index}`,
+  }))
   const session = createRepositorySession({
     metadata: async (repository) => ({ ...githubDataFixture.repo, nameWithOwner: repository, url: `https://github.com/${repository}` }),
     workCounts: async () => ({ issues: 1, pulls: 1 }),
-    documents: async () => [], document: async () => "",
+    documents: async () => [],
+    document: async () => "",
     branches: async () => ({ items: ["main"], hasMore: false }),
-    commits: async () => ({ items: [], hasMore: false }), commitCount: async () => 0,
+    commits: async () => ({ items: [], hasMore: false }),
+    commitCount: async () => 0,
     commit: async () => commitDetailFixture,
     issues: async (_repository, state) => ({ items: githubDataFixture.issues[state].value!.items, hasMore: false }),
     pulls: async (_repository, state) => ({ items: githubDataFixture.pulls[state].value!.items, hasMore: false }),
     runs: async () => ({ items: [], hasMore: false }),
     issue: async () => issueDetailFixture,
-    issueComments: async () => ({ items: comments, hasMore: false }), issueReferences: async () => [],
-    pull: async (): Promise<PullRequestDetail> => ({ ...summary, url: `${githubDataFixture.repo.url}/pull/${number}`,
-      body: "PR description", nodeId: "PR_comment_fixture", canReact: true, locked: false, permissions: { comment: allowed },
-      updatedAt: summary.createdAt, baseBranch: "main", headBranch: "next", additions: 0, deletions: 0,
-      changedFiles: 0, commitCount: 0, commentCount: comments.length,
-      labels: [], assignees: [], reviewers: [], mergeable: null }),
-    pullCommits: async () => [], pullContext: async () => pullContextFixture,
-    mentionableUsers: async (_repository, query) => { mentionQueries.push(query); return ["remote-user"] },
-    createIssueComment: async (repository, number, body) => { calls.push({ repository: repository.nameWithOwner, number, body }); return pending.promise },
+    issueComments: async () => ({ items: comments, hasMore: false }),
+    issueReferences: async () => [],
+    pull: async (): Promise<PullRequestDetail> => ({
+      ...summary,
+      url: `${githubDataFixture.repo.url}/pull/${number}`,
+      body: "PR description",
+      nodeId: "PR_comment_fixture",
+      canReact: true,
+      locked: false,
+      permissions: { comment: allowed },
+      updatedAt: summary.createdAt,
+      baseBranch: "main",
+      headBranch: "next",
+      additions: 0,
+      deletions: 0,
+      changedFiles: 0,
+      commitCount: 0,
+      commentCount: comments.length,
+      labels: [],
+      assignees: [],
+      reviewers: [],
+      mergeable: null,
+    }),
+    pullCommits: async () => [],
+    pullContext: async () => pullContextFixture,
+    mentionableUsers: async (_repository, query) => {
+      mentionQueries.push(query)
+      return ["remote-user"]
+    },
+    createIssueComment: async (repository, number, body) => {
+      calls.push({ repository: repository.nameWithOwner, number, body })
+      return pending.promise
+    },
   })
-  const view = await testRender(() => <Root cwd="/fixture" services={{ createPullReviewSession: createTestReviewSession,
-    resolveRepository: async () => githubDataFixture.repo.nameWithOwner, resolveLocalRepository: async () => undefined,
-    loadRecentRepositories: async () => [], rememberRepository: async () => {},
-    loadConfig: async () => ({ ...defaultConfig, showStatusBarHints: true, showScrollbars: false, keybindings: { "issue.comment": ["f8"] } }), saveConfig: async () => {},
-    createRepositorySession: () => session, copyToHostClipboard: async () => true,
-    openGitHub: async () => { throw new Error("Unexpected browser action") },
-    runCommand: () => { throw new Error("Unexpected local command") },
-  }} />, { width: 120, height: 40 })
-  const settle = async () => { await Bun.sleep(35); await view.flush() }
-  const dismiss = async () => { await view.mockMouse.click(0, 0); await settle() }
+  const view = await testRender(
+    () => (
+      <Root
+        cwd="/fixture"
+        services={{
+          createPullReviewSession: createTestReviewSession,
+          resolveRepository: async () => githubDataFixture.repo.nameWithOwner,
+          resolveLocalRepository: async () => undefined,
+          loadRecentRepositories: async () => [],
+          rememberRepository: async () => {},
+          loadConfig: async () => ({
+            ...defaultConfig,
+            showStatusBarHints: true,
+            showScrollbars: false,
+            keybindings: { "issue.comment": ["f8"] },
+          }),
+          saveConfig: async () => {},
+          createRepositorySession: () => session,
+          copyToHostClipboard: async () => true,
+          openGitHub: async () => {
+            throw new Error("Unexpected browser action")
+          },
+          runCommand: () => {
+            throw new Error("Unexpected local command")
+          },
+        }}
+      />
+    ),
+    { width: 120, height: 40 },
+  )
+  const settle = async () => {
+    await Bun.sleep(35)
+    await view.flush()
+  }
+  const dismiss = async () => {
+    await view.mockMouse.click(0, 0)
+    await settle()
+  }
   const right = async (id: string) => {
     await view.flush()
     const target = view.renderer.root.findDescendantById(id)!
@@ -68,19 +132,23 @@ test("Root PR conversation comments use the shared editor, retain drafts, confir
     expect(view.renderer.root.findDescendantById("issue-comment-writer")).toBeUndefined()
     expect(calls).toEqual([])
     await view.mockInput.typeText("@remote")
-    await Bun.sleep(210); await settle()
+    await Bun.sleep(210)
+    await settle()
     expect(view.renderer.root.findDescendantById("mention-option:remote-user")).toBeDefined()
-    view.mockInput.pressEnter(); await settle()
+    view.mockInput.pressEnter()
+    await settle()
     expect(session.issueAction(number, "pull").body).toBe("@remote-user ")
     expect(mentionQueries).toEqual(["remote"])
     expect(calls).toEqual([])
-    view.mockInput.pressKey("d", { ctrl: true }); await settle()
+    view.mockInput.pressKey("d", { ctrl: true })
+    await settle()
     const body = "PR conversation draft qrs?h1l,"
     await view.mockInput.typeText(body)
     await settle()
     expect(session.issueAction(number, "pull").body).toBe(body)
     expect(session.issueAction(number).body).toBe("")
-    view.mockInput.pressEscape(); await settle()
+    view.mockInput.pressEscape()
+    await settle()
     expect(view.captureCharFrame()).toContain("Draft saved · Resume")
     view.mockInput.pressKey("F8")
     await settle()
@@ -95,7 +163,8 @@ test("Root PR conversation comments use the shared editor, retain drafts, confir
     await dismiss()
     expect(calls).toEqual([{ repository: githubDataFixture.repo.nameWithOwner, number, body }])
     expect(session.issueAction(number, "pull").operation).toEqual({ status: "loading" })
-    await Bun.sleep(220); await view.flush()
+    await Bun.sleep(220)
+    await view.flush()
     expect(view.captureCharFrame()).toContain("Posting comment")
     expect(view.renderer.root.findDescendantById("pull-comment-post")).toBeUndefined()
     expect(view.captureCharFrame()).toContain("Draft saved · Resume")
@@ -104,7 +173,8 @@ test("Root PR conversation comments use the shared editor, retain drafts, confir
     expect(session.issueAction(number, "pull").body).toBe(body)
     expect(view.captureCharFrame()).toContain("Forbidden")
     pending = Promise.withResolvers<IssueComment>()
-    await clickControl(view, "pull-comment-resume"); await settle()
+    await clickControl(view, "pull-comment-resume")
+    await settle()
     await clickControl(view, "pull-comment-post")
     await clickControl(view, "issue-action-confirm")
     expect(calls).toHaveLength(2)
@@ -133,18 +203,26 @@ test("Root PR conversation comments use the shared editor, retain drafts, confir
     view.mockInput.pressKey("F8")
     await settle()
     await view.mockInput.typeText("Retained PR draft")
-    view.mockInput.pressEscape(); await settle()
-    view.mockInput.pressKey("3"); view.mockInput.pressEnter(); await settle()
-    view.mockInput.pressKey("F8"); await settle()
+    view.mockInput.pressEscape()
+    await settle()
+    view.mockInput.pressKey("3")
+    view.mockInput.pressEnter()
+    await settle()
+    view.mockInput.pressKey("F8")
+    await settle()
     await view.mockInput.typeText("Separate issue draft")
-    view.mockInput.pressEscape(); await settle()
+    view.mockInput.pressEscape()
+    await settle()
     expect(session.issueAction(issueDetailFixture.number).body).toBe("Separate issue draft")
     expect(session.issueAction(number, "pull").body).toBe("Retained PR draft")
-    view.mockInput.pressKey("4"); await settle()
-    view.mockInput.pressKey("F8"); await settle()
+    view.mockInput.pressKey("4")
+    await settle()
+    view.mockInput.pressKey("F8")
+    await settle()
     expect(view.renderer.root.findDescendantById("issue-comment-editor")).toBeUndefined()
     expect(view.captureCharFrame()).toContain("Retained PR draft")
-    view.mockInput.pressKey("d", { ctrl: true }); await settle()
+    view.mockInput.pressKey("d", { ctrl: true })
+    await settle()
     await view.mockInput.typeText("Late PR comment")
     pending = Promise.withResolvers<IssueComment>()
     await clickControl(view, "pull-comment-post")
@@ -160,5 +238,7 @@ test("Root PR conversation comments use the shared editor, retain drafts, confir
     expect(view.renderer.root.findDescendantById("pull-comment-post")).toBeUndefined()
     expect(session.issueAction(number, "pull").body).toBe("Replacement PR draft")
     expect(session.pullDetail()).toBeUndefined()
-  } finally { view.renderer.destroy() }
+  } finally {
+    view.renderer.destroy()
+  }
 })
