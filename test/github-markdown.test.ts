@@ -262,6 +262,17 @@ other/repo@abc1234 @hidden
       .toBe("▧ Unsafe")
   })
 
+  test("standalone images keep descriptions separate from filename fallbacks", () => {
+    expect(normalizeGitHubMarkdown('![](images/screen%20shot.png?token=secret)'))
+      .toBe('![](images/screen%20shot.png?token=secret "screen shot.png")')
+    expect(normalizeGitHubMarkdown('[![](images/screen.png)](https://example.com/view)'))
+      .toBe('![](https://example.com/view "screen.png")')
+    expect(normalizeGitHubMarkdown('![](https://example.com/)'))
+      .toBe('![](https://example.com/ "open image")')
+    expect(normalizeGitHubMarkdown('<img alt=" " title="Useful description" src="screen.png">'))
+      .toBe('![Useful description](screen.png)')
+  })
+
   test("issue attachments preserve branding and badge images as links", () => {
     const markdown = normalizeGitHubMarkdown(`![Broken logo](https://example.com/logo.png)\n\n![Build status](https://img.shields.io/build/status)\n\n![Qdrant](https://example.com/docs/logo.svg)`, { preserveImages: true })
     expect(markdown).toContain("▧ [Broken logo](https://example.com/logo.png)")

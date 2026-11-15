@@ -12,6 +12,7 @@ import remarkStringify from "remark-stringify"
 import { unified } from "unified"
 import { SKIP, visit } from "unist-util-visit"
 import { referenceLinkChunks } from "./reference-links"
+import { imageFilename } from "./markdown-images"
 import { anchorMarker, sourceLineAnchor, type MarkdownCodeSource, type MarkdownSourceMap } from "./markdown-anchors"
 
 export type GitHubMarkdownContext = {
@@ -354,7 +355,12 @@ function terminalMedia(options: { preserveImages?: boolean } = {}) {
     }
     const caption = (image: Element, label: string, target: string, element = image): ElementContent => {
       if (!isDecorativeImage(image, label) && standalone(element) && safeTarget(target)) {
-        return { type: "element", tagName: "img", properties: { src: safeTarget(target), alt: label }, children: [] }
+        const description = property(image, "alt").trim() || property(image, "title").trim()
+        return { type: "element", tagName: "img", properties: {
+          src: safeTarget(target), alt: description,
+          // A linked image opens its enclosing link, but its filename comes from the image source.
+          ...(!description ? { title: imageFilename(property(image, "src") || target) || "open image" } : {}),
+        }, children: [] }
       }
       return imageCaption(label, target)
     }

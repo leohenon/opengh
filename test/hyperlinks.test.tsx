@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test"
-import { CodeRenderable, NativeSession, RGBA, ScrollBoxRenderable, TextAttributes, type Renderable } from "@opentui/core"
+import { CodeRenderable, measureEditText, NativeSession, RGBA, ScrollBoxRenderable, TextAttributes, type Renderable } from "@opentui/core"
 import { Writable } from "node:stream"
 import { testRender } from "@opentui/solid"
 import { createSignal, Show } from "solid-js"
@@ -18,6 +18,7 @@ import { defaultConfig } from "../src/config"
 import { App } from "../src/ui/app"
 import { mouseClick } from "../src/ui/mouse"
 import { waitForText } from "./fixtures/wait"
+import { fitImageFilename } from "../src/ui/markdown-images"
 import { githubDataFixture, repositoryOperationsFixture } from "./fixtures/github-data"
 
 type View = Awaited<ReturnType<typeof testRender>>
@@ -91,6 +92,36 @@ test("standalone image blocks wrap neutral clickable captions in rich and minima
         expect(opened.at(-1)).toBe(url)
       }
     }
+  } finally { view.renderer.destroy() }
+})
+
+test("image filename fallbacks truncate to one line and retain full clickable destinations after resizing", async () => {
+  const [content, setContent] = createSignal("")
+  const opened: string[] = []
+  const view = await testRender(() => <ThemeProvider name="github"><HyperlinkProvider identity="filename" onOpen={(url) => { opened.push(url) }}>
+    <HyperlinkSurface><MarkdownSample content={content()} /></HyperlinkSurface>
+  </HyperlinkProvider></ThemeProvider>, { width: 80, height: 12 })
+  try {
+    for (const name of ["a-very-long-unbroken-screenshot-filename-for-review.png", "界".repeat(20) + ".png", "👩‍💻".repeat(10) + ".png"]) {
+      const url = `https://example.com/images/${encodeURIComponent(name)}?token=secret#preview`
+      setContent(`![](${url})`)
+      for (const width of [80, 28, 12, 80]) {
+        view.resize(width, 12)
+        await settleMarkdown(view)
+        const cells = linkCells(view, url)
+        expect(new Set(cells.map(({ y }) => y)).size).toBe(1)
+        const caption = view.captureCharFrame().split("\n")[cells[0]!.y]!.trim().replace(/^│ /, "")
+        expect(caption).toBe(fitImageFilename(name, width - 2, (text) => measureEditText(text, { widthMethod: view.renderer.widthMethod })))
+        expect(caption.endsWith(".png")).toBe(true)
+        expect(view.captureCharFrame()).not.toContain("secret")
+        await view.mockMouse.click(cells[0]!.x, cells[0]!.y)
+        expect(opened.at(-1)).toBe(url)
+      }
+    }
+    setContent("![](https://example.com/)")
+    await settleMarkdown(view)
+    expect(view.captureCharFrame()).toContain("│ open image")
+    linkCells(view, "https://example.com/")
   } finally { view.renderer.destroy() }
 })
 

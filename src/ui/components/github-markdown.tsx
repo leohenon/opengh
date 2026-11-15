@@ -1,8 +1,9 @@
-import { BoxRenderable, CodeRenderable, MarkdownRenderable, StyledText, TextRenderable, TextTableRenderable, Yoga, type MarkdownOptions, type Renderable, type SyntaxStyle } from "@opentui/core"
+import { BoxRenderable, CodeRenderable, MarkdownRenderable, measureEditText, StyledText, TextRenderable, TextTableRenderable, Yoga, type MarkdownOptions, type Renderable, type SyntaxStyle } from "@opentui/core"
 import { useRenderer } from "@opentui/solid"
 import { createMemo, onCleanup, onMount, Show } from "solid-js"
 import { assertGitHubMarkdownSource, gitHubMarkdownFallback, normalizeGitHubMarkdown, type GitHubMarkdownContext } from "../github-markdown"
 import { compactLinkChunks, compactMarkdownLinks } from "../markdown-links"
+import { fitImageFilename } from "../markdown-images"
 import "../markdown-parsers"
 import { useTheme } from "../theme"
 import { READING_WIDTH } from "../detail-layout"
@@ -245,10 +246,18 @@ export function GitHubMarkdown(props: { content: string; syntaxStyle: SyntaxStyl
           border: ["left"], borderColor: border, paddingLeft: 1,
         })
         panel.add(new TextRenderable(renderer, { content: "image", fg: muted, height: 1 }))
+        const description = stripAnchorMarkers(image.text).trim()
+        const filename = image.title || "open image"
+        const linked = (text: string) => new StyledText([{ __isChunk: true, text, link: { url: image.href } }])
         const caption = new TextRenderable(renderer, {
-          content: new StyledText([{ __isChunk: true, text: stripAnchorMarkers(image.text), link: { url: image.href } }]),
-          fg: foreground, wrapMode: "word", width: "100%", minWidth: 0, flexShrink: 0,
+          content: linked(description || filename),
+          fg: foreground, wrapMode: description ? "word" : "none", width: "100%", minWidth: 0, flexShrink: 0,
+          ...(!description ? { height: 1 } : {}),
         })
+        if (!description) panel.onSizeChange = () => {
+          caption.content = linked(fitImageFilename(filename, Math.max(0, panel.width - 2),
+            (text) => measureEditText(text, { widthMethod: renderer.widthMethod })))
+        }
         panel.add(caption)
         for (const { id } of markers) anchorTargets.set(id, { node: caption, position: { line: 0, column: 0 } })
         block = panel
