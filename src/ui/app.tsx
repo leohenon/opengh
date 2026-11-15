@@ -1479,11 +1479,11 @@ function AppContent(props: AppProps) {
     if (overlay() === "settings") return settingsHint()
     if (overlay() === "command") return commandHint()
     if (overlay() === "branch-picker" || overlay() === "switch-repo") return hint(...picker)
-    if (overlay() === "issue-references") return hint(open, ["references.switchTab", "switch tabs"], copy, close)
+    if (overlay() === "issue-references") return hint(open, close, ["references.switchTab", "switch tabs"], copy)
     if (editingConversationComment()) return conversationCommentHint()
     // Arrays are priority lists, identical at every terminal width. The footer
     // fits whole hints without hiding recovery/primary actions behind copy/open.
-    const common: HintEntry[] = [...(focus() ? [["global.openFullApp", "full app"] as const] : []), ["search.start", "search"], ...(props.onSwitchRepository ? [["global.switchRepository", "switch repo"] as const] : []), help]
+    const common: HintEntry[] = [...(focus() ? [["global.openFullApp", "full app"] as const] : []), ["search.start", "search"], help, ...(props.onSwitchRepository ? [["global.switchRepository", "switch repo"] as const] : [])]
     const resource = activeResource()
     if (resource?.status === "loading" && resource.value === undefined) {
       const detail = diffTarget() || activeRunId() || activeCommitSha() || activeIssueNumber() || activePullNumber()
@@ -1495,8 +1495,8 @@ function AppContent(props: AppProps) {
     const more = (available: boolean | undefined): HintEntry[] => available ? [["navigation.activate", "load more"]] : []
     const list = (hasItems: boolean): HintEntry[] => hasItems ? [open] : []
     if (diffTarget()) {
-      if (inlineDraftFocused()[page()]) return hint(["dialog.submit", "post"], ["dialog.togglePreview", "preview"],
-        ["dialog.toggleExpanded", "expand"], ["dialog.externalEditor", "editor"], ["dialog.discard", "clear"], ["dialog.close", "cancel"])
+      if (inlineDraftFocused()[page()]) return hint(["dialog.submit", "post"], ["dialog.close", "cancel"], ["dialog.togglePreview", "preview"],
+        ["dialog.toggleExpanded", "expand"], ["dialog.discard", "clear"], ["dialog.externalEditor", "editor"])
       const failed = resource?.status === "error"
       const recovery: HintEntry[] = failed ? [...retry, ["navigation.activate", "file list"]]
         : canRefresh && diffResource().value?.kind === "files" ? [["view.refresh", "retry full diff"]] : []
@@ -1505,45 +1505,47 @@ function AppContent(props: AppProps) {
       return hint(back, ...recovery,
         [["diff.previousFile", "diff.nextFile"], "files"],
         [["diff.previousHunk", "diff.nextHunk"], "hunks"],
-        ...(failed ? [] : [["diff.toggleLayout", "layout"], ["diff.toggleWrap", "wrap"]] as const),
+        ...common,
         ["diff.toggleFiles", "toggle files"], ["diff.filterFiles", "filter files"],
-        ...comments, ["diff.openViewer", "viewer"], ...refresh, github, ...common)
+        ...comments,
+        ...(failed ? [] : [["diff.toggleLayout", "layout"], ["diff.toggleWrap", "wrap"]] as const),
+        ...refresh, github, ["diff.openViewer", "viewer"])
     }
     if (activeRunId()) return hint(back, ...retry,
-      ...more(runDetail().jobs.status !== "loading" && runDetail().jobs.value?.hasMore), ...refresh, github, copy, ...common)
+      ...more(runDetail().jobs.status !== "loading" && runDetail().jobs.value?.hasMore), ...refresh, ...common, github, copy)
     if (activeCommitSha()) return hint(back, ...retry,
-      ...more(commitResource().status !== "loading" && commitResource().value?.files.hasMore), diff,
-      ...(commitMenuItems().length ? [["detail.references", "references"] as const] : []), ...refresh, github, copy, ...common)
+      diff, ...more(commitResource().status !== "loading" && commitResource().value?.files.hasMore),
+      ...(commitMenuItems().length ? [["detail.references", "references"] as const] : []), ...refresh, ...common, github, copy)
     if (activeIssueNumber()) return hint(back, ...retry,
-      ...more(issueDetail().comments.status !== "loading" && issueDetail().comments.value?.hasMore),
       ...(canComment() ? [["issue.comment", "comment"] as const] : []),
       ...(hasIssueActions() ? [["issue.actions", "actions"] as const] : []),
+      ...more(issueDetail().comments.status !== "loading" && issueDetail().comments.value?.hasMore),
       timeline, ...(issueMenuItems().length ? [["detail.references", "references"] as const] : []),
-      ...refresh, github, copy, ...common)
+      ...refresh, ...common, github, copy)
     if (activePullNumber()) return hint(back, ...retry,
+      diff, ...(canComment() ? [["issue.comment", "comment"] as const] : []),
+      ...(hasIssueActions() ? [["issue.actions", "actions"] as const] : []),
       ...more(pullDetail().comments.status !== "loading" && pullDetail().comments.value?.hasMore),
-      ...(canComment() ? [["issue.comment", "comment"] as const] : []),
-      ...(hasIssueActions() ? [["issue.actions", "actions"] as const] : []), diff,
       timeline, ...(pullMenuItems().length ? [["detail.references", "references"] as const] : []),
-      ...refresh, github, copy, ...common)
+      ...refresh, ...common, github, copy)
     if (page() === "actions") {
       const hasItems = !!data().runs.value?.items.length
-      return hint(...retry, ...list(hasItems), ...refresh, github, ...(hasItems ? [copy] : []), ...common)
+      return hint(...retry, ...list(hasItems), ...refresh, ...common, github, ...(hasItems ? [copy] : []))
     }
     if (page() === "pulls" || page() === "issues") {
       const hasItems = !!(page() === "pulls" ? pulls() : issues()).value?.items.length
       return hint(...retry, ...list(hasItems), ["work.toggleState", "open/closed"],
-        ...(page() === "pulls" && hasItems ? [diff] : []), ...refresh, github, ...(hasItems ? [copy] : []), ...common)
+        ...(page() === "pulls" && hasItems ? [diff] : []), ...refresh, ...common, github, ...(hasItems ? [copy] : []))
     }
     if (page() === "commits") {
       const hasItems = !!data().commits.value?.items.length
       return hint(...retry, ...list(hasItems), ["commits.chooseBranch", "branch"], ...(hasItems ? [diff] : []),
-        ...refresh, github, ...(hasItems ? [copy] : []), ...common)
+        ...refresh, ...common, github, ...(hasItems ? [copy] : []))
     }
     if (page() === "overview") return hint(...retry,
       ...(overviewDocuments().length > 1 ? [["overview.nextDocument", "documents"] as const] : []),
       ["overview.toggleSidebar", "sidebar"],
-      ...(canClone() ? [["command.clone", "clone"] as const] : []), ...refresh, github, copy, ...common)
+      ...(canClone() ? [["command.clone", "clone"] as const] : []), ...refresh, ...common, github, copy)
     return hint(...common)
   }
 

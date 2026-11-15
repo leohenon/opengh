@@ -17,7 +17,7 @@ export function InlineCommentRetryDialog(props: {
   const { colors } = useTheme()
   const keys = useKeybindings()
   let scroll: ScrollBoxRenderable | undefined
-  createEffect(() => props.onHintChange(keys.hints(["dialog.confirm", "retry"], ["item.open", "GitHub"], ["dialog.close", "cancel"])))
+  createEffect(() => props.onHintChange(keys.hints(["dialog.confirm", "retry"], ["dialog.close", "cancel"], ["item.open", "GitHub"])))
   onCleanup(() => props.onHintChange(undefined))
   useKeyActions({ "dialog.confirm": props.onConfirm, "dialog.close": props.onClose, "item.open": props.onOpenGitHub,
     "navigation.up": () => scroll?.scrollBy(-1), "navigation.down": () => scroll?.scrollBy(1),

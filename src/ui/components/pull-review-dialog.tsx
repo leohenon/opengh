@@ -75,9 +75,9 @@ function ReviewEditor(props: ComposerPresentation & {
   }
   createEffect(() => props.onHintChange(confirming()
     ? keys.hints(["dialog.confirm", "confirm"], ["dialog.close", "back"])
-    : keys.hints(...(props.allowEmpty || body().trim() ? [["dialog.submit", "post"] as const] : []), ["dialog.togglePreview", composer.preview() ? "write" : "preview"],
-      ["dialog.toggleExpanded", composer.expanded() ? "restore" : "expand"], ["dialog.externalEditor", "editor"],
-      ["dialog.discard", "clear"], ["dialog.close", "back"])))
+    : keys.hints(...(props.allowEmpty || body().trim() ? [["dialog.submit", "post"] as const] : []), ["dialog.close", "back"], ["dialog.togglePreview", composer.preview() ? "write" : "preview"],
+      ["dialog.toggleExpanded", composer.expanded() ? "restore" : "expand"],
+      ["dialog.discard", "clear"], ["dialog.externalEditor", "editor"])))
   onCleanup(() => props.onHintChange(undefined))
   useKeyActions({ "dialog.close": close, "dialog.confirm": confirm }, { when: confirming, priority: 180, modal: true })
   useKeyActions({
@@ -262,10 +262,11 @@ export function PullReviewDialog(props: PullReviewDialogProps) {
       ["dialog.close", "close"])
     : keys.hints(
       ...(canSubmit() || canUseHead() || canClearLegacy() ? [["dialog.submit", canSubmit() ? "submit review" : canUseHead() ? "use current commit" : "review old comments"] as const] : []),
+      ["dialog.close", "back"],
       ["dialog.togglePreview", composer.preview() ? "write" : "preview"],
       ["dialog.toggleExpanded", composer.expanded() ? "restore" : "expand"],
-      ...(draft() && !locked() ? [["dialog.externalEditor", "editor"] as const] : []),
-      ...(draft() && !locked() ? [["dialog.discard", "clear"] as const] : []), ["dialog.close", "back"])))
+      ...(draft() && !locked() ? [["dialog.discard", "clear"] as const] : []),
+      ...(draft() && !locked() ? [["dialog.externalEditor", "editor"] as const] : []))))
   onCleanup(() => props.onHintChange(undefined))
   useKeyActions({}, { when: busy, priority: 200, modal: true })
   useKeyActions({

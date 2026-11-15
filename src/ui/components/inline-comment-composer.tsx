@@ -61,8 +61,8 @@ export function InlineCommentComposer(props: {
   const clear = () => { if (!blocked() && editor && !editor.isDestroyed) replaceEditorText(editor, "") }
   const cancel = () => { if (!blocked()) props.onCancel() }
   createEffect(() => props.onHintChange?.(props.active && !props.disabled ? keys.hints(
-    ...(props.canPost === false ? [] : [["dialog.submit", "post"] as const]), ["dialog.togglePreview", composer.preview() ? "write" : "preview"],
-    ["dialog.toggleExpanded", "expand"], ["dialog.externalEditor", "editor"], ["dialog.discard", "clear"], ["dialog.close", "keep draft"],
+    ...(props.canPost === false ? [] : [["dialog.submit", "post"] as const]), ["dialog.close", "keep draft"], ["dialog.togglePreview", composer.preview() ? "write" : "preview"],
+    ["dialog.toggleExpanded", "expand"], ["dialog.discard", "clear"], ["dialog.externalEditor", "editor"],
   ) : undefined))
   onMount(() => { editor?.gotoBufferEnd(); measure() }) // Reopened drafts continue where they left off.
   createEffect(on(composer.preview, (preview) => { if (preview) props.onGrow?.() }, { defer: true }))

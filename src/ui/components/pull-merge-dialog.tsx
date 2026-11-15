@@ -90,7 +90,7 @@ export function PullMergeDialog(props: {
     ? keys.hints(["dialog.confirm", "merge"], ["dialog.close", "back"])
     : stage() === "edit" ? loading() ? keys.hints(["dialog.close", "back"])
       : loadError() ? keys.hints(["dialog.submit", "retry"], ["dialog.close", "back"])
-      : keys.hints(["dialog.submit", "review"], [["dialog.nextField", "dialog.previousField"], "field"], ["dialog.close", "back"])
+      : keys.hints(["dialog.submit", "review"], ["dialog.close", "back"], [["dialog.nextField", "dialog.previousField"], "field"])
     : keys.hints(["navigation.activate", "select"], ["dialog.close", "cancel"])))
   onCleanup(() => { disposed = true; props.onHintChange(undefined) })
   useKeyActions({

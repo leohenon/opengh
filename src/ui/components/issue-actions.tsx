@@ -253,15 +253,15 @@ export function IssueActionDialog(props: {
   createEffect(() => props.onHintChange(pending() ? "Saving…"
     : confirmSubmit() ? keys.hints(["dialog.confirm", "confirm"], ["dialog.close", "back"])
     : stage() === "reason" ? keys.hints(["navigation.activate", "select"], ["dialog.close", "close"])
-    : retry() ? keys.hints(["dialog.submit", "retry"], ["dialog.discard", "discard"], ["dialog.close", "back"])
-    : props.kind === "duplicate" ? keys.hints([["dialog.confirm", "dialog.submit"], "review"], ["dialog.discard", "discard"], ["dialog.close", "back"])
+    : retry() ? keys.hints(["dialog.submit", "retry"], ["dialog.close", "back"], ["dialog.discard", "discard"])
+    : props.kind === "duplicate" ? keys.hints([["dialog.confirm", "dialog.submit"], "review"], ["dialog.close", "back"], ["dialog.discard", "discard"])
     : keys.hints(
       ...(props.submissionAllowed === false ? [] : [["dialog.submit", props.kind === "comment" ? "post" : "submit"] as const]),
+      ["dialog.close", hasCloseReason() ? "back" : "keep draft"],
       ["dialog.togglePreview", previewing() ? "write" : "preview"],
       ["dialog.toggleExpanded", expanded() ? "restore" : "expand"],
-      ["dialog.externalEditor", "editor"],
       ["dialog.discard", "clear"],
-      ["dialog.close", hasCloseReason() ? "back" : "keep draft"],
+      ["dialog.externalEditor", "editor"],
     )))
   onCleanup(() => props.onHintChange(undefined))
 

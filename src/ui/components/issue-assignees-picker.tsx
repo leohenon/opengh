@@ -101,9 +101,9 @@ export function IssueAssigneesPicker(props: {
   createEffect(() => props.onHintChange(pending() ? "Saving assignees…" : confirming()
     ? keys.hints(["dialog.confirm", "confirm"], ["dialog.close", "back"]) : keys.hints(
       ["dialog.submit", "save"],
+      ["dialog.close", "cancel"],
       ...(filtered()[currentRow()] || !loading() ? [["picker.accept", filtered()[currentRow()] ? "toggle" : props.users?.status === "error" ? "retry users" : "load users"] as const] : []),
-      ...(props.onReload && !loading() ? [["picker.reload", "reload users"] as const] : []),
-      ["dialog.close", "cancel"])))
+      ...(props.onReload && !loading() ? [["picker.reload", "reload users"] as const] : []))))
   onCleanup(() => props.onHintChange(undefined))
   usePaste((event) => {
     if (blocked()) { event.preventDefault(); event.stopPropagation() }
