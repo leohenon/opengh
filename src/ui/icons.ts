@@ -1,23 +1,22 @@
-import type { Page } from "../navigation"
+import type { Page } from "../navigation";
 
-// Nerd Font Octicons: keep GitHub entity and workflow states visually consistent.
 export const pullRequestIcons = {
   open: "\uf407",
   merged: "\uf419",
   closed: "\uf4dc",
   draft: "\uf4dd",
-} as const
+} as const;
 
 export const issueIcons = {
   open: "◉",
   closed: "✓",
-} as const
+} as const;
 
 export const repositoryIcons = {
   fork: "\uf402",
   star: "\uf41e",
   watching: "\uf441",
-} as const
+} as const;
 
 export const workflowIcons = {
   success: "\uf49e",
@@ -27,60 +26,124 @@ export const workflowIcons = {
   clock: "\uf43a",
   attention: "\uf421",
   neutral: "\uf48b",
-} as const
+} as const;
 
 export type IconSet = {
-  navigation: Record<Page, string>
-  pullRequest: { open: string; merged: string; closed: string; draft: string }
-  issue: { open: string; closed: string }
-  repository: { fork: string; star: string; watching: string }
-  workflow: { success: string; failure: string; cancelled: string; skipped: string; clock: string; attention: string; neutral: string }
-  document: { readme: string; conduct: string; contributing: string; license: string; security: string; file: string }
-  user: string
-  comment: string
-  commit: string
-  branch: string
-}
+  navigation: Record<Page, string>;
+  pullRequest: { open: string; merged: string; closed: string; draft: string };
+  issue: { open: string; closed: string };
+  repository: { fork: string; star: string; watching: string };
+  workflow: {
+    success: string;
+    failure: string;
+    cancelled: string;
+    skipped: string;
+    clock: string;
+    attention: string;
+    neutral: string;
+  };
+  document: {
+    readme: string;
+    conduct: string;
+    contributing: string;
+    license: string;
+    security: string;
+    file: string;
+  };
+  user: string;
+  comment: string;
+  commit: string;
+  branch: string;
+};
 
 export const nerdIcons: IconSet = {
-  navigation: { overview: "\uf401", commits: "\uf417", issues: "\uf41b", pulls: "\uf407", actions: "\uf500" },
+  navigation: {
+    overview: "\uf401",
+    commits: "\uf417",
+    issues: "\uf41b",
+    pulls: "\uf407",
+    actions: "\uf500",
+  },
   pullRequest: pullRequestIcons,
   issue: issueIcons,
   repository: repositoryIcons,
   workflow: workflowIcons,
-  document: { readme: "\uf405", conduct: "\uf4ae", contributing: "\uf4fd", license: "\uf495", security: "\uf49c", file: "\uf4a5" },
+  document: {
+    readme: "\uf405",
+    conduct: "\uf4ae",
+    contributing: "\uf4fd",
+    license: "\uf495",
+    security: "\uf49c",
+    file: "\uf4a5",
+  },
   user: "\uf007",
   comment: "\uf075",
   commit: "\uf417",
   branch: "\uf418",
-}
+};
 
 export const unicodeIcons: IconSet = {
-  navigation: { overview: "≡", commits: "◇", issues: "◉", pulls: "⑂", actions: "▷" },
+  navigation: {
+    overview: "≡",
+    commits: "◇",
+    issues: "◉",
+    pulls: "⑂",
+    actions: "▷",
+  },
   pullRequest: { open: "⑂", merged: "⑃", closed: "×", draft: "◌" },
   issue: issueIcons,
   repository: { fork: "⑂", star: "☆", watching: "◉" },
-  workflow: { success: "✓", failure: "×", cancelled: "⊘", skipped: "↷", clock: "◷", attention: "!", neutral: "−" },
-  document: { readme: "≡", conduct: "♡", contributing: "+", license: "⚖", security: "⛨", file: "▧" },
-  user: "●",
-  comment: "💬",
+  workflow: {
+    success: "✓",
+    failure: "×",
+    cancelled: "⊘",
+    skipped: "↷",
+    clock: "◷",
+    attention: "!",
+    neutral: "−",
+  },
+  document: {
+    readme: "≡",
+    conduct: "♡",
+    contributing: "+",
+    license: "⚖",
+    security: "⛨",
+    file: "▧",
+  },
+  user: "@",
+  comment: ">",
   commit: "◇",
   branch: "⑂",
-}
+};
 
 export const noIcons: IconSet = {
   navigation: { overview: "", commits: "", issues: "", pulls: "", actions: "" },
   pullRequest: { open: "", merged: "", closed: "", draft: "" },
   issue: { open: "", closed: "" },
   repository: { fork: "", star: "", watching: "" },
-  workflow: { success: "", failure: "", cancelled: "", skipped: "", clock: "", attention: "", neutral: "" },
-  document: { readme: "", conduct: "", contributing: "", license: "", security: "", file: "" },
+  workflow: {
+    success: "",
+    failure: "",
+    cancelled: "",
+    skipped: "",
+    clock: "",
+    attention: "",
+    neutral: "",
+  },
+  document: {
+    readme: "",
+    conduct: "",
+    contributing: "",
+    license: "",
+    security: "",
+    file: "",
+  },
   user: "",
   comment: "",
   commit: "",
   branch: "",
-}
+};
 
 export function iconPrefix(icon: string) {
-  return icon ? `${icon} ` : ""
+  return icon ? `${icon} ` : "";
 }
