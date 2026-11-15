@@ -73,7 +73,8 @@ tilde() {
 path_command() {
   case "$1" in *[\'\"\\\$\`]*) return 0 ;; esac
   case "$1" in "$HOME"/*) value="\$HOME${1#"$HOME"}" ;; *) value=$1 ;; esac
-  case "${SHELL##*/}" in
+  shell=${SHELL:-}
+  case "${shell##*/}" in
     zsh) printf "echo 'export PATH=\"%s:\$PATH\"' >> ~/.zshrc\n" "$value" ;;
     bash)
       if [ "$os" = darwin ]; then rc=~/.bash_profile; else rc=~/.bashrc; fi
