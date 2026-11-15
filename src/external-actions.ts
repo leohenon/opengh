@@ -21,11 +21,18 @@ export function expandExternalCommand(command: string[], patch: string) {
   return validateExternalCommand(command).map(arg => arg.replace(/\{patch\}/g, () => patch))
 }
 
+export class DiffViewerSetupRequiredError extends Error {
+  constructor() {
+    super("Install hunk or set diffViewerCommand in config.json.")
+    this.name = "DiffViewerSetupRequiredError"
+  }
+}
+
 export function resolveDiffViewerCommand(command?: string[], findExecutable = Bun.which): string[] {
   if (command !== undefined) return validateExternalCommand(command)
   const hunk = findExecutable("hunk")
   if (hunk) return [hunk, "patch", "{patch}"]
-  throw new Error("Install hunk or set diffViewerCommand in config.json.")
+  throw new DiffViewerSetupRequiredError()
 }
 
 export type Terminal = { suspend(): void | Promise<void>; resume(): void | Promise<void>; isDestroyed: boolean }

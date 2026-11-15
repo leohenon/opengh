@@ -2,7 +2,8 @@ import type { ScrollBoxRenderable } from "@opentui/core"
 import type { RepositoryScope } from "../repository-session"
 import { useRenderer, useTerminalDimensions } from "@opentui/solid"
 import { batch, createEffect, createMemo, createSignal, For, on, onCleanup, onMount, Show, untrack } from "solid-js"
-import { openExternalDiff } from "../external-actions"
+import { DiffViewerSetupRequiredError, openExternalDiff } from "../external-actions"
+import { DiffViewerSetupDialog } from "./components/diff-viewer-setup"
 import { defaultConfig, type Config } from "../config"
 import type { HintEntry } from "../keybindings"
 import { KeybindingsBoundary, useKeyActions, useKeybindings } from "./keybindings"
@@ -70,7 +71,7 @@ import { SearchProvider } from "./search-context"
 import { StatusPromptBar, StatusPromptProvider } from "./status-prompt"
 import { SearchSurface } from "./components/search-surface"
 
-type Overlay = "context-menu" | "reactions" | "help" | "branch-picker" | "settings" | "issue-references" | "issue-actions" | "issue-action" | "pull-merge" | "pull-draft" | "pull-review" | "review-comment" | "inline-confirm" | "inline-retry" | "command" | "switch-repo"
+type Overlay = "context-menu" | "reactions" | "help" | "branch-picker" | "settings" | "issue-references" | "issue-actions" | "issue-action" | "pull-merge" | "pull-draft" | "pull-review" | "review-comment" | "inline-confirm" | "inline-retry" | "command" | "switch-repo" | "diff-viewer-setup"
 type ToastState = { id: number; title: string; message: string; duration?: number; tone?: "error" | "success" | "info" }
 type ConversationCommentTarget = { repository: string; number: number; parent?: IssueActionParent }
 const conversationCommentKey = (target: ConversationCommentTarget) => JSON.stringify([target.repository, target.parent ?? "issue", target.number])
@@ -1308,8 +1309,10 @@ function AppContent(props: AppProps) {
       await openExternalDiff({ terminal: renderer, command: config().diffViewerCommand,
         content: resourceForDiff(target).value })
     } catch (error) {
-      if (!disposed && !renderer.isDestroyed && navigation() === origin)
-        setToast({ id: ++toastId, title: "External tool unavailable", message: error instanceof Error ? error.message : String(error), tone: "error" })
+      if (!disposed && !renderer.isDestroyed && navigation() === origin) {
+        if (error instanceof DiffViewerSetupRequiredError) setOverlay("diff-viewer-setup")
+        else setToast({ id: ++toastId, title: "External tool unavailable", message: error instanceof Error ? error.message : String(error), tone: "error" })
+      }
     }
   }
   let copying = false
@@ -1472,6 +1475,7 @@ function AppContent(props: AppProps) {
     if (overlay() === "issue-action" || overlay() === "pull-merge" || overlay() === "pull-draft" || overlay() === "pull-review" || overlay() === "review-comment" || overlay() === "inline-confirm" || overlay() === "inline-retry") return issueActionHint()
     if (overlay() === "issue-actions") return hint(open, close)
     if (overlay() === "help") return hint(close)
+    if (overlay() === "diff-viewer-setup") return issueActionHint()
     if (overlay() === "settings") return settingsHint()
     if (overlay() === "command") return commandHint()
     if (overlay() === "branch-picker" || overlay() === "switch-repo") return hint(...picker)
@@ -2197,6 +2201,9 @@ function AppContent(props: AppProps) {
           onCopy={(reference) => { setOverlay(); void copyToClipboard(reference.url, "URL") }}
           onClose={() => setOverlay()}
         />
+      </Show>
+      <Show when={overlay() === "diff-viewer-setup"}>
+        <DiffViewerSetupDialog showScrollbar={config().showScrollbars} onClose={() => setOverlay()} onHintChange={setIssueActionHint} />
       </Show>
       <Show when={overlay() === "settings"}>
         <Settings
