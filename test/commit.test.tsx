@@ -247,7 +247,7 @@ test("overview, commit, and PR shortcuts open GitHub and copy the active URL or 
 
   view.mockInput.pressKey("2")
   await view.flush()
-  expect(view.captureCharFrame()).toContain("enter open · tab branch · D diff · r refresh · o GitHub · y copy SHA")
+  expect(view.captureCharFrame()).toContain("enter open · tab branch · D diff · r refresh · / search · ? help · o GitHub · y copy SHA")
   expect(view.captureCharFrame()).toContain("? help")
   view.mockInput.pressKey("j")
   view.mockInput.pressKey("y")

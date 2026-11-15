@@ -98,7 +98,7 @@ test("issue action overlays isolate input and confirm comments, closing, reopeni
     showStatusBarHints: false,
     showScrollbars: false,
   })
-  const hint = "ctrl+s post · ctrl+p preview · ctrl+o restore · ctrl+g editor · ctrl+d clear · esc keep draft"
+  const hint = "ctrl+s post · esc keep draft · ctrl+p preview · ctrl+o restore · ctrl+d clear · ctrl+g editor"
   const [detail, setDetail] = createSignal<IssueDetailState>({
     number,
     resource: { status: "ready", value: issueDetailFixture },
@@ -929,7 +929,7 @@ test("comment editor preserves its cursor indicator and draft across expansion a
   try {
     await view.flush()
     const writer = view.renderer.root.findDescendantById("issue-comment-writer") as TextareaRenderable
-    expect(hint()).toStartWith("ctrl+s post · ctrl+p preview · ctrl+o expand")
+    expect(hint()).toStartWith("ctrl+s post · esc keep draft · ctrl+p preview · ctrl+o expand")
     expect(hint()).not.toContain("ctrl+l")
     expect(view.renderer.root.findDescendantById("issue-comment-lines")).toBeUndefined()
     expect(view.renderer.root.findDescendantById("issue-action-line-numbers")).toBeUndefined()

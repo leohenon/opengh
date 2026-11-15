@@ -230,7 +230,7 @@ test("draft PR inline comments open from Hunk's [+] in opengh's editor and publi
     }
     await openInline()
     expect(setup.captureCharFrame()).toContain("╭─ Comment ─")
-    expect(setup.captureCharFrame()).toContain("ctrl+s post · ctrl+p preview · ctrl+o expand")
+    expect(setup.captureCharFrame()).toContain("ctrl+s post · esc cancel · ctrl+p preview · ctrl+o expand")
     await setup.mockInput.typeText("@al")
     await settle()
     expect(setup.renderer.root.findDescendantById("mention-option:alice")).toBeDefined()

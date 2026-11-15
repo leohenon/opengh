@@ -860,7 +860,7 @@ describe("opengh TUI", () => {
     expect(statusLine()).toBe("")
     setConfig({ ...defaultConfig, showStatusBarHints: true, hideDocumentsTab: false, compactHeader: false, iconStyle: "unicode" })
     await view.flush()
-    expect(statusLine()).toBe("tab documents · s sidebar · r refresh · o GitHub · y copy URL · / search · ? help")
+    expect(statusLine()).toBe("tab documents · s sidebar · r refresh · / search · ? help · o GitHub · y copy URL")
 
     setOperations((value) => ({ ...value, refresh: { status: "loading" } }))
     await view.flush()
@@ -874,7 +874,7 @@ describe("opengh TUI", () => {
     expect(config().showStatusBarHints).toBe(true)
     setOperations(repositoryOperationsFixture)
     await view.flush()
-    expect(statusLine()).toBe("tab documents · s sidebar · r refresh · o GitHub · y copy URL · / search · ? help")
+    expect(statusLine()).toBe("tab documents · s sidebar · r refresh · / search · ? help · o GitHub · y copy URL")
 
     view.mockInput.pressKey("?")
     await view.flush()
@@ -912,7 +912,7 @@ describe("opengh TUI", () => {
     setOperations(repositoryOperationsFixture)
     setConfig({ ...defaultConfig, showStatusBarHints: true, hideDocumentsTab: false, compactHeader: false, iconStyle: "unicode" })
     await view.flush()
-    expect(statusLine()).toBe("esc back · D diff · r refresh · o GitHub · y copy SHA · / search · ? help")
+    expect(statusLine()).toBe("esc back · D diff · r refresh · / search · ? help · o GitHub · y copy SHA")
   })
 
   test("About sidebar links open the parent repository internally and description URLs externally", async () => {

@@ -156,7 +156,7 @@ for (const parent of ["issue", "pull"] as const) {
       await view.mockInput.typeText("Saved **draft** q?hc")
       await settle()
       expect(action().body).toBe("Saved **draft** q?hc")
-      expect(footer()).toContain("ctrl+s post · ctrl+t preview · ctrl+o expand")
+      expect(footer()).toContain("ctrl+s post · esc keep draft · ctrl+t preview · ctrl+o expand")
       expect(view.captureCharFrame()).not.toContain("Help")
       const instance = editor()
       view.mockInput.pressKey("t", { ctrl: true })

@@ -307,12 +307,12 @@ test("repository switch popup isolates input, preserves cancelled navigation, an
     await view.mockInput.typeText("owner/pending")
     view.mockInput.pressEnter()
     await settle()
-    expect(view.captureCharFrame()).not.toContain("Loading owner/pending")
-    for (let attempt = 0; attempt < 40 && !view.captureCharFrame().includes("Loading owner/pending"); attempt++) {
+    expect(view.captureCharFrame()).not.toContain("Loading repository")
+    for (let attempt = 0; attempt < 40 && !view.captureCharFrame().includes("Loading repository"); attempt++) {
       await Bun.sleep(25)
       await settle()
     }
-    expect(view.captureCharFrame()).toContain("Loading owner/pending")
+    expect(view.captureCharFrame()).toContain("Loading repository")
     expect(recent).not.toContain("owner/pending")
     await switchPage() // A slow load is escapable; an obsolete response must not replace the chosen repo.
     await view.mockInput.typeText("cli/cli")
