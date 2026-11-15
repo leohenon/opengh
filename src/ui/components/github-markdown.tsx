@@ -1,4 +1,4 @@
-import { BoxRenderable, CodeRenderable, MarkdownRenderable, TextRenderable, TextTableRenderable, Yoga, type MarkdownOptions, type Renderable, type SyntaxStyle } from "@opentui/core"
+import { BoxRenderable, CodeRenderable, MarkdownRenderable, StyledText, TextRenderable, TextTableRenderable, Yoga, type MarkdownOptions, type Renderable, type SyntaxStyle } from "@opentui/core"
 import { useRenderer } from "@opentui/solid"
 import { createMemo, onCleanup, onMount, Show } from "solid-js"
 import { assertGitHubMarkdownSource, gitHubMarkdownFallback, normalizeGitHubMarkdown, type GitHubMarkdownContext } from "../github-markdown"
@@ -236,7 +236,23 @@ export function GitHubMarkdown(props: { content: string; syntaxStyle: SyntaxStyl
         for (const { id } of markers) anchorTargets.set(id, { node: marker })
         return marker
       }
-      if (token.type === "blockquote") {
+      const inline = token.type === "paragraph" ? token.tokens?.filter((child) =>
+        child.type !== "text" || stripAnchorMarkers(child.raw).trim()) : undefined
+      const image = inline?.length === 1 && inline[0]?.type === "image" ? inline[0] : undefined
+      if (image) {
+        const panel = new BoxRenderable(renderer, {
+          width: "100%", minWidth: 0, flexShrink: 0, flexDirection: "column",
+          border: ["left"], borderColor: border, paddingLeft: 1,
+        })
+        panel.add(new TextRenderable(renderer, { content: "image", fg: muted, height: 1 }))
+        const caption = new TextRenderable(renderer, {
+          content: new StyledText([{ __isChunk: true, text: stripAnchorMarkers(image.text), link: { url: image.href } }]),
+          fg: foreground, wrapMode: "word", width: "100%", minWidth: 0, flexShrink: 0,
+        })
+        panel.add(caption)
+        for (const { id } of markers) anchorTargets.set(id, { node: caption, position: { line: 0, column: 0 } })
+        block = panel
+      } else if (token.type === "blockquote") {
         const quote = new BoxRenderable(renderer, {
           width: "100%", minWidth: 0, flexShrink: 0, flexDirection: "column",
           border: simple ? [] : ["left"], borderColor: quoteColor(token.text), paddingLeft: 1,

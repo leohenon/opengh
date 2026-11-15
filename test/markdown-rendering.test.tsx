@@ -229,8 +229,9 @@ test("references, image captions, nested fences, and plain-text documents keep t
 > \`\`\`python
 > print("#555 stays code")
 > \`\`\``)
+  let resolveAnchor: MarkdownAnchorResolver | undefined
   const view = await testRender(() => <ThemeProvider name="github"><MarkdownSample
-    content={content()} plainText={plainText()}
+    content={content()} plainText={plainText()} anchorRef={(resolver) => { resolveAnchor = resolver }}
     context={{ repositoryUrl: "https://github.com/qdrant/qdrant", ref: "dev", path: "README.md" }}
   /></ThemeProvider>, { width: 120, height: 60 })
   try {
@@ -240,7 +241,11 @@ test("references, image captions, nested fences, and plain-text documents keep t
       const frame = view.captureCharFrame()
       expect(frame).toContain("#11126")
       expect(frame).not.toContain("\\#11126")
-      expect(frame).toContain("▧ Screenshot")
+      expect(frame).toContain("│ image")
+      expect(frame).toContain("│ Screenshot")
+      const imageAnchor = await resolveAnchor?.("L3")
+      expect(imageAnchor).toBeDefined()
+      expect(imageAnchor!.node.y + imageAnchor!.row).toBe(frame.split("\n").findIndex((row) => row.includes("│ Screenshot")))
       expect(frame).not.toContain("Image:")
       expect(frame).not.toContain("```")
       const codes = codeBlocks(view.renderer.root)
@@ -255,7 +260,7 @@ test("references, image captions, nested fences, and plain-text documents keep t
       const reference = spans.find((span) => span.text.includes("#11126"))!
       const link = spans.find((span) => span.text === "the guide")!
       expect(reference.fg.equals(link.fg)).toBe(true)
-      const marker = spans.find((span) => span.text.includes("▧"))!
+      const marker = spans.find((span) => span.text.trim() === "image")!
       const caption = spans.find((span) => span.text === "Screenshot")!
       expect(marker.fg.equals(caption.fg)).toBe(false)
       const inline = spans.find((span) => span.text.trim() === "nested")!
@@ -496,7 +501,7 @@ test("minimal Markdown switches live without losing structure, links, or literal
     await settle(view)
     expect(json().screenY - json().parent!.screenY).toBe(2)
     expect(view.captureCharFrame()).toContain("─")
-    for (const text of ["Completed task", "Pending task", "▧ Screenshot", "Static form text"])
+    for (const text of ["Completed task", "Pending task", "│ Screenshot", "Static form text"])
       expect(view.captureCharFrame()).toContain(text)
     expect(view.captureCharFrame()).not.toContain("Hidden control")
     setStyle("minimal")
@@ -506,14 +511,17 @@ test("minimal Markdown switches live without losing structure, links, or literal
       const frame = view.captureCharFrame()
       for (const text of ["Heading", "Guide and important text.", "Warning", "Keep this warning.", "Nested code:", "Docs", "Ready", "## Literal heading"])
         expect(frame).toContain(text)
-      for (const text of ["Completed task", "Pending task", "▧ Screenshot", "Static form text"])
+      for (const text of ["Completed task", "Pending task", "│ Screenshot", "Static form text"])
         expect(frame).toContain(text)
       expect(frame).not.toContain("Hidden control")
       expect(frame).not.toContain("local-file")
       expect(codeBlocks(view.renderer.root).find((block) => block.filetype === "html")?.plainText)
         .toBe('<input list="d"><datalist id="d"></datalist>')
       expect(frame).not.toContain("https://example.com")
-      expect(frame).not.toMatch(/[─│┌└]/)
+      expect(frame).not.toMatch(/[─┌└]/)
+      // Image borders identify media even when decorative Markdown borders are off.
+      expect(frame.split("\n").filter((row) => row.includes("│")).map((row) => row.trim()))
+        .toEqual(["│ image", "│ Screenshot"])
       expect(frame.split("\n").some((row) => row.trim() === "json")).toBe(false)
       expect(json().screenY - json().parent!.screenY).toBe(0)
       expect(json().plainText).toBe('{\n  "enabled": true, "count": 12\n}')

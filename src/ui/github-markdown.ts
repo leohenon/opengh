@@ -332,6 +332,32 @@ function terminalMedia(options: { preserveImages?: boolean } = {}) {
       parent.children.splice(index, 1)
       return index
     })
+    const parents = new WeakMap<Element, Element | Root>()
+    visit(tree, "element", (element, _index, parent) => {
+      if (parent) parents.set(element, parent)
+    })
+    const standalone = (element: Element): boolean => {
+      let child: Element = element
+      let parent = parents.get(child)
+      while (parent) {
+        if (parent.type === "element" && ["li", "td", "th", "h1", "h2", "h3", "h4", "h5", "h6"].includes(parent.tagName)) return false
+        if (parent.type === "root") return true
+        if (["blockquote", "div", "center"].includes(parent.tagName))
+          return child.tagName === "p" || parent.children.every((sibling) => sibling === child || sibling.type === "text" && !sibling.value.trim())
+        const picture = parent.tagName === "picture"
+        if (!parent.children.every((sibling) => sibling === child || sibling.type === "text" && !sibling.value.trim()
+          || picture && sibling.type === "element" && sibling.tagName === "source")) return false
+        child = parent
+        parent = parents.get(child)
+      }
+      return true
+    }
+    const caption = (image: Element, label: string, target: string, element = image): ElementContent => {
+      if (!isDecorativeImage(image, label) && standalone(element) && safeTarget(target)) {
+        return { type: "element", tagName: "img", properties: { src: safeTarget(target), alt: label }, children: [] }
+      }
+      return imageCaption(label, target)
+    }
     const presentationGroups = new WeakSet<Element>()
     visit(tree, "element", (element) => {
       if (!isPresentationGroup(element)) return
@@ -357,7 +383,7 @@ function terminalMedia(options: { preserveImages?: boolean } = {}) {
             parent.children[index] = { type: "text", value: "", position: element.position }
             return SKIP
           }
-          const link = { ...imageCaption(label, href || property(image, "src")), position: element.position }
+          const link = { ...caption(image, label, href || property(image, "src"), element), position: element.position }
           parent.children[index] = parent.type === "element" && presentationGroups.has(parent)
             ? { type: "element", tagName: "p", properties: {}, children: [link], position: element.position }
             : link
@@ -387,8 +413,8 @@ function terminalMedia(options: { preserveImages?: boolean } = {}) {
           || property(pictureSource ?? element, "src")
           || property(pictureSource ?? element, "srcSet").split(/[ ,]/)[0]
           || ""
-        parent.children[index] = { ...imageCaption(label, target), position: element.position }
-        return
+        parent.children[index] = { ...caption(element, label, target), position: element.position }
+        return SKIP
       }
 
       if (["video", "audio", "iframe", "embed", "object"].includes(tag)) {
@@ -585,11 +611,11 @@ function resolveTarget(value: string, context: GitHubMarkdownContext) {
 function githubLinks(context: GitHubMarkdownContext) {
   let inserted = 0
   return (tree: MarkdownRoot) => visit(tree, (node, index, parent) => {
-    if (node.type === "link" || node.type === "definition") {
+    if (node.type === "link" || node.type === "definition" || node.type === "image") {
       node.url = resolveTarget(node.url, context)
       return SKIP
     }
-    if (node.type === "code" || node.type === "inlineCode" || node.type === "image" || node.type === "linkReference" || node.type === "imageReference") return SKIP
+    if (node.type === "code" || node.type === "inlineCode" || node.type === "linkReference" || node.type === "imageReference") return SKIP
     if (node.type !== "text" || index === undefined || !parent || !("children" in parent)) return
     const chunks = node.value.split(/(\uE000[^\uE001]*\uE001)/g).flatMap((part) => part.startsWith("\uE000")
       ? [{ text: part }] : referenceLinkChunks(part, context.repositoryUrl))

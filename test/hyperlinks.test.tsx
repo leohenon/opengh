@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test"
-import { CodeRenderable, NativeSession, RGBA, ScrollBoxRenderable, type Renderable } from "@opentui/core"
+import { CodeRenderable, NativeSession, RGBA, ScrollBoxRenderable, TextAttributes, type Renderable } from "@opentui/core"
 import { Writable } from "node:stream"
 import { testRender } from "@opentui/solid"
 import { createSignal, Show } from "solid-js"
@@ -11,6 +11,8 @@ import { messageReactionMouse, type ReactionControls } from "../src/ui/component
 import { HyperlinkProvider, HyperlinkSurface, useHyperlinkMouse } from "../src/ui/hyperlinks"
 import { createReactiveMarkdownStyle } from "../src/ui/markdown-style"
 import { ThemeProvider, useTheme } from "../src/ui/theme"
+import { MarkdownProvider } from "../src/ui/markdown-preferences"
+import type { MarkdownStyle } from "../src/config"
 import { resolveTheme } from "../src/theme"
 import { defaultConfig } from "../src/config"
 import { App } from "../src/ui/app"
@@ -58,6 +60,39 @@ function MarkdownSample(props: { content: string }) {
     <GitHubMarkdown content={props.content} syntaxStyle={style()} />
   </box>
 }
+
+test("standalone image blocks wrap neutral clickable captions in rich and minimal Markdown", async () => {
+  const url = "https://example.com/screenshot.png"
+  const opened: string[] = []
+  const [style, setStyle] = createSignal<MarkdownStyle>("rich")
+  const view = await testRender(() => <ThemeProvider name="github">
+    <MarkdownProvider style={style()}><HyperlinkProvider identity="image" onOpen={(target) => { opened.push(target) }}>
+      <HyperlinkSurface><MarkdownSample content={`<img alt="A &amp; B [screenshot] showing a long description across multiple lines" src="${url}">`} /></HyperlinkSurface>
+    </HyperlinkProvider></MarkdownProvider>
+  </ThemeProvider>, { width: 100, height: 20 })
+  try {
+    for (const preference of ["rich", "minimal"] as const) {
+      setStyle(preference)
+      for (const width of [100, 28]) {
+        view.resize(width, 20)
+        await settleMarkdown(view)
+        const frame = view.captureCharFrame()
+        expect(frame).toContain("│ image")
+        expect(frame).toContain("A & B [screenshot]")
+        expect(frame).not.toContain("▧")
+        expect(frame).not.toContain(url)
+        const cells = linkCells(view, url)
+        if (width === 28) expect(new Set(cells.map((cell) => cell.y)).size).toBeGreaterThan(1)
+        const caption = styleAt(view, cells[0]!)
+        expect(caption.attributes & TextAttributes.UNDERLINE).toBe(0)
+        expect(caption.fg).toEqual(RGBA.fromHex(resolveTheme("github").text))
+        const continuation = cells.at(-1)!
+        await view.mockMouse.click(continuation.x, continuation.y)
+        expect(opened.at(-1)).toBe(url)
+      }
+    }
+  } finally { view.renderer.destroy() }
+})
 
 test("opens painted wrapped markdown and table links without native OSC 8 support", async () => {
   const wrappedUrl = "https://example.com/wrapped"

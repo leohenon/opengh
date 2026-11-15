@@ -204,7 +204,7 @@ C#123abc and #123abc aren't issue references. Inline \`#7\` stays code.
     expect(markdown).not.toContain("/issues/123")
     expect(markdown).not.toContain("/issues/7")
     expect(markdown).not.toContain("/issues/8")
-    expect(markdown).toContain("▧ [Web UI](https://github.com/qdrant/qdrant/blob/feature%2Fnested/docs/web-ui.png)")
+    expect(markdown).toContain("![Web UI](https://github.com/qdrant/qdrant/blob/feature%2Fnested/docs/web-ui.png)")
     expect(markdown).toContain("#8 stays code")
     expect(normalizeGitHubMarkdown("[comment](#issuecomment-123)", { context: {
       repositoryUrl: "https://github.com/qdrant/qdrant", sourceUrl: "https://github.com/qdrant/qdrant/issues/10",
@@ -242,6 +242,24 @@ other/repo@abc1234 @hidden
     expect(markdown).toContain("> **Warning**\n>\n> Read the **migration guide**.")
     expect(markdown).toContain("\\[!NOTE] is literal here.")
     expect(markdown).toContain("```text\n> [!NOTE]\n```")
+  })
+
+  test("standalone images retain image identity while inline images and badges stay compact", () => {
+    expect(normalizeGitHubMarkdown("![Screenshot](ui.png)")).toBe("![Screenshot](ui.png)")
+    expect(normalizeGitHubMarkdown('[![Screenshot](ui.png)](https://example.com/view)'))
+      .toBe("![Screenshot](https://example.com/view)")
+    expect(normalizeGitHubMarkdown('<p><picture><source srcset="dark.png"><img alt="Screenshot" src="ui.png"></picture></p>'))
+      .toBe("![Screenshot](ui.png)")
+    expect(normalizeGitHubMarkdown("Before ![Inline](ui.png) after"))
+      .toBe("Before ▧ [Inline](ui.png) after")
+    expect(normalizeGitHubMarkdown('<div>Before <img alt="Inline" src="ui.png"> after</div>'))
+      .toBe("Before ▧ [Inline](ui.png) after")
+    expect(normalizeGitHubMarkdown("- ![Nested](ui.png)"))
+      .toBe("- ▧ [Nested](ui.png)")
+    expect(normalizeGitHubMarkdown("![Build status](https://img.shields.io/build/status)", { preserveImages: true }))
+      .toBe("▧ [Build status](https://img.shields.io/build/status)")
+    expect(normalizeGitHubMarkdown('![Unsafe](javascript:alert)'))
+      .toBe("▧ Unsafe")
   })
 
   test("issue attachments preserve branding and badge images as links", () => {
