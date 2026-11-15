@@ -28,7 +28,7 @@ describe("config", () => {
   })
 
   test("uses defaults when the config file does not exist", async () => {
-    expect(await loadConfig("/path/that/does/not/exist.json")).toEqual({ showScrollbars: false, theme: "opengh", colorMode: "system", reducedMotion: false, markdownStyle: "rich", detailLayout: "centered", detailsPlacement: "auto", diffLayout: "auto", diffWrap: false, diffFullscreen: true, showStatusBarHints: false, showTabShortcuts: true, showTabCounts: true, hideDocumentsTab: false, compactHeader: false, iconStyle: "nerd" })
+    expect(await loadConfig("/path/that/does/not/exist.json")).toEqual({ showScrollbars: false, theme: "opengh", colorMode: "system", reducedMotion: false, markdownStyle: "rich", detailLayout: "centered", detailsPlacement: "auto", diffLayout: "auto", diffWrap: false, diffFullscreen: true, showStatusBarHints: false, showTabShortcuts: true, showTabCounts: true, hideDocumentsTab: false, compactHeader: false, iconStyle: "unicode" })
   })
 
   test("bounds config reads, rejects unsafe parents, and never creates missing directories", async () => {
@@ -94,7 +94,22 @@ describe("config", () => {
     await Bun.write(invalidPath, JSON.stringify({ showScrollbars: "yes", theme: "unknown", colorMode: "system", reducedMotion: "yes", markdownStyle: "invalid", detailLayout: "invalid", detailsPlacement: "invalid", showStatusBarHints: "no", iconStyle: "invalid", compactHeader: "yes", showTabShortcuts: "yes", showTabCounts: "yes", hideDocumentsTab: "yes", diffLayout: "stacked", diffWrap: "yes" }))
 
     expect(await loadConfig(enabledPath)).toEqual({ showScrollbars: true, theme: "nord", colorMode: "system", reducedMotion: true, markdownStyle: "minimal", detailLayout: "centered", detailsPlacement: "inline", diffLayout: "unified", diffWrap: true, diffFullscreen: true, showStatusBarHints: false, showTabShortcuts: false, showTabCounts: false, hideDocumentsTab: true, compactHeader: true, iconStyle: "none" })
-    expect(await loadConfig(invalidPath)).toEqual({ showScrollbars: false, theme: "opengh", colorMode: "system", reducedMotion: false, markdownStyle: "rich", detailLayout: "centered", detailsPlacement: "auto", diffLayout: "auto", diffWrap: false, diffFullscreen: true, showStatusBarHints: false, showTabShortcuts: true, showTabCounts: true, hideDocumentsTab: false, compactHeader: false, iconStyle: "nerd" })
+    expect(await loadConfig(invalidPath)).toEqual({ showScrollbars: false, theme: "opengh", colorMode: "system", reducedMotion: false, markdownStyle: "rich", detailLayout: "centered", detailsPlacement: "auto", diffLayout: "auto", diffWrap: false, diffFullscreen: true, showStatusBarHints: false, showTabShortcuts: true, showTabCounts: true, hideDocumentsTab: false, compactHeader: false, iconStyle: "unicode" })
+  })
+
+  test("icon styles default to Unicode and preserve explicit choices", async () => {
+    const directory = (await Bun.$`mktemp -d`.text()).trim()
+    const path = join(directory, "config.json")
+    try {
+      for (const iconStyle of [undefined, "invalid", null]) {
+        await Bun.write(path, JSON.stringify({ iconStyle }))
+        expect((await loadConfig(path)).iconStyle).toBe("unicode")
+      }
+      for (const iconStyle of ["unicode", "nerd", "none"] as const) {
+        await saveConfig({ ...defaultConfig, iconStyle }, path)
+        expect((await loadConfig(path)).iconStyle).toBe(iconStyle)
+      }
+    } finally { await rm(directory, { recursive: true, force: true }) }
   })
 
   test("fullscreen diffs default on, reject non-boolean values, and preserve an explicit off value on save", async () => {

@@ -6,7 +6,7 @@ import { App } from "../src/ui/app";
 import { Header } from "../src/ui/components/header";
 import { defaultConfig, type Config } from "../src/config";
 import { appColors, resolveTheme } from "../src/theme";
-import { issueIcons, nerdIcons, pullRequestIcons, repositoryIcons, workflowIcons } from "../src/ui/icons";
+import { issueIcons, nerdIcons, pullRequestIcons, repositoryIcons, unicodeIcons } from "../src/ui/icons";
 import type { CommitDetailState, RepositoryData, ResourceState } from "../src/repository-state";
 import type { DetailTarget, InitialNavigation, NavigationState, Page } from "../src/navigation";
 import { ThemeProvider, useTheme } from "../src/ui/theme";
@@ -525,21 +525,22 @@ describe("opengh TUI", () => {
     const header = () => view.captureCharFrame().split("\n")[3]!;
     await view.flush();
     expect(header()).toContain("1 Overview");
-    expect(header()).not.toContain(nerdIcons.navigation.overview);
+    expect(header()).not.toContain(unicodeIcons.navigation.overview);
     setConfig((current) => ({ ...current, showTabShortcuts: false }));
     await view.flush();
-    expect(header()).toContain(`${nerdIcons.navigation.overview} Overview`);
+    expect(header()).toContain(`${unicodeIcons.navigation.overview} Overview`);
     expect(header()).not.toContain("1 Overview");
     view.mockInput.pressKey("3");
     await view.flush();
     expect(view.captureCharFrame()).toContain("Open (61)");
-    setConfig((current) => ({ ...current, iconStyle: "unicode" }));
+    setConfig((current) => ({ ...current, iconStyle: "nerd" }));
     await view.flush();
-    expect(header()).toContain("≡ Overview");
+    expect(header()).toContain(`${nerdIcons.navigation.overview} Overview`);
     setConfig((current) => ({ ...current, iconStyle: "none" }));
     await view.flush();
     expect(header()).toContain("Overview");
-    expect(header()).not.toContain("≡");
+    expect(header()).not.toContain(unicodeIcons.navigation.overview);
+    expect(header()).not.toContain(nerdIcons.navigation.overview);
     expect(header()).not.toContain("1 Overview");
     setConfig((current) => ({ ...current, iconStyle: "nerd" }));
     view.resize(76, 32);
@@ -856,7 +857,8 @@ describe("opengh TUI", () => {
     expect(iconColor(issueIcons.closed)).toEqual(RGBA.fromHex(colors.closedState));
   });
 
-  test("workflow icons distinguish failures, neutral conclusions, queued runs, and active progress", async () => {
+  test.each(["unicode", "nerd"] as const)("%s workflow icons distinguish failures, neutral conclusions, queued runs, and active progress", async (iconStyle) => {
+    const workflowIcons = (iconStyle === "nerd" ? nerdIcons : unicodeIcons).workflow;
     const colors = appColors(resolveTheme(defaultConfig.theme));
     const completed = ["success", "failure", "timed_out", "cancelled", "skipped", "neutral", "action_required"].map((conclusion, index) => ({
       id: index, name: "CI", title: `${conclusion} run`, status: "completed", conclusion, createdAt: "2026-04-14T09:00:00Z",
@@ -864,7 +866,7 @@ describe("opengh TUI", () => {
     const pending = ["in_progress", "queued", "waiting"].map((status, index) => ({
       id: 20 + index, name: "CI", title: `${status} run`, status, conclusion: "", createdAt: "2026-04-14T09:00:00Z",
     }));
-    const [config, setConfig] = createSignal({ ...defaultConfig });
+    const [config, setConfig] = createSignal({ ...defaultConfig, iconStyle });
     const view = await testRender(() => <App data={{ ...githubDataFixture,
       runs: { status: "ready", value: { items: [...completed, ...pending], page: 1, hasMore: false } },
     }} operations={repositoryOperationsFixture} config={config()} />, { width: 120, height: 44 });
@@ -1346,7 +1348,7 @@ describe("opengh TUI", () => {
     await view.flush()
 
     const commits = view.captureCharFrame()
-    expect(commits).toContain(" main ▾")
+    expect(commits).toContain(`${unicodeIcons.branch} main ▾`)
     expect(commits).not.toContain("100+")
     expect(commits).not.toContain("100 loaded")
 
@@ -2088,13 +2090,13 @@ describe("opengh TUI", () => {
     expect(view.captureCharFrame()).toContain("README");
     expect(view.captureCharFrame()).toContain("Contributing");
 
-    expect(view.captureCharFrame()).not.toContain(nerdIcons.document.readme);
+    expect(view.captureCharFrame()).not.toContain(unicodeIcons.document.readme);
     view.resize(140, 24);
     await view.flush();
-    expect(view.captureCharFrame()).toContain(`${nerdIcons.document.readme} README`);
+    expect(view.captureCharFrame()).toContain(`${unicodeIcons.document.readme} README`);
     view.resize(76, 24);
     await view.flush();
-    expect(view.captureCharFrame()).not.toContain(nerdIcons.document.readme);
+    expect(view.captureCharFrame()).not.toContain(unicodeIcons.document.readme);
     expect(view.captureCharFrame()).toContain("Contributing");
 
     view.resize(50, 24);

@@ -9,9 +9,7 @@ Run `opengh` to get started. See the [CLI reference](cli.md) for options.
 Use the keyboard or mouse. Arrow keys move between tabs and items; `enter` opens an item and `esc` goes back.
 
 Press `?` for shortcuts or right-click for actions. See [Keybindings](keybindings.md) for
-defaults and customization.
-
-Press `,` to open settings. Change the icon style if your terminal does not use a Nerd Font. See [Configuration](configuration.md).
+defaults and customization. Press `,` to open settings.
 
 ## Actions and comments
 

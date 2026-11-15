@@ -4,7 +4,7 @@
 
 Press `,` for settings. Changes save immediately.
 
-No [Nerd Font](https://www.nerdfonts.com/)? Set **Icon style** to **Unicode** or **None**.
+Using a [Nerd Font](https://www.nerdfonts.com/)? Select **Nerd** under **Icon style**.
 
 ## Edit the config file
 
@@ -36,12 +36,12 @@ Omitted options use defaults. An absolute `XDG_CONFIG_HOME` changes the path to
 | `diffLayout`         | `"auto"`                                      | `auto`: split on wide terminals, unified below 80 columns. `split`, `unified`. |
 | `diffWrap`           | `false`                                       | Wrap long diff lines instead of panning.                                       |
 | `diffFullscreen`     | `true`                                        | Hide app tabs during diff review.                                              |
-| `iconStyle`          | `"nerd"`                                      | `nerd` requires a Nerd Font; `unicode` does not; `none` hides icons.           |
+| `iconStyle`          | `"unicode"`                                   | `nerd` requires a Nerd Font; `unicode` does not; `none` hides icons.           |
 | `showStatusBarHints` | `false`                                       | Shortcut hints.                                                                |
 | `showScrollbars`     | `false`                                       | Scrollbars for overflowing content.                                            |
 | `reducedMotion`      | `false`                                       | Static loading indicators.                                                     |
 | `diffViewerCommand`  | `hunk patch {patch}` when `hunk` is on `PATH` | External diff viewer.                                                          |
-| `keybindings`        | No overrides                                  | [Customize shortcuts](keybindings.md#change-a-shortcut).                                                           |
+| `keybindings`        | No overrides                                  | [Customize shortcuts](keybindings.md#change-a-shortcut).                       |
 
 ## External diff viewer
 

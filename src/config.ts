@@ -46,7 +46,7 @@ export const defaultConfig: Config = {
   diffWrap: false,
   diffFullscreen: true,
   showStatusBarHints: false,
-  iconStyle: "nerd",
+  iconStyle: "unicode",
   compactHeader: false,
   hideDocumentsTab: false,
   showTabShortcuts: true,
