@@ -848,7 +848,13 @@ export function createGitHubClient(transport: GitHubTransport, commentStorage?: 
   }
 
   // Sends only the changes, so assignees someone else changed meanwhile are left alone.
-  const updateIssueAssignees = async (repository: Repo, number: number, changes: AssigneeChanges): Promise<IssueDetail> => {
+  // `current` is the last known assignee list; without it, removals always go first.
+  const updateIssueAssignees = async (
+    repository: Repo,
+    number: number,
+    changes: AssigneeChanges,
+    current?: readonly string[],
+  ): Promise<IssueDetail> => {
     if (!transport.mutate) throw new Error("GitHub transport does not support mutations.")
     if (!changes.add.length && !changes.remove.length) throw new Error("There are no assignee changes to save.")
     // GitHub manages PR assignees through the issues endpoint too.
@@ -858,19 +864,27 @@ export function createGitHubClient(transport: GitHubTransport, commentStorage?: 
       if (detail.number !== number) throw new Error("GitHub returned a different issue.")
       return "pull_request" in item ? detail : withIssuePermissions(repository, number, detail)
     }
+    const add = { method: "POST" as const, logins: changes.add, done: "Added", verb: "adding" }
+    const remove = { method: "DELETE" as const, logins: changes.remove, done: "Removed", verb: "removing" }
+    // Add first, so a failed second request never leaves fewer assignees than before. Remove first only
+    // when adding would exceed GitHub's 10-assignee limit (or the current assignees are unknown).
+    const combined = new Set([...(current ?? []), ...changes.add].map((login) => login.toLowerCase()))
+    const steps = current === undefined || combined.size > 10 ? [remove, add] : [add, remove]
     let item: IssueDetailResponse | undefined
-    if (changes.add.length) item = await transport.mutate<IssueDetailResponse>(path, "POST", { assignees: changes.add })
-    if (changes.remove.length) {
+    let first: (typeof steps)[number] | undefined
+    for (const step of steps) {
+      if (!step.logins.length) continue
       try {
-        item = await transport.mutate<IssueDetailResponse>(path, "DELETE", { assignees: changes.remove })
+        item = await transport.mutate<IssueDetailResponse>(path, step.method, { assignees: step.logins })
       } catch (error) {
-        if (!item) throw error
+        if (!item || !first) throw error
         const reason = error instanceof Error ? error.message : String(error)
         throw new AssigneeUpdateError(
-          `Added ${mentions(changes.add)}, but removing ${mentions(changes.remove)} failed: ${reason}`,
+          `${first.done} ${mentions(first.logins)}, but ${step.verb} ${mentions(step.logins)} failed: ${reason}`,
           await result(item).catch(() => undefined),
         )
       }
+      first ??= step
     }
     const detail = await result(item!)
     const assigned = new Set(detail.assignees.map((login) => login.toLowerCase()))

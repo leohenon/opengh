@@ -1334,6 +1334,7 @@ describe("repository session", () => {
     let fail = true
     let commentCalls = 0
     const updates: AssigneeChanges[] = []
+    const currents: (readonly string[] | undefined)[] = []
     const candidates = Array.from({ length: 11 }, (_, index) => `user${index}`)
     const session = createRepositorySession(
       loaders({
@@ -1344,8 +1345,9 @@ describe("repository session", () => {
           commentCalls++
           return issueCommentsFixture[0]!
         },
-        updateIssueAssignees: async (_repository, _number, changes) => {
+        updateIssueAssignees: async (_repository, _number, changes, current) => {
           updates.push(changes)
+          currents.push(current)
           if (fail) throw new Error("Assignment denied")
           if (!changes.add.length) return pending.promise
           remote = { ...remote, assignees: [...remote.assignees.filter((login) => !changes.remove.includes(login)), ...changes.add] }
@@ -1369,6 +1371,8 @@ describe("repository session", () => {
     expect(session.issueAction(number).selectedAssignees).toEqual([])
     // The failed removal's outcome is unknown, so the retry sends it again.
     expect(session.issueAction(number).uncertainAssignees).toEqual(["max", "jane"])
+    // The client orders requests using the issue's current assignees.
+    expect(currents.at(-1)).toEqual(["max", "jane"])
     fail = false
     const saving = session.submitIssueAction(number, "assignees")
     await expect(session.submitIssueAction(number, "assignees")).rejects.toThrow("already in progress")
@@ -1396,15 +1400,24 @@ describe("repository session", () => {
     expect(await session.submitIssueAction(number, "assignees")).toEqual({})
     expect(updates).toHaveLength(3)
     expect(session.issueDetail()?.resource.value?.assignees).toEqual(["octocat"])
+    // A reload can drop earlier pages; users GitHub already listed stay selectable.
+    candidates.length = 0
+    await session.reloadAssignableUsers!()
+    expect(session.assignableUsers!()?.value?.items).toEqual([{ login: "octocat" }])
+    session.prepareIssueAction(number, "assignees")
+    session.updateIssueDraft(number, { selectedAssignees: ["octocat", "user3"] })
+    await session.submitIssueAction(number, "assignees")
+    expect(updates.at(-1)).toEqual({ add: ["user3"], remove: [] })
+    expect(updates).toHaveLength(4)
     expect(session.issueAction(number).body).toBe("Unrelated comment draft")
     expect(commentCalls).toBe(0)
     staleRead = false
     remote = { ...remote, permissions: { ...remote.permissions!, assignees: false } }
     await session.loadIssue(number)
     session.prepareIssueAction(number, "assignees")
-    expect(session.issueAction(number).selectedAssignees).toEqual(["octocat"])
+    expect(session.issueAction(number).selectedAssignees).toEqual(["octocat", "user3"])
     await expect(session.submitIssueAction(number, "assignees")).rejects.toThrow("permission")
-    expect(updates).toHaveLength(3)
+    expect(updates).toHaveLength(4)
   })
 
   test("assignable users cache by repository, continue by cursor, dedupe pages, retry the failed page, reload, and guard concurrent requests", async () => {

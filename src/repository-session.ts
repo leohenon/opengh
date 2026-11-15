@@ -134,7 +134,7 @@ export type RepositoryLoaders = {
     draft?: IssueCommentDraft,
   ): Promise<IssueComment>
   updateIssueState?(repository: Repo, number: number, state: ListState, reason?: IssueCloseReason): Promise<IssueDetail>
-  updateIssueAssignees?(repository: Repo, number: number, changes: AssigneeChanges): Promise<IssueDetail>
+  updateIssueAssignees?(repository: Repo, number: number, changes: AssigneeChanges, current?: readonly string[]): Promise<IssueDetail>
   assignableUsers?(
     repository: RepositoryTarget,
     page?: number,
@@ -2078,6 +2078,8 @@ export function createRepositorySession(
     const current = state()
     return current.status === "ready" ? assignableUserCache()[String(current.data.repo.id)] : undefined
   }
+  // Every login GitHub listed since the last repository refresh, so a picker reload keeps earlier selections valid.
+  const listedAssignees = new Map<string, Set<string>>()
   // Restarting loads the first page again and replaces the list, which stays visible meanwhile.
   const loadAssignableUserPage = async (restart: boolean) => {
     const current = state()
@@ -2105,6 +2107,11 @@ export function createRepositorySession(
         seen.add(key)
         return true
       })
+      if (assignableUserCache()[key] === pending) {
+        const listed = listedAssignees.get(key) ?? new Set<string>()
+        for (const user of next.items) listed.add(user.login.toLowerCase())
+        listedAssignees.set(key, listed)
+      }
       finish({ status: "ready", value: { items, page: nextPage, hasMore: next.hasMore, ...(next.cursor ? { cursor: next.cursor } : {}) } })
     } catch (error) {
       finish(failedResource(error, value, phase))
@@ -2718,6 +2725,8 @@ export function createRepositorySession(
     const allowed = new Set(
       [...current, ...baseline, ...(assignableUsers()?.value?.items ?? []).map((user) => user.login)].map((login) => login.toLowerCase()),
     )
+    const repo = state()
+    if (repo.status === "ready") for (const login of listedAssignees.get(String(repo.data.repo.id)) ?? []) allowed.add(login)
     if (action.selectedAssignees.some((login) => !allowed.has(login.toLowerCase())))
       throw new Error("Select assignees from the suggested users.")
     if (new Set(action.selectedAssignees.map((login) => login.toLowerCase())).size > 10)
@@ -2782,7 +2791,7 @@ export function createRepositorySession(
         attempted = changes
         let loaded: IssueDetail
         try {
-          loaded = await loaders.updateIssueAssignees(current.data.repo, number, changes)
+          loaded = await loaders.updateIssueAssignees(current.data.repo, number, changes, pull.assignees)
         } catch (error) {
           if (error instanceof AssigneeUpdateError && error.detail?.number === number) reconcile(error.detail)
           throw error
@@ -2912,7 +2921,7 @@ export function createRepositorySession(
         attempted = changes
         let loaded: IssueDetail
         try {
-          loaded = await loaders.updateIssueAssignees(current.data.repo, number, changes)
+          loaded = await loaders.updateIssueAssignees(current.data.repo, number, changes, issue.assignees)
         } catch (error) {
           if (error instanceof AssigneeUpdateError && error.detail?.number === number)
             reconcileIssueState(repository, number, error.detail, scope, reactionRead, key)
@@ -3213,6 +3222,7 @@ export function createRepositorySession(
       delete next[String(current.data.repo.id)]
       return next
     })
+    listedAssignees.delete(String(current.data.repo.id))
     const branch = current.data.currentBranch
     mentionUserCache.clear()
     setState({ ...current, operations: { ...current.operations, refresh: loading() } })

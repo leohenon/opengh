@@ -786,13 +786,18 @@ describe("GitHub client", () => {
     const calls: unknown[] = []
     let server: string[] = []
     let ignore = false
-    let failRemoval: Error | undefined
+    let failAdd: Error | undefined
+    let failRemove: Error | undefined
     const client = createGitHubClient({
       ...transport(),
       async mutate<T>(path: string, method: "POST" | "PATCH" | "DELETE", body: Record<string, unknown>) {
         calls.push({ path, method, body })
         const logins = body.assignees as string[]
-        if (method === "DELETE" && failRemoval) throw failRemoval
+        if (method === "POST" && failAdd) throw failAdd
+        if (method === "DELETE" && failRemove) throw failRemove
+        // GitHub allows at most 10 assignees.
+        if (method === "POST" && new Set([...server, ...logins].map((login) => login.toLowerCase())).size > 10)
+          throw new Error("Too many assignees")
         if (!ignore)
           server =
             method === "POST"
@@ -832,13 +837,28 @@ describe("GitHub client", () => {
     })
     // Someone else assigned carol meanwhile; only our own changes are sent.
     server = ["bob", "carol"]
-    const updated = await client.updateIssueAssignees(repository, 42, { add: ["alice"], remove: ["BOB"] })
+    // Adding first means a failed removal never leaves fewer assignees than before.
+    const updated = await client.updateIssueAssignees(repository, 42, { add: ["alice"], remove: ["BOB"] }, ["bob"])
     expect(updated.assignees).toEqual(["carol", "alice"])
     expect(updated.permissions?.assignees).toBe(true)
     expect(calls).toEqual([
       { path: "repositories/123/issues/42/assignees", method: "POST", body: { assignees: ["alice"] } },
       { path: "repositories/123/issues/42/assignees", method: "DELETE", body: { assignees: ["BOB"] } },
     ])
+    // Swapping one of ten assignees removes first, so it never exceeds GitHub's limit.
+    const ten = Array.from({ length: 10 }, (_, index) => `user${index}`)
+    server = [...ten]
+    calls.length = 0
+    const swapped = await client.updateIssueAssignees(repository, 42, { add: ["replacement"], remove: ["user0"] }, ten)
+    expect(swapped.assignees).toHaveLength(10)
+    expect(swapped.assignees).toContain("replacement")
+    expect(swapped.assignees).not.toContain("user0")
+    expect(calls.map((call) => (call as { method: string }).method)).toEqual(["DELETE", "POST"])
+    // Without the current assignees, removals go first to stay within the limit.
+    server = ["bob"]
+    calls.length = 0
+    await client.updateIssueAssignees(repository, 42, { add: ["alice"], remove: ["bob"] })
+    expect(calls.map((call) => (call as { method: string }).method)).toEqual(["DELETE", "POST"])
     calls.length = 0
     await client.updateIssueAssignees(repository, 42, { add: [], remove: ["carol"] })
     expect(calls).toEqual([{ path: "repositories/123/issues/42/assignees", method: "DELETE", body: { assignees: ["carol"] } }])
@@ -856,15 +876,27 @@ describe("GitHub client", () => {
 
     ignore = false
     server = ["bob"]
-    failRemoval = new Error("Server error")
-    const partial = await client.updateIssueAssignees(repository, 42, { add: ["alice"], remove: ["bob"] }).catch((error) => error)
+    failRemove = new Error("Server error")
+    const partial = await client.updateIssueAssignees(repository, 42, { add: ["alice"], remove: ["bob"] }, ["bob"]).catch((error) => error)
     expect(partial).toBeInstanceOf(AssigneeUpdateError)
     expect(partial.message).toBe("Added @alice, but removing @bob failed: Server error")
     expect(partial.detail.assignees).toEqual(["bob", "alice"])
-    // Nothing was added, so the original failure is reported unchanged.
-    const removal = await client.updateIssueAssignees(repository, 42, { add: [], remove: ["bob"] }).catch((error) => error)
-    expect(removal).not.toBeInstanceOf(AssigneeUpdateError)
-    expect(removal.message).toBe("Server error")
+    failRemove = undefined
+    // At the limit, removal goes first; a failed addition reports what was removed.
+    server = [...ten]
+    failAdd = new Error("Server error")
+    const atLimit = await client
+      .updateIssueAssignees(repository, 42, { add: ["replacement"], remove: ["user0"] }, ten)
+      .catch((error) => error)
+    expect(atLimit).toBeInstanceOf(AssigneeUpdateError)
+    expect(atLimit.message).toBe("Removed @user0, but adding @replacement failed: Server error")
+    expect(atLimit.detail.assignees).toEqual(ten.slice(1))
+    // The first request failed, so the original failure is reported unchanged.
+    server = ["bob"]
+    const addition = await client.updateIssueAssignees(repository, 42, { add: ["alice"], remove: ["bob"] }, ["bob"]).catch((error) => error)
+    expect(addition).not.toBeInstanceOf(AssigneeUpdateError)
+    expect(addition.message).toBe("Server error")
+    expect(server).toEqual(["bob"])
   })
 
   test("closes duplicates using the canonical global ID and rejects invalid targets without writes", async () => {
