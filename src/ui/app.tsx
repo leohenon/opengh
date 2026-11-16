@@ -1354,11 +1354,12 @@ function AppContent(props: AppProps) {
   )
   const visibleTabs = () => navigationTabs().tabs
   const overviewDocuments = () => data().documents.value ?? []
+  const viewableOverviewDocuments = () => [...overviewDocuments(), ...(data().linkedDocuments ?? [])]
   // The About sidebar follows the terminal width until toggled; the choice is not persisted.
   const [aboutSidebar, setAboutSidebar] = createSignal<AboutSidebar>("auto")
   const toggleAboutSidebar = () => setAboutSidebar(aboutSidebarVisible(aboutSidebar(), dimensions().width) ? "hide" : "show")
   const currentOverviewDocument = createMemo(
-    () => overviewDocuments().find((document) => document.id === overviewDocument()) ?? overviewDocuments()[0],
+    () => viewableOverviewDocuments().find((document) => document.id === overviewDocument()) ?? overviewDocuments()[0],
   )
   const activeResource = (): ResourceState<unknown> | undefined => {
     if (diffTarget()) return diffResource()
@@ -1648,7 +1649,7 @@ function AppContent(props: AppProps) {
 
   createEffect(() => {
     if (data().documents.status !== "ready") return
-    if (!overviewDocuments().some((document) => document.id === overviewDocument())) {
+    if (!viewableOverviewDocuments().some((document) => document.id === overviewDocument())) {
       setOverviewDocument(overviewDocuments()[0]?.id)
       overviewScroll?.scrollTo(0)
     }
@@ -1734,10 +1735,8 @@ function AppContent(props: AppProps) {
   const moveOverviewDocument = (delta: number) => {
     const available = overviewDocuments()
     if (!available.length) return
-    const current = Math.max(
-      0,
-      available.findIndex((document) => document.id === overviewDocument()),
-    )
+    const index = available.findIndex((document) => document.id === overviewDocument())
+    const current = index === -1 ? (delta > 0 ? -1 : 0) : index
     selectOverviewDocument(available[(current + delta + available.length) % available.length]!.id)
   }
   const openRepositoryPicker = () => {
@@ -2424,7 +2423,7 @@ function AppContent(props: AppProps) {
       const location = new URL(url)
       const documentUrl = new URL(location.href)
       documentUrl.hash = ""
-      const document = overviewDocuments().find(
+      const document = viewableOverviewDocuments().find(
         (item) =>
           item.resource.value !== undefined &&
           documentUrl.href ===
@@ -2612,6 +2611,7 @@ function AppContent(props: AppProps) {
                               <OverviewScreen
                                 repo={data().repo}
                                 documents={data().documents}
+                                linkedDocuments={data().linkedDocuments}
                                 currentDocument={overviewDocument()}
                                 documentAnchor={documentAnchor()}
                                 interactive={page() === "overview" && !diffTarget() && overlay() === undefined}

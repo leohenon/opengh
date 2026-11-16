@@ -136,17 +136,7 @@ describe("application root", () => {
                 ...state,
                 data: {
                   ...state.data,
-                  documents: {
-                    status: "ready",
-                    value: [
-                      ...state.data.documents.value!,
-                      {
-                        ...source,
-                        id,
-                        resource: { status: "ready", value: "# Root guide loaded" },
-                      },
-                    ],
-                  },
+                  linkedDocuments: [{ ...source, id, resource: { status: "ready", value: "# Root guide loaded" } }],
                 },
               },
         )

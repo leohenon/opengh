@@ -105,8 +105,9 @@ describe("repository session", () => {
     const source = { ...ready(session).data.documents.value![0]!, id: "ignored", path: "docs/guide.md", label: "Guide" }
     const id = session.openDocument(source)!
     expect(id).toContain(source.path)
-    const document = () => ready(session).data.documents.value!.find((document) => document.id === id)!
+    const document = () => ready(session).data.linkedDocuments!.find((document) => document.id === id)!
     expect(document().resource.status).toBe("loading")
+    expect(ready(session).data.documents.value!.some((document) => document.id === id)).toBe(false)
     expect(session.openDocument({ ...source, id: "another" })).toBe(id)
     await new Promise((resolve) => setTimeout(resolve, 0))
     expect(document().resource).toMatchObject({ status: "error", message: "Guide unavailable" })
@@ -141,7 +142,30 @@ describe("repository session", () => {
     pending.resolve("stale content")
     await new Promise((resolve) => setTimeout(resolve, 0))
     expect(ready(session).data.currentBranch).toBe("next")
-    expect(ready(session).data.documents.value!.some((document) => document.id === id)).toBe(false)
+    expect(ready(session).data.linkedDocuments).toBeUndefined()
+  })
+
+  test("linked documents stay out of the document list and reload with a refresh", async () => {
+    const defaults = loaders()
+    let version = 1
+    const session = createRepositorySession(
+      loaders({
+        document: async (repository, source, options) =>
+          source.path === "docs/guide.md" ? `# Guide v${version}` : defaults.document(repository, source, options),
+      }),
+    )
+    await session.load("owner/repo")
+    const standard = ready(session).data.documents.value!.map((document) => document.id)
+    const id = session.openDocument({ ...ready(session).data.documents.value![0]!, path: "docs/guide.md", label: "guide.md" })!
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    const linked = () => ready(session).data.linkedDocuments?.find((document) => document.id === id)
+    expect(linked()?.resource).toEqual({ status: "ready", value: "# Guide v1" })
+    version = 2
+    await session.refresh()
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(ready(session).data.documents.value!.map((document) => document.id)).toEqual(standard)
+    expect(linked()?.resource).toEqual({ status: "ready", value: "# Guide v2" })
+    expect(session.canSwitchBranch()).toBe(true)
   })
 
   test("an injected loader set must supply its own pull request loader", () => {

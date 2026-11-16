@@ -653,6 +653,13 @@ export function createRepositorySession(
   let branchGeneration = 0
   let commitCountGeneration = 0
   let documentsGeneration = 0
+  let linkedAbort = new AbortController()
+  let linkedGeneration = 0
+  const resetLinkedReads = () => {
+    linkedAbort.abort()
+    linkedAbort = new AbortController()
+    ++linkedGeneration
+  }
   const generation = () => repositoryGeneration
   const [reactionActions, setReactionActions] = createSignal<Record<string, ReactionActionState>>({})
   const emptyReactionAction: ReactionActionState = { operation: idle() }
@@ -870,6 +877,55 @@ export function createRepositorySession(
       }
     })
   }
+
+  const fetchLinkedDocument = async (
+    source: RepositoryDocument,
+    repository: string,
+    branch: string,
+    request: number,
+    previous?: string,
+  ) => {
+    const linkedRequest = linkedGeneration
+    const target = repositorySnapshot(repository, request)
+    const resource = await withRequestBudget({ signal: linkedAbort.signal }, (options) =>
+      loadDocument(() => loaders.document(target, source, options), previous),
+    )
+    if (linkedRequest !== linkedGeneration) return
+    updateReady(setState, request, generation, repository, (current) => {
+      const linked = current.data.linkedDocuments
+      if (current.data.currentBranch !== branch || !linked?.some((document) => document.id === source.id)) return current
+      return {
+        ...current,
+        data: {
+          ...current.data,
+          linkedDocuments: linked.map((document) => (document.id === source.id ? { ...document, resource } : document)),
+        },
+      }
+    })
+  }
+  const reloadLinkedDocuments = (repository: string, branch: string, request: number) => {
+    const current = state()
+    const linked = current.status === "ready" ? current.data.linkedDocuments : undefined
+    if (!linked?.length || current.status !== "ready") return
+    setState({
+      ...current,
+      data: {
+        ...current.data,
+        linkedDocuments: linked.map((document) => ({ ...document, resource: loadingResource(document.resource.value) })),
+      },
+    })
+    for (const document of linked) void fetchLinkedDocument(document, repository, branch, request, document.resource.value)
+  }
+  const stopLinkedDocuments = (data: RepositoryData, reason: string): RepositoryData =>
+    data.linkedDocuments
+      ? {
+          ...data,
+          linkedDocuments: data.linkedDocuments.map((document) => ({
+            ...document,
+            resource: stoppedResource(document.resource, new DOMException(reason, "AbortError")),
+          })),
+        }
+      : data
 
   const fetchDocuments = async (repository: string, repo: Repo, branch: string, request: number) => {
     documentsAbort.abort()
@@ -3047,6 +3103,7 @@ export function createRepositorySession(
             ...retainable(data.documents),
             value: data.documents.value.map((document) => ({ ...document, resource: retainable(document.resource) })),
           },
+    linkedDocuments: undefined,
     branches: retainable(data.branches),
     commits: retainable(data.commits),
     commitCount: retainable(data.commitCount),
@@ -3106,6 +3163,7 @@ export function createRepositorySession(
   const load = async (repository: string, scope: RepositoryScope = "full", expectedId?: number) => {
     retainRepository(state(), false)
     resetRepositoryReads()
+    resetLinkedReads()
     clearRepositoryDetails()
     const request = ++repositoryGeneration
     ++branchGeneration
@@ -3253,7 +3311,12 @@ export function createRepositorySession(
     listedAssignees.delete(String(current.data.repo.id))
     const branch = current.data.currentBranch
     mentionUserCache.clear()
-    setState({ ...current, operations: { ...current.operations, refresh: loading() } })
+    resetLinkedReads()
+    setState({
+      ...current,
+      data: stopLinkedDocuments(current.data, "Repository refreshed"),
+      operations: { ...current.operations, refresh: loading() },
+    })
     try {
       const repo = await loaders.metadata(repository, repositoryReads())
       if (request !== repositoryGeneration) return
@@ -3285,6 +3348,7 @@ export function createRepositorySession(
               },
             },
       )
+      if (request === repositoryGeneration) reloadLinkedDocuments(repository, branch, request)
       await loadResources(repository, branch, repo, request, current.data)
       updateReady(setState, request, generation, repository, (latest) => ({
         ...latest,
@@ -3310,19 +3374,17 @@ export function createRepositorySession(
     )
       return undefined
     const documents = current.data.documents.value ?? []
-    const existing = documents.find(
+    const linked = current.data.linkedDocuments ?? []
+    const existing = [...documents, ...linked].find(
       (document) => document.repository === source.repository && document.ref === source.ref && document.path === source.path,
     )
     if (existing) return existing.id
     if (!documents.some((document) => document.repository === source.repository && document.ref === source.ref)) return undefined
     const id = `linked:${JSON.stringify([source.repository, source.ref, source.path])}`
     const document = { ...source, id, resource: loadingResource<string>() }
-    setState({
-      ...current,
-      data: { ...current.data, documents: { status: "ready", value: [...documents, document] } },
-    })
+    setState({ ...current, data: { ...current.data, linkedDocuments: [...linked, document] } })
     // Navigation needs the ID now, not the loaded file.
-    void fetchDocument(document, current.repository, current.data.currentBranch, repositoryGeneration)
+    void fetchLinkedDocument(document, current.repository, current.data.currentBranch, repositoryGeneration)
     return id
   }
 
@@ -3354,6 +3416,20 @@ export function createRepositorySession(
       return fetchDocuments(repository, current.data.repo, branch, request)
     }
     if (resource.kind === "document") {
+      const linked = current.data.linkedDocuments?.find((document) => document.id === resource.id)
+      if (linked) {
+        if (linked.resource.status === "loading") return
+        setState({
+          ...current,
+          data: {
+            ...current.data,
+            linkedDocuments: current.data.linkedDocuments!.map((document) =>
+              document.id === linked.id ? { ...document, resource: loadingResource(document.resource.value) } : document,
+            ),
+          },
+        })
+        return fetchLinkedDocument(linked, repository, branch, request, linked.resource.value)
+      }
       const documents = current.data.documents
       const source = documents.value?.find((document) => document.id === resource.id)
       if (!source || documents.status === "loading" || source.resource.status === "loading") return
@@ -3410,9 +3486,7 @@ export function createRepositorySession(
       current.operations.branch.status !== "loading" &&
       current.operations.refresh.status !== "loading" &&
       current.data.commits.status !== "loading" &&
-      current.data.documents.status !== "loading" &&
-      // Linked files are optional; a branch switch cancels them.
-      !current.data.documents.value?.some((document) => !document.id.startsWith("linked:") && document.resource.status === "loading")
+      !hasLoadingDocuments(current.data)
     )
   }
 
@@ -3430,18 +3504,10 @@ export function createRepositorySession(
     ++documentsGeneration
     const budget = createRequestBudget(documentsAbort.signal)
     const options = { signal: documentsAbort.signal, budget }
+    resetLinkedReads()
     setState({
       ...current,
-      data: {
-        ...current.data,
-        documents: {
-          ...current.data.documents,
-          value: (current.data.documents.value ?? []).map((document) => ({
-            ...document,
-            resource: stoppedResource(document.resource, new DOMException("Branch changed", "AbortError")),
-          })),
-        },
-      },
+      data: stopLinkedDocuments(current.data, "Branch changed"),
       operations: { ...current.operations, branch: loading() },
     })
     try {
@@ -3475,6 +3541,7 @@ export function createRepositorySession(
             ...latest.data,
             currentBranch: branch,
             documents: { status: "ready", value: documents },
+            linkedDocuments: undefined,
             commits: { status: "ready", value: page(commits) },
             commitCount: loadingResource(),
           },

@@ -446,6 +446,14 @@ test("overview opens nested Markdown on demand, keeps loading and retry local, a
             value: "# Start document\n\n[Guide](docs/guide.md#target)\n\n[Outside](https://github.com/other/repo/blob/main/guide.md)",
           },
         },
+        {
+          id: "contributing",
+          label: "CONTRIBUTING",
+          repository,
+          ref,
+          path: "CONTRIBUTING.md",
+          resource: { status: "ready", value: "# Contributing document" },
+        },
       ],
     },
   })
@@ -454,10 +462,7 @@ test("overview opens nested Markdown on demand, keeps loading and retry local, a
   const update = (id: string, resource: ResourceState<string>) =>
     setData((data) => ({
       ...data,
-      documents: {
-        status: "ready",
-        value: data.documents.value!.map((document) => (document.id === id ? { ...document, resource } : document)),
-      },
+      linkedDocuments: data.linkedDocuments!.map((document) => (document.id === id ? { ...document, resource } : document)),
     }))
   const view = await testRender(
     () => (
@@ -467,16 +472,15 @@ test("overview opens nested Markdown on demand, keeps loading and retry local, a
           operations={repositoryOperationsFixture}
           config={{ ...defaultConfig, showStatusBarHints: false }}
           onOpenDocument={(source) => {
-            const existing = data().documents.value!.find((document) => document.path === source.path)
+            const existing = [...data().documents.value!, ...(data().linkedDocuments ?? [])].find(
+              (document) => document.path === source.path,
+            )
             if (existing) return existing.id
             requests.push(source.path)
             const id = source.path
             setData((data) => ({
               ...data,
-              documents: {
-                status: "ready",
-                value: [...data.documents.value!, { ...source, id, resource: { status: "loading", phase: "load" } }],
-              },
+              linkedDocuments: [...(data.linkedDocuments ?? []), { ...source, id, resource: { status: "loading", phase: "load" } }],
             }))
             return id
           }}
@@ -506,7 +510,7 @@ test("overview opens nested Markdown on demand, keeps loading and retry local, a
     update("docs/guide.md", { status: "error", phase: "load", message: "Guide unavailable" })
     await waitForText(view, "Guide unavailable")
     await view.mockInput.pressKey("r")
-    expect(data().documents.value![1]!.resource.status).toBe("loading")
+    expect(data().linkedDocuments![0]!.resource.status).toBe("loading")
     update("docs/guide.md", {
       status: "ready",
       value: `# Guide top\n\n${"Filler paragraph.\n\n".repeat(30)}## Target\n\nTarget reached.\n\n[Child](nested/child.MARKDOWN)\n\n[Home](../README.md)`,
@@ -517,6 +521,9 @@ test("overview opens nested Markdown on demand, keeps loading and retry local, a
     expect(requests).toEqual(["docs/guide.md", "docs/nested/child.MARKDOWN"])
     const lines = view.captureCharFrame().split("\n")
     const tabRow = lines.findIndex((line) => line.includes("README"))
+    expect(lines[tabRow]).toContain("CONTRIBUTING")
+    expect(lines[tabRow]).not.toContain("guide")
+    expect(lines[tabRow]).not.toContain("child")
     await view.mockMouse.click(lines[tabRow]!.indexOf("README"), tabRow)
     await waitForText(view, "Start document")
     update("docs/nested/child.MARKDOWN", { status: "ready", value: "# Late child content" })
@@ -528,6 +535,12 @@ test("overview opens nested Markdown on demand, keeps loading and retry local, a
     expect(requests).toHaveLength(2)
     await click(`${prefix}README.md`)
     await waitForText(view, "Start document")
+    view.mockInput.pressEscape()
+    await waitForText(view, "Guide top")
+    expect(view.captureCharFrame()).not.toContain("Start document")
+    const backLines = view.captureCharFrame().split("\n")
+    const backTabs = backLines.find((line) => line.includes("README"))!
+    expect(backTabs).not.toContain("guide")
   } finally {
     view.renderer.destroy()
   }

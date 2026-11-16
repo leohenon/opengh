@@ -92,6 +92,7 @@ export type RepositoryData = {
   currentBranch: string
   workCounts: ResourceState<{ issues: number; pulls: number }>
   documents: ResourceState<RepositoryDocumentState[]>
+  linkedDocuments?: RepositoryDocumentState[]
   branches: ResourceState<Paginated<string>>
   commits: ResourceState<Paginated<CommitSummary>>
   commitCount: ResourceState<number>

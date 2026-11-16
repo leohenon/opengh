@@ -85,6 +85,7 @@ function InlineAbout(props: { repo: Repo }) {
 export function OverviewScreen(props: {
   repo: Repo
   documents: ResourceState<RepositoryDocumentState[]>
+  linkedDocuments?: RepositoryDocumentState[]
   currentDocument?: string
   documentAnchor?: MarkdownAnchorRequest
   interactive?: boolean
@@ -111,7 +112,10 @@ export function OverviewScreen(props: {
   const repo = () => props.repo
   const about = createMemo(() => extractAboutContent(repo().description))
   const documents = () => props.documents.value ?? []
-  const document = () => documents().find((item) => item.id === props.currentDocument) ?? documents()[0]
+  const document = () =>
+    documents().find((item) => item.id === props.currentDocument) ??
+    props.linkedDocuments?.find((item) => item.id === props.currentDocument) ??
+    documents()[0]
   const documentLabel = (item: RepositoryDocumentState, includeIcon: boolean = showDocumentIcons()): string => {
     const name = item.path.split("/").at(-1)?.toLowerCase() ?? ""
     const kind = /^readme(?:$|[._-])/.test(name)
