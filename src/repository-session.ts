@@ -219,6 +219,7 @@ export type RepositorySession = {
   load(repository: string, scope?: RepositoryScope): Promise<void>
   ensure?(scope: RepositoryScope): Promise<void>
   refresh(): Promise<void>
+  openDocument(source: RepositoryDocument): string | undefined
   retryResource(resource: RepositoryResource): Promise<void>
   canSwitchBranch(): boolean
   switchBranch(branch: string): Promise<void>
@@ -3299,6 +3300,32 @@ export function createRepositorySession(
     }
   }
 
+  const openDocument = (source: RepositoryDocument): string | undefined => {
+    const current = state()
+    if (
+      current.status !== "ready" ||
+      current.operations.refresh.status === "loading" ||
+      current.operations.branch.status === "loading" ||
+      current.data.documents.status !== "ready"
+    )
+      return undefined
+    const documents = current.data.documents.value ?? []
+    const existing = documents.find(
+      (document) => document.repository === source.repository && document.ref === source.ref && document.path === source.path,
+    )
+    if (existing) return existing.id
+    if (!documents.some((document) => document.repository === source.repository && document.ref === source.ref)) return undefined
+    const id = `linked:${JSON.stringify([source.repository, source.ref, source.path])}`
+    const document = { ...source, id, resource: loadingResource<string>() }
+    setState({
+      ...current,
+      data: { ...current.data, documents: { status: "ready", value: [...documents, document] } },
+    })
+    // Navigation needs the ID now, not the loaded file.
+    void fetchDocument(document, current.repository, current.data.currentBranch, repositoryGeneration)
+    return id
+  }
+
   const retryResource = async (resource: RepositoryResource) => {
     const current = state()
     if (current.status !== "ready" || current.operations.refresh.status === "loading" || current.operations.branch.status === "loading")
@@ -3383,7 +3410,9 @@ export function createRepositorySession(
       current.operations.branch.status !== "loading" &&
       current.operations.refresh.status !== "loading" &&
       current.data.commits.status !== "loading" &&
-      !hasLoadingDocuments(current.data)
+      current.data.documents.status !== "loading" &&
+      // Linked files are optional; a branch switch cancels them.
+      !current.data.documents.value?.some((document) => !document.id.startsWith("linked:") && document.resource.status === "loading")
     )
   }
 
@@ -3401,7 +3430,20 @@ export function createRepositorySession(
     ++documentsGeneration
     const budget = createRequestBudget(documentsAbort.signal)
     const options = { signal: documentsAbort.signal, budget }
-    setState({ ...current, operations: { ...current.operations, branch: loading() } })
+    setState({
+      ...current,
+      data: {
+        ...current.data,
+        documents: {
+          ...current.data.documents,
+          value: (current.data.documents.value ?? []).map((document) => ({
+            ...document,
+            resource: stoppedResource(document.resource, new DOMException("Branch changed", "AbortError")),
+          })),
+        },
+      },
+      operations: { ...current.operations, branch: loading() },
+    })
     try {
       const [commits, documents] = await Promise.all([
         loaders.commits(current.data.repo, branch, 1, branchReads()),
@@ -3793,6 +3835,7 @@ export function createRepositorySession(
     submitIssueAction,
     load,
     refresh,
+    openDocument,
     retryResource,
     ensure,
     canSwitchBranch,

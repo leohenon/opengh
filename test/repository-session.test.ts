@@ -87,6 +87,63 @@ function ready(session: ReturnType<typeof createRepositorySession>) {
 }
 
 describe("repository session", () => {
+  test("on-demand documents append synchronously, reuse source identity, and retry failures", async () => {
+    const defaults = loaders()
+    let fail = true
+    let calls = 0
+    const session = createRepositorySession(
+      loaders({
+        document: async (repository, source) => {
+          if (source.path !== "docs/guide.md") return defaults.document(repository, source)
+          calls++
+          if (fail) throw new Error("Guide unavailable")
+          return "# Loaded guide"
+        },
+      }),
+    )
+    await session.load("owner/repo")
+    const source = { ...ready(session).data.documents.value![0]!, id: "ignored", path: "docs/guide.md", label: "Guide" }
+    const id = session.openDocument(source)!
+    expect(id).toContain(source.path)
+    const document = () => ready(session).data.documents.value!.find((document) => document.id === id)!
+    expect(document().resource.status).toBe("loading")
+    expect(session.openDocument({ ...source, id: "another" })).toBe(id)
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(document().resource).toMatchObject({ status: "error", message: "Guide unavailable" })
+    fail = false
+    await session.retryResource({ kind: "document", id })
+    expect(document().resource).toEqual({ status: "ready", value: "# Loaded guide" })
+    expect(session.openDocument(source)).toBe(id)
+    expect(calls).toBe(2)
+    const loaded = ready(session).data.documents.value![0]!
+    expect(session.openDocument({ ...loaded, id: "different" })).toBe(loaded.id)
+    expect(session.openDocument({ ...source, ref: "unknown" })).toBeUndefined()
+  })
+
+  test("late on-demand loads cannot publish into a new branch", async () => {
+    const defaults = loaders()
+    const pending = deferred<string>()
+    let signal: AbortSignal | undefined
+    const session = createRepositorySession(
+      loaders({
+        document: async (repository, source, options) => {
+          if (source.path !== "docs/late.md") return defaults.document(repository, source)
+          signal = options?.signal
+          return pending.promise
+        },
+      }),
+    )
+    await session.load("owner/repo")
+    const source = { ...ready(session).data.documents.value![0]!, path: "docs/late.md" }
+    const id = session.openDocument(source)!
+    await session.switchBranch("next")
+    expect(signal?.aborted).toBe(true)
+    pending.resolve("stale content")
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(ready(session).data.currentBranch).toBe("next")
+    expect(ready(session).data.documents.value!.some((document) => document.id === id)).toBe(false)
+  })
+
   test("an injected loader set must supply its own pull request loader", () => {
     // @ts-expect-error Omitting it must fail to compile; it can never fall back to the live GitHub client.
     const incomplete: RepositoryLoaders = { ...loaders(), pull: undefined }

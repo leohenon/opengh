@@ -4,7 +4,8 @@ import { render, testRender } from "@opentui/solid"
 import { createTestRenderer } from "@opentui/core/testing"
 import { initializeHunk } from "../src/ui/hunk-host"
 import { resumeLocation, type ResumeLocation } from "../src/resume"
-import type { DiffTarget } from "../src/models"
+import type { DiffTarget, RepositoryDocument } from "../src/models"
+import { waitForText } from "./fixtures/wait"
 import { patchFixture } from "./fixtures/diff"
 import { BoxRenderable, CodeRenderable, RGBA, type Renderable, type TextareaRenderable } from "@opentui/core"
 import { createSignal } from "solid-js"
@@ -85,6 +86,7 @@ function readySession() {
     },
     load: idle,
     refresh: idle,
+    openDocument: () => undefined,
     retryResource: idle,
     canSwitchBranch: () => true,
     switchBranch: idle,
@@ -97,6 +99,93 @@ function readySession() {
 }
 
 describe("application root", () => {
+  test("wires overview Markdown links to the session and navigates to its accepted document ID", async () => {
+    const repository = githubDataFixture.repo.nameWithOwner
+    const [state, setState] = createSignal<RepositoryState>({
+      status: "ready",
+      repository,
+      operations: repositoryOperationsFixture,
+      data: {
+        ...githubDataFixture,
+        documents: {
+          status: "ready",
+          value: [
+            {
+              id: "readme",
+              label: "README",
+              repository,
+              ref: "main",
+              path: "README.md",
+              resource: { status: "ready", value: "# Root document\n\n[Open guide](docs/guide.md)" },
+            },
+          ],
+        },
+      },
+    })
+    const opened: RepositoryDocument[] = []
+    const session = {
+      ...readySession(),
+      state,
+      openDocument: (source: RepositoryDocument) => {
+        opened.push(source)
+        const id = "accepted-guide"
+        setState((state) =>
+          state.status !== "ready"
+            ? state
+            : {
+                ...state,
+                data: {
+                  ...state.data,
+                  documents: {
+                    status: "ready",
+                    value: [
+                      ...state.data.documents.value!,
+                      {
+                        ...source,
+                        id,
+                        resource: { status: "ready", value: "# Root guide loaded" },
+                      },
+                    ],
+                  },
+                },
+              },
+        )
+        return id
+      },
+    }
+    const view = await testRender(
+      () => (
+        <Root
+          repositoryArgument={repository}
+          cwd="/work"
+          services={{
+            createPullReviewSession: createTestReviewSession,
+            resolveRepository: async () => repository,
+            resolveLocalRepository: async () => undefined,
+            loadRecentRepositories: async () => [],
+            rememberRepository: async () => {},
+            loadRepositoryTabs: async () => ({}),
+            saveRepositoryTabs: async () => {},
+            loadConfig: async () => defaultConfig,
+            createRepositorySession: () => session,
+          }}
+        />
+      ),
+      { width: 80, height: 24 },
+    )
+    active.push(view)
+    await waitForText(view, "Root document")
+    const url = `https://github.com/${repository}/blob/main/docs/guide.md`
+    let cell: { x: number; y: number } | undefined
+    for (let y = 0; y < view.renderer.height; y++)
+      for (let x = 0; x < view.renderer.width; x++) if (view.renderer.getLinkAt(x, y) === url) cell = { x, y }
+    expect(cell).toBeDefined()
+    await view.mockMouse.click(cell!.x, cell!.y)
+    await waitForText(view, "Root guide loaded")
+    expect(opened).toHaveLength(1)
+    expect(opened[0]).toMatchObject({ repository, ref: "main", path: "docs/guide.md" })
+  })
+
   test("retains a resolved launch through metadata retry, then consumes it before repository switching", async () => {
     const [state, setState] = createSignal<RepositoryState>({ status: "loading", repository: "cli/cli" })
     const [pullDetail, setPullDetail] = createSignal<PullDetailState>()

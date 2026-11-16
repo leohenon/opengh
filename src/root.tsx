@@ -482,6 +482,7 @@ export function Root(props: {
                             onRefreshRecentRepositories={refreshRecent}
                             onSwitchRepository={open}
                             onOpenReference={(repository, detail) => open(repository, { detail })}
+                            onOpenDocument={(source) => session.openDocument(source)}
                             onRetryResource={(resource) => void session.retryResource(resource)}
                             canSwitchBranch={session.canSwitchBranch()}
                             onBranchChange={(branch) => void session.switchBranch(branch)}

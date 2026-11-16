@@ -35,6 +35,7 @@ import type {
   ReactionKind,
   ReactionState,
   ReactionTarget,
+  RepositoryDocument,
 } from "../models"
 import {
   atRepositoryEntry,
@@ -104,6 +105,7 @@ import { MarkdownProvider } from "./markdown-preferences"
 import { MentionProvider, type MentionSearch } from "./mentions"
 import { HyperlinkProvider, HyperlinkSurface } from "./hyperlinks"
 import { resolveLinkTarget } from "../link-target"
+import { overviewDocumentLink } from "../overview-document-link"
 import type { MarkdownAnchorRequest } from "./markdown-anchors"
 import { SearchProvider } from "./search-context"
 import { StatusPromptBar, StatusPromptProvider } from "./status-prompt"
@@ -163,6 +165,7 @@ export type AppProps = {
   onRefreshRecentRepositories?: () => Promise<void>
   onSwitchRepository?: (repository: string) => void
   onOpenReference?: (repository: string, detail: DetailTarget) => void
+  onOpenDocument?: (source: RepositoryDocument) => string | undefined
   onRetryResource?: (resource: RepositoryResource) => void
   canSwitchBranch?: boolean
   onBranchChange?: (branch: string) => void
@@ -2424,12 +2427,17 @@ function AppContent(props: AppProps) {
           documentUrl.href ===
             `https://github.com/${item.repository}/blob/${encodeURIComponent(item.ref)}/${item.path.split("/").map(encodeURIComponent).join("/")}`,
       )
-      if (document) {
+      let documentId = document?.id
+      if (!documentId && page() === "overview") {
+        const source = overviewDocumentLink(url, currentOverviewDocument(), overviewDocuments())
+        if (source) documentId = props.onOpenDocument?.(source)
+      }
+      if (documentId) {
         initialPagePending = false
         batch(() => {
           setOverlay()
-          setNavigation((state) => openPage(state, "overview", document.id))
-          setDocumentAnchor(location.hash ? { document: document.id, fragment: location.hash, request } : undefined)
+          setNavigation((state) => openPage(state, "overview", documentId))
+          setDocumentAnchor(location.hash ? { document: documentId, fragment: location.hash, request } : undefined)
         })
         if (!location.hash) overviewScroll?.scrollTo(0)
         return

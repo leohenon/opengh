@@ -4,6 +4,7 @@ import { Writable } from "node:stream"
 import { testRender } from "@opentui/solid"
 import { createSignal, Show } from "solid-js"
 import type { ReactionTarget } from "../src/models"
+import type { RepositoryData, ResourceState } from "../src/repository-state"
 import { GitHubMarkdown } from "../src/ui/components/github-markdown"
 import { TimelineCommits } from "../src/ui/components/pull-commits"
 import { Popup } from "../src/ui/components/popup"
@@ -420,6 +421,113 @@ test("popup links open once and backdrop dismissal consumes the whole click", as
     const background = linkCells(view, backgroundUrl)[0]!
     await view.mockMouse.click(background.x, background.y)
     expect(opened).toEqual([popupUrl, backgroundUrl])
+  } finally {
+    view.renderer.destroy()
+  }
+})
+
+test("overview opens nested Markdown on demand, keeps loading and retry local, and ignores late navigation", async () => {
+  const repository = githubDataFixture.repo.nameWithOwner
+  const ref = "feature/docs"
+  const prefix = `https://github.com/${repository}/blob/${encodeURIComponent(ref)}/`
+  const [data, setData] = createSignal<RepositoryData>({
+    ...githubDataFixture,
+    documents: {
+      status: "ready",
+      value: [
+        {
+          id: "readme",
+          label: "README",
+          repository,
+          ref,
+          path: "README.md",
+          resource: {
+            status: "ready",
+            value: "# Start document\n\n[Guide](docs/guide.md#target)\n\n[Outside](https://github.com/other/repo/blob/main/guide.md)",
+          },
+        },
+      ],
+    },
+  })
+  const opened: string[] = []
+  const requests: string[] = []
+  const update = (id: string, resource: ResourceState<string>) =>
+    setData((data) => ({
+      ...data,
+      documents: {
+        status: "ready",
+        value: data.documents.value!.map((document) => (document.id === id ? { ...document, resource } : document)),
+      },
+    }))
+  const view = await testRender(
+    () => (
+      <ThemeProvider name="github">
+        <App
+          data={data}
+          operations={repositoryOperationsFixture}
+          config={{ ...defaultConfig, showStatusBarHints: false }}
+          onOpenDocument={(source) => {
+            const existing = data().documents.value!.find((document) => document.path === source.path)
+            if (existing) return existing.id
+            requests.push(source.path)
+            const id = source.path
+            setData((data) => ({
+              ...data,
+              documents: {
+                status: "ready",
+                value: [...data.documents.value!, { ...source, id, resource: { status: "loading", phase: "load" } }],
+              },
+            }))
+            return id
+          }}
+          onRetryResource={(resource) => {
+            if (resource.kind === "document") update(resource.id, { status: "loading", phase: "load" })
+          }}
+          onOpenUrl={async (url) => {
+            opened.push(url)
+          }}
+        />
+      </ThemeProvider>
+    ),
+    { width: 80, height: 22 },
+  )
+  const click = async (url: string) => {
+    const cell = linkCells(view, url)[0]!
+    await view.mockMouse.click(cell.x, cell.y)
+    await settleMarkdown(view)
+  }
+  try {
+    await settleMarkdown(view)
+    await click("https://github.com/other/repo/blob/main/guide.md")
+    expect(opened).toHaveLength(1)
+    await click(`${prefix}docs/guide.md#target`)
+    expect(requests).toEqual(["docs/guide.md"])
+    expect(view.captureCharFrame()).not.toContain("Start document")
+    update("docs/guide.md", { status: "error", phase: "load", message: "Guide unavailable" })
+    await waitForText(view, "Guide unavailable")
+    await view.mockInput.pressKey("r")
+    expect(data().documents.value![1]!.resource.status).toBe("loading")
+    update("docs/guide.md", {
+      status: "ready",
+      value: `# Guide top\n\n${"Filler paragraph.\n\n".repeat(30)}## Target\n\nTarget reached.\n\n[Child](nested/child.MARKDOWN)\n\n[Home](../README.md)`,
+    })
+    await waitForText(view, "Target reached")
+    expect(view.captureCharFrame()).not.toContain("Guide top")
+    await click(`${prefix}docs/nested/child.MARKDOWN`)
+    expect(requests).toEqual(["docs/guide.md", "docs/nested/child.MARKDOWN"])
+    const lines = view.captureCharFrame().split("\n")
+    const tabRow = lines.findIndex((line) => line.includes("README"))
+    await view.mockMouse.click(lines[tabRow]!.indexOf("README"), tabRow)
+    await waitForText(view, "Start document")
+    update("docs/nested/child.MARKDOWN", { status: "ready", value: "# Late child content" })
+    await settleMarkdown(view)
+    expect(view.captureCharFrame()).toContain("Start document")
+    expect(view.captureCharFrame()).not.toContain("Late child content")
+    await click(`${prefix}docs/guide.md#target`)
+    await waitForText(view, "Target reached")
+    expect(requests).toHaveLength(2)
+    await click(`${prefix}README.md`)
+    await waitForText(view, "Start document")
   } finally {
     view.renderer.destroy()
   }
