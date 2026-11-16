@@ -43,7 +43,7 @@ export function resolveLinkTarget(value: string): LinkTarget | undefined {
   const url = parseSafeUrl(value)
   if (!url) return undefined
   const external: LinkTarget = { kind: "external", url: value }
-  if (url.protocol === "mailto:" || url.hostname !== "github.com" || url.port || url.search || url.hash) return external
+  if (url.protocol === "mailto:" || url.hostname !== "github.com" || url.port) return external
 
   const [owner, name, ...path] = url.pathname.replace(/^\/|\/$/g, "").split("/")
   if (
@@ -55,9 +55,23 @@ export function resolveLinkTarget(value: string): LinkTarget | undefined {
     return external
   const repository = owner && name && normalizeRepository(`${owner}/${name}`)
   if (!repository) return external
+  const [route, target] = path
+  if (route === "actions" && target === "runs" && (path.length === 3 || (path.length === 5 && path[3] === "job"))) {
+    // Job and step links open their parent run.
+    if (
+      [...url.searchParams].some(([key, value]) =>
+        key === "pr" ? positiveNumber(value) === undefined : key !== "check_suite_focus" || !["true", "false"].includes(value),
+      ) ||
+      (url.hash && !/^#step:\d+:\d+$/.test(url.hash))
+    )
+      return external
+    const id = positiveNumber(path[2]!)
+    if (id === undefined || (path.length === 5 && positiveNumber(path[4]!) === undefined)) return undefined
+    return { kind: "detail", repository, detail: { kind: "run", id } }
+  }
+  if (url.search || url.hash) return external
   if (!path.length) return { kind: "page", repository, page: "overview" }
 
-  const [route, target] = path
   const pages: Record<string, Page> = { issues: "issues", pulls: "pulls", commits: "commits", actions: "actions" }
   if (path.length === 1 && Object.hasOwn(pages, route!)) return { kind: "page", repository, page: pages[route!]! }
   if (path.length === 2) {
@@ -81,10 +95,6 @@ export function resolveLinkTarget(value: string): LinkTarget | undefined {
   if (path.length === 4 && route === "pull" && path[2] === "commits") {
     if (positiveNumber(target!) === undefined || !/^[a-f\d]{4,40}$/i.test(path[3]!)) return undefined
     return { kind: "detail", repository, detail: { kind: "commit", sha: path[3]!.toLowerCase() } }
-  }
-  if (path.length === 3 && route === "actions" && target === "runs") {
-    const id = positiveNumber(path[2]!)
-    return id === undefined ? undefined : { kind: "detail", repository, detail: { kind: "run", id } }
   }
   if (path.length === 3 && route === "pull" && path[2] === "files") {
     const number = positiveNumber(target!)

@@ -23,6 +23,26 @@ describe("link targets", () => {
     for (const [url, expected] of cases) expect(resolveLinkTarget(url)).toEqual(expected)
   })
 
+  test("opens Actions job and check-focus links at their parent run", () => {
+    for (const suffix of [
+      "",
+      "/job/78",
+      "/job/78/",
+      "?check_suite_focus=true",
+      "/job/78?check_suite_focus=true",
+      "/job/78?pr=34",
+      "/job/78?pr=34&check_suite_focus=true#step:3:4",
+      "/job/78?check_suite_focus=false#step:3:4",
+      "/job/78#step:3:4",
+    ]) {
+      expect(resolveLinkTarget(`https://github.com/other/project/actions/runs/56${suffix}`)).toEqual({
+        kind: "detail",
+        repository: "other/project",
+        detail: { kind: "run", id: 56 },
+      })
+    }
+  })
+
   test("preserves unsupported destinations and nonempty queries and anchors exactly", () => {
     const urls = [
       "https://github.com/apps/dependabot",
@@ -39,7 +59,13 @@ describe("link targets", () => {
       "https://github.com/other/project/issues/12#issuecomment-99",
       "https://github.com/other/project/pulls?q=is%3Aopen",
       "https://github.com/other/project/pull/34/files#diff-123",
-      "https://github.com/other/project/actions/runs/56?check_suite_focus=true",
+      "https://github.com/other/project/actions/runs/56?unknown=true",
+      "https://github.com/other/project/actions/runs/56?check_suite_focus=invalid",
+      "https://github.com/other/project/actions/runs/56/job/78?pr=invalid",
+      "https://github.com/other/project/actions/runs/56/job/78?pr=0",
+      "https://github.com/other/project/actions/runs/56/job/78/logs",
+      "https://github.com/other/project/actions/runs/56#unknown",
+      "https://github.com/other/project/actions/runs/56/job/78?unknown=true",
       "https://github.com/other/project/issues/12?ignored=/../#../",
       "https://github.com:8443/other/project",
       "https://example.com/a?x=1&y=2#part",
@@ -80,6 +106,10 @@ describe("link targets", () => {
       "https://github.com/other/project/pull/-1",
       "https://github.com/other/project/pull/1.5/files",
       "https://github.com/other/project/actions/runs/nope",
+      "https://github.com/other/project/actions/runs/0/job/78",
+      "https://github.com/other/project/actions/runs/56/job/0",
+      "https://github.com/other/project/actions/runs/56/job/nope",
+      "https://github.com/other/project/actions/runs/56/job/9007199254740992",
       "https://github.com/other/project/commit/abc",
       `https://github.com/other/project/commit/${"a".repeat(41)}`,
     ]
