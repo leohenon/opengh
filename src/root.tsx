@@ -523,6 +523,7 @@ export function Root(props: {
                             onOpenInBrowser={(target, repository, view) => services.openGitHub(repository ?? repositoryName, target, view)}
                             onCopyToClipboard={services.copyToHostClipboard}
                             onLoadMoreRuns={session.loadMoreRuns}
+                            onWorkFindChange={session.setWorkFind ? (kind, query) => void session.setWorkFind?.(kind, query) : undefined}
                             onLoadMoreIssues={session.loadMoreIssues}
                             onLoadMorePulls={session.loadMorePulls}
                           />

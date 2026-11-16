@@ -54,7 +54,7 @@ function loaders(overrides: Partial<RepositoryLoaders> = {}): RepositoryLoaders 
     workCounts: async () => ({ issues: 61, pulls: 24 }),
     commitCount: async () => 4,
     documents: async (repo, branch) =>
-      githubDataFixture.documents.value!.map(({ resource, ...source }) => ({
+      githubDataFixture.documents.value!.map(({ resource: _resource, ...source }) => ({
         ...source,
         id: `${repo.nameWithOwner}:${source.path}`,
         repository: repo.nameWithOwner,
@@ -2469,5 +2469,177 @@ describe("mentionable user search", () => {
     expect(await latest).toEqual(["new-repository-user"])
     expect(await session.searchMentionableUsers!("a")).toEqual(["new-repository-user"])
     expect(results).toHaveLength(3)
+  })
+})
+
+describe("GitHub-backed work find", () => {
+  test.each(["issues", "pulls"] as const)("%s retains its query for paging, retries, refresh, and repository roundtrips", async (kind) => {
+    const calls: Array<{ state: string; page: number; query?: string }> = []
+    let failPage = false
+    const session = createRepositorySession(
+      loaders({
+        [kind]: async (_repo: unknown, state: "open" | "closed", page = 1, _options: unknown, query?: string) => {
+          calls.push({ state, page, query })
+          if (failPage && page === 2) throw new Error("Search unavailable")
+          const original = githubDataFixture[kind][state].value!.items[0]!
+          return { items: [{ ...original, number: page }], hasMore: true }
+        },
+      }),
+    )
+    await session.load("owner/repo", kind)
+    await session.setWorkFind!(kind, "  label:bug  ")
+    expect(ready(session).data.workFinds?.[kind]).toBe("label:bug")
+    expect(calls.slice(-2)).toEqual([
+      { state: "open", page: 1, query: "label:bug" },
+      { state: "closed", page: 1, query: "label:bug" },
+    ])
+    const loadMore = kind === "issues" ? session.loadMoreIssues : session.loadMorePulls
+    failPage = true
+    await loadMore("open")
+    expect(ready(session).data[kind].open.status).toBe("error")
+    expect(ready(session).data[kind].open.value!.items.map((item) => item.number)).toEqual([1])
+    failPage = false
+    await session.retryResource({ kind, state: "open" })
+    expect(calls.at(-1)).toEqual({ state: "open", page: 2, query: "label:bug" })
+    expect(ready(session).data[kind].open.value!.items.map((item) => item.number)).toEqual([1, 2])
+    calls.length = 0
+    await session.refresh()
+    expect(calls).toHaveLength(3)
+    expect(calls.every((call) => call.query === "label:bug")).toBe(true)
+    await session.load("owner/other", "detail")
+    expect(ready(session).data.workFinds?.[kind]).toBeUndefined()
+    await session.load("owner/repo", kind)
+    expect(ready(session).data.workFinds?.[kind]).toBe("label:bug")
+    await session.setWorkFind!(kind, "")
+    expect(ready(session).data.workFinds?.[kind]).toBe("")
+    expect(ready(session).data[kind].open.value!.page).toBe(1)
+    expect(calls.slice(-2).every((call) => call.query === "")).toBe(true)
+  })
+
+  test.each(["issues", "pulls"] as const)("%s cancels replaced searches and rejects old successful or failed pages", async (kind) => {
+    const stalePage = deferred<{ items: NonNullable<typeof githubDataFixture.issues.open.value>["items"]; hasMore: boolean }>()
+    const signals: AbortSignal[] = []
+    let initial = true
+    const session = createRepositorySession(
+      loaders({
+        [kind]: async (_repo: unknown, state: "open" | "closed", page = 1, options: { signal: AbortSignal }, query?: string) => {
+          if (initial) return { items: [], hasMore: false }
+          if (query === "old") {
+            signals.push(options.signal)
+            return stalePage.promise
+          }
+          const original = githubDataFixture[kind][state].value!.items[0]!
+          return { items: [{ ...original, number: page + 100 }], hasMore: true }
+        },
+      }),
+    )
+    await session.load("owner/repo", kind)
+    initial = false
+    const first = session.setWorkFind!(kind, "old")
+    expect(ready(session).data[kind].open.value).toBeUndefined()
+    await session.setWorkFind!(kind, "new")
+    expect(signals.every((signal) => signal.aborted)).toBe(true)
+    stalePage.resolve({ items: [], hasMore: false })
+    await first
+    expect(ready(session).data.workFinds?.[kind]).toBe("new")
+    expect(ready(session).data[kind].open.value!.items[0]!.number).toBe(101)
+
+    const pending = deferred<{ items: never[]; hasMore: boolean }>()
+    let oldSignal: AbortSignal | undefined
+    const next = createRepositorySession(
+      loaders({
+        [kind]: async (_repo: unknown, state: "open" | "closed", page = 1, options: { signal: AbortSignal }, query?: string) => {
+          if (query === "before" && page === 2) {
+            oldSignal = options.signal
+            return pending.promise
+          }
+          return { items: [], hasMore: true }
+        },
+      }),
+    )
+    await next.load("owner/repo", kind)
+    await next.setWorkFind!(kind, "before")
+    const pagination = kind === "issues" ? next.loadMoreIssues("open") : next.loadMorePulls("open")
+    await next.setWorkFind!(kind, "after")
+    expect(oldSignal!.aborted).toBe(true)
+    pending.reject(new Error("obsolete pagination failure"))
+    await pagination
+    expect(ready(next).data[kind].open.status).toBe("ready")
+    expect(ready(next).data[kind].open.value!.page).toBe(1)
+  })
+
+  test.each(["issues", "pulls"] as const)("%s keeps the search total through paging and drops it when the find clears", async (kind) => {
+    const session = createRepositorySession(
+      loaders({
+        [kind]: async (_repo: unknown, state: "open" | "closed", page = 1, _options: unknown, query?: string) => {
+          const original = githubDataFixture[kind][state].value!.items[0]!
+          return { items: [{ ...original, number: page }], hasMore: true, ...(query ? { total: state === "open" ? 87 : 212 } : {}) }
+        },
+      }),
+    )
+    await session.load("owner/repo", kind)
+    expect(ready(session).data[kind].open.value!.total).toBeUndefined()
+    await session.setWorkFind!(kind, "label:bug")
+    expect(ready(session).data[kind].open.value!.total).toBe(87)
+    expect(ready(session).data[kind].closed.value!.total).toBe(212)
+    await (kind === "issues" ? session.loadMoreIssues("open") : session.loadMorePulls("open"))
+    expect(ready(session).data[kind].open.value!.items.map((item) => item.number)).toEqual([1, 2])
+    expect(ready(session).data[kind].open.value!.total).toBe(87)
+    await session.setWorkFind!(kind, "")
+    expect(ready(session).data[kind].open.value!.total).toBeUndefined()
+  })
+
+  test("a write keeps an already-found issue in place while the found list refetches", async () => {
+    const number = issueDetailFixture.number
+    let remote: IssueDetail = { ...issueDetailFixture }
+    const refetch = deferred<{ items: IssueDetail[]; hasMore: boolean }>()
+    let hold = false
+    const session = createRepositorySession(
+      loaders({
+        issue: async () => remote,
+        issues: async (_repository, state, _page, _options, query) =>
+          hold && query ? refetch.promise : { items: remote.state === state ? [remote] : [], hasMore: false },
+        updateIssueAssignees: async (_repository, _number, changes) => {
+          remote = { ...remote, assignees: remote.assignees.filter((login) => !changes.remove.includes(login)) }
+          return remote
+        },
+      }),
+    )
+    await session.load("owner/repo", "issues")
+    await session.setWorkFind!("issues", "label:bug")
+    await session.loadIssue(number)
+    hold = true
+    session.prepareIssueAction(number, "assignees")
+    session.updateIssueDraft(number, { selectedAssignees: ["max"] })
+    await session.submitIssueAction(number, "assignees")
+    expect(ready(session).data.issues.open.value!.items.map((item) => item.number)).toEqual([number])
+    expect(ready(session).data.issues.closed.value!.items).toEqual([])
+    refetch.resolve({ items: [remote], hasMore: false })
+  })
+
+  test("a search error has no rows from the prior query and retry keeps the failed query", async () => {
+    let fail = true
+    const queries: string[] = []
+    const base = loaders()
+    const session = createRepositorySession(
+      loaders({
+        issues: async (repo, state, page, options, query) => {
+          if (query) {
+            queries.push(query)
+            if (fail) throw new Error("Invalid GitHub search query")
+          }
+          return base.issues(repo, state, page, options)
+        },
+      }),
+    )
+    await session.load("owner/repo", "issues")
+    await session.setWorkFind!("issues", "label:bug")
+    const resource = ready(session).data.issues.open
+    expect(resource.status).toBe("error")
+    expect(resource.value).toBeUndefined()
+    fail = false
+    await session.retryResource({ kind: "issues", state: "open" })
+    expect(ready(session).data.issues.open.status).toBe("ready")
+    expect(queries.at(-1)).toBe("label:bug")
   })
 })

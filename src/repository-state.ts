@@ -95,6 +95,7 @@ export type RepositoryData = {
   branches: ResourceState<Paginated<string>>
   commits: ResourceState<Paginated<CommitSummary>>
   commitCount: ResourceState<number>
+  workFinds?: Partial<Record<"issues" | "pulls", string>>
   issues: Record<ListState, ResourceState<Paginated<IssueSummary>>>
   pulls: Record<ListState, ResourceState<Paginated<PullRequestSummary>>>
   runs: ResourceState<Paginated<WorkflowRunSummary>>

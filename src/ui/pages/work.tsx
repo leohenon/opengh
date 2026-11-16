@@ -15,6 +15,7 @@ import { mouseClick, type MousePosition } from "../mouse"
 export function WorkScreen(props: {
   kind: "issue" | "pull"
   state: ListState
+  find?: string
   counts: { open: string; closed: string }
   resource: ResourceState<Paginated<IssueSummary | PullRequestSummary>>
   active: boolean
@@ -80,8 +81,8 @@ export function WorkScreen(props: {
             itemKey={(item) => item.number}
             active={props.active && props.interactive}
             showScrollbar={props.showScrollbar}
-            resetKey={props.state}
-            empty={`No ${props.state} ${props.kind === "issue" ? "issues" : "pull requests"}${page().hasMore ? " loaded yet" : ""}`}
+            resetKey={`${props.state}:${props.find ?? ""}`}
+            empty={`No ${props.state} ${props.kind === "issue" ? "issues" : "pull requests"}${props.find ? " found" : page().hasMore ? " loaded yet" : ""}`}
             onEndReached={props.onEndReached}
             onContextMenu={props.onContextMenu}
             onActivate={props.onOpen}

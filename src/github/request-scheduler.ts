@@ -3,17 +3,24 @@ import { GitHubApiError, GitHubRequestNotSentError } from "./errors"
 const MAX_CONCURRENT_REQUESTS = 4
 const MIN_BACKOFF_MS = 60_000
 
+type Cooldown = { blockedUntil: number; backoff: number }
+
+const isSearch = (path: string) => /^\/?search\//.test(path)
+
 // Shared by REST, GraphQL, identity probes, and anonymous page fetches. Cooldowns
 // reject locally rather than queueing stale polling reads or delayed writes.
 export class GitHubRequestScheduler {
   private active = 0
   private queue: (() => void)[] = []
-  private blockedUntil = 0
-  private backoff = MIN_BACKOFF_MS
+  private core: Cooldown = { blockedUntil: 0, backoff: MIN_BACKOFF_MS }
+  private search: Cooldown = { blockedUntil: 0, backoff: MIN_BACKOFF_MS }
 
   assertAvailable(path: string, write: boolean) {
-    if (Date.now() >= this.blockedUntil) return
-    const message = `GitHub requests are paused until ${new Date(this.blockedUntil).toLocaleTimeString()} due to rate limiting`
+    const now = Date.now()
+    const blockedUntil = Math.max(this.core.blockedUntil, isSearch(path) ? this.search.blockedUntil : 0)
+    if (now >= blockedUntil) return
+    const subject = isSearch(path) && this.search.blockedUntil > this.core.blockedUntil ? "GitHub search is" : "GitHub requests are"
+    const message = `${subject} paused until ${new Date(blockedUntil).toLocaleTimeString()} due to rate limiting`
     if (write) throw new GitHubRequestNotSentError(`${message}; wait before retrying. No changes were sent.`)
     throw new GitHubApiError(path, message, 429)
   }
@@ -66,12 +73,14 @@ export class GitHubRequestScheduler {
     }
   }
 
-  observe(headers: Headers, rateLimited: boolean) {
+  observe(headers: Headers, rateLimited: boolean, path = "") {
     const now = Date.now()
     const exhausted = headers.get("x-ratelimit-remaining") === "0"
+    // Secondary limits are account-wide.
+    const cooldown = isSearch(path) && (exhausted || !rateLimited) ? this.search : this.core
     if (!rateLimited && !exhausted) {
       // An older, already in-flight success must not undo a new cooldown.
-      if (now >= this.blockedUntil) this.backoff = MIN_BACKOFF_MS
+      if (now >= cooldown.blockedUntil) cooldown.backoff = MIN_BACKOFF_MS
       return
     }
     const retry = headers.get("retry-after")
@@ -79,8 +88,8 @@ export class GitHubRequestScheduler {
     const reset = headers.get("x-ratelimit-reset")
     const resetAt = exhausted && reset !== null ? Number(reset) * 1000 + 1000 : 0
     const specified = Math.max(Number.isFinite(retryAt) ? retryAt : 0, Number.isFinite(resetAt) ? resetAt : 0)
-    this.blockedUntil = Math.max(this.blockedUntil, specified > now ? specified : now + this.backoff)
-    this.backoff = Math.min(this.backoff * 2, 15 * MIN_BACKOFF_MS)
+    cooldown.blockedUntil = Math.max(cooldown.blockedUntil, specified > now ? specified : now + cooldown.backoff)
+    cooldown.backoff = Math.min(cooldown.backoff * 2, 15 * MIN_BACKOFF_MS)
   }
 }
 

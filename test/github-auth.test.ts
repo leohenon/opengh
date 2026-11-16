@@ -374,9 +374,7 @@ test("pre-dispatch budget failures are unsent only for writes", async () => {
   const budget = createRequestBudget()
   const spawn = spyOn(Bun, "spawn").mockImplementation(() => result('{"id":1,"login":"viewer"}'))
   try {
-    try {
-      budget.consumeBytes(MAX_DETAIL_BYTES + 1)
-    } catch {}
+    expect(() => budget.consumeBytes(MAX_DETAIL_BYTES + 1)).toThrow(RequestBudgetLimitError)
     await expect(transport.mutate!("repos/o/r/issues", "POST", {}, { budget })).rejects.toBeInstanceOf(GitHubRequestNotSentError)
     await expect(transport.json("repos/o/r", { budget })).rejects.toBe(budget.signal.reason)
     expect(spawn).not.toHaveBeenCalled()
@@ -537,6 +535,37 @@ test("exhausted budgets pause polling, GraphQL, and pages across transports unti
     clock.mockRestore()
     spawn.mockRestore()
     fetch.mockRestore()
+  }
+})
+
+test("an exhausted search quota pauses only search, while a core cooldown also pauses search", async () => {
+  const scheduler = new GitHubRequestScheduler()
+  const transport = createGitHubTransport(scheduler)
+  let now = 1_800_000_000_000
+  const clock = spyOn(Date, "now").mockImplementation(() => now)
+  const spawn = spyOn(Bun, "spawn").mockImplementation(() => apiResult({ id: 1, login: "viewer" }))
+  const search = "search/issues?q=repo%3Ao%2Fr%20is%3Aissue%20state%3Aopen%20bug&per_page=30&page=1"
+  try {
+    await transport.json("repos/o/r")
+    const reset = { "X-Ratelimit-Remaining": "0", "X-Ratelimit-Reset": String(now / 1000 + 60) }
+    spawn.mockImplementation(() => apiResult({ total_count: 0, incomplete_results: false, items: [] }, reset))
+    await transport.json(search)
+    await expect(transport.json(search)).rejects.toThrow("GitHub search is paused until")
+    spawn.mockImplementation(() => apiResult({ ok: true }))
+    expect(await transport.json<{ ok: boolean }>("repos/o/r/issues")).toEqual({ ok: true })
+    spawn.mockImplementation(() => apiResult({ ok: true }, { ...reset, "X-Ratelimit-Reset": String(now / 1000 + 120) }))
+    await transport.json("repos/o/r/pulls")
+    now += 61_001
+    await expect(transport.json(search)).rejects.toThrow("GitHub requests are paused until")
+    now += 60_000
+    spawn.mockImplementation(() => apiResult({ total_count: 0, incomplete_results: false, items: [] }))
+    expect(await transport.json<unknown>(search)).toEqual({ total_count: 0, incomplete_results: false, items: [] })
+    spawn.mockImplementation(() => apiResult({ message: "Secondary rate limit exceeded" }, { "Retry-After": "90" }, 403, "", 1))
+    await expect(transport.json(search)).rejects.toThrow("wait before retrying")
+    await expect(transport.json("repos/o/r/issues")).rejects.toThrow("GitHub requests are paused until")
+  } finally {
+    clock.mockRestore()
+    spawn.mockRestore()
   }
 })
 

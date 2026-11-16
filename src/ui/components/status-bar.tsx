@@ -48,15 +48,16 @@ export function fitStatusHints(hint: string | undefined, available: number) {
   return visible.join(" · ")
 }
 
-export function StatusBar(props: { kind?: StatusKind; detail?: string; error?: string; hint?: string; zIndex?: number }) {
+export function StatusBar(props: { kind?: StatusKind; detail?: string; error?: string; context?: string; hint?: string; zIndex?: number }) {
   const { colors } = useTheme()
   const dimensions = useTerminalDimensions()
   const hint = () => {
     if (!props.error && loadingMessage()) return ""
-    const message = props.error ? `× ${props.error}` : undefined
-    const available = dimensions().width - 4 - (message ? Bun.stringWidth(message) + 5 : 0)
+    const message = props.error ? `× ${props.error}` : context()
+    const available = dimensions().width - 4 - (message ? Bun.stringWidth(message) + (props.error ? 5 : 3) : 0)
     return fitStatusHints(props.hint, available)
   }
+  const context = () => (props.error || loadingMessage() ? undefined : props.context)
   const loadingMessage = () => {
     if (!props.kind) return undefined
     if (props.kind === "loading-resource" && props.detail) return `Loading ${props.detail}…`
@@ -95,8 +96,15 @@ export function StatusBar(props: { kind?: StatusKind; detail?: string; error?: s
           </box>
         )}
       </Show>
+      <Show when={context()}>
+        {(label) => (
+          <text id="status-context" height={1} flexShrink={1} wrapMode="none" fg={colors.blue}>
+            {label()}
+          </text>
+        )}
+      </Show>
       <text height={1} wrapMode="none" fg={colors.muted}>
-        {(props.error || loadingMessage()) && hint() ? " · " : ""}
+        {(props.error || loadingMessage() || context()) && hint() ? " · " : ""}
         {hint()}
       </text>
     </box>

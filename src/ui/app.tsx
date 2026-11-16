@@ -65,6 +65,7 @@ import { reactionKey } from "../reactions"
 import { ReactionPicker, type ReactionMessage } from "./components/reaction-picker"
 import type { ReactionControls } from "./components/reactions"
 import { BranchPicker } from "./components/branch-picker"
+import { WorkFindPrompt } from "./components/work-find-prompt"
 import { Header, ReviewHeader } from "./components/header"
 import { ContextMenu, type ContextMenuItem } from "./components/context-menu"
 import { mouseContextMenu, type MousePosition } from "./mouse"
@@ -215,6 +216,7 @@ export type AppProps = {
   onOpenInBrowser?: (target?: string | number, repository?: string, view?: "diff") => Promise<void>
   onCopyToClipboard?: (value: string) => Promise<boolean>
   onLoadMoreRuns?: () => Promise<void>
+  onWorkFindChange?: (kind: "issues" | "pulls", query: string) => void
   onLoadMoreIssues?: (state: ListState) => Promise<void>
   onLoadMorePulls?: (state: ListState) => Promise<void>
 }
@@ -1281,9 +1283,14 @@ function AppContent(props: AppProps) {
   const issues = () => data().issues[issueState()]
   const pulls = () => data().pulls[pullState()]
   // Open totals share the header tabs' source. GitHub gives no closed total, so closed shows loaded rows ("30+" when more exist).
-  const loadedCount = (resource: ResourceState<Paginated<unknown>>) =>
-    resource.value ? `${resource.value.items.length}${resource.value.hasMore ? "+" : ""}` : resource.status === "error" ? "—" : "…"
+  const loadedCount = (resource: ResourceState<Paginated<unknown>>) => {
+    const value = resource.value
+    if (!value) return resource.status === "error" ? "—" : "…"
+    if (value.total !== undefined) return value.total > 1000 ? "1000+" : String(value.total)
+    return `${value.items.length}${value.hasMore ? "+" : ""}`
+  }
   const openCount = (kind: "issues" | "pulls") => {
+    if (data().workFinds?.[kind]) return loadedCount(data()[kind].open)
     const totals = data().workCounts
     if (totals.value) return String(totals.value[kind])
     return totals.status === "error" ? loadedCount(data()[kind].open) : "…"
@@ -1720,6 +1727,34 @@ function AppContent(props: AppProps) {
     setOverlay("switch-repo")
     void props.onRefreshRecentRepositories?.().catch(() => {})
   }
+  const workFindKind = (): "issues" | "pulls" | undefined => {
+    if (diffTarget() || activeIssueNumber() || activePullNumber()) return undefined
+    return page() === "issues" || page() === "pulls" ? (page() as "issues" | "pulls") : undefined
+  }
+  const [findOpen, setFindOpen] = createSignal(false)
+  createEffect(() => {
+    if (findOpen() && (!workFindKind() || overlay() !== undefined)) setFindOpen(false)
+  })
+  const openWorkFind = () => {
+    if (overlay() !== undefined || !props.onWorkFindChange || !workFindKind()) return false
+    setFindOpen(true)
+  }
+  const activeWorkFindKind = () => {
+    const kind = workFindKind()
+    return kind && data().workFinds?.[kind] ? kind : undefined
+  }
+  const activeWorkFind = () => {
+    const kind = activeWorkFindKind()
+    return kind ? `Find: ${data().workFinds?.[kind]}` : undefined
+  }
+  const clearWorkFind = () => {
+    const kind = activeWorkFindKind()
+    if (!kind || !props.onWorkFindChange) return false
+    if (!workFindDisabled()) props.onWorkFindChange(kind, "")
+  }
+  const findContextItems = (): ContextMenuItem[] =>
+    props.onWorkFindChange && workFindKind() ? [{ label: "Find…", run: openWorkFind }] : []
+  const workFindDisabled = () => operations().refresh.status === "loading" || operations().branch.status === "loading"
   const openBranchPicker = () => {
     if (overlay() !== undefined || page() !== "commits" || activeCommitSha() || diffTarget() || props.canSwitchBranch === false) return
     const branches = data().branches
@@ -1918,6 +1953,7 @@ function AppContent(props: AppProps) {
         disabled: !props.onOpenInBrowser,
       },
     )
+    items.push(...findContextItems())
     openContextMenu(position, items, valid)
   }
   const openPageContext = (position: MousePosition) => {
@@ -1963,6 +1999,7 @@ function AppContent(props: AppProps) {
         })
     }
     items.push(
+      ...findContextItems(),
       ...commentContextItems(),
       ...issueActionsContextItems(),
       ...referencesContextItems(),
@@ -2127,6 +2164,8 @@ function AppContent(props: AppProps) {
         ...retry,
         ...list(hasItems),
         ["work.toggleState", "open/closed"],
+        ...(props.onWorkFindChange ? [["work.find", "find"] as const] : []),
+        ...(activeWorkFindKind() ? [["navigation.back", "clear find"] as const] : []),
         ...(page() === "pulls" && hasItems ? [diff] : []),
         ...refresh,
         ...common,
@@ -2202,6 +2241,7 @@ function AppContent(props: AppProps) {
         void props.onRefreshRecentRepositories?.().catch(() => {})
       },
       "navigation.back": () => {
+        if (clearWorkFind() !== false) return
         if (!canGoBack()) return false
         goBack()
       },
@@ -2316,6 +2356,7 @@ function AppContent(props: AppProps) {
         if (branches.status === "error" && branches.phase === "load") props.onRetryResource?.({ kind: "branches" })
         if (branches.value) setOverlay("branch-picker")
       },
+      "work.find": openWorkFind,
       "work.toggleState": () => {
         if (diffTarget() || activeIssueNumber() || activePullNumber()) return false
         if (page() === "issues") setIssueState((value) => (value === "open" ? "closed" : "open"))
@@ -2486,6 +2527,7 @@ function AppContent(props: AppProps) {
                               }
                               detail={statusDetail()}
                               error={statusError()}
+                              context={activeWorkFind()}
                               hint={statusError() ? keys.hint("view.refresh", "retry") : shortcutHint()}
                               zIndex={
                                 overlay() && (config().showStatusBarHints || ((status() || statusError()) && !fullscreenEditorOpen()))
@@ -2592,6 +2634,7 @@ function AppContent(props: AppProps) {
                               <WorkScreen
                                 kind="issue"
                                 state={issueState()}
+                                find={data().workFinds?.issues}
                                 onStateChange={setIssueState}
                                 counts={issueCounts()}
                                 resource={issues()}
@@ -2614,6 +2657,7 @@ function AppContent(props: AppProps) {
                               <WorkScreen
                                 kind="pull"
                                 state={pullState()}
+                                find={data().workFinds?.pulls}
                                 onStateChange={setPullState}
                                 counts={pullCounts()}
                                 resource={pulls()}
@@ -3161,6 +3205,21 @@ function AppContent(props: AppProps) {
                           onChange={(config) => props.onConfigChange?.(config) ?? Promise.resolve()}
                           onClose={() => setOverlay()}
                         />
+                      </Show>
+                      <Show when={findOpen() && workFindKind()} keyed>
+                        {(kind) => (
+                          <WorkFindPrompt
+                            kind={kind}
+                            query={data().workFinds?.[kind] ?? ""}
+                            disabled={workFindDisabled()}
+                            onApply={(query) => {
+                              if (workFindDisabled()) return
+                              setFindOpen(false)
+                              props.onWorkFindChange?.(kind, query)
+                            }}
+                            onClose={() => setFindOpen(false)}
+                          />
+                        )}
                       </Show>
                       <Show when={overlay() === "branch-picker" && data().branches.value}>
                         <BranchPicker

@@ -110,6 +110,7 @@ export function Help(props: {
         return [
           entry("navigation.activate", "open issue"),
           entry("work.toggleState", "toggle open/closed"),
+          entry("work.find", "find issues / PRs on GitHub"),
           entry("item.open", "open on GitHub"),
           entry("item.copy", "copy issue URL"),
         ]
@@ -128,6 +129,7 @@ export function Help(props: {
         return [
           entry("navigation.activate", "open pull request"),
           entry("work.toggleState", "toggle open/closed"),
+          entry("work.find", "find issues / PRs on GitHub"),
           entry("item.diff", "view diff"),
           entry("item.open", "open on GitHub"),
           entry("item.copy", "copy pull request URL"),

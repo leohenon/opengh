@@ -32,4 +32,8 @@ Inline comments post separately from the review.
 
 ## Search
 
-Press `/` to search loaded content on any page. This does not search GitHub or the entire repository.
+Press `/` to search loaded content on any page. This does not search GitHub or the entire repository; to search GitHub issues and PRs, use [Find](#find).
+
+## Find
+
+Press `F` on an issues or pull requests list to search GitHub, e.g. `label:bug author:@me`, or `review-requested:@me -is:draft` for PRs. Results follow the Open/Closed tab, newest first, and the tabs show the number of matches. Press `esc` to clear.

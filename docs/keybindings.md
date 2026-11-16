@@ -24,9 +24,14 @@ Use characters (`j`, `G`, `?`), named keys (`enter`, `esc`), or modifiers (`ctrl
 
 If your terminal intercepts right-click, use keyboard shortcuts (`?` lists them).
 
-## Search the page
+## Search and find
 
-`/` searches loaded, visible content; `enter` confirms, `n`/`N` moves next/previous. Search is literal, case-insensitive unless uppercase is used, and does not filter lists.
+`/` (`search.start`) searches loaded, visible content; `enter` confirms, `n`/`N` (`search.next`/`search.previous`) moves next/previous. Search is literal, case-insensitive unless uppercase is used, and does not filter lists.
+
+`F` depends on the page:
+
+- On issue and PR lists, `F` (`work.find`) finds on GitHub, e.g. `label:bug author:@me`, or `review-requested:@me -is:draft` for PRs. `esc` clears it.
+- In diffs, `F` (`diff.filterFiles`) filters files by path. `esc` clears it.
 
 ## Defaults
 
@@ -82,6 +87,7 @@ Source: [`src/keybindings.ts`](../src/keybindings.ts).
 | `overview.toggleSidebar`    | `s`                |
 | `commits.chooseBranch`      | `tab`, `shift+tab` |
 | `work.toggleState`          | `tab`, `shift+tab` |
+| `work.find`                 | `F`                |
 | `issue.comment`             | `c`                |
 | `issue.actions`             | `a`                |
 | `detail.references`         | `p`                |

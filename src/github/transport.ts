@@ -154,7 +154,7 @@ async function request(scheduler: GitHubRequestScheduler, ...[path, accept, fiel
       status === 429 ||
       ((status === 403 || code !== 0) &&
         (RATE_LIMIT_MESSAGE.test(message) || headers.get("x-ratelimit-remaining") === "0" || headers.has("retry-after")))
-    scheduler.observe(headers, limited)
+    scheduler.observe(headers, limited, path)
     if (code !== 0 || (status !== undefined && status >= 400) || limited)
       throw new GitHubApiError(
         path,

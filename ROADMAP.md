@@ -6,7 +6,6 @@
 
 - [x] Open file references and links
 - [ ] Browse repository files
-- [ ] Add Vim mode for text editing
 - [x] Full mouse support
 - [ ] Decide default icon style
 
@@ -19,6 +18,7 @@
 - [x] Merge PRs (merge, squash, rebase)
 - [x] Assign and unassign users
 - [x] Add and remove reactions
+- [x] Find issues and PRs with GitHub search
 - [ ] Create issues and PRs
 - [ ] Edit titles and descriptions
 - [ ] Edit and delete comments
@@ -38,7 +38,7 @@
 
 - [ ] Browse repository discussions
 
-#### Coding agents
+#### Agents
 
 - [x] Publish an agent skill for efficient GitHub context retrieval
 - [ ] Add private diff notes and review-context handoff to coding agents

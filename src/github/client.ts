@@ -49,9 +49,10 @@ function repositoryIssues(repository: Repo) {
 }
 
 const PAGE_SIZE = 30
+const SEARCH_RESULT_LIMIT = 1000
 const BRANCH_PAGE_SIZE = 100
 
-type Page<T> = { items: T[]; hasMore: boolean }
+type Page<T> = { items: T[]; hasMore: boolean; total?: number }
 
 export type { AssigneeChanges } from "../assignee-changes"
 
@@ -361,6 +362,51 @@ function issueSummary(item: IssueResponse): IssueSummary {
   }
 }
 
+const WORK_QUALIFIER = /"[^"]*"|\b(repo|org|user|type|state|is|sort)\s*:\s*("[^"]*"|[^\s"()]*)/gi
+const LIST_IS_VALUES = new Set(["issue", "pr", "pull-request", "open", "closed"])
+
+function workFindQuery(query: string): string {
+  if (/\\"/.test(query) || (query.match(/"/g)?.length ?? 0) % 2 !== 0)
+    throw new Error("Find queries require balanced double quotes without escaped quotes.")
+  for (const [, key, value = ""] of query.matchAll(WORK_QUALIFIER)) {
+    if (!key) continue
+    const name = key.toLowerCase()
+    if (name === "sort") throw new Error("sort: is not supported in Find; results are sorted newest first.")
+    if (name === "is" && !LIST_IS_VALUES.has(value.replaceAll('"', "").trim().toLowerCase())) continue
+    throw new Error(
+      "Remove repo:, org:, user:, type:, state:, is:issue/pr, and is:open/closed from the query; repository, type, and state are set by the current list.",
+    )
+  }
+  // OR would escape the repo: scope. GitHub ignores lowercase operators.
+  if (/(?:^|[\s()])(?:AND|OR|NOT)(?=[\s()]|$)/.test(query.replace(/"[^"]*"/g, " ")))
+    throw new Error("Boolean operators (AND, OR, NOT) are not supported in Find. Quote them to search for the literal text.")
+  return query.trim()
+}
+
+function workSearchItem(value: unknown, kind: "issue" | "pr"): IssueResponse {
+  const item = record(value)
+  const user = record(item?.user)
+  const pull = record(item?.pull_request)
+  if (
+    !item ||
+    typeof item.number !== "number" ||
+    !Number.isSafeInteger(item.number) ||
+    item.number <= 0 ||
+    (item.state !== "open" && item.state !== "closed") ||
+    typeof item.title !== "string" ||
+    !item.title.trim() ||
+    (item.user !== null && (typeof user?.login !== "string" || !user.login.trim())) ||
+    typeof item.created_at !== "string" ||
+    !Number.isFinite(Date.parse(item.created_at)) ||
+    (item.draft !== undefined && typeof item.draft !== "boolean") ||
+    (item.pull_request != null && !pull) ||
+    (kind === "pr" ? !pull : !!pull) ||
+    (pull?.merged_at != null && (typeof pull.merged_at !== "string" || !Number.isFinite(Date.parse(pull.merged_at))))
+  )
+    throw new Error("GitHub returned an invalid work search item.")
+  return value as IssueResponse
+}
+
 function issueDetail(item: IssueDetailResponse, allowPullRequest = false): IssueDetail {
   if (!allowPullRequest && "pull_request" in item) throw new Error(`Issue #${item.number} is a pull request.`)
   const reactions = parseReactions(item.reactions)
@@ -619,12 +665,56 @@ export function createGitHubClient(transport: GitHubTransport, commentStorage?: 
     }
   }
 
+  const searchWork = async (
+    repository: RepositoryReference,
+    kind: "issue" | "pr",
+    state: ListState,
+    page: number,
+    options: RequestOptions | undefined,
+    find: string,
+  ): Promise<Page<IssueResponse>> => {
+    const name = repositoryName(repository)
+    repositoryPath(name)
+    const query = `repo:${name} is:${kind} state:${state} ${workFindQuery(find)}`
+    if (!Number.isSafeInteger(page) || page < 1) throw new Error("Search page must be a positive safe integer.")
+    const offset = (page - 1) * PAGE_SIZE
+    if (offset >= SEARCH_RESULT_LIMIT) return { items: [], hasMore: false }
+    const response = record(
+      await transport.json<unknown>(
+        `search/issues?q=${encodeURIComponent(query)}&per_page=${PAGE_SIZE}&page=${page}&sort=created&order=desc`,
+        options,
+      ),
+    )
+    if (
+      typeof response?.total_count !== "number" ||
+      !Number.isSafeInteger(response.total_count) ||
+      response.total_count < 0 ||
+      typeof response.incomplete_results !== "boolean" ||
+      !Array.isArray(response.items)
+    )
+      throw new Error("GitHub returned an invalid work search response.")
+    options?.budget?.consumeItems(response.items.length)
+    if (response.incomplete_results) throw new Error("GitHub search results are incomplete. Narrow the query and try again.")
+    const items = response.items.map((item) => workSearchItem(item, kind))
+    return {
+      // The search index lags writes.
+      items: items.slice(0, SEARCH_RESULT_LIMIT - offset).filter((item) => item.state === state),
+      hasMore: items.length === PAGE_SIZE && offset + PAGE_SIZE < Math.min(response.total_count, SEARCH_RESULT_LIMIT),
+      total: response.total_count,
+    }
+  }
+
   const issues = async (
     repository: RepositoryReference,
     state: ListState,
     page = 1,
     options?: RequestOptions,
+    query?: string,
   ): Promise<Page<IssueSummary>> => {
+    if (query?.trim()) {
+      const result = await searchWork(repository, "issue", state, page, options, query)
+      return { ...result, items: result.items.map(issueSummary) }
+    }
     const items = await transport.json<IssueResponse[]>(
       `${repositoryPath(repository)}/issues?state=${state}&per_page=${PAGE_SIZE}&page=${page}`,
       options,
@@ -1282,9 +1372,11 @@ export function createGitHubClient(transport: GitHubTransport, commentStorage?: 
       // Keep event deduplication separate from shared commit metadata, and bound concurrent API requests.
       for (let offset = 0; offset < commits.length; offset += 4) {
         const results = await Promise.allSettled(
-          commits.slice(offset, offset + 4).map(async (reference) => {
-            reference.title = await loadTitle(reference)
-          }),
+          commits.slice(offset, offset + 4).map((reference) =>
+            loadTitle(reference).then((title) => {
+              reference.title = title
+            }),
+          ),
         )
         const failure = results.find((result) => result.status === "rejected")
         if (failure?.status === "rejected") throw failure.reason
@@ -1311,7 +1403,19 @@ export function createGitHubClient(transport: GitHubTransport, commentStorage?: 
     state: ListState,
     page = 1,
     options?: RequestOptions,
+    query?: string,
   ): Promise<Page<PullRequestSummary>> => {
+    if (query?.trim()) {
+      const result = await searchWork(repository, "pr", state, page, options, query)
+      return {
+        ...result,
+        items: result.items.map((item) => ({
+          ...issueSummary(item),
+          merged: item.pull_request?.merged_at != null,
+          draft: item.draft === true,
+        })),
+      }
+    }
     const items = await transport.json<PullResponse[]>(
       `${repositoryPath(repository)}/pulls?state=${state}&per_page=${PAGE_SIZE}&page=${page}`,
       options,

@@ -99,7 +99,7 @@ import type {
   ResourceState,
 } from "./repository-state"
 
-type Page<T> = { items: T[]; hasMore: boolean }
+type Page<T> = { items: T[]; hasMore: boolean; total?: number }
 
 export type RepositoryLoaders = {
   addReaction?(repository: Repo, target: ReactionTarget, kind: ReactionKind): Promise<ReactionState>
@@ -144,12 +144,24 @@ export type RepositoryLoaders = {
   mentionableUsers?(repository: RepositoryTarget, query: string, options?: RequestOptions): Promise<string[]>
   markIssueDuplicate?(repository: Repo, number: number, canonicalNumber: number): Promise<IssueDetail>
   issueTimeline?(repository: RepositoryTarget, number: number, options?: RequestOptions): Promise<IssueTimeline>
-  issues(repository: RepositoryTarget, state: ListState, page?: number, options?: RequestOptions): Promise<Page<IssueSummary>>
+  issues(
+    repository: RepositoryTarget,
+    state: ListState,
+    page?: number,
+    options?: RequestOptions,
+    query?: string,
+  ): Promise<Page<IssueSummary>>
   hasIssues?(repository: RepositoryTarget, state: ListState, options?: RequestOptions): Promise<boolean>
   pull(repository: RepositoryTarget, number: number, options?: RequestOptions): Promise<PullRequestDetail>
   pullCommits(repository: RepositoryTarget, number: number, options?: RequestOptions): Promise<CommitSummary[]>
   pullContext(repository: RepositoryTarget, number: number, options?: RequestOptions): Promise<PullContext>
-  pulls(repository: RepositoryTarget, state: ListState, page?: number, options?: RequestOptions): Promise<Page<PullRequestSummary>>
+  pulls(
+    repository: RepositoryTarget,
+    state: ListState,
+    page?: number,
+    options?: RequestOptions,
+    query?: string,
+  ): Promise<Page<PullRequestSummary>>
   run?(repository: RepositoryTarget, id: number, options?: RequestOptions): Promise<WorkflowRunDetail>
   runJobs?(repository: RepositoryTarget, id: number, attempt: number, page?: number, options?: RequestOptions): Promise<Page<WorkflowJob>>
   runs(repository: RepositoryTarget, page?: number, options?: RequestOptions): Promise<Page<WorkflowRunSummary>>
@@ -213,6 +225,7 @@ export type RepositorySession = {
   loadMoreBranches(): Promise<void>
   loadMoreCommits(): Promise<void>
   loadMoreRuns(): Promise<void>
+  setWorkFind?(kind: "issues" | "pulls", query: string): Promise<void>
   loadMoreIssues(state: ListState): Promise<void>
   loadMorePulls(state: ListState): Promise<void>
 }
@@ -295,7 +308,8 @@ async function loadPageSet<T, K>(
       seen.add(itemKey)
       return true
     })
-  return { items, page: pages.length, hasMore: pages.at(-1)?.hasMore ?? false }
+  const last = pages.at(-1)
+  return { items, page: pages.length, hasMore: last?.hasMore ?? false, ...(last?.total === undefined ? {} : { total: last.total }) }
 }
 async function withRequestBudget<T>(options: RequestOptions, load: (options: RequestOptions) => Promise<T>): Promise<T> {
   const budget = options.budget ?? createRequestBudget(options.signal)
@@ -619,6 +633,14 @@ export function createRepositorySession(
   let repositoryAbort = new AbortController()
   let branchReadAbort = new AbortController()
   const repositoryReads = (): RequestOptions => ({ signal: repositoryAbort.signal })
+  const workReadAbort = { issues: new AbortController(), pulls: new AbortController() }
+  const workReads = (kind: "issues" | "pulls"): RequestOptions => ({
+    signal: AbortSignal.any([repositoryAbort.signal, workReadAbort[kind].signal]),
+  })
+  const currentWorkFind = (kind: "issues" | "pulls") => {
+    const current = state()
+    return current.status === "ready" ? (current.data.workFinds?.[kind] ?? "") : ""
+  }
   const branchReads = (): RequestOptions => ({ signal: AbortSignal.any([repositoryAbort.signal, branchReadAbort.signal]) })
   const resetRepositoryReads = () => {
     mentionUserCache.clear()
@@ -978,17 +1000,19 @@ export function createRepositorySession(
 
   const fetchIssues = async (repository: string, listState: ListState, request: number, pageCount = 1) => {
     const listRequest = ++issueListGeneration[listState]
-    const options = repositoryReads()
+    const query = currentWorkFind("issues")
+    const options = workReads("issues")
     try {
       const target = repositorySnapshot(repository, request)
       const result = await loadPageSet(
         pageCount,
-        (page) => loaders.issues(target, listState, page, options),
+        (page) => loaders.issues(target, listState, page, options, query),
         (item) => item.number,
         options,
       )
+      if (listRequest !== issueListGeneration[listState]) return
       // REST issue pages include PRs. An empty filtered page with more pages cannot prove there are no issues.
-      if (result.items.length === 0 && result.hasMore && loaders.hasIssues) {
+      if (!query && result.items.length === 0 && result.hasMore && loaders.hasIssues) {
         const current = state()
         if (request !== repositoryGeneration || current.status !== "ready" || current.repository !== repository) return
         result.hasMore = await loaders.hasIssues(target, listState, options)
@@ -1024,12 +1048,13 @@ export function createRepositorySession(
 
   const fetchPulls = async (repository: string, listState: ListState, request: number, pageCount = 1) => {
     const listRequest = ++pullListGeneration[listState]
-    const options = repositoryReads()
+    const query = currentWorkFind("pulls")
+    const options = workReads("pulls")
     try {
       const target = repositorySnapshot(repository, request)
       const result = await loadPageSet(
         pageCount,
-        (page) => loaders.pulls(target, listState, page, options),
+        (page) => loaders.pulls(target, listState, page, options, query),
         (item) => item.number,
         options,
       )
@@ -2405,7 +2430,8 @@ export function createRepositorySession(
         const resource = lists[listState]
         if (!resource.value) continue
         const items = resource.value.items.filter((item) => item.number !== number)
-        if (listState === updated.state) {
+        const listed = resource.value.items.some((item) => item.number === number)
+        if (listState === updated.state && (!latest.data.workFinds?.issues || listed)) {
           const { title, author, createdAt, state } = updated
           items.push({ number, title, author, createdAt, state })
           items.sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt))
@@ -2527,7 +2553,8 @@ export function createRepositorySession(
         const resource = lists[listState]
         if (!resource.value) continue
         const items = resource.value.items.filter((item) => item.number !== number)
-        if (listState === updated.state) {
+        const listed = resource.value.items.some((item) => item.number === number)
+        if (listState === updated.state && (!latest.data.workFinds?.pulls || listed)) {
           const { title, author, createdAt, state, merged, draft } = updated
           items.push({ number, title, author, createdAt, state, merged, draft })
           items.sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt))
@@ -3576,6 +3603,29 @@ export function createRepositorySession(
     }
   }
 
+  const setWorkFind = async (kind: "issues" | "pulls", query: string) => {
+    const current = state()
+    if (current.status !== "ready" || current.operations.refresh.status === "loading" || current.operations.branch.status === "loading")
+      return
+    const find = query.trim()
+    if (find === (current.data.workFinds?.[kind] ?? "")) return
+    workReadAbort[kind].abort()
+    workReadAbort[kind] = new AbortController()
+    const listGeneration = kind === "issues" ? issueListGeneration : pullListGeneration
+    ++listGeneration.open
+    ++listGeneration.closed
+    setState({
+      ...current,
+      data: {
+        ...current.data,
+        workFinds: { ...current.data.workFinds, [kind]: find },
+        [kind]: { open: loadingResource(), closed: loadingResource() },
+      },
+    })
+    const fetch = kind === "issues" ? fetchIssues : fetchPulls
+    await Promise.all([fetch(current.repository, "open", repositoryGeneration), fetch(current.repository, "closed", repositoryGeneration)])
+  }
+
   const loadMoreIssues = async (listState: ListState) => {
     const current = state()
     const resource = current.status === "ready" ? current.data.issues[listState] : undefined
@@ -3597,7 +3647,7 @@ export function createRepositorySession(
       data: { ...current.data, issues: { ...current.data.issues, [listState]: loadingResource(value, "pagination") } },
     })
     try {
-      const result = await loaders.issues(current.data.repo, listState, nextPage, repositoryReads())
+      const result = await loaders.issues(current.data.repo, listState, nextPage, workReads("issues"), current.data.workFinds?.issues)
       updateReady(setState, request, generation, repository, (latest) => {
         const latestValue = latest.data.issues[listState].value
         if (listRequest !== issueListGeneration[listState] || !latestValue || latestValue.page !== nextPage - 1) return latest
@@ -3611,7 +3661,10 @@ export function createRepositorySession(
               [listState]: {
                 status: "ready",
                 value: page(
-                  { items: [...latestValue.items, ...result.items.filter((item) => !existing.has(item.number))], hasMore: result.hasMore },
+                  {
+                    ...result,
+                    items: [...latestValue.items, ...result.items.filter((item) => !existing.has(item.number))],
+                  },
                   nextPage,
                 ),
               },
@@ -3655,7 +3708,7 @@ export function createRepositorySession(
       data: { ...current.data, pulls: { ...current.data.pulls, [listState]: loadingResource(value, "pagination") } },
     })
     try {
-      const result = await loaders.pulls(current.data.repo, listState, nextPage, repositoryReads())
+      const result = await loaders.pulls(current.data.repo, listState, nextPage, workReads("pulls"), current.data.workFinds?.pulls)
       if (listRequest !== pullListGeneration[listState]) return
       updateReady(setState, request, generation, repository, (latest) => {
         const latestValue = latest.data.pulls[listState].value
@@ -3670,7 +3723,10 @@ export function createRepositorySession(
               [listState]: {
                 status: "ready",
                 value: page(
-                  { items: [...latestValue.items, ...result.items.filter((item) => !existing.has(item.number))], hasMore: result.hasMore },
+                  {
+                    ...result,
+                    items: [...latestValue.items, ...result.items.filter((item) => !existing.has(item.number))],
+                  },
                   nextPage,
                 ),
               },
@@ -3744,6 +3800,7 @@ export function createRepositorySession(
     loadMoreBranches,
     loadMoreCommits,
     loadMoreRuns,
+    setWorkFind,
     loadMoreIssues,
     loadMorePulls,
   }
