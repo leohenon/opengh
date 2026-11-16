@@ -21,6 +21,7 @@ import {
   loadGitHubPull,
   loadGitHubPullCommits,
   loadGitHubPullContext,
+  loadGitHubPullMergeability,
   loadGitHubPulls,
   loadGitHubRuns,
   loadGitHubRun,
@@ -40,6 +41,7 @@ import {
   removeGitHubReaction,
 } from "./github/client"
 import { GitHubApiError, type RequestOptions } from "./github/transport"
+import type { PullMergeability } from "./github/pull-context"
 import { loadGitHubMentionableUsers } from "./github/mentionable-users"
 import type { IssueCommentConfirmation, IssueCommentDraft } from "./github/issue-comments"
 import { createRequestBudget, MAX_AUTOMATIC_PAGES, RequestBudgetLimitError } from "./github/request-budget"
@@ -157,6 +159,7 @@ export type RepositoryLoaders = {
   pull(repository: RepositoryTarget, number: number, options?: RequestOptions): Promise<PullRequestDetail>
   pullCommits(repository: RepositoryTarget, number: number, options?: RequestOptions): Promise<CommitSummary[]>
   pullContext(repository: RepositoryTarget, number: number, options?: RequestOptions): Promise<PullContext>
+  pullMergeability?(repository: RepositoryTarget, number: number, options?: RequestOptions): Promise<PullMergeability>
   pulls(
     repository: RepositoryTarget,
     state: ListState,
@@ -265,6 +268,7 @@ const defaultLoaders: RepositoryLoaders = {
   pull: loadGitHubPull,
   pullCommits: loadGitHubPullCommits,
   pullContext: loadGitHubPullContext,
+  pullMergeability: loadGitHubPullMergeability,
   pulls: loadGitHubPulls,
   runs: loadGitHubRuns,
   run: loadGitHubRun,
@@ -316,6 +320,8 @@ async function loadPageSet<T, K>(
   const last = pages.at(-1)
   return { items, page: pages.length, hasMore: last?.hasMore ?? false, ...(last?.total === undefined ? {} : { total: last.total }) }
 }
+const MERGEABILITY_RECHECK_DELAYS_MS = [2000, 4000, 8000, 15000]
+
 async function withRequestBudget<T>(options: RequestOptions, load: (options: RequestOptions) => Promise<T>): Promise<T> {
   const budget = options.budget ?? createRequestBudget(options.signal)
   try {
@@ -1657,14 +1663,72 @@ export function createRepositorySession(
       const draft = current?.number === number ? current.resource.value?.draft : undefined
       if (typeof draft === "boolean" && typeof loaded.readiness.isDraft === "boolean" && draft !== loaded.readiness.isDraft)
         throw new Error("Merge readiness does not match the PR stage yet. Refresh the pull request.")
-      const value = withThreadReactions(number, loaded, revision)
+      const pull = current?.number === number ? current.resource.value : undefined
+      const recheck =
+        loaders.pullMergeability !== undefined &&
+        loaded.readiness.mergeable === "UNKNOWN" &&
+        pull?.state === "open" &&
+        !pull.merged &&
+        !options.signal?.aborted
+      const reacted = withThreadReactions(number, loaded, revision)
+      const value = recheck ? { ...reacted, readiness: { ...reacted.readiness, mergeablePending: true } } : reacted
       setPullDetail((current) => (current?.number === number ? { ...current, context: { status: "ready", value } } : current))
+      if (recheck) recheckMergeability(repository, number, request, value.readiness.headSha, options.signal ?? pullAbort.signal)
     } catch (error) {
       if (request !== pullGeneration || draftGeneration !== pullDraftGeneration) return
       setPullDetail((current) =>
         current?.number === number ? { ...current, context: failedResource(error, current.context.value ?? previous) } : current,
       )
     }
+  }
+
+  // GitHub computes conflict status in the background, so its first answer is often UNKNOWN.
+  // Ask again a few times for just that status, without reloading the rest of the PR.
+  let mergeabilityCheck = 0
+  const recheckMergeability = (repository: string, number: number, request: number, headSha: string, signal: AbortSignal) => {
+    const token = ++mergeabilityCheck
+    const pendingContext = () => {
+      const current = pullDetail()
+      const context = current?.number === number && current.context.status === "ready" ? current.context.value : undefined
+      return context?.readiness.mergeablePending && context.readiness.headSha === headSha ? context : undefined
+    }
+    const settle = (context: PullContext, result?: PullMergeability) => {
+      const { mergeablePending: _, ...readiness } = context.readiness
+      const value = {
+        ...context,
+        readiness: result ? { ...readiness, mergeable: result.mergeable, mergeStateStatus: result.mergeStateStatus } : readiness,
+      }
+      setPullDetail((current) =>
+        current?.number === number && current.context.status === "ready" && current.context.value === context
+          ? { ...current, context: { status: "ready", value } }
+          : current,
+      )
+    }
+    const check = (attempt: number) => {
+      const timer = setTimeout(async () => {
+        signal.removeEventListener("abort", stop)
+        const active = () => token === mergeabilityCheck && request === pullGeneration && !signal.aborted
+        if (!active() || !pendingContext()) return
+        let result: PullMergeability | undefined
+        try {
+          result = await withRequestBudget({ signal }, (options) =>
+            loaders.pullMergeability!(repositorySnapshot(repository), number, options),
+          )
+        } catch {
+          // Keep asking; the last attempt reports the status as unknown.
+        }
+        const context = pendingContext()
+        if (!active() || !context) return
+        if (result?.headSha === headSha && result.mergeable !== "UNKNOWN") return settle(context, result)
+        // A new head needs a full refresh; say so rather than mixing revisions.
+        if (attempt + 1 >= MERGEABILITY_RECHECK_DELAYS_MS.length || (result && result.headSha !== headSha)) return settle(context)
+        check(attempt + 1)
+      }, MERGEABILITY_RECHECK_DELAYS_MS[attempt])
+      timer.unref?.()
+      const stop = () => clearTimeout(timer)
+      signal.addEventListener("abort", stop, { once: true })
+    }
+    check(0)
   }
 
   const retryPullContext = async () => {
@@ -1724,7 +1788,8 @@ export function createRepositorySession(
         // Retire any in-flight load for another PR before showing the retained one.
         ++pullGeneration
         setPullDetail(cached.value)
-        if (!cached.stale && !options.force) return
+        // A conflict-status check stopped when this PR was left; load it again to resume.
+        if (!cached.stale && !options.force && !cached.value.context.value?.readiness.mergeablePending) return
       }
     }
     const revision = reactionRevision

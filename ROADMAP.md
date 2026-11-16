@@ -9,14 +9,15 @@
 - [x] Full mouse support
 - [ ] Decide default icon style
 - [ ] Vim modal editing
-- [ ] Keyboard copy mode for link selection
+- [ ] Select and copy text with the keyboard
+- [ ] Open links with the keyboard
 
 #### Issues & PRs
 
 - [x] Add comments
 - [x] Close and reopen PRs
 - [x] Submit PR reviews (approve, request changes, comment)
-- [x] Add and reply to inline review comments
+- [x] Add inline review comments
 - [x] Merge PRs (merge, squash, rebase)
 - [x] Assign and unassign users
 - [x] Add and remove reactions

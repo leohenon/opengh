@@ -42,3 +42,12 @@ test("merge status distinguishes blockers, waiting, unknown data, optional failu
   expect(mergeReadinessStatus({ ...unstable, checks: [{ ...unstable.checks[0]!, required: undefined }] }).status).toBe("unavailable")
   expect(mergeReadinessStatus({ ...unstable, checksComplete: false }).status).toBe("unavailable")
 })
+
+test("an UNKNOWN conflict status waits while opengh checks again, then reports it as unknown", () => {
+  const unknown = { ...clean, mergeable: "UNKNOWN" as const, mergeStateStatus: "UNKNOWN" }
+  expect(mergeReadinessStatus({ ...unknown, mergeablePending: true })).toEqual({ status: "waiting", reasons: ["Checking for conflicts…"] })
+  expect(mergeReadinessStatus(unknown)).toEqual({
+    status: "unavailable",
+    reasons: ["Conflict status unknown; refresh readiness.", "Merge state unavailable; refresh readiness."],
+  })
+})

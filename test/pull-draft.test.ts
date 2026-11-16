@@ -1,4 +1,4 @@
-import { expect, test } from "bun:test"
+import { expect, spyOn, test } from "bun:test"
 import { createGitHubClient } from "../src/github/client"
 import { createRepositorySession, type RepositoryLoaders } from "../src/repository-session"
 import type { PullContext, PullRequestDetail } from "../src/models"
@@ -279,4 +279,86 @@ test("late draft writes cannot change another repository and failed writes prese
   failure.session.updateIssueDraft(1, { body: "keep" }, "pull")
   await expect(failure.session.updatePullDraft(1, true)).rejects.toThrow("Denied")
   expect(failure.session.issueAction(1, "pull")).toMatchObject({ body: "keep", operation: { status: "error" } })
+})
+
+// Re-checks run on GitHub's schedule; tests replace those delays with immediate timers.
+function immediateRechecks() {
+  const timeout = globalThis.setTimeout
+  const delays: number[] = []
+  const spy = spyOn(globalThis, "setTimeout").mockImplementation(((callback: () => void, delay?: number, ...rest: unknown[]) => {
+    if (delay !== undefined && [2000, 4000, 8000, 15000].includes(delay)) {
+      delays.push(delay)
+      return timeout(callback, 0, ...rest)
+    }
+    return timeout(callback, delay, ...rest)
+  }) as typeof setTimeout)
+  return { delays, restore: () => spy.mockRestore() }
+}
+const unknown = (): PullContext => {
+  const value = context(false)
+  return { ...value, readiness: { ...value.readiness, mergeable: "UNKNOWN", mergeStateStatus: "UNKNOWN" } }
+}
+const settle = async () => {
+  for (let i = 0; i < 10; i++) await new Promise((resolve) => setTimeout(resolve, 5))
+}
+
+test("an UNKNOWN conflict status is checked again until GitHub reports it, without reloading the PR", async () => {
+  const timers = immediateRechecks()
+  try {
+    const answers = ["UNKNOWN", "UNKNOWN", "MERGEABLE"] as const
+    let checks = 0
+    let contexts = 0
+    const { session } = await setup({
+      pullContext: async () => (contexts++, unknown()),
+      pullMergeability: async () => ({ headSha: head, mergeable: answers[checks++]!, mergeStateStatus: "CLEAN" }),
+    })
+    expect(session.pullDetail()?.context.value?.readiness).toMatchObject({ mergeable: "UNKNOWN", mergeablePending: true })
+    await settle()
+    expect(checks).toBe(3)
+    expect(timers.delays).toEqual([2000, 4000, 8000])
+    expect(contexts).toBe(1)
+    const readiness = session.pullDetail()?.context.value?.readiness
+    expect(readiness).toMatchObject({ mergeable: "MERGEABLE", mergeStateStatus: "CLEAN" })
+    expect(readiness).not.toHaveProperty("mergeablePending")
+  } finally {
+    timers.restore()
+  }
+})
+
+test("conflict status checks give up after a few tries, on a new head, or when the PR is left", async () => {
+  const timers = immediateRechecks()
+  try {
+    let checks = 0
+    const { session } = await setup({
+      pullContext: async () => unknown(),
+      pullMergeability: async () => {
+        checks++
+        throw new Error("Network unavailable")
+      },
+    })
+    await settle()
+    expect(checks).toBe(4)
+    expect(session.pullDetail()?.context.value?.readiness).toMatchObject({ mergeable: "UNKNOWN" })
+    expect(session.pullDetail()?.context.value?.readiness).not.toHaveProperty("mergeablePending")
+
+    const moved = await setup({
+      pullContext: async () => unknown(),
+      pullMergeability: async () => ({ headSha: "b".repeat(40), mergeable: "MERGEABLE", mergeStateStatus: "CLEAN" }),
+    })
+    await settle()
+    // Readiness for another revision is not applied to this one.
+    expect(moved.session.pullDetail()?.context.value?.readiness).toMatchObject({ mergeable: "UNKNOWN" })
+    expect(moved.session.pullDetail()?.context.value?.readiness).not.toHaveProperty("mergeablePending")
+
+    let left = 0
+    const leaving = await setup({
+      pullContext: async () => unknown(),
+      pullMergeability: async () => (left++, { headSha: head, mergeable: "MERGEABLE", mergeStateStatus: "CLEAN" }),
+    })
+    leaving.session.clearPull()
+    await settle()
+    expect(left).toBe(0)
+  } finally {
+    timers.restore()
+  }
 })

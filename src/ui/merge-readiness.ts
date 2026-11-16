@@ -36,29 +36,35 @@ export function mergeReadinessStatus(readiness: PullReadiness, expectedHeadSha?:
   if (!readiness.checksComplete) unavailable.push("Check data incomplete; refresh readiness.")
   if (readiness.checks.some((check) => check.required === undefined)) unavailable.push("Check requirements unknown; confirm on GitHub.")
   if (required.some((check) => check.state === "unknown")) unavailable.push("Required check results unknown; refresh readiness.")
-  if (readiness.mergeable !== "MERGEABLE" && readiness.mergeable !== "CONFLICTING") {
+  // GitHub reports UNKNOWN until it has computed conflicts; meanwhile opengh asks again.
+  const checking = readiness.mergeable === "UNKNOWN" && readiness.mergeablePending === true
+  if (checking) waiting.push("Checking for conflicts…")
+  else if (readiness.mergeable !== "MERGEABLE" && readiness.mergeable !== "CONFLICTING") {
     unavailable.push("Conflict status unknown; refresh readiness.")
   }
-  switch (readiness.mergeStateStatus) {
-    // UNSTABLE means non-passing checks, not unknown readiness. Required
-    // checks are evaluated above; failures in optional checks do not block merging.
-    case "CLEAN":
-    case "UNSTABLE":
-    case "DIRTY":
-    case "DRAFT":
-      break
-    case "BLOCKED":
-      if (!draft && !blocked.length && !waiting.length) blocked.push("Repository requirements block merging; check GitHub.")
-      break
-    case "BEHIND":
-      unavailable.push("Branch is behind base; confirm update requirements on GitHub.")
-      break
-    case "HAS_HOOKS":
-      unavailable.push("Merge hooks reported; confirm requirements on GitHub.")
-      break
-    default:
-      unavailable.push("Merge state unavailable; refresh readiness.")
-  }
+  if (checking && readiness.mergeStateStatus === "UNKNOWN") {
+    // The merge state is computed with the conflict status.
+  } else
+    switch (readiness.mergeStateStatus) {
+      // UNSTABLE means non-passing checks, not unknown readiness. Required
+      // checks are evaluated above; failures in optional checks do not block merging.
+      case "CLEAN":
+      case "UNSTABLE":
+      case "DIRTY":
+      case "DRAFT":
+        break
+      case "BLOCKED":
+        if (!draft && !blocked.length && !waiting.length) blocked.push("Repository requirements block merging; check GitHub.")
+        break
+      case "BEHIND":
+        unavailable.push("Branch is behind base; confirm update requirements on GitHub.")
+        break
+      case "HAS_HOOKS":
+        unavailable.push("Merge hooks reported; confirm requirements on GitHub.")
+        break
+      default:
+        unavailable.push("Merge state unavailable; refresh readiness.")
+    }
 
   const reasons = [...blocked, ...waiting, ...unavailable]
   if (draft) return { status: "draft", reasons: ["Mark ready for review before merging.", ...reasons] }

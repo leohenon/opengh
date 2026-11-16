@@ -252,6 +252,8 @@ export type PullReadiness = {
   headSha: string
   isDraft?: boolean
   mergeable: "MERGEABLE" | "CONFLICTING" | "UNKNOWN"
+  // GitHub is still computing an UNKNOWN conflict status, and opengh is checking again.
+  mergeablePending?: boolean
   mergeStateStatus: string
   reviewDecision?: "APPROVED" | "CHANGES_REQUESTED" | "REVIEW_REQUIRED" | null
   checks: PullCheck[]

@@ -152,8 +152,37 @@ function message(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
 }
 
+export type PullMergeability = Pick<PullContext["readiness"], "headSha" | "mergeable" | "mergeStateStatus">
+
 export function createGitHubPullContext(transport: GitHubTransport) {
   return {
+    // Only conflict status, which GitHub computes in the background and first reports as UNKNOWN.
+    async pullMergeability(repository: RepositoryReference, number: number, options?: RequestOptions): Promise<PullMergeability> {
+      if (!transport.graphql) throw new Error("PR details require GraphQL")
+      if (!Number.isSafeInteger(number) || number <= 0) throw new Error("Invalid pull request number")
+      const selector = repositorySelector(repository)
+      const response = object(
+        await transport.graphql<unknown>(
+          `query PullMergeability(${selector.declarations}) {
+          ${selector.select(`pullRequest(number: ${number}) { headRefOid mergeable mergeStateStatus }`)}
+        }`,
+          selector.variables,
+          options,
+        ),
+      )
+      if (response.errors != null) {
+        if (!Array.isArray(response.errors)) throw new Error("Invalid GraphQL errors response")
+        if (response.errors.length)
+          throw new Error(response.errors.map((error) => optionalText(object(error).message) || "GraphQL error").join("; "))
+      }
+      options?.budget?.consumeItems(1)
+      const pull = object(object(object(response.data).repository).pullRequest)
+      const headSha = text(pull.headRefOid)
+      if (!headSha) throw new Error("Missing PR head SHA")
+      const mergeable = text(pull.mergeable)
+      if (!["MERGEABLE", "CONFLICTING", "UNKNOWN"].includes(mergeable)) throw new Error("Invalid PR mergeability")
+      return { headSha, mergeable: mergeable as PullMergeability["mergeable"], mergeStateStatus: text(pull.mergeStateStatus) }
+    },
     async pullContext(repository: RepositoryReference, number: number, options?: RequestOptions): Promise<PullContext> {
       if (!transport.graphql) throw new Error("PR details require GraphQL")
       if (!Number.isSafeInteger(number) || number <= 0) throw new Error("Invalid pull request number")

@@ -289,3 +289,30 @@ test("a single hidden check is counted in the singular", async () => {
     view.renderer.destroy()
   }
 })
+
+test("an UNKNOWN conflict status reads as being checked, then as unknown", async () => {
+  const base = context([])
+  const [pending, setPending] = createSignal(true)
+  const view = await testRender(
+    () => (
+      <PullReadinessPanel
+        context={{
+          ...base,
+          readiness: { ...base.readiness, mergeable: "UNKNOWN", mergeStateStatus: "UNKNOWN", mergeablePending: pending() || undefined },
+        }}
+        interactive
+      />
+    ),
+    { width: 100, height: 30 },
+  )
+  try {
+    await view.flush()
+    expect(view.captureCharFrame()).toContain("Branch: Checking for conflicts…")
+    expect(view.captureCharFrame()).not.toContain("refresh readiness")
+    setPending(false)
+    await view.flush()
+    expect(view.captureCharFrame()).toContain("Branch: Conflict status unknown")
+  } finally {
+    view.renderer.destroy()
+  }
+})

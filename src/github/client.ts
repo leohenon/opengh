@@ -454,7 +454,7 @@ function commitSummary(item: CommitResponse): CommitSummary {
 // Map endpoints into domain models here; transport owns execution/errors, the session owns async state.
 export function createGitHubClient(transport: GitHubTransport, commentStorage?: IssueCommentStorage) {
   const { documents, document } = createGitHubDocuments(transport)
-  const { pullContext } = createGitHubPullContext(transport)
+  const { pullContext, pullMergeability } = createGitHubPullContext(transport)
   const { addReaction, removeReaction, bodyReactions, commentReactions } = createGitHubReactions(transport)
   const metadata = async (repository: string, options?: RequestOptions): Promise<Repo> => {
     const repo = await transport.json<RepositoryResponse>(`repos/${repository}`, options)
@@ -1847,6 +1847,7 @@ export function createGitHubClient(transport: GitHubTransport, commentStorage?: 
     mergePull,
     pullCommits,
     pullContext,
+    pullMergeability,
     runs,
     run,
     runJobs,
@@ -1882,6 +1883,7 @@ export const loadGitHubIssueTimeline = client.issueTimeline
 export const loadGitHubPull = client.pull
 export const loadGitHubPullCommits = client.pullCommits
 export const loadGitHubPullContext = client.pullContext
+export const loadGitHubPullMergeability = client.pullMergeability
 export const loadGitHubPulls = client.pulls
 export const loadGitHubRuns = client.runs
 

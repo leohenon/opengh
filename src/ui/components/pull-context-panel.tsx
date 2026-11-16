@@ -225,7 +225,9 @@ export function PullReadinessPanel(props: {
                 ? "Conflicts reported"
                 : readiness().mergeable === "MERGEABLE"
                   ? "No conflicts"
-                  : "Conflict status unknown"}
+                  : readiness().mergeablePending
+                    ? "Checking for conflicts…"
+                    : "Conflict status unknown"}
             </span>
           </text>
           <Show when={requiredSummary().length}>
