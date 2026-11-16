@@ -1,3 +1,4 @@
+import { TextareaRenderable } from "@opentui/core"
 import { useRenderer } from "@opentui/solid"
 import { createEffect, createMemo, createSignal, Match, onCleanup, onMount, Show, Switch } from "solid-js"
 import type { DetailTarget, InitialNavigation, NavigationState, Page } from "./navigation"
@@ -19,7 +20,7 @@ import type { RepositoryState } from "./repository-state"
 import { App } from "./ui/app"
 import { ThemeProvider } from "./ui/theme"
 import { MotionProvider } from "./ui/motion"
-import { KeybindingsProvider, useKeyActions } from "./ui/keybindings"
+import { KeybindingsProvider, replaceEditorText, useKeyActions } from "./ui/keybindings"
 import { MouseSurface } from "./ui/components/mouse-surface"
 import { SelectionClipboard } from "./ui/components/selection-clipboard"
 import { Toast } from "./ui/components/toast"
@@ -181,6 +182,13 @@ export function Root(props: {
         quitting = false
         setReviewSaveError(error instanceof Error ? error.message : "Could not save the review draft.")
       })
+  }
+
+  const interrupt = (): false | void => {
+    if (commandCancel) return commandCancel()
+    const editor = renderer.currentFocusedRenderable
+    if (editor instanceof TextareaRenderable && editor.plainText.length) replaceEditorText(editor, "")
+    else return false
   }
 
   const reloadConfig = async () => {
@@ -356,7 +364,7 @@ export function Root(props: {
   return (
     <KeybindingsProvider overrides={config().keybindings}>
       <RootShortcuts
-        onInterrupt={() => (commandCancel ? commandCancel() : quit())}
+        onInterrupt={interrupt}
         onQuit={quit}
         onReload={() => void reloadConfig()}
         onBack={() => (view() === "repository" && session.state().status !== "ready" ? returnToRepository() : false)}
@@ -581,10 +589,12 @@ export function Root(props: {
   )
 }
 
-function RootShortcuts(props: { onInterrupt(): void; onQuit(): void; onReload(): void; onBack(): boolean }) {
-  useKeyActions(
+function RootShortcuts(props: { onInterrupt(): false | void; onQuit(): void; onReload(): void; onBack(): boolean }) {
+  const keys = useKeyActions(
     {
-      "global.interrupt": () => props.onInterrupt(),
+      "global.interrupt": (event) => {
+        if (props.onInterrupt() === false && !keys.dispatch(event, "dialog.close")) props.onQuit()
+      },
       "global.reloadConfig": () => props.onReload(),
     },
     { priority: 1000 },

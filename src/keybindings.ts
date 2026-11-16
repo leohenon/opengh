@@ -3,7 +3,7 @@ const binding = (keys: string[], description: string) => ({ keys, description })
 
 export const keybindingDefinitions = {
   "global.quit": binding(["q"], "Quit"),
-  "global.interrupt": binding(["ctrl+c"], "Quit / cancel running command"),
+  "global.interrupt": binding(["ctrl+c"], "Clear input / close dialog / quit / cancel running command"),
   "global.reloadConfig": binding(["ctrl+r"], "Reload configuration"),
   "global.help": binding(["?"], "Help"),
   "global.openFullApp": binding(["ctrl+o"], "Open full app from focus mode"),

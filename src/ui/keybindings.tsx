@@ -36,23 +36,25 @@ function createKeybindings(overrides: () => KeybindingOverrides | undefined) {
         registrations.delete(registration)
       }
     },
-    dispatch(event: KeyEvent) {
-      if (event.defaultPrevented || event.propagationStopped || event.eventType === "release") return
+    // An explicit action skips key matching.
+    dispatch(event: KeyEvent, requestedAction?: KeyAction) {
+      if (event.defaultPrevented || event.propagationStopped || event.eventType === "release") return false
       // Snapshot before invoking callbacks: opening a dialog must not handle this same key again.
       const active = [...registrations]
         .filter(({ options }) => options.when?.() !== false)
         .sort((a, b) => (b.options.priority ?? 0) - (a.options.priority ?? 0) || b.order - a.order)
       for (const { handlers, options } of active) {
         for (const action of Object.keys(handlers) as KeyAction[]) {
-          if (!matches(event, action)) continue
+          if (requestedAction ? action !== requestedAction : !matches(event, action)) continue
           if (handlers[action]?.(event) === false) continue
           event.preventDefault()
           event.stopPropagation()
-          return
+          return true
         }
         // Block lower application layers, but leave unclaimed text to the focused editor.
-        if (options.modal) return
+        if (options.modal) return true
       }
+      return false
     },
   }
 }

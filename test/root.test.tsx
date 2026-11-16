@@ -6,7 +6,7 @@ import { initializeHunk } from "../src/ui/hunk-host"
 import { resumeLocation, type ResumeLocation } from "../src/resume"
 import type { DiffTarget } from "../src/models"
 import { patchFixture } from "./fixtures/diff"
-import { BoxRenderable, CodeRenderable, RGBA, type Renderable } from "@opentui/core"
+import { BoxRenderable, CodeRenderable, RGBA, type Renderable, type TextareaRenderable } from "@opentui/core"
 import { createSignal } from "solid-js"
 import { defaultConfig, type Config } from "../src/config"
 import { appColors, resolveTheme } from "../src/theme"
@@ -930,6 +930,149 @@ test("failed tab saves remain pending and are retried on exit without writing un
   }
 })
 
+test.each(["c", "x"])("Ctrl+%s clears and dismisses picker/search inputs, then quits from the main screen", async (key) => {
+  const view = await testRender(
+    () => (
+      <Root
+        cwd="/unused"
+        services={{
+          createPullReviewSession: createTestReviewSession,
+          resolveRepository: async () => "cli/cli",
+          loadRecentRepositories: async () => ["cli/cli"],
+          rememberRepository: async () => {},
+          loadRepositoryTabs: async () => ({}),
+          saveRepositoryTabs: async () => {},
+          resolveLocalRepository: async () => undefined,
+          createRepositorySession: readySession,
+          loadConfig: async () => ({
+            ...defaultConfig,
+            keybindings: { "global.interrupt": [`ctrl+${key}`], "dialog.close": [] },
+          }),
+        }}
+      />
+    ),
+    { width: 120, height: 32, exitOnCtrlC: false },
+  )
+  active.push(view)
+  await Bun.sleep(0)
+  await view.flush()
+  view.mockInput.pressKey("S")
+  await view.flush()
+  const input = view.renderer.currentFocusedRenderable as TextareaRenderable
+  await view.mockInput.typeText("query q")
+  if (key === "x") {
+    view.mockInput.pressCtrlC()
+    expect(input.plainText).toBe("query q")
+    expect(view.renderer.isDestroyed).toBe(false)
+  }
+  view.mockInput.pressKey(key, { ctrl: true })
+  await view.flush()
+  expect(view.renderer.isDestroyed).toBe(false)
+  expect(input.plainText).toBe("")
+  expect(view.captureCharFrame()).toContain("cli")
+  expect(view.captureCharFrame()).not.toContain("No matching repositories")
+  view.mockInput.pressKey("z", { ctrl: true })
+  await view.flush()
+  expect(input.plainText).toBe("query q")
+  expect(view.captureCharFrame()).toContain("No matching repositories")
+  view.mockInput.pressKey(key, { ctrl: true })
+  await view.mockInput.typeText("   ")
+  view.mockInput.pressKey(key, { ctrl: true })
+  expect(input.plainText).toBe("")
+  expect(view.renderer.isDestroyed).toBe(false)
+  view.mockInput.pressKey(key, { ctrl: true })
+  await view.flush()
+  expect(view.renderer.isDestroyed).toBe(false)
+  expect(view.renderer.root.findDescendantById("picker-query")).toBeUndefined()
+  view.mockInput.pressKey("/")
+  await view.flush()
+  const searchInput = view.renderer.currentFocusedRenderable as TextareaRenderable
+  await view.mockInput.typeText("search")
+  view.mockInput.pressKey(key, { ctrl: true })
+  await view.flush()
+  expect(searchInput.plainText).toBe("")
+  expect(view.renderer.isDestroyed).toBe(false)
+  view.mockInput.pressKey(key, { ctrl: true })
+  await view.flush()
+  expect(view.renderer.isDestroyed).toBe(false)
+  expect(view.renderer.currentFocusedRenderable).not.toBe(searchInput)
+  view.mockInput.pressKey(key, { ctrl: true })
+  await Bun.sleep(0)
+  expect(view.renderer.isDestroyed).toBe(true)
+})
+
+test("Ctrl+C clears a comment draft undoably, dismisses only the active dialog, then quits", async () => {
+  const [body, setBody] = createSignal("")
+  const issueDetail: IssueDetailState = {
+    number: issueDetailFixture.number,
+    resource: { status: "ready", value: issueDetailFixture },
+    comments: { status: "ready", value: { items: [], page: 1, hasMore: false } },
+    references: { status: "ready", value: [] },
+  }
+  const view = await testRender(
+    () => (
+      <Root
+        cwd="/unused"
+        initialDetail={{ kind: "issue", number: issueDetailFixture.number }}
+        services={{
+          createPullReviewSession: createTestReviewSession,
+          resolveRepository: async () => "cli/cli",
+          loadRecentRepositories: async () => [],
+          rememberRepository: async () => {},
+          loadRepositoryTabs: async () => ({}),
+          saveRepositoryTabs: async () => {},
+          resolveLocalRepository: async () => undefined,
+          loadConfig: async () => ({ ...defaultConfig }),
+          createRepositorySession: () => ({
+            ...readySession(),
+            issueDetail: () => issueDetail,
+            issueAction: () => ({ body: body(), reason: "completed" as const, operation: { status: "idle" as const } }),
+            updateIssueDraft: (_number, draft) => setBody(draft.body ?? body()),
+          }),
+        }}
+      />
+    ),
+    { width: 120, height: 32, exitOnCtrlC: false },
+  )
+  active.push(view)
+  await Bun.sleep(0)
+  await view.flush()
+  view.mockInput.pressKey("c")
+  await view.flush()
+  const editor = view.renderer.currentFocusedRenderable as TextareaRenderable
+  const text = "Comment draft\nsecond line"
+  await view.mockInput.pasteBracketedText(text)
+  expect(body()).toBe(text)
+  view.mockInput.pressCtrlC()
+  await view.flush()
+  expect(view.renderer.isDestroyed).toBe(false)
+  expect(editor.plainText).toBe("")
+  expect(body()).toBe("")
+  view.mockInput.pressKey("z", { ctrl: true })
+  await view.flush()
+  expect(editor.plainText).toBe(text)
+  expect(body()).toBe(text)
+  view.mockInput.pressKey("s", { ctrl: true })
+  await view.flush()
+  expect(view.captureCharFrame()).toContain("Post comment to")
+  view.mockInput.pressCtrlC()
+  await view.flush()
+  expect(view.renderer.isDestroyed).toBe(false)
+  expect(view.captureCharFrame()).not.toContain("Post comment to")
+  expect(body()).toBe(text)
+  view.mockInput.pressKey("d", { ctrl: true })
+  await view.flush()
+  expect(editor.plainText).toBe("")
+  expect(body()).toBe("")
+  view.mockInput.pressCtrlC()
+  await view.flush()
+  expect(view.renderer.isDestroyed).toBe(false)
+  expect(view.renderer.currentFocusedRenderable).not.toBe(editor)
+  view.mockInput.pressCtrlC()
+  await Bun.sleep(0)
+  expect(view.renderer.isDestroyed).toBe(true)
+})
+
 test("reloads bindings in place, keeps the last valid config on failure, and remaps interrupt in inputs", async () => {
   let next: Config = { ...defaultConfig, showStatusBarHints: true, keybindings: { "global.interrupt": ["ctrl+x"] } }
   let invalid = false
@@ -987,6 +1130,10 @@ test("reloads bindings in place, keeps the last valid config on failure, and rem
   view.mockInput.pressKey("F1")
   await view.flush()
   expect(view.captureCharFrame()).toContain("Help")
+  view.mockInput.pressKey("x", { ctrl: true })
+  await view.flush()
+  expect(view.renderer.isDestroyed).toBe(false)
+  expect(view.captureCharFrame()).not.toContain("Help")
   view.mockInput.pressKey("x", { ctrl: true })
   await Bun.sleep(0)
   expect(view.renderer.isDestroyed).toBe(true)
@@ -1071,7 +1218,7 @@ test("settings cannot save or dismiss during a deferred config reload", async ()
         }}
       />
     ),
-    { width: 120, height: 32 },
+    { width: 120, height: 32, exitOnCtrlC: false },
   )
   active.push(view)
   await Bun.sleep(0)
@@ -1082,7 +1229,10 @@ test("settings cannot save or dismiss during a deferred config reload", async ()
   view.mockInput.pressEnter()
   view.mockInput.pressEscape()
   await Bun.sleep(30)
+  view.mockInput.pressCtrlC()
+  await Bun.sleep(0)
   await view.flush()
+  expect(view.renderer.isDestroyed).toBe(false)
   expect(saved).toBeUndefined()
   expect(view.captureCharFrame()).toContain("Settings")
   expect(view.captureCharFrame()).not.toContain("Search themes")
@@ -1097,7 +1247,7 @@ test("settings cannot save or dismiss during a deferred config reload", async ()
   expect(saved?.keybindings).toEqual({ "global.help": ["f1"] })
 })
 
-test("remapped interrupt cancels commands without quitting, then quits after command completion", async () => {
+test("remapped interrupt cancels commands first, dismisses completed output, then quits", async () => {
   const result = deferred<{ exitCode: number; cancelled: boolean }>()
   let cancelled = 0
   let copied = ""
@@ -1161,6 +1311,10 @@ test("remapped interrupt cancels commands without quitting, then quits after com
   view.mockInput.pressKey("F5")
   await Bun.sleep(0)
   expect(copied).toBe("command output\n")
+  view.mockInput.pressKey("x", { ctrl: true })
+  await view.flush()
+  expect(view.renderer.isDestroyed).toBe(false)
+  expect(view.captureCharFrame()).not.toContain("Cancelled (exit 143)")
   view.mockInput.pressKey("x", { ctrl: true })
   await Bun.sleep(0)
   expect(view.renderer.isDestroyed).toBe(true)
