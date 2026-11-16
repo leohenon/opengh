@@ -1126,10 +1126,13 @@ function AppContent(props: AppProps) {
     const selected = sameConversationComment(target)
     const expanded = selected && overlay() === "issue-action" && issueAction()?.kind === "comment" && !commentConfirmOnly()
     const open = selected && conversationCommentOpen() && !expanded
+    const posting = pendingIssueActions().some(
+      (action) => action.kind === "comment" && conversationCommentKey(action) === conversationCommentKey(target),
+    )
     return {
       open,
       body: conversationDraft(target),
-      saved: !expanded && !open && !!conversationDraft(target).trim(),
+      saved: !expanded && !open && !posting && !!conversationDraft(target).trim(),
       focused: selected && conversationCommentFocused(),
       enabled: conversationCommentEditable(target),
       canPost: conversationCommentAvailable(target),

@@ -45,6 +45,7 @@ export function ActivityCommentComposer(props: {
   const renderer = useRenderer()
   const { colors } = useTheme()
   const open = createMemo(() => props.comment.open)
+  const saved = createMemo(() => props.comment.saved)
   const focused = createMemo(() => open() && props.comment.focused)
   const active = createMemo(() => focused() && props.interactive && props.comment.enabled)
   const [width, setWidth] = createSignal(1)
@@ -89,8 +90,28 @@ export function ActivityCommentComposer(props: {
       if (focused) reveal()
     }),
   )
+  // Follow a restored draft only from the bottom.
+  createEffect(
+    on(
+      saved,
+      (visible) => {
+        if (!visible || !props.interactive) return
+        const scroll = props.scroll()
+        if (!scroll || scroll.scrollTop < scroll.scrollHeight - scroll.viewport.height) return
+        const scrollTop = scroll.scrollTop
+        const revealSaved = () => {
+          if (!saved() || !props.interactive || scroll.isDestroyed || scroll.scrollTop !== scrollTop) return
+          scroll.scrollChildIntoView(`${props.idPrefix}-area`)
+        }
+        renderer.once("frame", revealSaved)
+        renderer.requestRender()
+        onCleanup(() => renderer.off("frame", revealSaved))
+      },
+      { defer: true },
+    ),
+  )
   return (
-    <Show when={open() || props.comment.saved}>
+    <Show when={open() || saved()}>
       <box
         id={`${props.idPrefix}-area`}
         ref={(value) => {
