@@ -5,12 +5,14 @@ import type { GitHubTransport, RequestOptions } from "../src/github/transport"
 
 const repository = { id: 123, nodeId: "R_123", nameWithOwner: "renamed/repository" }
 const date = "2026-01-01T00:00:00Z"
+const repositoryUrl = (name: string) => `https://api.github.com/repos/${name}`
 const issue = (number = 1, overrides: Record<string, unknown> = {}) => ({
   number,
   state: "open",
   title: `Work ${number}`,
   user: { login: "octocat" },
   created_at: date,
+  repository_url: repositoryUrl(repository.nameWithOwner),
   ...overrides,
 })
 const pull = (number = 1, overrides: Record<string, unknown> = {}) => issue(number, { pull_request: { merged_at: null }, ...overrides })
@@ -83,7 +85,7 @@ describe("GitHub work queries", () => {
   })
 
   test("passes @me to GitHub search without another identity request", async () => {
-    const { client, calls } = fixture(search([pull()]))
+    const { client, calls } = fixture(search([pull(1, { repository_url: repositoryUrl("owner/repo") })]))
     const query = "review-requested:@me assignee:@me author:@me involves:@me draft:true"
     await client.pulls("owner/repo", "open", undefined, undefined, query)
     expect(calls).toHaveLength(1)
@@ -126,7 +128,7 @@ describe("GitHub work queries", () => {
       ] as const) {
         const { client, calls } = fixture(
           search(
-            Array.from({ length: count }, (_, index) => item(index + 1)),
+            Array.from({ length: count }, (_, index) => item(index + 1, { repository_url: repositoryUrl("owner/repo") })),
             total,
           ),
         )
@@ -220,6 +222,7 @@ describe("GitHub work queries", () => {
       ...[undefined, null, "unknown", "OPEN"].map((state) => ({ state })),
       ...[undefined, {}, { login: undefined }, { login: "" }, { login: 1 }, []].map((user) => ({ user })),
       ...[undefined, null, "not a date", 123].map((created_at) => ({ created_at })),
+      ...[undefined, null, 1, {}].map((repository_url) => ({ repository_url })),
       ...[null, 0, "true"].map((draft) => ({ draft })),
       ...["PR", [], 1].map((pull_request) => ({ pull_request })),
     ]
@@ -248,6 +251,9 @@ describe("GitHub work queries", () => {
       "-repo:owner/repo",
       'RePo:"other/repo"',
       "repo :other/repo",
+      "owner:other",
+      "-owner:other",
+      "OWNER: other",
       "org:other",
       "user:other",
       "type:pr",
@@ -300,6 +306,18 @@ describe("GitHub work queries", () => {
       expect(result.items.map(({ number }) => number)).toEqual(items.map(({ number }) => number).filter((number) => number !== 5))
       expect(result.hasMore).toBe(true)
       expect(result.total).toBe(45)
+    }
+  })
+
+  test("rejects results from another repository, matching the current name case-insensitively", async () => {
+    for (const method of ["issues", "pulls"] as const) {
+      const item = method === "issues" ? issue : pull
+      for (const name of ["cli/cli", "renamed/repository-fork", "other/renamed/repository", "renamed/repositor"]) {
+        const { client } = fixture(search([item(1), item(2, { repository_url: repositoryUrl(name) })]))
+        await expect(client[method](repository, "open", 1, undefined, "bug")).rejects.toThrow("results from another repository")
+      }
+      const { client } = fixture(search([item(1, { repository_url: repositoryUrl("Renamed/Repository") })]))
+      expect((await client[method](repository, "open", 1, undefined, "bug")).items).toHaveLength(1)
     }
   })
 

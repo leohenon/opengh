@@ -362,7 +362,7 @@ function issueSummary(item: IssueResponse): IssueSummary {
   }
 }
 
-const WORK_QUALIFIER = /"[^"]*"|\b(repo|org|user|type|state|is|sort)\s*:\s*("[^"]*"|[^\s"()]*)/gi
+const WORK_QUALIFIER = /"[^"]*"|\b(repo|owner|org|user|type|state|is|sort)\s*:\s*("[^"]*"|[^\s"()]*)/gi
 const LIST_IS_VALUES = new Set(["issue", "pr", "pull-request", "open", "closed"])
 
 function workFindQuery(query: string): string {
@@ -374,7 +374,7 @@ function workFindQuery(query: string): string {
     if (name === "sort") throw new Error("sort: is not supported in Find; results are sorted newest first.")
     if (name === "is" && !LIST_IS_VALUES.has(value.replaceAll('"', "").trim().toLowerCase())) continue
     throw new Error(
-      "Remove repo:, org:, user:, type:, state:, is:issue/pr, and is:open/closed from the query; repository, type, and state are set by the current list.",
+      "Remove repo:, owner:, org:, user:, type:, state:, is:issue/pr, and is:open/closed from the query; repository, type, and state are set by the current list.",
     )
   }
   // OR would escape the repo: scope. GitHub ignores lowercase operators.
@@ -383,7 +383,7 @@ function workFindQuery(query: string): string {
   return query.trim()
 }
 
-function workSearchItem(value: unknown, kind: "issue" | "pr"): IssueResponse {
+function workSearchItem(value: unknown, kind: "issue" | "pr", repository: string): IssueResponse {
   const item = record(value)
   const user = record(item?.user)
   const pull = record(item?.pull_request)
@@ -395,6 +395,7 @@ function workSearchItem(value: unknown, kind: "issue" | "pr"): IssueResponse {
     (item.state !== "open" && item.state !== "closed") ||
     typeof item.title !== "string" ||
     !item.title.trim() ||
+    typeof item.repository_url !== "string" ||
     (item.user !== null && (typeof user?.login !== "string" || !user.login.trim())) ||
     typeof item.created_at !== "string" ||
     !Number.isFinite(Date.parse(item.created_at)) ||
@@ -404,6 +405,9 @@ function workSearchItem(value: unknown, kind: "issue" | "pr"): IssueResponse {
     (pull?.merged_at != null && (typeof pull.merged_at !== "string" || !Number.isFinite(Date.parse(pull.merged_at))))
   )
     throw new Error("GitHub returned an invalid work search item.")
+  // A row has only a number, so a foreign result would open the wrong item.
+  if (!item.repository_url.toLowerCase().endsWith(`/repos/${repository.toLowerCase()}`))
+    throw new Error("GitHub search returned results from another repository. Remove repository scope from the query.")
   return value as IssueResponse
 }
 
@@ -695,7 +699,7 @@ export function createGitHubClient(transport: GitHubTransport, commentStorage?: 
       throw new Error("GitHub returned an invalid work search response.")
     options?.budget?.consumeItems(response.items.length)
     if (response.incomplete_results) throw new Error("GitHub search results are incomplete. Narrow the query and try again.")
-    const items = response.items.map((item) => workSearchItem(item, kind))
+    const items = response.items.map((item) => workSearchItem(item, kind, name))
     return {
       // The search index lags writes.
       items: items.slice(0, SEARCH_RESULT_LIMIT - offset).filter((item) => item.state === state),
