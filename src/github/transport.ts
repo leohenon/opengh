@@ -2,6 +2,7 @@ import { spawnGitHub } from "./process"
 import { GitHubApiError, GitHubRequestNotSentError } from "./errors"
 import { GitHubRequestScheduler, githubRequests } from "./request-scheduler"
 import { ResponseLimitError, type RequestBudget } from "./request-budget"
+import { githubWrites, type GitHubWrites } from "./writes"
 
 export { GitHubApiError, GitHubRequestNotSentError } from "./errors"
 
@@ -91,7 +92,7 @@ async function request(scheduler: GitHubRequestScheduler, ...[path, accept, fiel
     if (options?.jq) args.push("--jq", options.jq)
     if (fields) for (const [key, value] of Object.entries(fields)) args.push("-f", `${key}=${value}`)
     if (mutation) args.push("--method", mutation.method, "--input", "-")
-    process = spawnGitHub(args, undefined, mutation ? JSON.stringify(mutation.body) : undefined)
+    process = spawnGitHub(args, undefined, mutation ? JSON.stringify(mutation.body) : undefined, write)
   } catch (error) {
     // No child was dispatched. Errors while reading its response below remain
     // ambiguous, even if the same budget or signal caused them.
@@ -229,7 +230,10 @@ function awaitWithAbort<T>(promise: Promise<T>, signal?: AbortSignal): Promise<T
   })
 }
 
-export function createGitHubTransport(scheduler: GitHubRequestScheduler = githubRequests): GitHubTransport {
+export function createGitHubTransport(
+  scheduler: GitHubRequestScheduler = githubRequests,
+  writes: Pick<GitHubWrites, "track"> = githubWrites,
+): GitHubTransport {
   const direct = (...args: RequestArguments) => request(scheduler, ...args)
   const send = (...args: RequestArguments) => scheduler.run(args[0], () => direct(...args), requestSignal(args[4]))
   type Viewer = { id: number; login: string }
@@ -258,15 +262,16 @@ export function createGitHubTransport(scheduler: GitHubRequestScheduler = github
   }
   async function authenticatedRequest(...args: RequestArguments) {
     const [path, , , , options] = args
+    if (writeRequest(args)) return writes.track(authenticatedWrite(...args))
+    validateEndpoint(path)
+    requestSignal(options)?.throwIfAborted()
+    // Probe the session's account without making reads wait.
+    if (!initialViewer && !readProbeFailed) probeViewer().catch(() => {})
+    return send(...args)
+  }
+  async function authenticatedWrite(...args: RequestArguments) {
+    const [path, , , , options] = args
     const signal = requestSignal(options)
-    const write = writeRequest(args)
-    if (!write) {
-      validateEndpoint(path)
-      signal?.throwIfAborted()
-      // Probe the session's account without making reads wait.
-      if (!initialViewer && !readProbeFailed) probeViewer().catch(() => {})
-      return send(...args)
-    }
     let expected: Viewer
     try {
       validateEndpoint(path)

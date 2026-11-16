@@ -10,10 +10,19 @@ export function githubEnvironment() {
   return env
 }
 
-const children = new Set<Bun.Subprocess<"ignore" | Uint8Array, "pipe", "pipe">>()
+type Child = Bun.Subprocess<"ignore" | Uint8Array, "pipe", "pipe">
+const children = new Set<Child>()
+const writes = new Set<Child>()
 let stopping = false
+let abandoned = false
+// Longer than the transport's request timeout.
+const WRITE_SHUTDOWN_LIMIT_MS = 30_000
 
-export function spawnGitHub(args: string[], cwd?: string, input?: string) {
+export function abandonGitHubWrites() {
+  abandoned = true
+}
+
+export function spawnGitHub(args: string[], cwd?: string, input?: string, write = false) {
   if (stopping) throw new Error("Application is shutting down")
   let child: Bun.Subprocess<"ignore" | Uint8Array, "pipe", "pipe">
   try {
@@ -33,16 +42,26 @@ export function spawnGitHub(args: string[], cwd?: string, input?: string) {
     throw error
   }
   children.add(child)
-  void child.exited.then(
-    () => children.delete(child),
-    () => children.delete(child),
-  )
+  if (write) writes.add(child)
+  const forget = () => {
+    children.delete(child)
+    writes.delete(child)
+  }
+  void child.exited.then(forget, forget)
   return child
 }
 
+// Lets writes finish unless abandoned.
 export async function stopGitHubProcesses() {
   stopping = true
   const active = [...children]
-  for (const child of active) child.kill("SIGKILL")
+  const finishing = active.filter((child) => writes.has(child) && !abandoned)
+  for (const child of active) if (!finishing.includes(child)) child.kill("SIGKILL")
+  let timer: ReturnType<typeof setTimeout> | undefined
+  if (finishing.length)
+    timer = setTimeout(() => {
+      for (const child of finishing) child.kill("SIGKILL")
+    }, WRITE_SHUTDOWN_LIMIT_MS)
   await Promise.allSettled(active.map((child) => child.exited))
+  clearTimeout(timer)
 }

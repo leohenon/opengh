@@ -18,6 +18,7 @@ import { createRepositorySession } from "../src/repository-session"
 import { createPullReviewSession } from "../src/pull-review-session"
 import { createInlineDrafts } from "../src/inline-drafts"
 import { GitHubApiError } from "../src/github/transport"
+import { createGitHubWrites } from "../src/github/writes"
 import {
   githubDataFixture,
   repositoryOperationsFixture,
@@ -876,6 +877,53 @@ test("a teardown without quit, such as SIGTERM, hands pending tab and review sav
   save.resolve()
   await shutdown[0]
   expect(saved["cli/cli"]).toBe("commits")
+})
+
+test("quit waits for changes being sent to GitHub, and quitting again stops waiting", async () => {
+  for (const force of [false, true]) {
+    const writes = createGitHubWrites()
+    let abandoned = false
+    const posting = Promise.withResolvers<void>()
+    const view = await testRender(
+      () => (
+        <Root
+          cwd="/work"
+          repositoryArgument="cli/cli"
+          services={{
+            createPullReviewSession: createTestReviewSession,
+            githubWrites: { ...writes, abandon: () => (abandoned = true) },
+            resolveRepository: async (argument) => argument,
+            resolveLocalRepository: async () => undefined,
+            loadRecentRepositories: async () => [],
+            rememberRepository: async () => {},
+            loadRepositoryTabs: async () => ({}),
+            saveRepositoryTabs: async () => {},
+            loadConfig: async () => defaultConfig,
+            createRepositorySession: () => readySession(),
+          }}
+        />
+      ),
+      { width: 120, height: 32 },
+    )
+    active.push(view)
+    await waitForText(view, "Overview")
+    void writes.track(posting.promise)
+    view.mockInput.pressKey("q")
+    await waitForText(view, "Sending to GitHub")
+    expect(view.renderer.isDestroyed).toBe(false)
+    if (force) {
+      view.mockInput.pressKey("q")
+      await Bun.sleep(0)
+      expect(abandoned).toBe(true)
+      expect(view.renderer.isDestroyed).toBe(true)
+      posting.resolve()
+    } else {
+      posting.resolve()
+      for (let attempt = 0; attempt < 50 && !view.renderer.isDestroyed; attempt++) await Bun.sleep(10)
+      expect(abandoned).toBe(false)
+      expect(view.renderer.isDestroyed).toBe(true)
+    }
+  }
 })
 
 test("quit retains unsaved issue and PR drafts, then retries and waits for review and tab saves", async () => {

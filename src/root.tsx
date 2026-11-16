@@ -14,6 +14,7 @@ import { openUrl } from "./open-url"
 import { loadGitHubIssueKind } from "./github/client"
 import { createInlineComments } from "./inline-comments"
 import { createInlineDrafts, type InlineDrafts } from "./inline-drafts"
+import { githubWrites, type GitHubWrites } from "./github/writes"
 import { createPullReviewSession } from "./pull-review-session"
 import type { PullReviewSession } from "./review-types"
 import { createRepositorySession, type RepositoryScope, type RepositorySession } from "./repository-session"
@@ -46,6 +47,7 @@ export type RootServices = {
   createPullReviewSession(): PullReviewSession
   createInlineComments: typeof createInlineComments
   createInlineDrafts(): InlineDrafts
+  githubWrites: GitHubWrites
   openGitHub(repository: string, target?: string | number, view?: "diff"): Promise<void>
   openUrl(url: string): Promise<void>
   copyToHostClipboard(value: string): Promise<boolean>
@@ -66,6 +68,7 @@ const defaultServices: RootServices = {
   createPullReviewSession,
   createInlineComments,
   createInlineDrafts: () => createInlineDrafts(),
+  githubWrites,
   openGitHub,
   openUrl,
   copyToHostClipboard,
@@ -178,9 +181,27 @@ export function Root(props: {
   }
   const finishQuit = () => {
     // The app remains editable while review/tab saves are pending.
+    if (renderer.isDestroyed) return
+    setWaitingForWrites(false)
     if (flushDraftsForQuit()) renderer.destroy()
   }
+  // Quitting waits for the whole operation, including confirming the result locally; quitting again stops it.
+  const tracked =
+    <A extends unknown[], R>(write: (...args: A) => Promise<R>) =>
+    (...args: A) =>
+      services.githubWrites.track(write(...args))
+  const [waitingForWrites, setWaitingForWrites] = createSignal(false)
+  const waitForWrites = async () => {
+    if (!services.githubWrites.active()) return
+    setWaitingForWrites(true)
+    await services.githubWrites.settled()
+  }
   const quit = () => {
+    if (waitingForWrites()) {
+      services.githubWrites.abandon()
+      finishQuit()
+      return
+    }
     if (quitting) return
     quitting = true
     setQuitDraftSaveError(false)
@@ -201,14 +222,16 @@ export function Root(props: {
         }
       })
     void Promise.all([tabs, flushReview(), flushInline()])
+      .then(waitForWrites)
       .then(() => {
-        // Tab saves can outlast the first drain, and a review may first open
-        // while quitting. Always drain again before the synchronous final flush.
+        // Tab saves can outlast the first drain, a review may first open while quitting,
+        // and finished writes clear their drafts. Always drain again before the final flush.
         return Promise.all([flushReview(), flushInline()])
       })
       .then(finishQuit)
       .catch((error: { title: string; message: string }) => {
         quitting = false
+        setWaitingForWrites(false)
         setQuitSaveError(error)
       })
   }
@@ -544,8 +567,8 @@ export function Root(props: {
                                 onLoadMoreCommitFiles={session.loadMoreCommitFiles}
                                 onCloseCommit={session.clearCommit}
                                 getReactionAction={session.reactionAction}
-                                onAddReaction={session.addReaction}
-                                onRemoveReaction={session.removeReaction}
+                                onAddReaction={tracked(session.addReaction)}
+                                onRemoveReaction={tracked(session.removeReaction)}
                                 issueDetail={session.issueDetail()}
                                 onLoadIssue={session.loadIssue}
                                 onLoadMoreIssueComments={session.loadMoreIssueComments}
@@ -560,12 +583,12 @@ export function Root(props: {
                                 onPrepareIssueAction={session.prepareIssueAction}
                                 onIssueDraftChange={session.updateIssueDraft}
                                 onDiscardIssueDraft={session.discardIssueDraft}
-                                onSubmitIssueAction={session.submitIssueAction}
+                                onSubmitIssueAction={tracked(session.submitIssueAction)}
                                 reviews={reviews}
                                 inlineDrafts={inlineDrafts}
-                                onPostInlineComment={inlineComments.post}
-                                onMergePull={session.mergePull}
-                                onUpdatePullDraft={session.updatePullDraft}
+                                onPostInlineComment={tracked(inlineComments.post)}
+                                onMergePull={tracked(session.mergePull)}
+                                onUpdatePullDraft={tracked(session.updatePullDraft)}
                                 onLoadPullMergeMessage={session.loadPullMergeMessage}
                                 pullDetail={session.pullDetail()}
                                 onLoadPull={session.loadPull}
@@ -627,6 +650,16 @@ export function Root(props: {
             </Show>
             <Show when={quitSaveError()}>
               {(error) => <Toast title={error().title} message={error().message} onDismiss={() => setQuitSaveError(undefined)} />}
+            </Show>
+            <Show when={waitingForWrites()}>
+              <Toast
+                title="Sending to GitHub"
+                message="opengh will quit when it finishes. Quit again to stop it now."
+                tone="info"
+                zIndex={400}
+                duration={60_000}
+                onDismiss={() => {}}
+              />
             </Show>
             <Show when={props.unexpectedError?.()}>
               {(message) => (

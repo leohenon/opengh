@@ -4,6 +4,7 @@ import { createSignal } from "solid-js"
 import { Root } from "./root"
 import { initializeHunk } from "./ui/hunk-host"
 import { stopGitHubProcesses } from "./github/process"
+import { githubWrites } from "./github/writes"
 import { stopClipboardProcesses } from "./clipboard"
 import { stopCommandProcesses } from "./command-actions"
 import { saveRepositoryTabs } from "./repository-tabs"
@@ -114,6 +115,8 @@ const renderer = await createCliRenderer({
       renderer.closed,
       resumeWriter.flush(),
       stopGitHubProcesses(),
+      // Writes in flight finish first; their requests are bounded.
+      Promise.race([githubWrites.settled(), Bun.sleep(35_000)]),
       stopClipboardProcesses(),
       stopCommandProcesses(),
       ...pendingSaves,
