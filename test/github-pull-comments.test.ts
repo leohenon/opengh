@@ -190,6 +190,13 @@ describe("PR conversation comments", () => {
       const detail = await client.pull("owner/repo", 42)
       expect(detail.permissions).toBeUndefined()
       expect(detail).toMatchObject({ number: 42, body: "PR body", reactions: { heart: 3 }, viewerReactions: ["heart"] })
+      expect(detail.permissionsError).toBe(
+        response instanceof Error
+          ? response.message
+          : response === responses[11]
+            ? "Denied"
+            : "Pull request action permissions could not be verified.",
+      )
     }
     const detail = await createGitHubClient(rest()).pull("owner/repo", 42)
     expect(detail.permissions).toBeUndefined()

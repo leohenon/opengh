@@ -285,6 +285,7 @@ export type PullRequestDetail = PullRequestSummary &
       markDraft?: boolean
       markReady?: boolean
     }
+    permissionsError?: string
     merge?: { methods: PullMergeMethod[]; queueRequired: boolean }
     url: string
     body: string

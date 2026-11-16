@@ -1503,9 +1503,12 @@ function AppContent(props: AppProps) {
     if (!detailPage() || status()) return undefined
     const resource = activeResource()
     if (resource?.status === "error") return resource.message
-    const permissionsError = activeIssueNumber() ? issueDetail().resource.value?.permissionsError : undefined
-    return permissionsError ? `Issue actions unavailable: ${permissionsError}` : undefined
-    return undefined
+    if (activeIssueNumber()) {
+      const permissionsError = issueDetail().resource.value?.permissionsError
+      return permissionsError ? `Issue actions unavailable: ${permissionsError}` : undefined
+    }
+    const permissionsError = activePullNumber() ? pullDetail().resource.value?.permissionsError : undefined
+    return permissionsError ? `Pull request actions unavailable: ${permissionsError}` : undefined
   }
   const paginationSource = () => {
     if (activeRunId()) return `pagination:run:${runId()}`

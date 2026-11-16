@@ -1431,6 +1431,7 @@ export function createGitHubClient(transport: GitHubTransport, commentStorage?: 
     }
   }
 
+  const pullPermissionsUnverified = "Pull request action permissions could not be verified."
   const withPullPermissions = async (
     repository: RepositoryReference,
     number: number,
@@ -1447,7 +1448,11 @@ export function createGitHubClient(transport: GitHubTransport, commentStorage?: 
           options,
         ),
       )
-      if (response?.errors != null && (!Array.isArray(response.errors) || response.errors.length)) return detail
+      if (response?.errors != null && (!Array.isArray(response.errors) || response.errors.length)) {
+        const reported = Array.isArray(response.errors) ? record(response.errors[0])?.message : undefined
+        detail.permissionsError = typeof reported === "string" && reported.trim() ? reported : pullPermissionsUnverified
+        return detail
+      }
       const repo = record(record(response?.data)?.repository)
       if (repo?.pullRequest) options?.budget?.consumeItems(1)
       const id = record(repo?.pullRequest)?.id
@@ -1457,8 +1462,10 @@ export function createGitHubClient(transport: GitHubTransport, commentStorage?: 
         typeof repo?.isArchived !== "boolean" ||
         (repo.viewerPermission !== null && typeof repo.viewerPermission !== "string") ||
         (detail.nodeId !== undefined && detail.nodeId !== id)
-      )
+      ) {
+        detail.permissionsError = pullPermissionsUnverified
         return detail
+      }
       const maintainer = ["WRITE", "MAINTAIN", "ADMIN"].includes(typeof repo.viewerPermission === "string" ? repo.viewerPermission : "")
       const capabilities = record(repo.pullRequest)
       const writable = repo.isArchived === false
@@ -1494,6 +1501,7 @@ export function createGitHubClient(transport: GitHubTransport, commentStorage?: 
     } catch (error) {
       if (interrupted(error, options)) throw error
       // Permission lookup failures must not prevent read-only browsing.
+      detail.permissionsError = error instanceof Error ? error.message : pullPermissionsUnverified
     }
     return detail
   }

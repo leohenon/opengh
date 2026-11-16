@@ -8,6 +8,7 @@ import { PullReadinessPanel } from "../src/ui/components/pull-context-panel"
 import { relativeTime } from "../src/ui/format"
 import {
   githubDataFixture,
+  issueDetailFixture,
   issueCommentsFixture,
   issuePullReferenceFixture,
   repositoryOperationsFixture,
@@ -237,6 +238,55 @@ test("merge conflicts remain visible in the merge-readiness section", async () =
     await view.flush()
     expect(view.captureCharFrame()).toContain("Merge blocked")
     expect(view.captureCharFrame()).toContain("Branch: Conflicts reported")
+  } finally {
+    view.renderer.destroy()
+  }
+})
+
+test("pull request permission failures explain why actions are unavailable", async () => {
+  const comments = { status: "ready" as const, value: { items: [], page: 1, hasMore: false } }
+  const view = await testRender(
+    () => (
+      <App
+        data={githubDataFixture}
+        operations={repositoryOperationsFixture}
+        initialNavigation={{ detail: { kind: "pull", number: issueDetailFixture.number } }}
+        pullDetail={{
+          number: issueDetailFixture.number,
+          resource: {
+            status: "ready",
+            value: {
+              ...issueDetailFixture,
+              body: "Readable pull request description.",
+              permissions: undefined,
+              permissionsError: "Bad credentials",
+              merged: false,
+              draft: false,
+              baseBranch: "main",
+              headBranch: "feature",
+              additions: 1,
+              deletions: 0,
+              changedFiles: 1,
+              commitCount: 0,
+              reviewers: [],
+              mergeable: true,
+            },
+          },
+          comments,
+          references: { status: "ready", value: [] },
+          commits: { status: "ready", value: [] },
+          context: { status: "ready", value: pullContextFixture },
+        }}
+      />
+    ),
+    { width: 120, height: 40 },
+  )
+  try {
+    for (let attempt = 0; attempt < 20 && !view.captureCharFrame().includes("Readable pull request"); attempt++) {
+      await Bun.sleep(10)
+      await view.flush()
+    }
+    expect(view.captureCharFrame()).toContain("Pull request actions unavailable: Bad credentials")
   } finally {
     view.renderer.destroy()
   }
