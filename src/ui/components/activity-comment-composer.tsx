@@ -45,25 +45,48 @@ export function ActivityCommentComposer(props: {
   const renderer = useRenderer()
   const { colors } = useTheme()
   const open = createMemo(() => props.comment.open)
+  const focused = createMemo(() => open() && props.comment.focused)
+  const active = createMemo(() => focused() && props.interactive && props.comment.enabled)
   const [width, setWidth] = createSignal(1)
   let holder: BoxRenderable | undefined
-  let disposed = false
-  onCleanup(() => {
-    disposed = true
+  let pendingReveal: { scrollTop: number | undefined } | undefined
+  const reveal = () => {
+    if (!active()) return
+    pendingReveal = { scrollTop: props.scroll()?.scrollTop }
+    renderer.requestRender()
+  }
+  createEffect(() => {
+    if (!active()) return
+    let previous: { offset: number; scrollTop: number; visible: boolean } | undefined
+    const anchor = () => {
+      const scroll = props.scroll()
+      if (!active() || !holder || holder.isDestroyed || !scroll) return
+      const top = holder.y - scroll.viewport.y
+      const scrollTop = scroll.scrollTop
+      const offset = top + scrollTop
+      const requested = pendingReveal
+      pendingReveal = undefined
+      if (requested && (requested.scrollTop === undefined || requested.scrollTop === scrollTop)) {
+        const hidden = top + holder.height - scroll.viewport.height
+        if (hidden > 0) scroll.scrollBy(Math.min(hidden, top))
+      } else if (previous?.visible && previous.scrollTop === scrollTop) {
+        // Follow layout shifts, not the user's scrolling.
+        const delta = offset - previous.offset
+        if (delta) scroll.scrollBy(delta)
+      }
+      const y = top - (scroll.scrollTop - scrollTop)
+      previous = { offset, scrollTop: scroll.scrollTop, visible: y < scroll.viewport.height && y + holder.height > 0 }
+    }
+    renderer.on("frame", anchor)
+    onCleanup(() => {
+      renderer.off("frame", anchor)
+      pendingReveal = undefined
+    })
   })
-  const reveal = () =>
-    void renderer
-      .idle()
-      .then(() => {
-        const scroll = props.scroll()
-        if (disposed || !open() || !props.interactive || !holder || holder.isDestroyed || !scroll) return
-        const hidden = holder.y + holder.height - (scroll.viewport.y + scroll.viewport.height)
-        if (hidden > 0) scroll.scrollBy(Math.min(hidden, holder.y - scroll.viewport.y))
-      })
-      .catch(() => {})
+  // Closing an overlay is not a request to reveal the editor.
   createEffect(
-    on(open, (visible) => {
-      if (visible) reveal()
+    on(focused, (focused) => {
+      if (focused) reveal()
     }),
   )
   return (
