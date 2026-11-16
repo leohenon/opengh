@@ -1,5 +1,7 @@
 import { randomUUID } from "node:crypto"
-import { constants, type Stats } from "node:fs"
+import { spawnSync } from "node:child_process"
+import { constants, readFileSync, type Stats } from "node:fs"
+import { userInfo } from "node:os"
 import { lstat, mkdir, open, readlink, rename, rm } from "node:fs/promises"
 import { basename, dirname, isAbsolute, join, parse, sep } from "node:path"
 
@@ -18,13 +20,66 @@ function directoryParts(path: string) {
   return process.platform === "win32" ? path.split(/[\\/]/) : path.split("/")
 }
 
+type DatabaseEntry = string[]
+const parseDatabase = (text: string): DatabaseEntry[] =>
+  text
+    .split("\n")
+    .filter((line) => line && !line.startsWith("#"))
+    .map((line) => line.split(":"))
+
+// Like OpenSSH, accept a user private group (the umask 002 default on Fedora and RHEL):
+// the owner's primary group, with no other member.
+export function isPrivateGroup(
+  gid: number,
+  user: { uid: number; gid: number; username: string },
+  groups: DatabaseEntry[],
+  users: DatabaseEntry[],
+) {
+  if (gid !== user.gid) return false
+  const group = groups.find((entry) => entry.length >= 3 && Number(entry[2]) === gid)
+  if (!group) return false
+  if ((group[3] ?? "").split(",").some((member) => member.trim() && member.trim() !== user.username)) return false
+  return !users.some((entry) => entry.length >= 4 && Number(entry[3]) === gid && Number(entry[2]) !== user.uid)
+}
+
+function lookupDatabase(database: "group" | "passwd", key?: string): DatabaseEntry[] {
+  // getent covers NSS sources such as LDAP; local files are the fallback.
+  const result = spawnSync("getent", key === undefined ? [database] : [database, key], { encoding: "utf8", timeout: 2000 })
+  if (!result.error && result.status === 0) return parseDatabase(result.stdout)
+  if (!result.error && result.status === 2) return []
+  try {
+    return parseDatabase(readFileSync(`/etc/${database}`, "utf8"))
+  } catch {
+    return []
+  }
+}
+
+const privateGroups = new Map<number, boolean>()
+function privateGroup(gid: number) {
+  if (process.getgid === undefined || gid !== process.getgid()) return false
+  let result = privateGroups.get(gid)
+  if (result === undefined) {
+    try {
+      const { uid, username } = userInfo()
+      result = isPrivateGroup(gid, { uid, gid, username }, lookupDatabase("group", String(gid)), lookupDatabase("passwd"))
+    } catch {
+      result = false
+    }
+    privateGroups.set(gid, result)
+  }
+  return result
+}
+
 function checkDirectory(path: string, entry: Stats, destination: boolean) {
+  if (!entry.isDirectory()) throw new Error(`Untrusted writable directory: ${path}`)
   // Windows uses ACLs, not meaningful POSIX uid/group-writable mode bits.
-  const untrusted =
-    process.getuid !== undefined &&
-    ((!owned(entry.uid) && !(entry.uid === 0 && !destination)) ||
-      ((entry.mode & 0o022) !== 0 && !(!destination && entry.uid === 0 && (entry.mode & 0o1000) !== 0)))
-  if (!entry.isDirectory() || untrusted) throw new Error(`Untrusted writable directory: ${path}`)
+  if (process.getuid === undefined) return
+  if (!owned(entry.uid) && !(entry.uid === 0 && !destination)) throw new Error(`Untrusted writable directory: ${path}`)
+  if ((entry.mode & 0o022) === 0 || (!destination && entry.uid === 0 && (entry.mode & 0o1000) !== 0)) return
+  if ((entry.mode & 0o002) === 0 && owned(entry.uid) && privateGroup(entry.gid)) return
+  throw new Error(
+    `Untrusted writable directory: ${path}. Other users can write to it; run \`chmod go-w ${JSON.stringify(path)}\` to restrict it.`,
+  )
 }
 
 async function syncDirectory(path: string) {
