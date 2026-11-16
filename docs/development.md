@@ -9,7 +9,10 @@ bun install --frozen-lockfile
 gh auth login --hostname github.com
 bun run dev .                   # Watch mode
 bun start owner/repo            # Without watcher
+OPENGH_DEBUG=1 bun start .      # Open OpenTUI's console on unexpected errors
 ```
+
+Without `OPENGH_DEBUG`, unexpected errors show as a notice, and a crashed repository view offers a retry.
 
 ## Check changes
 

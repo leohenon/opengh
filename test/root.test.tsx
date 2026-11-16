@@ -176,6 +176,49 @@ describe("application root", () => {
     expect(opened[0]).toMatchObject({ repository, ref: "main", path: "docs/guide.md" })
   })
 
+  test("a crashed repository view shows a retry instead of the developer console", async () => {
+    let broken = true
+    const session = {
+      ...readySession(),
+      canSwitchBranch: () => {
+        if (broken) throw new Error("Render exploded")
+        return true
+      },
+    }
+    const [unexpected, setUnexpected] = createSignal<string>()
+    const view = await testRender(
+      () => (
+        <Root
+          repositoryArgument="cli/cli"
+          cwd="/work"
+          unexpectedError={unexpected}
+          onDismissUnexpectedError={() => setUnexpected(undefined)}
+          services={{
+            createPullReviewSession: createTestReviewSession,
+            resolveRepository: async () => "cli/cli",
+            resolveLocalRepository: async () => undefined,
+            loadRecentRepositories: async () => [],
+            rememberRepository: async () => {},
+            loadRepositoryTabs: async () => ({}),
+            saveRepositoryTabs: async () => {},
+            loadConfig: async () => defaultConfig,
+            createRepositorySession: () => session,
+          }}
+        />
+      ),
+      { width: 100, height: 30 },
+    )
+    active.push(view)
+    await waitForText(view, "Something went wrong")
+    expect(view.captureCharFrame()).toContain("Render exploded")
+    broken = false
+    view.mockInput.pressKey("r")
+    await waitForText(view, githubDataFixture.repo.nameWithOwner)
+    expect(view.captureCharFrame()).not.toContain("Render exploded")
+    setUnexpected("Task failed")
+    await waitForText(view, "Something went wrong: Task failed")
+  })
+
   test("retains a resolved launch through metadata retry, then consumes it before repository switching", async () => {
     const [state, setState] = createSignal<RepositoryState>({ status: "loading", repository: "cli/cli" })
     const [pullDetail, setPullDetail] = createSignal<PullDetailState>()

@@ -1,5 +1,6 @@
 import { createCliRenderer } from "@opentui/core"
 import { render } from "@opentui/solid"
+import { createSignal } from "solid-js"
 import { Root } from "./root"
 import { initializeHunk } from "./ui/hunk-host"
 import { stopGitHubProcesses } from "./github/process"
@@ -92,9 +93,19 @@ try {
   initialConfigError = error instanceof Error ? error.message : "Could not load config"
 }
 
+// OPENGH_DEBUG=1 opens OpenTUI's console instead of the notice.
+const debug = process.env.OPENGH_DEBUG === "1"
+const [unexpectedError, setUnexpectedError] = createSignal<string>()
+if (!debug) {
+  const report = (error: unknown) => setUnexpectedError(error instanceof Error ? error.message : String(error))
+  process.on("uncaughtException", report)
+  process.on("unhandledRejection", report)
+}
+
 const renderer = await createCliRenderer({
   targetFps: 30,
   exitOnCtrlC: false,
+  openConsoleOnError: debug,
   useMouse: true,
   enableMouseMovement: true,
   onDestroy: () => {
@@ -126,6 +137,8 @@ try {
         cwd={cwd}
         initialConfig={initialConfig}
         initialConfigError={initialConfigError}
+        unexpectedError={unexpectedError}
+        onDismissUnexpectedError={() => setUnexpectedError(undefined)}
         services={{
           saveConfig: (config) => trackSave(saveConfig(config)),
           saveRepositoryTabs: (tabs) => trackSave(saveRepositoryTabs(tabs)),
