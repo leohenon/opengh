@@ -234,6 +234,15 @@ export function createGitHubTransport(scheduler: GitHubRequestScheduler = github
   const send = (...args: RequestArguments) => scheduler.run(args[0], () => direct(...args), requestSignal(args[4]))
   type Viewer = { id: number; login: string }
   let initialViewer: Promise<Viewer> | undefined
+  // Reads only start the probe: some tokens (Actions, GitHub Apps) cannot read /user. Reads retry
+  // a probe that failed for another reason; one denied /user is retried only before a write.
+  let readProbeFailed = false
+  const probeViewer = () =>
+    (initialViewer ??= viewer().catch((error) => {
+      initialViewer = undefined
+      readProbeFailed = error instanceof GitHubApiError && (error.status === 403 || error.status === 404)
+      throw error
+    }))
   async function viewer(load = send, options?: RequestOptions): Promise<Viewer> {
     const value = JSON.parse(
       await load("user", undefined, undefined, undefined, {
@@ -251,26 +260,25 @@ export function createGitHubTransport(scheduler: GitHubRequestScheduler = github
     const [path, , , , options] = args
     const signal = requestSignal(options)
     const write = writeRequest(args)
+    if (!write) {
+      validateEndpoint(path)
+      signal?.throwIfAborted()
+      // Probe the session's account without making reads wait.
+      if (!initialViewer && !readProbeFailed) probeViewer().catch(() => {})
+      return send(...args)
+    }
     let expected: Viewer
     try {
       validateEndpoint(path)
       signal?.throwIfAborted()
-      // Remember the account that loaded this session, not its credentials. A failed
-      // initial login remains retryable after authenticating outside the app.
-      initialViewer ??= viewer().catch((error) => {
-        initialViewer = undefined
-        throw error
-      })
+      // A failed login stays retryable after signing in outside the app.
       // Cancel this caller's wait, not the shared probe needed by other requests.
-      expected = await awaitWithAbort(initialViewer, signal)
+      expected = await awaitWithAbort(probeViewer(), signal)
     } catch (error) {
-      if (write)
-        throw new GitHubRequestNotSentError(
-          error instanceof Error ? error.message : "GitHub account could not be verified; no changes were sent.",
-        )
-      throw error
+      throw new GitHubRequestNotSentError(
+        error instanceof Error ? error.message : "GitHub account could not be verified; no changes were sent.",
+      )
     }
-    if (!write) return send(...args)
     return scheduler.run(
       path,
       async () => {

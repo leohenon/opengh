@@ -240,7 +240,7 @@ test("fresh account probes honor cancellation and GraphQL variables stay in stdi
   }
 })
 
-test("cancelling an initial request stops waiting without killing another caller's identity probe", async () => {
+test("reads do not wait for the identity probe, and cancelling one does not kill it", async () => {
   const transport = createGitHubTransport()
   const controller = new AbortController()
   const reason = new Error("Diff cancelled")
@@ -253,42 +253,58 @@ test("cancelling an initial request stops waiting without killing another caller
   const spawn = spyOn(Bun, "spawn").mockImplementation((args) => {
     const endpoint = (args as string[])[4]!
     endpoints.push(endpoint)
-    return endpoint === "user"
-      ? ({
-          ...result('{"id":1,"login":"viewer"}'),
-          exited,
-          kill() {
-            kills++
-          },
-        } as unknown as Bun.Subprocess)
-      : result("patch")
+    if (endpoint === "user")
+      return {
+        ...result('{"id":1,"login":"viewer"}'),
+        exited,
+        kill() {
+          kills++
+        },
+      } as unknown as Bun.Subprocess
+    return result(endpoint.endsWith("/comments") ? '{"ok":true}' : "patch")
   })
-  let timeout: ReturnType<typeof setTimeout> | undefined
-  let retained: Promise<string> | undefined
+  let write: Promise<unknown> | undefined
   try {
     const cancelled = transport.text("repos/owner/repo/commits/old", undefined, { signal: controller.signal })
-    retained = transport.text("repos/owner/repo/commits/new")
-    const rejected = cancelled.then(
-      () => false,
-      (error) => {
-        expect(error).toBe(reason)
-        return true
-      },
-    )
     controller.abort(reason)
-    const deadline = new Promise<boolean>((resolve) => {
-      timeout = setTimeout(() => resolve(false), 200)
-    })
-    expect(await Promise.race([rejected, deadline])).toBe(true)
-    expect(endpoints).toEqual(["user"])
-    expect(kills).toBe(0)
-    finishProbe()
-    expect(await retained).toBe("patch")
+    await expect(cancelled).rejects.toBe(reason)
+    // Reads do not wait for the probe.
+    expect(await transport.text("repos/owner/repo/commits/new")).toBe("patch")
     expect(endpoints).toEqual(["user", "repos/owner/repo/commits/new"])
-  } finally {
-    clearTimeout(timeout)
+    expect(kills).toBe(0)
+    // Writes wait for it.
+    write = transport.mutate!("repos/owner/repo/issues/1/comments", "POST", { body: "private" })
+    await Bun.sleep(10)
+    expect(endpoints).not.toContain("repos/owner/repo/issues/1/comments")
     finishProbe()
-    await retained?.catch(() => {})
+    expect(await write).toEqual({ ok: true })
+    expect(endpoints.slice(2)).toEqual(["user", "repos/owner/repo/issues/1/comments"])
+  } finally {
+    finishProbe()
+    await write?.catch(() => {})
+    spawn.mockRestore()
+  }
+})
+
+test("a token that cannot read the account still browses, but cannot write", async () => {
+  const transport = createGitHubTransport(new GitHubRequestScheduler())
+  const endpoints: string[] = []
+  const spawn = spyOn(Bun, "spawn").mockImplementation((args) => {
+    const endpoint = (args as string[])[4]!
+    endpoints.push(endpoint)
+    return endpoint === "user" ? result("", "Resource not accessible by integration (HTTP 403)", 1) : result('{"ok":true}')
+  })
+  try {
+    expect(await transport.json<{ ok: boolean }>("repos/owner/repo")).toEqual({ ok: true })
+    await Bun.sleep(0)
+    expect(await transport.json<{ ok: boolean }>("repos/owner/repo/pulls")).toEqual({ ok: true })
+    // A failed probe is not repeated per read.
+    expect(endpoints).toEqual(["user", "repos/owner/repo", "repos/owner/repo/pulls"])
+    await expect(transport.mutate!("repos/owner/repo/issues/1/comments", "POST", { body: "x" })).rejects.toBeInstanceOf(
+      GitHubRequestNotSentError,
+    )
+    expect(endpoints).not.toContain("repos/owner/repo/issues/1/comments")
+  } finally {
     spawn.mockRestore()
   }
 })
