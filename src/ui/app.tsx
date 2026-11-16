@@ -503,7 +503,8 @@ function AppContent(props: AppProps) {
     canOfferMerge() ||
     canChangeDraft(true) ||
     canChangeDraft(false) ||
-    canOfferReview()
+    canOfferReview() ||
+    canToggleChecks()
   const openIssueAction = (kind: IssueActionKind) => {
     const number = activePullNumber() ?? activeIssueNumber()
     const parent = activePullNumber() ? "pull" : undefined
@@ -602,6 +603,17 @@ function AppContent(props: AppProps) {
           references: { status: "loading", phase: "load" },
         },
   )
+  const [checksExpanded, setChecksExpanded] = createSignal(false)
+  const checksIdentity = createMemo(() =>
+    JSON.stringify([
+      data().repo.nameWithOwner,
+      pullNumber(),
+      pullDetail().resource.value?.headSha,
+      pullDetail().context.value?.readiness.headSha,
+    ]),
+  )
+  createEffect(on(checksIdentity, () => setChecksExpanded(false)))
+  const canToggleChecks = () => Boolean(activePullNumber() && (pullDetail().context.value?.readiness.checks.length ?? 0) > 5)
   const canActOnPull = (kind: IssueActionKind) => {
     const number = activePullNumber()
     const pull = pullDetail().resource.value
@@ -2761,6 +2773,8 @@ function AppContent(props: AppProps) {
                                   comment={activityCommentFor(number, "pull")}
                                   onOpenReference={openReference}
                                   timelineCollapsed={timelineCollapsed()}
+                                  checksExpanded={checksExpanded()}
+                                  onChecksExpandedChange={setChecksExpanded}
                                   revealActivity={
                                     revealActivity()?.parent === "pull" && revealActivity()?.number === number
                                       ? revealActivity()?.id
@@ -2947,6 +2961,18 @@ function AppContent(props: AppProps) {
                               ? () => {
                                   setOverlay()
                                   void openInBrowser(activePullNumber())
+                                }
+                              : undefined
+                          }
+                          checks={
+                            canToggleChecks()
+                              ? {
+                                  expanded: checksExpanded(),
+                                  onToggle: () => {
+                                    setChecksExpanded(!checksExpanded())
+                                    setTimelineCollapsed(false)
+                                    setOverlay()
+                                  },
                                 }
                               : undefined
                           }

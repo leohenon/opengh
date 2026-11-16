@@ -1,4 +1,4 @@
-import { createMemo, For, Show } from "solid-js"
+import { createEffect, createMemo, createSignal, For, on, Show } from "solid-js"
 import type { PullCheck, PullContext } from "../../models"
 import { relativeTime } from "../format"
 import { mergeReadinessStatus } from "../merge-readiness"
@@ -7,6 +7,7 @@ import { iconPrefix } from "../icons"
 import { useTheme } from "../theme"
 import { MetadataField } from "./detail-metadata"
 import { TimelineEntry } from "./timeline-entry"
+import { Action } from "./action"
 
 export function PullContextMetadata(props: { context: PullContext; compact: boolean; repository?: string; omitEmpty?: boolean }) {
   const { colors } = useTheme()
@@ -106,6 +107,10 @@ const checkOrder: Record<PullCheck["state"], number> = {
 export function PullReadinessPanel(props: {
   context: PullContext
   expectedHeadSha?: string
+  identity?: string
+  interactive?: boolean
+  expanded?: boolean
+  onExpandedChange?: (expanded: boolean) => void
   backgroundColor?: string
   collapsed?: boolean
 }) {
@@ -122,7 +127,22 @@ export function PullReadinessPanel(props: {
         : status().status === "waiting"
           ? icons().workflow.clock
           : icons().workflow.attention
-  const checks = createMemo(() => [...readiness().checks].sort((a, b) => checkOrder[a.state] - checkOrder[b.state]))
+  const checks = createMemo(() =>
+    [...readiness().checks].sort((a, b) => {
+      const priority = (check: PullCheck) => (check.required === true && checkOrder[check.state] <= checkOrder.unknown ? 0 : 1)
+      return priority(a) - priority(b) || checkOrder[a.state] - checkOrder[b.state]
+    }),
+  )
+  const [localExpanded, setLocalExpanded] = createSignal(false)
+  const expanded = () => props.expanded ?? localExpanded()
+  const checksIdentity = createMemo(() => JSON.stringify([props.identity, props.expectedHeadSha, readiness().headSha]))
+  createEffect(on(checksIdentity, () => setLocalExpanded(false)))
+  const visibleChecks = createMemo(() => (expanded() ? checks() : checks().slice(0, 5)))
+  const toggleChecks = () => {
+    const next = !expanded()
+    setLocalExpanded(next)
+    props.onExpandedChange?.(next)
+  }
   const requiredSummary = createMemo(() => {
     const required = readiness().checks.filter((check) => check.required === true)
     return (Object.keys(checkOrder) as PullCheck["state"][])
@@ -217,7 +237,7 @@ export function PullReadinessPanel(props: {
             </text>
           </Show>
           <For
-            each={checks()}
+            each={visibleChecks()}
             fallback={
               <text width="100%" flexShrink={0} fg={colors.muted}>
                 {readiness().checksComplete ? "No checks reported." : "Check details unavailable."}
@@ -243,6 +263,17 @@ export function PullReadinessPanel(props: {
               </box>
             )}
           </For>
+          <Show when={checks().length > 5}>
+            <Action
+              id="pull-checks-disclosure"
+              onActivate={toggleChecks}
+              disabled={props.interactive === false}
+              identity={checksIdentity}
+              fg={colors.muted}
+            >
+              {expanded() ? "▾ Fewer checks" : `▸ ${checks().length - 5} more checks`}
+            </Action>
+          </Show>
         </Show>
       </box>
     </TimelineEntry>

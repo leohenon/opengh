@@ -145,6 +145,8 @@ export function PullScreen(props: {
   detail: PullDetailState
   revealActivity?: number
   timelineCollapsed?: boolean
+  checksExpanded?: boolean
+  onChecksExpandedChange?: (expanded: boolean) => void
   comment?: ActivityComment
   interactive: boolean
   showScrollbar: boolean
@@ -384,6 +386,10 @@ export function PullScreen(props: {
                       }
                     >
                       <PullReadinessPanel
+                        expanded={props.checksExpanded}
+                        onExpandedChange={props.onChecksExpandedChange}
+                        identity={current().url}
+                        interactive={props.interactive}
                         context={props.detail.context.value!}
                         expectedHeadSha={current().headSha}
                         backgroundColor={surface()}

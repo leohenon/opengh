@@ -26,6 +26,7 @@ export function IssueActionsMenu(props: {
   draftAction?: "draft" | "ready"
   onChangeDraft?(draft: boolean): void
   onReview?(): void
+  checks?: { expanded: boolean; onToggle(): void }
   onOpenGitHub?(): void
   onClose(): void
 }) {
@@ -41,7 +42,7 @@ export function IssueActionsMenu(props: {
         : [{ kind: "reopen", label: `Reopen ${props.parent === "pull" ? "PR" : "issue"}…` }]
     actions.push({ kind: "assignees", label: "Edit assignees…" })
     const visible: {
-      kind: Exclude<IssueActionKind, "comment"> | "merge" | "github" | "review" | "draft" | "ready"
+      kind: Exclude<IssueActionKind, "comment"> | "merge" | "github" | "review" | "draft" | "ready" | "checks"
       label: string
       disabled?: boolean
     }[] = actions.filter((item) => !(props.parent === "pull" && item.kind === "duplicate") && props.permissions?.[item.kind])
@@ -52,8 +53,10 @@ export function IssueActionsMenu(props: {
       if (props.merge.reason && !props.merge.checking && props.onOpenGitHub) visible.push({ kind: "github", label: "Open on GitHub" })
     }
     if (props.onReview) visible.push({ kind: "review", label: "Review…" })
+    if (props.parent === "pull" && props.checks)
+      visible.push({ kind: "checks", label: props.checks.expanded ? "Show fewer checks" : "Show all checks" })
     if (props.parent === "pull") {
-      const order = ["review", "merge", "assignees", "draft", "ready", "close", "reopen", "github"]
+      const order = ["review", "merge", "assignees", "draft", "ready", "close", "reopen", "checks", "github"]
       visible.sort((left, right) => order.indexOf(left.kind) - order.indexOf(right.kind))
     }
     return visible
@@ -80,6 +83,7 @@ export function IssueActionsMenu(props: {
     setSelected(index)
     if (item.kind === "merge") props.onMerge?.()
     else if (item.kind === "review") props.onReview?.()
+    else if (item.kind === "checks") props.checks?.onToggle()
     else if (item.kind === "github") props.onOpenGitHub?.()
     else if (item.kind === "draft" || item.kind === "ready") props.onChangeDraft?.(item.kind === "draft")
     else props.onSelect(item.kind)
