@@ -1,6 +1,6 @@
 import { TextAttributes, type ScrollBoxRenderable } from "@opentui/core"
 import { useKeyActions } from "../keybindings"
-import { createEffect, createMemo, For, onCleanup, Show } from "solid-js"
+import { createEffect, createMemo, createSignal, For, on, onCleanup, Show } from "solid-js"
 import { defaultConfig, type DetailLayout } from "../../config"
 import type { WorkflowRunSummary } from "../../models"
 import type { RunDetailState } from "../../repository-state"
@@ -12,6 +12,9 @@ import { iconPrefix } from "../icons"
 import { createScrollbarVisibility } from "../scrollbar-visibility"
 import { useTheme } from "../theme"
 import { runColor, runIcon, runState } from "../workflow-status"
+
+const MAX_FAILED_POLLS = 6
+const MAX_SETTLING_POLLS = 3
 
 function duration(start: string | null, end: string | null, running: boolean) {
   if (!start || (!end && !running)) return "—"
@@ -41,21 +44,51 @@ export function RunScreen(props: {
   const contentWidth = () => detailContentWidth(props.detailLayout)
   let scroll: ScrollBoxRenderable | undefined
   const bindScrollbar = createScrollbarVisibility(() => props.showScrollbar)
+  // Failed refreshes back off from 5 s to 60 s, then stop until a manual refresh.
+  // Steps can lag behind a finished run, but a cancelled run may never complete them.
+  const [failedPolls, setFailedPolls] = createSignal(0)
+  const [settlingPolls, setSettlingPolls] = createSignal(0)
+  createEffect(
+    on(
+      () => props.id,
+      () => {
+        setFailedPolls(0)
+        setSettlingPolls(0)
+      },
+    ),
+  )
+  createEffect(() => {
+    if (props.detail.resource.status === "ready" && props.detail.jobs.status === "ready") setFailedPolls(0)
+  })
+  const runFinished = () =>
+    props.detail.resource.value?.status === "completed" &&
+    props.detail.jobs.status === "ready" &&
+    props.detail.jobs.value.items.every((job) => job.status === "completed")
   const polling = createMemo(
     () =>
       props.active &&
       Boolean(props.onRefresh) &&
       props.detail.resource.value !== undefined &&
-      (props.detail.resource.value.status !== "completed" ||
-        props.detail.jobs.status !== "ready" ||
-        props.detail.jobs.value.items.some((job) => job.status !== "completed" || job.steps.some((step) => step.status !== "completed"))),
+      failedPolls() < MAX_FAILED_POLLS &&
+      (!runFinished() ||
+        (settlingPolls() < MAX_SETTLING_POLLS &&
+          props.detail.jobs.value?.items.some((job) => job.steps.some((step) => step.status !== "completed")) === true)),
   )
 
   createEffect(() => {
     if (!polling()) return
+    let skip = 0
     // The session prevents overlapping loads and preserves data on refresh failures.
     const timer = setInterval(() => {
-      void props.onRefresh?.()
+      if (skip > 0) return void skip--
+      const settling = runFinished()
+      void props.onRefresh?.().then(() => {
+        if (settling) setSettlingPolls((count) => count + 1)
+        if (props.detail.resource.status !== "error" && props.detail.jobs.status !== "error") return
+        const failures = failedPolls() + 1
+        skip = Math.min(2 ** failures, 12) - 1
+        setFailedPolls(failures)
+      })
     }, 5000)
     onCleanup(() => clearInterval(timer))
   })

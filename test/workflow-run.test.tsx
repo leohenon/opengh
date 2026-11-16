@@ -252,6 +252,97 @@ test("active run details poll every five seconds, pause off-tab, and stop on com
   }
 })
 
+async function renderPolledRun(load: (id: number) => RunDetailState) {
+  const timers = new Map<ReturnType<typeof setInterval>, () => void>()
+  const interval = globalThis.setInterval
+  const clear = globalThis.clearInterval
+  const start = spyOn(globalThis, "setInterval").mockImplementation(((...args: Parameters<typeof setInterval>) => {
+    const [callback, delay, ...rest] = args
+    const timer = interval(callback, delay === 5000 ? 2 ** 30 : delay, ...rest)
+    if (delay === 5000) timers.set(timer, () => callback(...rest))
+    return timer
+  }) as typeof setInterval)
+  const stop = spyOn(globalThis, "clearInterval").mockImplementation(((timer: Parameters<typeof clearInterval>[0]) => {
+    if (typeof timer === "object") timers.delete(timer)
+    clear(timer)
+  }) as typeof clearInterval)
+  const [detail, setDetail] = createSignal<RunDetailState>()
+  const state = { loads: 0 }
+  const view = await testRender(
+    () => (
+      <App
+        data={githubDataFixture}
+        operations={repositoryOperationsFixture}
+        runDetail={detail()}
+        onLoadRun={async (id) => {
+          state.loads++
+          setDetail(load(id))
+        }}
+        onCloseRun={() => setDetail(undefined)}
+      />
+    ),
+    { width: 110, height: 36 },
+  )
+  await view.flush()
+  view.mockInput.pressKey("5")
+  await view.flush()
+  view.mockInput.pressEnter()
+  await view.flush()
+  return {
+    state,
+    timers,
+    async tick() {
+      for (const callback of [...timers.values()]) callback()
+      await view.flush()
+    },
+    dispose() {
+      if (!view.renderer.isDestroyed) view.renderer.destroy()
+      for (const timer of timers.keys()) clear(timer)
+      start.mockRestore()
+      stop.mockRestore()
+    },
+  }
+}
+
+test("failing run refreshes back off and then stop polling", async () => {
+  const value = { ...workflowRunFixture, status: "in_progress", conclusion: "" }
+  const run = await renderPolledRun((id) => ({
+    id,
+    resource: { status: "error", phase: "load", message: "Run unavailable", value },
+    jobs: { status: "error", phase: "load", message: "Run unavailable" },
+  }))
+  try {
+    expect(run.state.loads).toBe(1)
+    const refreshedAt: number[] = []
+    for (let tick = 1; tick <= 60 && run.timers.size; tick++) {
+      const before = run.state.loads
+      await run.tick()
+      if (run.state.loads > before) refreshedAt.push(tick)
+    }
+    // 5 s, then 10, 20, 40 and 60 s apart, then no more.
+    expect(refreshedAt).toEqual([1, 3, 7, 15, 27, 39])
+    expect(run.timers.size).toBe(0)
+  } finally {
+    run.dispose()
+  }
+})
+
+test("a finished run whose steps never complete stops polling", async () => {
+  const job = { ...workflowJobFixture, steps: [{ ...workflowJobFixture.steps[0]!, status: "pending", conclusion: "" }] }
+  const run = await renderPolledRun((id) => ({
+    id,
+    resource: { status: "ready", value: { ...workflowRunFixture, id, conclusion: "cancelled" } },
+    jobs: { status: "ready", value: { items: [{ ...job, conclusion: "cancelled" }], page: 1, hasMore: false } },
+  }))
+  try {
+    for (let tick = 0; tick < 10 && run.timers.size; tick++) await run.tick()
+    expect(run.state.loads).toBe(4)
+    expect(run.timers.size).toBe(0)
+  } finally {
+    run.dispose()
+  }
+})
+
 test("retained run errors stay in the status bar without toasts across automatic retries, until success or a manual retry", async () => {
   const notices: (() => void)[] = []
   const timeout = globalThis.setTimeout
