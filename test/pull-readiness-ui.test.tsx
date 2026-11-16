@@ -278,3 +278,14 @@ test("five or fewer checks need no disclosure and empty checks retain their fall
     view.renderer.destroy()
   }
 })
+
+test("a single hidden check is counted in the singular", async () => {
+  const view = await testRender(() => <PullReadinessPanel context={context(checks.slice(0, 6))} interactive />, { width: 100, height: 30 })
+  try {
+    await view.flush()
+    expect(view.captureCharFrame()).toContain("▸ 1 more check")
+    expect(view.captureCharFrame()).not.toContain("1 more checks")
+  } finally {
+    view.renderer.destroy()
+  }
+})

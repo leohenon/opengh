@@ -271,7 +271,7 @@ export function PullReadinessPanel(props: {
               identity={checksIdentity}
               fg={colors.muted}
             >
-              {expanded() ? "▾ Fewer checks" : `▸ ${checks().length - 5} more checks`}
+              {expanded() ? "▾ Fewer checks" : `▸ ${checks().length - 5} more ${checks().length === 6 ? "check" : "checks"}`}
             </Action>
           </Show>
         </Show>
