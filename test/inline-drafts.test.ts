@@ -212,6 +212,90 @@ test("an unreadable stored file is reported and blocks saving that pull request,
   expect(drafts.get(context(2))?.body).toBe("new")
 })
 
+test("pending posts are memory-only, block duplicate sends, and clear their draft on success", async () => {
+  const memory = memoryStorage()
+  const drafts = createInlineDrafts({ storage: memory.storage })
+  const ctx = context(1)
+  drafts.set(ctx, "sending")
+  const gate = Promise.withResolvers<number>()
+  let sends = 0
+  const send = () => {
+    sends++
+    return gate.promise
+  }
+  const posting = drafts.trackPost(ctx, send)
+  expect(drafts.posting()).toEqual([draft(1, "sending")])
+  await expect(drafts.trackPost(ctx, send)).rejects.toThrow("already being posted")
+  expect(sends).toBe(1)
+  await drafts.flush()
+  const restarted = createInlineDrafts({ storage: memory.storage })
+  await restarted.load(scope)
+  expect(restarted.get(ctx)?.body).toBe("sending")
+  expect(restarted.posting()).toEqual([])
+  gate.resolve(123)
+  expect(await posting).toBe(123)
+  expect(drafts.posting()).toEqual([])
+  expect(drafts.get(ctx)).toBeUndefined()
+  await drafts.flush()
+  expect(memory.saves.at(-1)).toEqual([])
+})
+
+test.each([false, true])("failed posts retain the draft and release posting state (synchronous: %s)", async (synchronous) => {
+  const drafts = createInlineDrafts({ storage: false })
+  const ctx = context(1)
+  drafts.set(ctx, "keep me")
+  const failure = new Error("Request failed")
+  await expect(
+    drafts.trackPost(ctx, () => {
+      if (synchronous) throw failure
+      return Promise.reject(failure)
+    }),
+  ).rejects.toBe(failure)
+  expect(drafts.posting()).toEqual([])
+  expect(drafts.get(ctx)?.body).toBe("keep me")
+  await drafts.trackPost(ctx, async () => {})
+  expect(drafts.get(ctx)).toBeUndefined()
+})
+
+test.each(["edit", "edit back", "replace"])("completion preserves a newer draft revision (%s)", async (change) => {
+  const memory = memoryStorage()
+  const drafts = createInlineDrafts({ storage: memory.storage })
+  const ctx = context(1)
+  drafts.set(ctx, "original")
+  const gate = Promise.withResolvers<void>()
+  const posting = drafts.trackPost(ctx, () => gate.promise)
+  if (change === "replace") drafts.remove(ctx)
+  else drafts.set(ctx, "newer text")
+  if (change !== "edit") drafts.set(ctx, "original")
+  const newer = drafts.get(ctx)
+  gate.resolve()
+  await posting
+  expect(drafts.get(ctx)).toBe(newer)
+  await drafts.flush()
+  expect(memory.saves.at(-1)).toEqual([newer!])
+})
+
+test("finishing one repository's post does not clear another pending post", async () => {
+  const drafts = createInlineDrafts({ storage: false })
+  const first = context(1)
+  const second = { ...context(1), repository: "other/repo", repositoryId: 72 }
+  drafts.set(first, "first")
+  drafts.set(second, "second")
+  const firstGate = Promise.withResolvers<void>()
+  const secondGate = Promise.withResolvers<void>()
+  const firstPost = drafts.trackPost(first, () => firstGate.promise)
+  const secondPost = drafts.trackPost(second, () => secondGate.promise)
+  expect(drafts.posting()).toHaveLength(2)
+  firstGate.resolve()
+  await firstPost
+  expect(drafts.posting()).toEqual([drafts.get(second)!])
+  expect(drafts.get(first)).toBeUndefined()
+  secondGate.resolve()
+  await secondPost
+  expect(drafts.posting()).toEqual([])
+  expect(drafts.get(second)).toBeUndefined()
+})
+
 test("drafts persist across sessions through the disk store", async () => {
   const directory = temporary()
   const first = createInlineDrafts({ storage: createInlineDraftStorage(directory), delay: 1 })

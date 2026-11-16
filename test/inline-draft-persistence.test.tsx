@@ -8,7 +8,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { defaultConfig } from "../src/config"
 import { createInlineDrafts, createInlineDraftStorage, type InlineDrafts } from "../src/inline-drafts"
-import type { PullReviewSession, ReviewSessionState } from "../src/review-types"
+import type { InlineCommentInput, PostedInlineComment, PullReviewSession, ReviewSessionState } from "../src/review-types"
 import { App } from "../src/ui/app"
 import { initializeHunk } from "../src/ui/hunk-host"
 import { parseDiff } from "../src/ui/diff-model"
@@ -22,7 +22,11 @@ afterEach(() => {
   for (const directory of directories.splice(0)) rmSync(directory, { recursive: true, force: true })
 })
 
-test("inline comment drafts survive App remounts, as on repository switches, and restarts", async () => {
+async function draftView(
+  post: (input: InlineCommentInput) => Promise<PostedInlineComment> = async () => {
+    throw new Error("Not posted in this test")
+  },
+) {
   const directory = join(mkdtempSync(join(tmpdir(), "opengh-inline-draft-ui-")), "inline-drafts")
   directories.push(join(directory, ".."))
   const number = githubDataFixture.pulls.open.value!.items[0]!.number
@@ -78,9 +82,8 @@ test("inline comment drafts survive App remounts, as on repository switches, and
             operations={repositoryOperationsFixture}
             reviews={reviews}
             inlineDrafts={store}
-            onPostInlineComment={async () => {
-              throw new Error("Not posted in this test")
-            }}
+            onPostInlineComment={post}
+            onSwitchRepository={() => setMounted(false)}
             config={defaultConfig}
             initialNavigation={{ detail: { kind: "pull", number } }}
             diffs={{
@@ -151,14 +154,23 @@ test("inline comment drafts survive App remounts, as on repository switches, and
     await clickControl(setup, control.id)
     await settle()
   }
-  try {
-    await settle()
-    await openDiff()
+  const openComposer = async () => {
     const row = sourceRow(0)
     await setup.mockMouse.moveTo(row.x + 5, row.y)
     await settle()
     await setup.mockMouse.click(row.x + row.width - 2, row.y)
     await settle()
+  }
+  return { directory, setup, settle, openDiff, openComposer, composer, sourceRow, markers, resume, drafts, setDrafts, mounted, setMounted }
+}
+
+test("inline comment drafts survive App remounts, as on repository switches, and restarts", async () => {
+  const { directory, setup, settle, openDiff, openComposer, composer, sourceRow, markers, resume, drafts, setDrafts, setMounted } =
+    await draftView()
+  try {
+    await settle()
+    await openDiff()
+    await openComposer()
     expect(composer()?.focused).toBe(true)
     await setup.mockInput.typeText("Keep me across views")
     await settle()
@@ -199,3 +211,75 @@ test("inline comment drafts survive App remounts, as on repository switches, and
     setup.renderer.destroy()
   }
 }, 15_000)
+
+test.each([false, true])(
+  "pending inline posts stay unavailable across repository switches (success: %s)",
+  async (success) => {
+    const pending = Promise.withResolvers<PostedInlineComment>()
+    const posted = Promise.withResolvers<InlineCommentInput>()
+    let submissions = 0
+    const { setup, settle, openDiff, openComposer, composer, markers, resume, drafts, mounted, setMounted } = await draftView((input) => {
+      submissions++
+      posted.resolve(input)
+      return pending.promise
+    })
+    try {
+      await settle()
+      await openDiff()
+      await openComposer()
+      await setup.mockInput.typeText("Posting across views")
+      setup.mockInput.pressKey("s", { ctrl: true })
+      await settle()
+      await clickControl(setup, "inline-comment-confirm")
+      const input = await posted.promise
+      await settle()
+      expect(composer()?.focused).toBe(false)
+
+      // Use the actual repository-switch shortcut while the request is in flight.
+      setup.mockInput.pressKey("S")
+      await settle()
+      expect(setup.captureCharFrame()).toContain("Switch repository")
+      await setup.mockInput.typeText("other/repo")
+      setup.mockInput.pressEnter()
+      await settle()
+      expect(mounted()).toBe(false)
+      setMounted(true) // Returning to the original repository remounts App with the same store.
+      await settle()
+      await openDiff()
+      expect(drafts().get(input)?.body).toBe(input.body)
+      expect(markers()).toHaveLength(0)
+      await openComposer()
+      expect(composer()).toBeUndefined()
+      expect(submissions).toBe(1)
+      expect(setup.captureCharFrame()).toContain("Posting comment")
+
+      if (success)
+        pending.resolve({
+          id: 123,
+          url: `https://github.com/${input.repository}/pull/${input.number}#discussion_r123`,
+          body: input.body,
+          ...input.anchor,
+        })
+      else pending.reject(new Error("Posting failed"))
+      await settle()
+      expect(setup.captureCharFrame()).not.toContain("Posting comment")
+      await drafts().flush()
+      if (success) {
+        expect(drafts().get(input)).toBeUndefined()
+        expect(markers()).toHaveLength(0)
+        await openComposer()
+        expect(composer()?.plainText).toBe("")
+      } else {
+        expect(drafts().get(input)?.body).toBe(input.body)
+        expect(markers()).toHaveLength(1)
+        await resume()
+        expect(composer()?.plainText).toBe(input.body)
+      }
+      expect(submissions).toBe(1)
+    } finally {
+      pending.reject(new Error("Test finished"))
+      setup.renderer.destroy()
+    }
+  },
+  15_000,
+)

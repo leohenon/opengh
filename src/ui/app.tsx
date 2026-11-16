@@ -318,7 +318,8 @@ function AppContent(props: AppProps) {
   const [inlineDraftOpen, setInlineDraftOpen] = createSignal(false)
   const [inlineDraftFocused, setInlineDraftFocused] = createSignal<Partial<Record<Page, boolean>>>({})
   const [inlineConfirm, setInlineConfirm] = createSignal<InlineCommentInput>()
-  const [postingInline, setPostingInline] = createSignal<InlineCommentInput>()
+  const postingInline = () =>
+    inlineDraftStore.posting().find((input) => input.repository.toLowerCase() === data().repo.nameWithOwner.toLowerCase())
   const [inlineRetry, setInlineRetry] = createSignal<InlineCommentInput>()
   const [postedInlineThreads, setPostedInlineThreads] = createSignal<
     Array<{ repository: string; number: number; headSha: string; thread: PullReviewThread }>
@@ -787,8 +788,10 @@ function AppContent(props: AppProps) {
     if (target.kind !== "pull" || !commentable) return []
     const context = inlineContext()
     const open = inlineDraftOpen() && context ? inlineDraftKey(context) : undefined
+    const posting = new Set(inlineDraftStore.posting().map(inlineDraftKey))
     return [...inlineDrafts()].flatMap(([id, draft]) =>
       id !== open &&
+      !posting.has(id) &&
       draft.body.trim() &&
       draft.accountId === commentable.eligible.accountId &&
       draft.repositoryId === commentable.eligible.repositoryId &&
@@ -885,16 +888,15 @@ function AppContent(props: AppProps) {
   }
   const submitInlineComment = async (body: string, retryUnconfirmed = false) => {
     const context = inlineContext()
-    if (!context || !props.onPostInlineComment || postingInline()) return
+    const post = props.onPostInlineComment
+    if (!context || !post || postingInline()) return
     const input = { ...context, body }
     const viewer = props.reviews?.state().eligibility
     const author = viewer?.accountId === context.accountId ? viewer.login : "You"
     saveInlineDraft(context, body)
-    setPostingInline(input)
     setOverlay()
     try {
-      const posted = await props.onPostInlineComment(input, retryUnconfirmed ? { retryUnconfirmed: true } : undefined)
-      inlineDraftStore.remove(context)
+      const posted = await inlineDraftStore.trackPost(context, () => post(input, retryUnconfirmed ? { retryUnconfirmed: true } : undefined))
       if (inlineContext() === context) setInlineDraftOpen(false)
       if (disposed || renderer.isDestroyed || data().repo.nameWithOwner !== context.repository) return
       const now = new Date().toISOString()
@@ -946,7 +948,6 @@ function AppContent(props: AppProps) {
     } finally {
       // An unconfirmed post may still have landed; the retained PR must revalidate either way.
       props.onInvalidatePull?.(context.repository, context.number)
-      setPostingInline(undefined)
     }
   }
   const jumpReview = (anchor: ReviewAnchor) => {

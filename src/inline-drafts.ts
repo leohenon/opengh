@@ -168,6 +168,9 @@ export type InlineDrafts = {
   get(context: InlineDraftContext): InlineCommentInput | undefined
   set(context: InlineDraftContext, body: string): void
   remove(context: InlineDraftContext): void
+  posting(): readonly InlineCommentInput[]
+  // Posting state is memory-only; success removes only the submitted draft revision.
+  trackPost<T>(context: InlineDraftContext, send: () => Promise<T>): Promise<T>
   // In-memory edits and removals win over stored drafts.
   load(scope: InlineDraftScope): Promise<void>
   // Rejects if any change remains unsaved.
@@ -181,6 +184,7 @@ export function createInlineDrafts(options: { storage?: InlineDraftStorage | fal
   const storage = options.storage === undefined ? createInlineDraftStorage() : options.storage
   const delay = options.delay ?? 200
   const [drafts, setDrafts] = createSignal<ReadonlyMap<string, InlineCommentInput>>(new Map())
+  const [posting, setPosting] = createSignal<readonly InlineCommentInput[]>([])
   const [error, setError] = createSignal<string>()
   // Never replaced by a later load.
   const touched = new Set<string>()
@@ -269,9 +273,36 @@ export function createInlineDrafts(options: { storage?: InlineDraftStorage | fal
     }, delay)
     timer.unref?.()
   }
+  function remove(context: InlineDraftContext) {
+    const id = inlineDraftKey(context)
+    touched.add(id)
+    if (!drafts().has(id)) return
+    setDrafts((current) => {
+      const next = new Map(current)
+      next.delete(id)
+      return next
+    })
+    schedule(context)
+  }
   return {
     drafts,
     error,
+    posting,
+    async trackPost(context, send) {
+      const id = inlineDraftKey(context)
+      const draft = drafts().get(id)
+      if (!draft) throw new Error("Inline comment draft is unavailable.")
+      if (posting().some((pending) => scopeKey(pending) === scopeKey(context)))
+        throw new Error("An inline comment is already being posted to this pull request.")
+      setPosting((current) => [...current, draft])
+      try {
+        const result = await send()
+        if (drafts().get(id) === draft) remove(context)
+        return result
+      } finally {
+        setPosting((current) => current.filter((pending) => pending !== draft))
+      }
+    },
     get: (context) => drafts().get(inlineDraftKey(context)),
     set(context, body) {
       const id = inlineDraftKey(context)
@@ -280,17 +311,7 @@ export function createInlineDrafts(options: { storage?: InlineDraftStorage | fal
       setDrafts((current) => new Map(current).set(id, { ...canonical(context), body }))
       schedule(context)
     },
-    remove(context) {
-      const id = inlineDraftKey(context)
-      touched.add(id)
-      if (!drafts().has(id)) return
-      setDrafts((current) => {
-        const next = new Map(current)
-        next.delete(id)
-        return next
-      })
-      schedule(context)
-    },
+    remove,
     load: (scope) => ensureLoaded(scope).catch(() => {}),
     async flush() {
       for (const [key, scope] of failed) if (!pending.has(key)) pending.set(key, scope)
