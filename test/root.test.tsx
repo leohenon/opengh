@@ -16,6 +16,7 @@ import { parseLaunchArguments } from "../src/launch-target"
 import { Root } from "../src/root"
 import { createRepositorySession } from "../src/repository-session"
 import { createPullReviewSession } from "../src/pull-review-session"
+import { createInlineDrafts } from "../src/inline-drafts"
 import { GitHubApiError } from "../src/github/transport"
 import {
   githubDataFixture,
@@ -1062,6 +1063,68 @@ test.each([false, true])("quit drains late review edits after delayed tab saves 
   view.mockInput.pressKey("q")
   await Bun.sleep(0)
   expect(savedBodies).toEqual(["Retried latest review"])
+  expect(view.renderer.isDestroyed).toBe(true)
+})
+
+test("quit waits for inline comment drafts and a failed save cancels it without losing the draft", async () => {
+  const saved: string[][] = []
+  let failSave = true
+  const drafts = createInlineDrafts({
+    storage: {
+      async load() {
+        return []
+      },
+      async save(_scope, values) {
+        if (failSave) throw new Error("Inline storage unavailable")
+        saved.push(values.map((value) => value.body))
+      },
+    },
+  })
+  const context = {
+    accountId: 1,
+    repositoryId: 71,
+    repository: "cli/cli",
+    number: 42,
+    headSha: "a".repeat(40),
+    baseSha: "b".repeat(40),
+    anchor: { path: "README.md", line: 1, side: "RIGHT" as const },
+  }
+  const view = await testRender(
+    () => (
+      <Root
+        cwd="/work"
+        services={{
+          resolveRepository: async () => "cli/cli",
+          resolveLocalRepository: async () => undefined,
+          loadRecentRepositories: async () => [],
+          rememberRepository: async () => {},
+          loadRepositoryTabs: async () => ({}),
+          saveRepositoryTabs: async () => {},
+          loadConfig: async () => ({ ...defaultConfig }),
+          createRepositorySession: readySession,
+          createPullReviewSession: createTestReviewSession,
+          createInlineDrafts: () => drafts,
+        }}
+      />
+    ),
+    { width: 120, height: 32 },
+  )
+  active.push(view)
+  await Bun.sleep(0)
+  await view.flush()
+  drafts.set(context, "Unposted inline comment")
+  view.mockInput.pressKey("q")
+  await Bun.sleep(0)
+  await view.flush()
+  expect(view.renderer.isDestroyed).toBe(false)
+  expect(view.captureCharFrame()).toContain("Inline draft not saved — quit cancelled")
+  expect(view.captureCharFrame()).toContain("Inline storage unavailable")
+  expect(drafts.get(context)?.body).toBe("Unposted inline comment")
+  failSave = false
+  view.mockInput.pressKey("q")
+  await Bun.sleep(0)
+  await Bun.sleep(0)
+  expect(saved).toEqual([["Unposted inline comment"]])
   expect(view.renderer.isDestroyed).toBe(true)
 })
 

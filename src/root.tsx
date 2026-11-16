@@ -13,6 +13,7 @@ import { openGitHub } from "./github/browser"
 import { openUrl } from "./open-url"
 import { loadGitHubIssueKind } from "./github/client"
 import { createInlineComments } from "./inline-comments"
+import { createInlineDrafts, type InlineDrafts } from "./inline-drafts"
 import { createPullReviewSession } from "./pull-review-session"
 import type { PullReviewSession } from "./review-types"
 import { createRepositorySession, type RepositoryScope, type RepositorySession } from "./repository-session"
@@ -44,6 +45,7 @@ export type RootServices = {
   createRepositorySession(): RepositorySession
   createPullReviewSession(): PullReviewSession
   createInlineComments: typeof createInlineComments
+  createInlineDrafts(): InlineDrafts
   openGitHub(repository: string, target?: string | number, view?: "diff"): Promise<void>
   openUrl(url: string): Promise<void>
   copyToHostClipboard(value: string): Promise<boolean>
@@ -63,6 +65,7 @@ const defaultServices: RootServices = {
   createRepositorySession,
   createPullReviewSession,
   createInlineComments,
+  createInlineDrafts: () => createInlineDrafts(),
   openGitHub,
   openUrl,
   copyToHostClipboard,
@@ -148,11 +151,17 @@ export function Root(props: {
   onCleanup(() => session.flushDrafts?.())
   const reviews = services.createPullReviewSession()
   const inlineComments = services.createInlineComments()
+  // Owned here to survive repository switches, which remount App.
+  const inlineDrafts = services.createInlineDrafts()
   // Also runs when a signal destroys the renderer without quit().
   onCleanup(() => {
-    props.onShutdownWork?.(Promise.allSettled([flushRepositoryTabs(), reviews.flush()]))
+    props.onShutdownWork?.(Promise.allSettled([flushRepositoryTabs(), reviews.flush(), inlineDrafts.flush()]))
   })
-  const [reviewSaveError, setReviewSaveError] = createSignal<string>()
+  const [dismissedInlineDraftError, setDismissedInlineDraftError] = createSignal<string>()
+  createEffect(() => {
+    if (!inlineDrafts.error()) setDismissedInlineDraftError(undefined)
+  })
+  const [quitSaveError, setQuitSaveError] = createSignal<{ title: string; message: string }>()
   const [quitDraftSaveError, setQuitDraftSaveError] = createSignal(false)
   const [localRepository, setLocalRepository] = createSignal<LocalRepository>()
   let commandCancel: (() => void) | undefined
@@ -177,16 +186,30 @@ export function Root(props: {
     setQuitDraftSaveError(false)
     if (!flushDraftsForQuit()) return
     const tabs = flushRepositoryTabs()
-    void Promise.all([tabs, reviews.flush()])
+    const flushReview = () =>
+      reviews.flush().catch((error) => {
+        throw {
+          title: "Review draft not saved — quit cancelled",
+          message: error instanceof Error ? error.message : "Could not save the review draft.",
+        }
+      })
+    const flushInline = () =>
+      inlineDrafts.flush().catch((error) => {
+        throw {
+          title: "Inline draft not saved — quit cancelled",
+          message: `${error instanceof Error ? error.message : "Could not save an inline comment draft"}. The draft is kept in memory; fix local storage and quit again to retry.`,
+        }
+      })
+    void Promise.all([tabs, flushReview(), flushInline()])
       .then(() => {
         // Tab saves can outlast the first drain, and a review may first open
         // while quitting. Always drain again before the synchronous final flush.
-        return reviews.flush()
+        return Promise.all([flushReview(), flushInline()])
       })
       .then(finishQuit)
-      .catch((error) => {
+      .catch((error: { title: string; message: string }) => {
         quitting = false
-        setReviewSaveError(error instanceof Error ? error.message : "Could not save the review draft.")
+        setQuitSaveError(error)
       })
   }
 
@@ -539,6 +562,7 @@ export function Root(props: {
                                 onDiscardIssueDraft={session.discardIssueDraft}
                                 onSubmitIssueAction={session.submitIssueAction}
                                 reviews={reviews}
+                                inlineDrafts={inlineDrafts}
                                 onPostInlineComment={inlineComments.post}
                                 onMergePull={session.mergePull}
                                 onUpdatePullDraft={session.updatePullDraft}
@@ -587,12 +611,22 @@ export function Root(props: {
                 onDismiss={() => setQuitDraftSaveError(false)}
               />
             </Show>
-            <Show when={reviewSaveError()}>
-              <Toast
-                title="Review draft not saved — quit cancelled"
-                message={reviewSaveError()!}
-                onDismiss={() => setReviewSaveError(undefined)}
-              />
+            <Show
+              when={
+                !quitDraftSaveError() && !quitSaveError() && inlineDrafts.error() !== dismissedInlineDraftError() && inlineDrafts.error()
+              }
+            >
+              {(message) => (
+                <Toast
+                  title="Inline comment drafts"
+                  message={message()}
+                  zIndex={400}
+                  onDismiss={() => setDismissedInlineDraftError(inlineDrafts.error())}
+                />
+              )}
+            </Show>
+            <Show when={quitSaveError()}>
+              {(error) => <Toast title={error().title} message={error().message} onDismiss={() => setQuitSaveError(undefined)} />}
             </Show>
             <Show when={props.unexpectedError?.()}>
               {(message) => (
