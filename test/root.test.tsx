@@ -819,6 +819,61 @@ test("always remembers a main tab per repository and restores it on direct open"
   }
 })
 
+test("a teardown without quit, such as SIGTERM, hands pending tab and review saves to the host", async () => {
+  const session = readySession()
+  const save = deferred<void>()
+  const saved: Record<string, string> = {}
+  const shutdown: Promise<unknown>[] = []
+  let reviewFlushes = 0
+  const view = await testRender(
+    () => (
+      <Root
+        cwd="/work"
+        repositoryArgument="cli/cli"
+        onShutdownWork={(work) => shutdown.push(work)}
+        services={{
+          createPullReviewSession: () => {
+            const reviews = createTestReviewSession()
+            return {
+              ...reviews,
+              flush: () => {
+                reviewFlushes++
+                return reviews.flush()
+              },
+            }
+          },
+          resolveRepository: async (argument) => argument,
+          resolveLocalRepository: async () => undefined,
+          loadRecentRepositories: async () => [],
+          rememberRepository: async () => {},
+          loadRepositoryTabs: async () => ({}),
+          saveRepositoryTabs: async (tabs) => {
+            await save.promise
+            Object.assign(saved, tabs)
+          },
+          loadConfig: async () => defaultConfig,
+          createRepositorySession: () => session,
+        }}
+      />
+    ),
+    { width: 120, height: 32 },
+  )
+  await waitForText(view, "Overview")
+  view.mockInput.pressKey("2")
+  await view.flush()
+  // Destroyed inside the tab-save debounce.
+  view.renderer.destroy()
+  expect(shutdown).toHaveLength(1)
+  expect(reviewFlushes).toBe(1)
+  let settled = false
+  void shutdown[0]!.then(() => (settled = true))
+  await Bun.sleep(0)
+  expect(settled).toBe(false)
+  save.resolve()
+  await shutdown[0]
+  expect(saved["cli/cli"]).toBe("commits")
+})
+
 test("quit retains unsaved issue and PR drafts, then retries and waits for review and tab saves", async () => {
   let storageWritable = false
   const savedBodies: string[] = []

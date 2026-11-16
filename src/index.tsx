@@ -139,6 +139,7 @@ try {
         initialConfigError={initialConfigError}
         unexpectedError={unexpectedError}
         onDismissUnexpectedError={() => setUnexpectedError(undefined)}
+        onShutdownWork={(work) => void trackSave(work.then(() => {}))}
         services={{
           saveConfig: (config) => trackSave(saveConfig(config)),
           saveRepositoryTabs: (tabs) => trackSave(saveRepositoryTabs(tabs)),

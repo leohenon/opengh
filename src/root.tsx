@@ -84,6 +84,8 @@ export function Root(props: {
   /** An error that escaped every handler. */
   unexpectedError?: () => string | undefined
   onDismissUnexpectedError?: () => void
+  /** Saves the host must finish before exiting. */
+  onShutdownWork?: (work: Promise<unknown>) => void
 }) {
   const services = { ...defaultServices, ...props.services }
   const savedResume = props.resumeLocation
@@ -131,9 +133,6 @@ export function Root(props: {
       void flushRepositoryTabs()
     }, 250)
   }
-  onCleanup(() => {
-    void flushRepositoryTabs()
-  })
   const [configSaving, setConfigSaving] = createSignal(false)
   const [configReloading, setConfigReloading] = createSignal(false)
   const [configReloaded, setConfigReloaded] = createSignal(false)
@@ -149,6 +148,10 @@ export function Root(props: {
   onCleanup(() => session.flushDrafts?.())
   const reviews = services.createPullReviewSession()
   const inlineComments = services.createInlineComments()
+  // Also runs when a signal destroys the renderer without quit().
+  onCleanup(() => {
+    props.onShutdownWork?.(Promise.allSettled([flushRepositoryTabs(), reviews.flush()]))
+  })
   const [reviewSaveError, setReviewSaveError] = createSignal<string>()
   const [quitDraftSaveError, setQuitDraftSaveError] = createSignal(false)
   const [localRepository, setLocalRepository] = createSignal<LocalRepository>()
