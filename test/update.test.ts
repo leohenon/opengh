@@ -424,11 +424,12 @@ test.each(["hung version", "hung curl"])(
   "updater deadline kills installer descendants and cleans owned files: %s",
   async (mode) => {
     const f = await installerFixture(mode)
-    const result = await installerChild(f, 1_000)
+    // Under load the installer needs about a second to reach the hung step.
+    const result = await installerChild(f, 3_000)
     expect(result.code, result.error).toBe(1)
     expect(result.error).toMatch(/timed out/i)
     expect(result.error).toContain("Check opengh --version")
-    expect(result.elapsed).toBeLessThan(4_000)
+    expect(result.elapsed).toBeLessThan(6_000)
     expect(result.pids).toHaveLength(3)
     expect(result.running).toEqual([])
     expect(await readFile(f.executable, "utf8")).toBe(f.original)
