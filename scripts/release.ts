@@ -85,9 +85,13 @@ const ticked = (ref: string) => {
 const before = new Set(previous.ok ? ticked(previous.out) : [])
 const highlights = ticked("HEAD").filter((item) => !before.has(item))
 const commits = previous.ok
-  ? mustGit("log", "--no-merges", "--reverse", "--format=%s", `${previous.out}..HEAD`)
+  ? mustGit("log", "--no-merges", "--reverse", "--format=%H%x09%h%x09%s", `${previous.out}..HEAD`)
       .split("\n")
-      .filter((subject) => subject && !/^release \d/.test(subject))
+      .flatMap((line) => {
+        const [sha = "", short = "", ...rest] = line.split("\t")
+        const subject = rest.join("\t")
+        return sha && subject && !/^release \d/.test(subject) ? [{ sha, short, subject }] : []
+      })
   : []
 // GitHub identifies first-time contributors from merged PRs. This endpoint only generates
 // text; it does not create a release or tag. Keep our own notes and use just its contributor list.
@@ -135,7 +139,13 @@ const instructions = [
 ].join("\n")
 const draft = [
   ...(highlights.length ? [`## What's new\n\n${highlights.map((item) => `- ${item}`).join("\n")}`] : []),
-  ...(commits.length ? [`## Changes\n\n${commits.map((subject) => `- ${subject}`).join("\n")}`] : []),
+  ...(commits.length
+    ? [
+        `<details>\n<summary>Changes (${commits.length})</summary>\n\n${commits
+          .map(({ sha, short, subject }) => `- ${subject} ([${short}](https://github.com/leohenon/opengh/commit/${sha}))`)
+          .join("\n")}\n\n</details>`,
+      ]
+    : []),
   ...(contributors ? [`## New contributors\n\n${contributors}`] : []),
   ...(previous.ok ? [`**Full changelog:** https://github.com/leohenon/opengh/compare/${previous.out}...${tag}`] : []),
 ].join("\n\n")

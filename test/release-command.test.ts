@@ -185,6 +185,21 @@ test.each([false, true])(
   15_000,
 )
 
+test("changes link each commit by its short hash and leave out release commits", async () => {
+  const f = await fixture()
+  await f.git("tag", "v0.0.0")
+  const subjects = ["add a feature", "release 0.0.0", "fix a bug with a much longer subject that GitHub wraps but never truncates"]
+  for (const subject of subjects) await f.git("commit", "--allow-empty", "-m", subject)
+  await f.git("push", "origin", "main")
+  const link = async (ref: string) =>
+    `([${await f.git("rev-parse", "--short", ref)}](https://github.com/leohenon/opengh/commit/${await f.git("rev-parse", ref)}))`
+  await f.tool("editor", 'cp "$1" "$TMPDIR/draft"\nexit 1')
+  expect((await f.release("0.0.1")).code).not.toBe(0)
+  expect(await readFile(join(f.directory, "draft"), "utf8")).toContain(
+    `<details>\n<summary>Changes (2)</summary>\n\n- ${subjects[0]} ${await link("HEAD~2")}\n- ${subjects[2]} ${await link("HEAD")}\n\n</details>\n\n`,
+  )
+}, 15_000)
+
 test("no new contributors omits the section", async () => {
   const f = await fixture()
   await writeFile(join(f.directory, "generated-notes.json"), JSON.stringify({ body: "## What's Changed\n* A change\n" }))
