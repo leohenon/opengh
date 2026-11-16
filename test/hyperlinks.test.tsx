@@ -274,7 +274,7 @@ test("keeps drag, right-click, selection and message double-click distinct from 
   const target: ReactionTarget = { kind: "issue", number: 1, nodeId: "I_fixture" }
   const controls: ReactionControls = {
     action: () => ({ operation: { status: "idle" } }),
-    add: () => {},
+    toggle: () => {},
     open: (value) => {
       reactions.push(value)
     },

@@ -17,6 +17,7 @@ defaults and customization. Press `,` to open settings.
 - Press `a` for actions such as assigning, labeling, closing, or reopening an issue or pull request.
 - Press `c` to write a comment, then `ctrl+s` to post. `esc` saves the current draft, and `ctrl+d` clears it.
 - Type `@` while commenting to mention users.
+- Double-click a description or comment (or right-click → **React**) to pick a reaction. Choosing a reaction you already added, in the picker or by clicking its `✓` chip, removes it.
 
 ## Diffs
 

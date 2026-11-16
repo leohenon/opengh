@@ -455,7 +455,7 @@ function commitSummary(item: CommitResponse): CommitSummary {
 export function createGitHubClient(transport: GitHubTransport, commentStorage?: IssueCommentStorage) {
   const { documents, document } = createGitHubDocuments(transport)
   const { pullContext } = createGitHubPullContext(transport)
-  const { addReaction, bodyReactions, commentReactions } = createGitHubReactions(transport)
+  const { addReaction, removeReaction, bodyReactions, commentReactions } = createGitHubReactions(transport)
   const metadata = async (repository: string, options?: RequestOptions): Promise<Repo> => {
     const repo = await transport.json<RepositoryResponse>(`repos/${repository}`, options)
     options?.budget?.consumeItems(1)
@@ -1832,6 +1832,7 @@ export function createGitHubClient(transport: GitHubTransport, commentStorage?: 
     issueComments,
     createIssueComment,
     addReaction,
+    removeReaction,
     updateIssueState,
     updatePullState,
     updatePullDraft,
@@ -1887,3 +1888,4 @@ export const loadGitHubRuns = client.runs
 export const loadGitHubRun = client.run
 export const loadGitHubRunJobs = client.runJobs
 export const addGitHubReaction = client.addReaction
+export const removeGitHubReaction = client.removeReaction

@@ -71,7 +71,7 @@ export type IssueDetailState = {
 
 export type OperationState = { status: "idle" } | { status: "loading" } | { status: "error"; message: string }
 
-export type ReactionActionState = { kind?: ReactionKind; operation: OperationState }
+export type ReactionActionState = { kind?: ReactionKind; remove?: boolean; operation: OperationState }
 
 export type IssueActionState = {
   selectedAssignees?: string[]

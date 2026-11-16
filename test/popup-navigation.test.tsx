@@ -22,7 +22,7 @@ test("popups have no Back buttons and retain outside-click dismissal", async () 
             message={{ target: { kind: "issue", number: 1 }, state: {} }}
             action={() => ({ operation: { status: "idle" } })}
             showScrollbar={false}
-            onAdd={() => {}}
+            onToggle={() => {}}
             onClose={() => setScreen("done")}
           />
         </Match>

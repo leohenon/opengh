@@ -522,6 +522,7 @@ export function Root(props: {
                                 onCloseCommit={session.clearCommit}
                                 getReactionAction={session.reactionAction}
                                 onAddReaction={session.addReaction}
+                                onRemoveReaction={session.removeReaction}
                                 issueDetail={session.issueDetail()}
                                 onLoadIssue={session.loadIssue}
                                 onLoadMoreIssueComments={session.loadMoreIssueComments}

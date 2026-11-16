@@ -117,6 +117,88 @@ test("reaction writes reject wrong subjects, GraphQL errors and unconfirmed resu
   expect((await client.addReaction("owner/repo", { kind: "review-comment", number: 43, id: "RC1" }, "heart")).reactions.heart).toBe(9)
 })
 
+test("reaction removals reuse subject validation, send removeReaction and require the viewer reaction to be gone", async () => {
+  const cases: { target: ReactionTarget; id: string; kind: ReactionKind; content: string }[] = [
+    { target: { kind: "issue", number: 42 }, id: "I42", kind: "heart", content: "HEART" },
+    { target: { kind: "pull", number: 43 }, id: "PR43", kind: "+1", content: "THUMBS_UP" },
+    { target: { kind: "comment", parent: "issue", number: 42, id: 99 }, id: "C99", kind: "eyes", content: "EYES" },
+    { target: { kind: "review-comment", number: 43, id: "RC1" }, id: "RC1", kind: "rocket", content: "ROCKET" },
+  ]
+  let current = cases[0]!
+  let writes = 0
+  let wrongParent = false
+  let reply: ((id: string, content: string) => unknown) | undefined
+  const paths: string[] = []
+  const client = createGitHubReactions({
+    async json<T>(path: string) {
+      paths.push(path)
+      const target = current.target
+      return (
+        target.kind === "comment"
+          ? { id: target.id, node_id: current.id, issue_url: `https://api.github.com/repos/owner/repo/issues/${target.number}` }
+          : { number: target.number, node_id: current.id, ...(target.kind === "pull" ? { pull_request: {} } : {}) }
+      ) as T
+    },
+    async text() {
+      return ""
+    },
+    async graphql<T>(query: string, variables: Record<string, string>) {
+      if (query.includes("query ReactionSubject"))
+        return {
+          data: {
+            node: {
+              id: "RC1",
+              __typename: "PullRequestReviewComment",
+              pullRequest: { number: wrongParent ? 44 : 43, repository: { nameWithOwner: "owner/repo" } },
+            },
+          },
+        } as T
+      writes++
+      expect(query).toContain("mutation RemoveReaction")
+      expect(query).toContain("removeReaction(input: { subjectId: $id, content: $content })")
+      expect(query).not.toContain("addReaction")
+      expect(query).toContain("users: reactors")
+      expect(variables).toEqual({ id: current.id, content: current.content })
+      return (reply?.(current.id, current.content) ?? {
+        data: { removeReaction: { subject: { id: current.id, viewerCanReact: true, reactionGroups: [group(current.content, 2, false)] } } },
+      }) as T
+    },
+  })
+  for (current of cases)
+    expect(await client.removeReaction("owner/repo", current.target, current.kind)).toEqual({
+      reactions: { [current.kind]: 2 },
+      viewerReactions: [],
+      canReact: true,
+    })
+  expect(paths).toEqual(["repos/owner/repo/issues/42", "repos/owner/repo/issues/43", "repos/owner/repo/issues/comments/99"])
+  expect(writes).toBe(4)
+
+  // Subject checks guard removals before any write.
+  wrongParent = true
+  current = cases[3]!
+  await expect(client.removeReaction("owner/repo", current.target, current.kind)).rejects.toThrow("does not belong")
+  current = cases[0]!
+  await expect(client.removeReaction("owner/repo", { kind: "pull", number: 42 }, "heart")).rejects.toThrow("does not match")
+  await expect(client.removeReaction("owner/repo", { kind: "issue", number: 42, nodeId: "OLD" }, "heart")).rejects.toThrow(
+    "subject changed",
+  )
+  await expect(client.removeReaction("owner/repo", { kind: "issue", number: 42 }, "invalid" as ReactionKind)).rejects.toThrow("Unsupported")
+  expect(writes).toBe(4)
+
+  for (const bad of [
+    (id: string) => ({ data: { removeReaction: { subject: subject(id) } } }), // Still reacted.
+    () => ({ data: { removeReaction: { subject: { ...subject("OTHER"), reactionGroups: [] } } } }),
+    (id: string) => ({ data: { removeReaction: { subject: { ...subject(id), reactionGroups: [group("HEART", -1, false)] } } } }),
+  ]) {
+    reply = bad
+    await expect(client.removeReaction("owner/repo", current.target, "heart")).rejects.toThrow(
+      "did not confirm the requested reaction removal",
+    )
+  }
+  reply = () => ({ data: { removeReaction: null }, errors: [{ message: "Permission denied" }] })
+  await expect(client.removeReaction("owner/repo", current.target, "heart")).rejects.toThrow("Permission denied")
+})
+
 test("description and comment reads retain REST fallback and enrich viewer state without breaking permissions", async () => {
   const date = "2026-01-01T00:00:00Z"
   const issue = {

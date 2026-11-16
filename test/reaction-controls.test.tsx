@@ -156,9 +156,7 @@ test("Root/session first reaction uses message double-click, context menu, pendi
     expect(calls).toHaveLength(2)
     pending.resolve(confirmed("heart", 4))
     await settle(view)
-    expect(view.captureCharFrame()).toContain("✓ added")
-    view.mockInput.pressEnter()
-    expect(calls).toHaveLength(2)
+    expect(view.captureCharFrame()).toContain("heart · 4 · ✓ added · remove")
     await view.mockMouse.click(0, 0)
     await settle(view)
     await clickControl(view, "reaction-issue:412:body-heart")
@@ -184,6 +182,98 @@ test("Root/session first reaction uses message double-click, context menu, pendi
     view.mockInput.pressKey("?")
     await settle(view)
     expect(view.captureCharFrame()).not.toContain("choose message, then kind")
+  } finally {
+    view.renderer.destroy()
+  }
+})
+
+test("choosing an existing reaction in the picker or on its chip removes it, but never without permission", async () => {
+  const calls: Array<{ op: "add" | "remove"; target: ReactionTarget; kind: ReactionKind }> = []
+  let pending = Promise.withResolvers<ReactionState>()
+  const { view, session } = await setup({
+    issue: async () => ({
+      ...issueDetailFixture,
+      nodeId: "I_body",
+      body: "",
+      reactions: { heart: 2 },
+      viewerReactions: ["heart"],
+      canReact: true,
+    }),
+    issueComments: async () => ({
+      items: [
+        {
+          ...issueCommentsFixture[0]!,
+          id: 101,
+          nodeId: "IC_locked",
+          body: "Locked comment",
+          reactions: { "+1": 1 },
+          viewerReactions: ["+1"],
+          canReact: false,
+        },
+      ],
+      hasMore: false,
+    }),
+    addReaction: async (_repo, target, kind) => {
+      calls.push({ op: "add", target, kind })
+      return pending.promise
+    },
+    removeReaction: async (_repo, target, kind) => {
+      calls.push({ op: "remove", target, kind })
+      return pending.promise
+    },
+  })
+  const body: ReactionTarget = { kind: "issue", number: 412, nodeId: "I_body" }
+  const chip = "reaction-issue:412:body-heart"
+  try {
+    view.mockInput.pressKey("3")
+    view.mockInput.pressEnter()
+    await settle(view)
+    expect(view.captureCharFrame()).toContain("✓ ❤️ 2")
+    await messageGesture(view, "No description provided.")
+    expect(view.captureCharFrame()).toContain("heart · 2 · ✓ added")
+    expect(view.captureCharFrame()).not.toContain("✓ added · remove") // The cursor starts on another kind.
+    for (let index = 0; index < 5; index++) view.mockInput.pressArrow("down")
+    await view.flush()
+    expect(view.captureCharFrame()).toContain("heart · 2 · ✓ added · remove")
+    view.mockInput.pressEnter()
+    await settle(view)
+    expect(calls).toEqual([{ op: "remove", target: body, kind: "heart" }])
+    expect(session.reactionAction(body)).toMatchObject({ kind: "heart", remove: true, operation: { status: "loading" } })
+    expect(view.captureCharFrame()).toContain("Removing…")
+    view.mockInput.pressEnter() // Pending writes block another toggle.
+    await settle(view)
+    expect(calls).toHaveLength(1)
+    pending.resolve({ reactions: { heart: 1 }, viewerReactions: [], canReact: true })
+    await settle(view)
+    expect(view.captureCharFrame()).toContain("heart · 1")
+    expect(view.captureCharFrame()).not.toContain("✓ added")
+    await escape(view)
+    expect(view.captureCharFrame()).toContain("❤️ 1")
+    expect(view.captureCharFrame()).not.toContain("✓ ❤️")
+
+    // Chips toggle too.
+    pending = Promise.withResolvers<ReactionState>()
+    await clickControl(view, chip)
+    expect(calls.at(-1)).toEqual({ op: "add", target: body, kind: "heart" })
+    pending.resolve(confirmed("heart", 2))
+    await settle(view)
+    expect(view.captureCharFrame()).toContain("✓ ❤️ 2")
+    pending = Promise.withResolvers<ReactionState>()
+    await clickControl(view, chip)
+    await settle(view)
+    expect(calls.at(-1)).toEqual({ op: "remove", target: body, kind: "heart" })
+    expect(view.captureCharFrame()).toContain("Removing heart…")
+    pending.resolve({ reactions: { heart: 1 }, viewerReactions: [], canReact: true })
+    await settle(view)
+    expect(view.captureCharFrame()).toContain("❤️ 1")
+    expect(view.captureCharFrame()).not.toContain("✓ ❤️")
+    expect(calls).toHaveLength(3)
+
+    // Without permission, a chip cannot remove.
+    await clickControl(view, "reaction-issue:412:comment:101-+1")
+    await settle(view)
+    expect(calls).toHaveLength(3)
+    expect(view.captureCharFrame()).toContain("✓ 👍 1")
   } finally {
     view.renderer.destroy()
   }

@@ -15,7 +15,8 @@ export type ReactionMessage = { target: ReactionTarget; state: Partial<ReactionS
 export function ReactionPicker(props: {
   message: ReactionMessage
   action: (target: ReactionTarget) => ReactionActionState
-  onAdd: (target: ReactionTarget, kind: ReactionKind) => void
+  onToggle: (target: ReactionTarget, kind: ReactionKind) => void
+  removable?: boolean
   onClose: () => void
   showScrollbar: boolean
 }) {
@@ -31,15 +32,14 @@ export function ReactionPicker(props: {
     const current = operation()
     return current.status === "error" ? current.message : undefined
   }
+  const added = (kind: ReactionKind) => props.message.state.viewerReactions?.includes(kind) === true
   const disabled = (kind: ReactionKind) =>
-    props.message.state.canReact === false ||
-    operation().status === "loading" ||
-    props.message.state.viewerReactions?.includes(kind) === true
+    props.message.state.canReact === false || operation().status === "loading" || (added(kind) && !props.removable)
   const activate = (index: number) => {
     const kind = reactionLabels[index]?.[0]
     if (!kind || disabled(kind)) return
     setSelected(index)
-    props.onAdd(props.message.target, kind)
+    props.onToggle(props.message.target, kind)
   }
   useKeyActions(
     {
@@ -71,7 +71,7 @@ export function ReactionPicker(props: {
             Reactions
           </text>
           <Show when={operation().status === "loading"}>
-            <text fg={colors.muted}>Adding…</text>
+            <text fg={colors.muted}>{props.action(props.message.target).remove ? "Removing…" : "Adding…"}</text>
           </Show>
         </box>
         <box height={1} flexShrink={0} />
@@ -91,6 +91,7 @@ export function ReactionPicker(props: {
             {([kind, emoji], index) => {
               const enabled = () => !disabled(kind)
               const hover = mouseHover(enabled, () => kind)
+              const removing = () => added(kind) && enabled() && (selected() === index() || hover.hovered())
               return (
                 <box
                   id={`reaction-picker-row-${kind}`}
@@ -111,8 +112,10 @@ export function ReactionPicker(props: {
                   </text>
                   <text height={1} wrapMode="none" selectable={false} fg={disabled(kind) ? colors.muted : colors.text}>
                     {emoji} {kind} · {props.message.state.reactions?.[kind] ?? 0}
-                    {props.message.state.viewerReactions?.includes(kind)
-                      ? " · ✓ added"
+                    {added(kind)
+                      ? removing()
+                        ? " · ✓ added · remove"
+                        : " · ✓ added"
                       : props.message.state.canReact === false
                         ? " · unavailable"
                         : ""}

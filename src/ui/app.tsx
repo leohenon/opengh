@@ -184,6 +184,7 @@ export type AppProps = {
   onCloseCommit?: () => void
   getReactionAction?: (target: ReactionTarget) => ReactionActionState
   onAddReaction?: (target: ReactionTarget, kind: ReactionKind) => Promise<ReactionState>
+  onRemoveReaction?: (target: ReactionTarget, kind: ReactionKind) => Promise<ReactionState>
   issueDetail?: IssueDetailState
   onLoadIssue?: (number: number, options?: { force?: boolean }) => Promise<void>
   onLoadMoreIssueComments?: () => Promise<void>
@@ -1244,7 +1245,7 @@ function AppContent(props: AppProps) {
     )
       closeReactions()
   })
-  const addReaction = (target: ReactionTarget, kind: ReactionKind, fromPicker = false) => {
+  const toggleReaction = (target: ReactionTarget, kind: ReactionKind, fromPicker = false) => {
     if (
       fromPicker
         ? overlay() !== "reactions" || !selectedReactionMessage() || !sameReactionTarget(selectedReactionMessage()!.target, target)
@@ -1252,21 +1253,17 @@ function AppContent(props: AppProps) {
     )
       return
     const message = reactionMessages().find((message) => sameReactionTarget(message.target, target))
-    if (
-      !message ||
-      message.state.canReact === false ||
-      message.state.viewerReactions?.includes(kind) ||
-      props.getReactionAction?.(target).operation.status === "loading"
-    )
-      return
+    if (!message || message.state.canReact === false || props.getReactionAction?.(target).operation.status === "loading") return
+    const write = message.state.viewerReactions?.includes(kind) ? props.onRemoveReaction : props.onAddReaction
     // Session owns confirmation/error publication. No async popup, toast or focus effects can outlive this view.
-    void props.onAddReaction?.(target, kind).catch(() => {})
+    void write?.(target, kind).catch(() => {})
   }
   const reactionControls = (): ReactionControls | undefined =>
     props.onAddReaction && props.getReactionAction
       ? {
           action: props.getReactionAction,
-          add: (target, kind) => addReaction(target, kind),
+          toggle: (target, kind) => toggleReaction(target, kind),
+          removable: !!props.onRemoveReaction,
           open: openReactions,
           context: openMessageContext,
         }
@@ -2047,7 +2044,7 @@ function AppContent(props: AppProps) {
     const close: HintEntry = ["dialog.close", "close"]
     const picker: HintEntry[] = [["picker.accept", "open"], close]
     if (overlay() === "context-menu") return undefined
-    if (overlay() === "reactions") return hint(["navigation.activate", "add"], close)
+    if (overlay() === "reactions") return hint(["navigation.activate", props.onRemoveReaction ? "add/remove" : "add"], close)
     if (
       overlay() === "issue-action" ||
       overlay() === "pull-merge" ||
@@ -2887,7 +2884,8 @@ function AppContent(props: AppProps) {
                             action={props.getReactionAction!}
                             onClose={closeReactions}
                             showScrollbar={config().showScrollbars}
-                            onAdd={(target, kind) => addReaction(target, kind, true)}
+                            removable={!!props.onRemoveReaction}
+                            onToggle={(target, kind) => toggleReaction(target, kind, true)}
                           />
                         )}
                       </Show>

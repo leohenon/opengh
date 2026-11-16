@@ -20,7 +20,9 @@ export const reactionLabels: readonly [ReactionKind, string][] = [
 
 export type ReactionControls = {
   action: (target: ReactionTarget) => ReactionActionState
-  add: (target: ReactionTarget, kind: ReactionKind) => void
+  // Removes the kind when the viewer already reacted and removal is available.
+  toggle: (target: ReactionTarget, kind: ReactionKind) => void
+  removable?: boolean
   open: (target: ReactionTarget) => void
   context: (target: ReactionTarget, body: string, position: MousePosition) => void
 }
@@ -68,8 +70,8 @@ export function Reactions(props: {
                   wrapMode="none"
                   fg={selected(kind) ? colors.text : colors.muted}
                   {...mouseClick(
-                    () => props.controls?.add(props.target!, kind),
-                    () => !disabled() && !selected(kind),
+                    () => props.controls?.toggle(props.target!, kind),
+                    () => !disabled() && (!selected(kind) || props.controls?.removable === true),
                     identity,
                   )}
                 >
@@ -80,7 +82,9 @@ export function Reactions(props: {
             )}
           </For>
           <Show when={pending()}>
-            <text fg={colors.muted}>Adding {action()?.kind}…</text>
+            <text fg={colors.muted}>
+              {action()?.remove ? "Removing" : "Adding"} {action()?.kind}…
+            </text>
           </Show>
           <Show when={supported() && props.canReact === false}>
             <text fg={colors.muted}>Reactions unavailable</text>

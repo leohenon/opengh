@@ -10,6 +10,7 @@ import type {
   IssueComment,
   IssueTimeline,
   RepositoryDocument,
+  ReactionKind,
   ReactionState,
   ReactionTarget,
   PullRequestDetail,
@@ -2398,6 +2399,88 @@ describe("reaction mutations", () => {
     expect(session.pullDetail()?.resource.value?.reactions).toEqual({ heart: 9 })
     expect(session.pullDetail()?.comments.value?.items[0]?.reactions).toEqual({ heart: 9 })
     expect(session.pullDetail()?.context.value?.threads[0]?.comments[0]?.reactions).toEqual({ heart: 9 })
+  })
+
+  test("removals share the add request slot, publish their direction, survive stale reads and ignore late results", async () => {
+    const removal = deferred<ReactionState>()
+    const late = deferred<ReactionState>()
+    const calls: { op: "add" | "remove"; target: ReactionTarget; kind: ReactionKind }[] = []
+    const oldHeader = deferred<IssueDetail>()
+    let reads = 0
+    let removals = 0
+    const session = createRepositorySession(
+      reactionLoaders({
+        issue: async (_repository, number) =>
+          ++reads === 2 ? oldHeader.promise : { ...structuredClone(issueDetailFixture), number, nodeId: "I412", ...reactionSnapshot(3) },
+        addReaction: async (_repository, target, kind) => {
+          calls.push({ op: "add", target, kind })
+          return reactionSnapshot(4)
+        },
+        removeReaction: async (_repository, target, kind) => {
+          calls.push({ op: "remove", target, kind })
+          return ++removals === 1 ? removal.promise : late.promise
+        },
+      }),
+    )
+    await session.load("owner/repo")
+    await session.loadIssue(412)
+    const body: ReactionTarget = { kind: "issue", number: 412 }
+    const first = session.removeReaction(body, "heart")
+    expect(session.removeReaction(body, "heart")).toBe(first)
+    await expect(session.addReaction(body, "heart")).rejects.toThrow("already in progress")
+    await expect(session.removeReaction(body, "rocket")).rejects.toThrow("already in progress")
+    await Bun.sleep(0)
+    expect(calls).toEqual([{ op: "remove", target: { ...body, nodeId: "I412" }, kind: "heart" }])
+    expect(session.reactionAction(body)).toEqual({ kind: "heart", remove: true, operation: { status: "loading" } })
+    // A read started before the removal cannot bring the reaction back.
+    const refresh = session.loadIssue(412)
+    removal.resolve({ reactions: { heart: 2 }, viewerReactions: [], canReact: true })
+    await first
+    expect(session.reactionAction(body).operation).toEqual({ status: "idle" })
+    expect(session.issueDetail()?.resource.value).toMatchObject({ reactions: { heart: 2 }, viewerReactions: [] })
+    oldHeader.resolve({ ...structuredClone(issueDetailFixture), title: "Updated", nodeId: "I412", ...reactionSnapshot(3) })
+    await refresh
+    expect(session.issueDetail()?.resource.value).toMatchObject({ title: "Updated", reactions: { heart: 2 }, viewerReactions: [] })
+
+    // Adding again is an ordinary request.
+    await session.addReaction(body, "heart")
+    expect(calls.at(-1)?.op).toBe("add")
+    expect(session.issueDetail()?.resource.value).toMatchObject({ reactions: { heart: 4 }, viewerReactions: ["heart"] })
+
+    // A removal finishing after its page was cleared cannot patch the reopened page.
+    const pending = session.removeReaction(body, "heart").catch(() => undefined)
+    await Bun.sleep(0)
+    session.clearIssue()
+    await session.loadIssue(412)
+    late.resolve({ reactions: {}, viewerReactions: [], canReact: true })
+    await pending
+    expect(session.issueDetail()?.resource.value?.viewerReactions).toEqual(["heart"])
+    expect(session.reactionAction(body).operation.status).toBe("idle")
+  })
+
+  test("removing a reaction fails without a remover or permission and leaves state untouched", async () => {
+    const session = createRepositorySession(
+      reactionLoaders({
+        issue: async (_repository, number) => ({ ...structuredClone(issueDetailFixture), number, ...reactionSnapshot(1) }),
+      }),
+    )
+    await session.load("owner/repo")
+    await session.loadIssue(412)
+    const body: ReactionTarget = { kind: "issue", number: 412 }
+    await expect(session.removeReaction(body, "heart")).rejects.toThrow("Removing reactions is unavailable.")
+    expect(session.reactionAction(body).operation.status).toBe("idle")
+    const denied = createRepositorySession(
+      reactionLoaders({
+        issue: async (_repository, number) => ({ ...structuredClone(issueDetailFixture), number, ...reactionSnapshot(1), canReact: false }),
+        removeReaction: async () => {
+          throw new Error("Must not be called")
+        },
+      }),
+    )
+    await denied.load("owner/repo")
+    await denied.loadIssue(412)
+    await expect(denied.removeReaction(body, "heart")).rejects.toThrow("permission")
+    expect(denied.issueDetail()?.resource.value?.viewerReactions).toEqual(["heart"])
   })
 
   test("clear, replacement and repository roundtrips ignore late success/failure without clearing a newer request", async () => {

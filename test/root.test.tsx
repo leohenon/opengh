@@ -84,6 +84,9 @@ function readySession() {
     addReaction: async () => {
       throw new Error("Adding reactions is unavailable.")
     },
+    removeReaction: async () => {
+      throw new Error("Removing reactions is unavailable.")
+    },
     load: idle,
     refresh: idle,
     openDocument: () => undefined,

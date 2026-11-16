@@ -84,13 +84,8 @@ export function createGitHubReactions(transport: GitHubTransport) {
     }
     return object(response.data)
   }
-  const addReaction = async (repository: RepositoryReference, requested: ReactionTarget, kind: ReactionKind): Promise<ReactionState> => {
-    const target = { ...requested }
-    reactionKey(target)
-    validateReactionKind(kind)
-    repositorySelector(repository)
-    if (!transport.graphql) throw new Error("Reactions require GitHub GraphQL access.")
-    let id: string
+  // Shared by both writes, so a removal stays within this repository and PR/issue.
+  const reactionSubjectId = async (repository: RepositoryReference, target: ReactionTarget): Promise<string> => {
     if (target.kind === "review-comment") {
       const data = await request(
         `query ReactionSubject($id: ID!) { node(id: $id) {
@@ -109,35 +104,52 @@ export function createGitHubReactions(transport: GitHubTransport) {
           : object(pull.repository).id !== repository.nodeId)
       )
         throw new Error("Review comment does not belong to this pull request and repository.")
-      id = target.id
-    } else {
-      const path = target.kind === "comment" ? `issues/comments/${target.id}` : `issues/${target.number}`
-      const node = object(await transport.json<unknown>(`${repositoryPath(repository)}/${path}`))
-      if (target.kind === "comment") {
-        const parent = typeof node.issue_url === "string" ? /\/issues\/([1-9]\d*)$/.exec(node.issue_url)?.[1] : undefined
-        if (node.id !== target.id || Number(parent) !== target.number)
-          throw new Error("Comment does not belong to this issue or pull request.")
-      } else if (node.number !== target.number || (node.pull_request != null) !== (target.kind === "pull")) {
-        throw new Error("Reaction description does not match the requested issue or pull request.")
-      }
-      if (typeof node.node_id !== "string" || !node.node_id.trim()) throw new Error("Missing reaction subject ID from GitHub.")
-      id = node.node_id
+      return target.id
     }
+    const path = target.kind === "comment" ? `issues/comments/${target.id}` : `issues/${target.number}`
+    const node = object(await transport.json<unknown>(`${repositoryPath(repository)}/${path}`))
+    if (target.kind === "comment") {
+      const parent = typeof node.issue_url === "string" ? /\/issues\/([1-9]\d*)$/.exec(node.issue_url)?.[1] : undefined
+      if (node.id !== target.id || Number(parent) !== target.number)
+        throw new Error("Comment does not belong to this issue or pull request.")
+    } else if (node.number !== target.number || (node.pull_request != null) !== (target.kind === "pull")) {
+      throw new Error("Reaction description does not match the requested issue or pull request.")
+    }
+    if (typeof node.node_id !== "string" || !node.node_id.trim()) throw new Error("Missing reaction subject ID from GitHub.")
+    return node.node_id
+  }
+  const writeReaction = async (
+    repository: RepositoryReference,
+    requested: ReactionTarget,
+    kind: ReactionKind,
+    remove: boolean,
+  ): Promise<ReactionState> => {
+    const target = { ...requested }
+    reactionKey(target)
+    validateReactionKind(kind)
+    repositorySelector(repository)
+    if (!transport.graphql) throw new Error("Reactions require GitHub GraphQL access.")
+    const id = await reactionSubjectId(repository, target)
     if (target.nodeId !== undefined && target.nodeId !== id)
       throw new Error("The reaction subject changed. Refresh the message before retrying.")
     const content = Object.keys(contents).find((content) => contents[content] === kind)!
+    const mutation = remove ? "removeReaction" : "addReaction"
     const data = await request(
-      `mutation AddReaction($id: ID!, $content: ReactionContent!) {
-      addReaction(input: { subjectId: $id, content: $content }) { subject { id ${reactionFields} } }
+      `mutation ${remove ? "RemoveReaction" : "AddReaction"}($id: ID!, $content: ReactionContent!) {
+      ${mutation}(input: { subjectId: $id, content: $content }) { subject { id ${reactionFields} } }
     }`,
       { id, content },
     )
-    const subject = object(object(data.addReaction).subject)
+    const subject = object(object(data[mutation]).subject)
     const value = parseReactionState(subject)
-    if (subject.id !== id || !value || !value.viewerReactions.includes(kind))
-      throw new Error("GitHub did not confirm the requested reaction. Refresh the message before retrying.")
+    if (subject.id !== id || !value || value.viewerReactions.includes(kind) === remove)
+      throw new Error(`GitHub did not confirm the requested reaction${remove ? " removal" : ""}. Refresh the message before retrying.`)
     return value
   }
+  const addReaction = (repository: RepositoryReference, target: ReactionTarget, kind: ReactionKind) =>
+    writeReaction(repository, target, kind, false)
+  const removeReaction = (repository: RepositoryReference, target: ReactionTarget, kind: ReactionKind) =>
+    writeReaction(repository, target, kind, true)
   const bodyReactions = async (
     repository: RepositoryReference,
     number: number,
@@ -186,5 +198,5 @@ export function createGitHubReactions(transport: GitHubTransport) {
     }
     return states
   }
-  return { addReaction, bodyReactions, commentReactions }
+  return { addReaction, removeReaction, bodyReactions, commentReactions }
 }

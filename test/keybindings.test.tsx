@@ -539,7 +539,7 @@ test("mouse menus and reaction picker respect remapped dialog and navigation act
                 message={{ target: { kind: "issue", number: 42 }, state: {} }}
                 action={() => ({ operation: { status: "idle" } })}
                 showScrollbar={false}
-                onAdd={(_target, kind) => reactions.push(kind)}
+                onToggle={(_target, kind) => reactions.push(kind)}
                 onClose={() => setScreen("done")}
               />
             </Show>

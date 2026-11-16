@@ -37,6 +37,7 @@ import {
   loadGitHubAssignableUsers,
   markGitHubIssueDuplicate,
   addGitHubReaction,
+  removeGitHubReaction,
 } from "./github/client"
 import { GitHubApiError, type RequestOptions } from "./github/transport"
 import { loadGitHubMentionableUsers } from "./github/mentionable-users"
@@ -103,6 +104,7 @@ type Page<T> = { items: T[]; hasMore: boolean; total?: number }
 
 export type RepositoryLoaders = {
   addReaction?(repository: Repo, target: ReactionTarget, kind: ReactionKind): Promise<ReactionState>
+  removeReaction?(repository: Repo, target: ReactionTarget, kind: ReactionKind): Promise<ReactionState>
   updatePullState?(repository: Repo, number: number, state: ListState): Promise<PullRequestDetail>
   updatePullDraft?(repository: Repo, number: number, draft: boolean): Promise<PullRequestDetail>
   pullMergeMessage?(repository: Repo, number: number, expectedHeadSha: string): Promise<PullMergeMessage>
@@ -173,6 +175,7 @@ export type RepositorySession = {
   draftSaveError?: Accessor<string | undefined>
   reactionAction(target: ReactionTarget): ReactionActionState
   addReaction(target: ReactionTarget, kind: ReactionKind): Promise<ReactionState>
+  removeReaction(target: ReactionTarget, kind: ReactionKind): Promise<ReactionState>
   diffs?: Accessor<Partial<Record<DiffTarget["kind"], DiffState>>>
   loadDiff?(target: DiffTarget, filesOnly?: boolean, options?: { force?: boolean }): Promise<void>
   clearDiff?(target?: DiffTarget): void
@@ -233,6 +236,7 @@ export type RepositorySession = {
 
 const defaultLoaders: RepositoryLoaders = {
   addReaction: addGitHubReaction,
+  removeReaction: removeGitHubReaction,
   diff: loadGitHubDiff,
   metadata: loadGitHubMetadata,
   workCounts: loadGitHubWorkCounts,
@@ -666,7 +670,7 @@ export function createRepositorySession(
   const reactionEpoch = { issue: 0, pull: 0 }
   let reactionRevision = 0
   const confirmedReactions = new Map<string, { revision: number; value: ReactionState }>()
-  const reactionRequests = new Map<string, { token: object; kind: ReactionKind; promise: Promise<ReactionState> }>()
+  const reactionRequests = new Map<string, { token: object; kind: ReactionKind; remove: boolean; promise: Promise<ReactionState> }>()
   const resetReactionOwner = (owner: "issue" | "pull") => {
     reactionEpoch[owner]++
     const prefix = `${owner}:`
@@ -771,7 +775,8 @@ export function createRepositorySession(
           : detail,
       )
   }
-  const addReaction = (requested: ReactionTarget, kind: ReactionKind): Promise<ReactionState> => {
+  // One request slot per message, so adding and removing cannot race.
+  const writeReaction = (requested: ReactionTarget, kind: ReactionKind, remove: boolean): Promise<ReactionState> => {
     const target = { ...requested }
     let key: string
     try {
@@ -787,10 +792,13 @@ export function createRepositorySession(
       return Promise.reject(new Error("The reaction subject changed. Refresh the message before retrying."))
     if (subject.nodeId) target.nodeId = subject.nodeId
     if (subject.canReact === false) return Promise.reject(new Error("You do not have permission to react to this message."))
-    if (!loaders.addReaction) return Promise.reject(new Error("Adding reactions is unavailable."))
+    const load = remove ? loaders.removeReaction : loaders.addReaction
+    if (!load) return Promise.reject(new Error(`${remove ? "Removing" : "Adding"} reactions is unavailable.`))
     const existing = reactionRequests.get(key)
     if (existing)
-      return existing.kind === kind ? existing.promise : Promise.reject(new Error("A reaction is already in progress for this message."))
+      return existing.kind === kind && existing.remove === remove
+        ? existing.promise
+        : Promise.reject(new Error("A reaction is already in progress for this message."))
     const scope = repositoryScope
     const owner = reactionParent(target)
     const epoch = reactionEpoch[owner]
@@ -805,11 +813,11 @@ export function createRepositorySession(
       return latest && (!subject.nodeId || latest.nodeId === subject.nodeId)
     }
     const publish = (operation: OperationState) =>
-      setReactionActions((actions) => (owns() ? { ...actions, [key]: { kind, operation } } : actions))
+      setReactionActions((actions) => (owns() ? { ...actions, [key]: { kind, ...(remove ? { remove } : {}), operation } } : actions))
     const promise = Promise.resolve()
       .then(() => {
         if (!owns() || !sameSubject()) throw new Error("The message changed before the reaction was submitted.")
-        return loaders.addReaction!(current.data.repo, target, kind)
+        return load(current.data.repo, target, kind)
       })
       .then(
         (value) => {
@@ -838,10 +846,12 @@ export function createRepositorySession(
       .finally(() => {
         if (reactionRequests.get(key)?.token === token) reactionRequests.delete(key)
       })
-    reactionRequests.set(key, { token, kind, promise })
+    reactionRequests.set(key, { token, kind, remove, promise })
     publish(loading())
     return promise
   }
+  const addReaction = (target: ReactionTarget, kind: ReactionKind) => writeReaction(target, kind, false)
+  const removeReaction = (target: ReactionTarget, kind: ReactionKind) => writeReaction(target, kind, true)
 
   const repositorySnapshot = (repository: string, request?: number): Repo => {
     const current = state()
@@ -3863,6 +3873,7 @@ export function createRepositorySession(
     draftSaveError,
     reactionAction,
     addReaction,
+    removeReaction,
     diffs,
     loadDiff,
     clearDiff,
