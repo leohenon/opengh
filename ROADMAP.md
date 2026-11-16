@@ -5,9 +5,11 @@
 #### Navigation
 
 - [x] Open file references and links
-- [ ] Browse repository files
+- [ ] Full repo file explorer
 - [x] Full mouse support
 - [ ] Decide default icon style
+- [ ] Vim modal editing
+- [ ] Keyboard copy mode for link selection
 
 #### Issues & PRs
 

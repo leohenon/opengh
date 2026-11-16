@@ -12,6 +12,9 @@ The skill is a short set of instructions, not a service.
 npx skills add leohenon/opengh --skill opengh --global
 ```
 
+The agent's environment needs `opengh` on `PATH` and a signed-in GitHub CLI. See
+[Installation](installation.md#authenticate).
+
 ## Use
 
 Ask for GitHub context as part of a task:

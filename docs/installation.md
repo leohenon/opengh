@@ -57,3 +57,5 @@ opengh update
 ## Troubleshooting
 
 - **Alpine binary does not start:** install runtime libraries with `apk add libstdc++ libgcc`.
+- **Authentication error:** run `gh auth login --hostname github.com`, then check `gh auth status`.
+  `GH_TOKEN` and `GITHUB_TOKEN` override saved credentials; update or unset a stale one.

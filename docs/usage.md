@@ -2,7 +2,8 @@
 
 opengh is a terminal interface for GitHub.com repositories.
 
-Run `opengh` to get started. See the [CLI reference](cli.md) for options.
+Run `opengh` to get started. See the [CLI reference](cli.md) for options. opengh needs a
+signed-in GitHub CLI; see [Installation](installation.md#authenticate).
 
 ## Basic Navigation
 
