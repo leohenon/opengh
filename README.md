@@ -32,8 +32,8 @@ Available for macOS and Linux.
 ```sh
 # Curl
 curl -fsSL \
-  https://github.com/leohenon/opengh/releases/download/v0.0.0-beta.2/install.sh \
-  | OPENGH_VERSION=0.0.0-beta.2 sh
+  https://github.com/leohenon/opengh/releases/download/v0.0.0-beta.4/install.sh \
+  | OPENGH_VERSION=0.0.0-beta.4 sh
 
 # Homebrew
 brew install leohenon/tap/opengh
