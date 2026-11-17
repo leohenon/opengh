@@ -208,6 +208,28 @@ async function readLimited(
   }
 }
 
+const READ_RETRY_DELAY_MS = 500
+
+function transientFailure(error: unknown) {
+  if (!(error instanceof GitHubApiError)) return false
+  if (error.status === 502 || error.status === 503 || error.status === 504) return true
+  return error.status === undefined && /\bEOF\b|Could not connect to GitHub|connection reset/i.test(error.message)
+}
+
+function delay(ms: number, signal?: AbortSignal) {
+  return new Promise<void>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      signal?.removeEventListener("abort", abort)
+      resolve()
+    }, ms)
+    const abort = () => {
+      clearTimeout(timer)
+      reject(signal!.reason)
+    }
+    signal?.addEventListener("abort", abort, { once: true })
+  })
+}
+
 function awaitWithAbort<T>(promise: Promise<T>, signal?: AbortSignal): Promise<T> {
   if (!signal) return promise
   return new Promise<T>((resolve, reject) => {
@@ -267,7 +289,16 @@ export function createGitHubTransport(
     requestSignal(options)?.throwIfAborted()
     // Probe the session's account without making reads wait.
     if (!initialViewer && !readProbeFailed) probeViewer().catch(() => {})
-    return send(...args)
+    try {
+      return await send(...args)
+    } catch (error) {
+      // Busy GitHub endpoints occasionally drop a response (EOF, 502–504). Reads are safe to repeat
+      // once; writes never are, since GitHub may already have applied them.
+      const signal = requestSignal(options)
+      if (!transientFailure(error) || signal?.aborted) throw error
+      await delay(READ_RETRY_DELAY_MS, signal)
+      return send(...args)
+    }
   }
   async function authenticatedWrite(...args: RequestArguments) {
     const [path, , , , options] = args

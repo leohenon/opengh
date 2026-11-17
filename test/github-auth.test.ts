@@ -785,3 +785,41 @@ test("failed response streams retain their slots until gh actually exits", async
     spawn.mockRestore()
   }
 })
+
+test("a read GitHub drops once is retried, but writes and lasting failures are not", async () => {
+  const transport = createGitHubTransport(new GitHubRequestScheduler())
+  const endpoints: string[] = []
+  let failures: string[] = []
+  const spawn = spyOn(Bun, "spawn").mockImplementation((args) => {
+    const endpoint = (args as string[])[4]!
+    endpoints.push(endpoint)
+    if (endpoint === "user") return result('{"id":1,"login":"viewer"}')
+    const failure = failures.shift()
+    return failure ? result("", failure, 1) : result('{"ok":true}')
+  })
+  try {
+    for (const failure of ['Post "https://api.github.com/graphql": EOF', "gh: HTTP 504", "HTTP 502: Bad Gateway"]) {
+      failures = [failure]
+      endpoints.length = 0
+      expect(await transport.json<{ ok: boolean }>("repos/owner/repo")).toEqual({ ok: true })
+      expect(endpoints.filter((endpoint) => endpoint === "repos/owner/repo")).toHaveLength(2)
+    }
+    // Only one retry: a lasting failure still surfaces.
+    failures = ["gh: HTTP 504", "gh: HTTP 504"]
+    endpoints.length = 0
+    await expect(transport.json("repos/owner/repo")).rejects.toBeInstanceOf(GitHubApiError)
+    expect(endpoints.filter((endpoint) => endpoint === "repos/owner/repo")).toHaveLength(2)
+    // Ordinary errors are not retried.
+    failures = ["Not Found (HTTP 404)"]
+    endpoints.length = 0
+    await expect(transport.json("repos/owner/repo")).rejects.toBeInstanceOf(GitHubApiError)
+    expect(endpoints.filter((endpoint) => endpoint === "repos/owner/repo")).toHaveLength(1)
+    // A write GitHub may already have applied is never repeated.
+    failures = ["gh: HTTP 504"]
+    endpoints.length = 0
+    await expect(transport.mutate!("repos/owner/repo/issues/1/comments", "POST", { body: "hi" })).rejects.toBeInstanceOf(GitHubApiError)
+    expect(endpoints.filter((endpoint) => endpoint.endsWith("/comments"))).toHaveLength(1)
+  } finally {
+    spawn.mockRestore()
+  }
+})
