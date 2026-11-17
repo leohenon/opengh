@@ -8,8 +8,8 @@ test("PR context paginates threads, replies and checks without hiding data on pr
   const done = { hasNextPage: false, endCursor: null }
   const calls: string[] = []
   const budget = createRequestBudget()
+  const hunk = "@@ -10,1 +12,1 @@\n-before\n+after"
   const comment = (id: string, replyTo?: string) => ({
-    diffHunk: "@@ -10,1 +12,1 @@\n-before\n+after",
     id,
     author: { login: "alice" },
     authorAssociation: "MEMBER",
@@ -65,6 +65,12 @@ test("PR context paginates threads, replies and checks without hiding data on pr
           reviewDecision: "REVIEW_REQUIRED",
           milestone: { title: "Release", url: "https://github.com/owner/repo/milestone/1", dueOn: "2026-02-01T00:00:00Z" },
         })
+      if (name === "PullThreads") {
+        // The hunk is requested once per thread, not repeated for every reply.
+        expect(query).toContain("rootComment: comments(first: 1) { nodes { id diffHunk } }")
+        expect(query.match(/diffHunk/g)).toHaveLength(1)
+      }
+      if (name === "PullThreadComments") expect(query).not.toContain("diffHunk")
       if (name === "PullThreads")
         return response({
           headRefOid: head,
@@ -79,6 +85,7 @@ test("PR context paginates threads, replies and checks without hiding data on pr
                     isResolved: true,
                     isOutdated: true,
                     resolvedBy: { login: "bob" },
+                    rootComment: { nodes: [{ id: "old", diffHunk: hunk }] },
                     comments: { nodes: [comment("old")], pageInfo: done },
                   },
                 ],
@@ -97,6 +104,7 @@ test("PR context paginates threads, replies and checks without hiding data on pr
                     isResolved: false,
                     isOutdated: false,
                     resolvedBy: null,
+                    rootComment: { nodes: [{ id: "root", diffHunk: hunk }] },
                     comments: { nodes: [comment("root")], pageInfo: { hasNextPage: true, endCursor: "comments1" } },
                   },
                 ],
@@ -161,7 +169,8 @@ test("PR context paginates threads, replies and checks without hiding data on pr
   budget.dispose()
   expect(context.threads).toHaveLength(2)
   expect(context.threads[0]).toMatchObject({ diffSide: "RIGHT", startLine: 12, originalStartLine: 12 })
-  expect(context.threads[0]?.comments[0]?.diffHunk).toBe("@@ -10,1 +12,1 @@\n-before\n+after")
+  expect(context.threads[0]?.comments[0]?.diffHunk).toBe(hunk)
+  expect(context.threads[0]?.comments[1]?.diffHunk).toBeUndefined()
   expect(context.threads[0]?.comments.map((entry) => entry.id)).toEqual(["root", "reply"])
   expect(context.threads[0]?.comments[1]).toMatchObject({
     replyToId: "root",

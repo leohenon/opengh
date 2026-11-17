@@ -62,7 +62,9 @@ class HeadChangedError extends Error {
 }
 
 const pageInfo = "pageInfo { hasNextPage endCursor }"
-const commentFields = `id author { login } authorAssociation body diffHunk createdAt updatedAt url
+// The diff hunk is requested once per thread (rootComment below): replies repeat their root's
+// hunk, which can be tens of kilobytes, and only the root's is shown.
+const commentFields = `id author { login } authorAssociation body createdAt updatedAt url
   pullRequestReview { databaseId } replyTo { id }
   ${reactionFields}`
 
@@ -281,6 +283,7 @@ export function createGitHubPullContext(transport: GitHubTransport) {
             "PullThreads",
             `headRefOid reviewThreads(first: 100, after: $cursor) {
           nodes { id path line originalLine startLine originalStartLine diffSide isResolved isOutdated resolvedBy { login }
+            rootComment: comments(first: 1) { nodes { id diffHunk } }
             comments(first: 100) { nodes { ${commentFields} } ${pageInfo} }
           } ${pageInfo}
         }`,
@@ -326,6 +329,11 @@ export function createGitHubPullContext(transport: GitHubTransport) {
                   current = page(thread.comments, cursors)
                   budget.consumeItems(current.nodes.length)
                 }
+                const root = object(node.rootComment).nodes
+                if (!Array.isArray(root)) throw new Error("Missing PR details connection nodes")
+                const hunk = root.length ? object(root[0]) : undefined
+                const rootComment = hunk && comments.get(text(hunk.id))
+                if (rootComment) rootComment.diffHunk = optionalText(hunk.diffHunk)
                 const items = [...comments.values()]
                 result[position] = {
                   kind: "review-thread",
