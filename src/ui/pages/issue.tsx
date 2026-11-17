@@ -393,6 +393,7 @@ export function IssueScreen(props: {
                       commentCount={current().commentCount}
                       comments={props.detail.comments}
                       references={props.detail.references}
+                      historyTruncated={props.detail.historyTruncated}
                       onOpenReference={props.onOpenReference}
                       events={props.detail.events}
                       subject="issue"

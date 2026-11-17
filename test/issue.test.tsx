@@ -543,3 +543,31 @@ test("mixed references render chronologically and the references menu includes i
   await view.flush()
   expect(opened).toEqual({ detail: { kind: "pull", number: 77 }, repository: "other/repo" })
 })
+
+test("a conversation longer than opengh loads keeps its history and says it is incomplete", async () => {
+  const [truncated, setTruncated] = createSignal(true)
+  const view = await testRender(
+    () => (
+      <App
+        data={githubDataFixture}
+        operations={repositoryOperationsFixture}
+        initialNavigation={{ detail: { kind: "issue", number: issueDetailFixture.number } }}
+        issueDetail={{
+          number: issueDetailFixture.number,
+          resource: { status: "ready", value: { ...issueDetailFixture, body: "Long discussion." } },
+          comments: { status: "ready", value: { items: [], page: 1, hasMore: false } },
+          references: { status: "ready", value: [] },
+          historyTruncated: truncated() || undefined,
+        }}
+      />
+    ),
+    { width: 120, height: 40 },
+  )
+  active.push(view)
+  await settle(view)
+  await waitForText(view, "Long discussion.")
+  expect(view.captureCharFrame()).toContain("Timeline is incomplete")
+  setTruncated(false)
+  await view.flush()
+  expect(view.captureCharFrame()).not.toContain("Timeline is incomplete")
+})

@@ -1034,9 +1034,14 @@ export function createGitHubClient(transport: GitHubTransport, commentStorage?: 
       const eventNodes = new Map<string, IssueTimelineEvent>()
       const dismissalStates = new Map<string, PullReviewState>()
       let timelineIndex = 0
+      let truncated = false
       for (let page = 1; ; page++) {
         options.signal?.throwIfAborted()
-        if (page > MAX_AUTOMATIC_PAGES) throw detailLimit()
+        // Very long conversations keep their first pages and say the rest is missing.
+        if (page > MAX_AUTOMATIC_PAGES) {
+          truncated = true
+          break
+        }
         const items = await transport.json<IssueTimelineResponse[]>(
           `${repositoryPath(repository)}/issues/${number}/timeline?per_page=100&page=${page}`,
           options,
@@ -1393,6 +1398,7 @@ export function createGitHubClient(transport: GitHubTransport, commentStorage?: 
         events: [...events.values()]
           .filter((event) => event.event !== "closed" || !mergedTimes.has(Date.parse(event.createdAt)))
           .sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt)),
+        ...(truncated ? { truncated } : {}),
       }
     } finally {
       ownedBudget?.dispose()

@@ -57,6 +57,8 @@ export type PullDetailState = {
   comments: ResourceState<Paginated<IssueComment>>
   references: ResourceState<IssueReference[]>
   events?: IssueTimelineEvent[]
+  // The timeline was longer than opengh reads; references and events are partial.
+  historyTruncated?: boolean
   commits: ResourceState<CommitSummary[]>
   context: ResourceState<PullContext>
 }
@@ -67,6 +69,8 @@ export type IssueDetailState = {
   comments: ResourceState<Paginated<IssueComment>>
   references: ResourceState<IssueReference[]>
   events?: IssueTimelineEvent[]
+  // The timeline was longer than opengh reads; references and events are partial.
+  historyTruncated?: boolean
 }
 
 export type OperationState = { status: "idle" } | { status: "loading" } | { status: "error"; message: string }

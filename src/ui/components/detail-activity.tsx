@@ -490,6 +490,7 @@ export function DetailActivity(props: {
   pullUrl?: string
   comments: ResourceState<Paginated<IssueComment>>
   references: ResourceState<IssueReference[]>
+  historyTruncated?: boolean
   onOpenReference?: (reference: IssueReference) => void
   events?: readonly IssueTimelineEvent[]
   threads?: readonly PullReviewThread[]
@@ -646,6 +647,11 @@ export function DetailActivity(props: {
       <Show when={(props.commits?.value?.length ?? 0) >= 250 && (props.commitTotal ?? 0) > loadedCommits()}>
         <text width="100%" flexShrink={0} marginTop={1} fg={colors.muted}>
           Commit history may be incomplete. GitHub's PR commits endpoint returns at most 250 commits.
+        </text>
+      </Show>
+      <Show when={props.historyTruncated}>
+        <text width="100%" flexShrink={0} marginTop={1} fg={colors.muted}>
+          Timeline is incomplete: this conversation has more history than opengh loads. Open it on GitHub for the rest.
         </text>
       </Show>
       <TimelineItem last>{props.children}</TimelineItem>

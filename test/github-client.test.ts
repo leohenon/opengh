@@ -1698,7 +1698,8 @@ test("timeline propagates inherited options, bounds raw pages and preserves canc
     },
   })
   try {
-    await expect(client.issueTimeline("owner/repo", 42, { budget })).rejects.toThrow("incomplete")
+    // A longer history keeps what was read and is marked incomplete, instead of failing.
+    expect(await client.issueTimeline("owner/repo", 42, { budget })).toEqual({ references: [], events: [], truncated: true })
     expect(calls).toBe(20)
     expect(budget.signal.aborted).toBe(false)
   } finally {

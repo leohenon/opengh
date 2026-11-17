@@ -342,6 +342,7 @@ export function PullScreen(props: {
                   commentCount={current().commentCount}
                   comments={props.detail.comments}
                   references={props.detail.references}
+                  historyTruncated={props.detail.historyTruncated}
                   onOpenReference={props.onOpenReference}
                   events={props.detail.events}
                   threads={props.detail.context.value?.threads}

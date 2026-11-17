@@ -1609,7 +1609,7 @@ export function createRepositorySession(
     const revision = pullActionRevision.get(key)
     try {
       const target = repositorySnapshot(repository)
-      const timeline = await withRequestBudget(options, async (options) =>
+      const timeline = await withRequestBudget(options, async (options): Promise<IssueTimeline> =>
         loaders.issueTimeline
           ? loaders.issueTimeline(target, number, options)
           : { references: await loaders.issueReferences(target, number, options), events: [] },
@@ -1617,7 +1617,12 @@ export function createRepositorySession(
       if (request !== pullGeneration || revision !== pullActionRevision.get(key)) return
       setPullDetail((current) =>
         current?.number === number
-          ? { ...current, references: { status: "ready", value: timeline.references }, events: timeline.events }
+          ? {
+              ...current,
+              references: { status: "ready", value: timeline.references },
+              events: timeline.events,
+              historyTruncated: timeline.truncated === true || undefined,
+            }
           : current,
       )
     } catch (error) {
@@ -2034,7 +2039,7 @@ export function createRepositorySession(
     const referenceRequest = ++issueReferencesGeneration
     try {
       const target = repositorySnapshot(repository)
-      const timeline = await withRequestBudget(options, async (options) =>
+      const timeline = await withRequestBudget(options, async (options): Promise<IssueTimeline> =>
         loaders.issueTimeline
           ? loaders.issueTimeline(target, number, options)
           : { references: await loaders.issueReferences(target, number, options), events: [] },
@@ -2042,7 +2047,12 @@ export function createRepositorySession(
       if (request !== issueGeneration || referenceRequest !== issueReferencesGeneration) return
       setIssueDetail((current) =>
         current?.number === number
-          ? { ...current, references: { status: "ready", value: timeline.references }, events: timeline.events }
+          ? {
+              ...current,
+              references: { status: "ready", value: timeline.references },
+              events: timeline.events,
+              historyTruncated: timeline.truncated === true || undefined,
+            }
           : current,
       )
     } catch (error) {

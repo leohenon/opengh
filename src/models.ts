@@ -204,6 +204,8 @@ export type IssueTimelineEvent =
 export type IssueTimeline = {
   references: IssueReference[]
   events: IssueTimelineEvent[]
+  // Longer than opengh reads; what was read is kept.
+  truncated?: boolean
 }
 
 export type PullRequestSummary = IssueSummary & {
