@@ -77,6 +77,28 @@ describe("create pull request", () => {
     ])
   })
 
+  test("sends draft: true only for a draft pull request", async () => {
+    const bodies: Record<string, unknown>[] = []
+    const client = createGitHubClient({
+      ...transport(),
+      async mutate<T>(_path: string, _method: "POST" | "PATCH", input: Record<string, unknown>) {
+        bodies.push(input)
+        return { ...pull, draft: input.draft === true } as T
+      },
+    })
+    expect(await client.createPull(repository, { base: "main", head: "topic", title: "Title", body: "", draft: true })).toMatchObject({
+      draft: true,
+    })
+    expect(await client.createPull(repository, { base: "main", head: "topic", title: "Title", body: "" })).toMatchObject({
+      draft: false,
+    })
+    expect(bodies).toEqual([
+      { base: "main", head: "topic", title: "Title", body: "", draft: true },
+      { base: "main", head: "topic", title: "Title", body: "" },
+    ])
+    expect("draft" in bodies[1]!).toBe(false)
+  })
+
   test("passes definite rejections through and warns when creation or its response is unconfirmed", async () => {
     const failing = (respond: () => unknown) =>
       createGitHubClient({

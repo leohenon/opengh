@@ -39,6 +39,9 @@ some accumulate pages internally. GraphQL uses cursors, including nested connect
   different repository; review drafts and inline-comment attempts refuse to submit on a mismatch.
 - Reconcile uncertain writes before retrying. Keep drafts and recovery records.
   Use `GitHubRequestNotSentError` only for proven pre-dispatch failures.
+- Pull requests from a fork (`owner:branch` head) are created with
+  `maintainer_can_modify: true`, matching GitHub's web default and `gh pr create`.
+  There is no toggle yet; same-repository PRs don't send the field.
 
 ## Limits
 

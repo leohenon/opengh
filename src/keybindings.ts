@@ -365,6 +365,7 @@ export const keybindingContexts: Record<string, KeyAction[]> = {
     "navigation.activate",
     "item.diff",
   ],
+  newPullConfirmation: [...dialogs, "dialog.confirm", "navigation.previousTab", "navigation.nextTab", "dialog.nextField"],
   mergeConfirmation: [...dialogs, "dialog.confirm", "navigation.up", "navigation.down", "navigation.pageUp", "navigation.pageDown"],
   reviewMenu: [...dialogs, "navigation.up", "navigation.down", "navigation.activate"],
   reviewWriter: [

@@ -22,6 +22,10 @@ type Summary =
 
 const plural = (count: number, word: string) => `${count} ${word}${count === 1 ? "" : "s"}`
 const owner = (repository: PullRepository) => repository.nameWithOwner.split("/")[0]!
+const createChoices = [
+  { label: "Create", hint: "create", draft: false },
+  { label: "Create as draft", hint: "create draft", draft: true },
+]
 
 export type PullSides = { baseRepository: PullRepository; base: string; headRepository: PullRepository; head: string }
 
@@ -353,6 +357,7 @@ export function NewPullDialog(props: {
         idPrefix="new-pull"
         heading="New pull request"
         confirmation={`Create pull request in ${baseRepository().nameWithOwner}: ${base()} ← ${headRef() ?? ""}?`}
+        choices={createChoices}
         repositoryUrl={props.repositoryUrl}
         defaultBranch={props.defaultBranch}
         showScrollbar={props.showScrollbar}
@@ -371,10 +376,16 @@ export function NewPullDialog(props: {
         }}
         onSubmit={
           props.onCreate
-            ? (title, body) => {
+            ? (title, body, choice) => {
                 const ref = headRef()
                 if (!ref || !props.onCreate) return Promise.reject(new Error("Choose a head branch."))
-                return props.onCreate(baseRepository(), { base: base(), head: ref, title, body })
+                return props.onCreate(baseRepository(), {
+                  base: base(),
+                  head: ref,
+                  title,
+                  body,
+                  ...(createChoices[choice]?.draft ? { draft: true } : {}),
+                })
               }
             : undefined
         }

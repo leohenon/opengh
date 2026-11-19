@@ -37,7 +37,7 @@ export type IssueTemplate = { name: string; about: string; title: string; body: 
 
 export type PullRequestTemplate = { filename: string; body: string }
 
-export type NewPull = { base: string; head: string; title: string; body: string }
+export type NewPull = { base: string; head: string; title: string; body: string; draft?: boolean }
 
 export type PullRepository = { id: number; nodeId: string; nameWithOwner: string; defaultBranch: string }
 

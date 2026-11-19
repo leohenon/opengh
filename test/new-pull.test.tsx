@@ -388,6 +388,74 @@ describe("new pull request", () => {
     expect(await drafts.load({ repositoryId: githubDataFixture.repo.id, head: "next" })).toEqual({ title: "", body: "" })
   })
 
+  test("the confirm step offers Create and Create as draft, starting on Create each time", async () => {
+    const created: NewPull[] = []
+    const { view } = await render({
+      localBranch: "next",
+      width: 150,
+      create: async (pull) => {
+        created.push(pull)
+        return { number: 7 } as PullRequestDetail
+      },
+    })
+    await open(view)
+    const confirm = async (key?: () => void) => {
+      key?.()
+      await view.flush()
+    }
+    await confirm(() => view.mockInput.pressKey("s", { ctrl: true }))
+    expect(frame(view)).toContain("› Create    Create as draft")
+    expect(statusLine(view)).toContain("←/→ choose · enter create · esc back")
+    await confirm(() => view.mockInput.pressArrow("right"))
+    expect(frame(view)).toContain("  Create  › Create as draft")
+    expect(statusLine(view)).toContain("enter create draft")
+    await confirm(() => view.mockInput.pressArrow("left"))
+    expect(frame(view)).toContain("› Create    Create as draft")
+    await confirm(() => view.mockInput.pressTab())
+    expect(frame(view)).toContain("› Create as draft")
+    await confirm(() => view.mockInput.pressTab())
+    expect(frame(view)).toContain("› Create    Create as draft")
+    await confirm(() => view.mockInput.pressArrow("right"))
+    view.mockInput.pressEscape()
+    await settle(view)
+    expect(frame(view)).not.toContain("Create as draft")
+    expect(box(view)).toBeDefined()
+    await confirm(() => view.mockInput.pressKey("s", { ctrl: true }))
+    expect(frame(view)).toContain("› Create    Create as draft")
+    view.mockInput.pressArrow("right")
+    view.mockInput.pressEnter()
+    await settle(view)
+    expect(created).toEqual([{ base: "main", head: "next", title: "Next", body: "", draft: true }])
+    expect(box(view)).toBeUndefined()
+  })
+
+  test("clicking a choice creates with it", async () => {
+    for (const [label, draft] of [
+      ["Create as draft", true],
+      ["Create", false],
+    ] as const) {
+      const created: NewPull[] = []
+      const { view } = await render({
+        localBranch: "next",
+        width: 150,
+        create: async (pull) => {
+          created.push(pull)
+          return { number: 7 } as PullRequestDetail
+        },
+      })
+      await open(view)
+      view.mockInput.pressKey("s", { ctrl: true })
+      await view.flush()
+      const row = lines(view).findIndex((line) => line.includes("Create as draft"))
+      const column = label === "Create" ? lines(view)[row]!.indexOf("› Create") + 2 : lines(view)[row]!.indexOf(label)
+      await view.mockMouse.click(column, row)
+      await settle(view)
+      expect(created).toEqual([{ base: "main", head: "next", title: "Next", body: "", ...(draft ? { draft: true } : {}) }])
+      expect("draft" in created[0]!).toBe(draft)
+      view.renderer.destroy()
+    }
+  })
+
   test("ctrl+s does nothing when there is nothing to compare or a pull request already exists", async () => {
     for (const compare of [
       async () => comparison(0),
@@ -783,6 +851,23 @@ describe("new pull request", () => {
         } else expect(frame(view)).not.toContain("Pull request created")
         view.renderer.destroy()
       }
+    })
+
+    test("says when the pull request created in another repository is a draft", async () => {
+      const { view } = await render({
+        localBranch: "next",
+        width: 150,
+        repositories: { bases: [upstream, browsed], heads: [browsed] },
+        create: async (pull) => ({ number: 124, draft: pull.draft === true }) as PullRequestDetail,
+      })
+      await open(view)
+      view.mockInput.pressKey("s", { ctrl: true })
+      await view.flush()
+      view.mockInput.pressArrow("right")
+      view.mockInput.pressEnter()
+      await settle(view)
+      expect(frame(view)).toContain("Draft pull request created")
+      expect(frame(view)).toContain("#124")
     })
 
     test("skips the repository step when a side has only one repository", async () => {

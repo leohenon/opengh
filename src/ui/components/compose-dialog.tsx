@@ -1,6 +1,6 @@
 import { TextAttributes, type InputRenderable, type ScrollBoxRenderable, type TextareaRenderable } from "@opentui/core"
 import { useRenderer, useTerminalDimensions } from "@opentui/solid"
-import { createEffect, createSignal, on, onCleanup, onMount, Show, type JSX } from "solid-js"
+import { createEffect, createSignal, For, on, onCleanup, onMount, Show, type JSX } from "solid-js"
 import type { ComposeDraft } from "../../compose-drafts"
 import type { HintEntry } from "../../keybindings"
 import { editMarkdownExternally } from "../external-editor"
@@ -59,6 +59,7 @@ export function ComposeDialog(props: {
   idPrefix: string
   heading: string
   confirmation: string
+  choices?: readonly { label: string; hint: string }[]
   repositoryUrl: string
   defaultBranch?: string
   showScrollbar: boolean
@@ -71,7 +72,7 @@ export function ComposeDialog(props: {
   suspended?: boolean
   onReady?(controls: ComposeControls): void
   onDraftChange(draft: ComposeDraft): void
-  onSubmit?(title: string, body: string): Promise<unknown>
+  onSubmit?(title: string, body: string, choice: number): Promise<unknown>
   onClose(): void
   onHintChange(hint: string | undefined): void
 }) {
@@ -91,6 +92,7 @@ export function ComposeDialog(props: {
   const [title, setTitle] = createSignal(props.draft.title)
   const [body, setBody] = createSignal(props.draft.body)
   const [confirming, setConfirming] = createSignal(false)
+  const [choice, setChoice] = createSignal(0)
   const [pending, setPending] = createSignal(false)
   const [error, setError] = createSignal<string>()
   const [preview, setPreview] = createSignal(false)
@@ -140,7 +142,13 @@ export function ComposeDialog(props: {
   }
   const canSubmit = () => !!props.onSubmit && !props.blocked && !!title().trim() && !pending()
   const requestSubmit = () => {
-    if (canSubmit()) setConfirming(true)
+    if (!canSubmit()) return
+    setChoice(0)
+    setConfirming(true)
+  }
+  const moveChoice = (delta: number, wrap = false) => {
+    const count = props.choices?.length ?? 1
+    setChoice((current) => (wrap ? (current + delta + count) % count : Math.max(0, Math.min(count - 1, current + delta))))
   }
   const submit = async () => {
     if (!canSubmit() || !props.onSubmit) return
@@ -148,7 +156,7 @@ export function ComposeDialog(props: {
     setPending(true)
     setError(undefined)
     try {
-      await props.onSubmit(title(), body())
+      await props.onSubmit(title(), body(), choice())
       if (!disposed) props.onClose()
     } catch (error) {
       if (!disposed) setError(error instanceof Error ? error.message : String(error))
@@ -163,7 +171,13 @@ export function ComposeDialog(props: {
         : pending()
           ? "Creating…"
           : confirming()
-            ? keys.hints(["dialog.confirm", "confirm"], ["dialog.close", "back"])
+            ? props.choices
+              ? keys.hints(
+                  [["navigation.previousTab", "navigation.nextTab"], "choose"],
+                  ["dialog.confirm", props.choices[choice()]?.hint ?? "confirm"],
+                  ["dialog.close", "back"],
+                )
+              : keys.hints(["dialog.confirm", "confirm"], ["dialog.close", "back"])
             : keys.hints(
                 ["dialog.submit", "create"],
                 ...(active("top") && props.top ? [...props.top.hints(), ["navigation.down", "title"] as const] : []),
@@ -183,7 +197,13 @@ export function ComposeDialog(props: {
   })
   useKeyActions({}, { when: () => pending() || externalEditing(), priority: 200, modal: true })
   useKeyActions(
-    { "dialog.close": () => setConfirming(false), "dialog.confirm": () => void submit() },
+    {
+      "dialog.close": () => setConfirming(false),
+      "dialog.confirm": () => void submit(),
+      "navigation.previousTab": () => moveChoice(-1),
+      "navigation.nextTab": () => moveChoice(1),
+      "dialog.nextField": () => moveChoice(1, true),
+    },
     { when: () => confirming() && !pending(), priority: 150, modal: true },
   )
   useKeyActions(
@@ -412,10 +432,35 @@ export function ComposeDialog(props: {
               {props.confirmation}
             </text>
             <box flexGrow={1} minHeight={0} />
-            <box height={1} flexShrink={0}>
-              <Action id={`${props.idPrefix}-confirm`} disabled={!canSubmit()} onActivate={() => void submit()}>
-                Confirm
-              </Action>
+            <box height={1} flexShrink={0} flexDirection="row">
+              <Show
+                when={props.choices}
+                fallback={
+                  <Action id={`${props.idPrefix}-confirm`} disabled={!canSubmit()} onActivate={() => void submit()}>
+                    Confirm
+                  </Action>
+                }
+              >
+                {(choices) => (
+                  <For each={choices()}>
+                    {(item, index) => (
+                      <box height={1} flexShrink={0} marginLeft={index() ? 2 : 0}>
+                        <Action
+                          id={`${props.idPrefix}-confirm-${index()}`}
+                          disabled={!canSubmit()}
+                          fg={choice() === index() ? colors.blue : colors.text}
+                          onActivate={() => {
+                            setChoice(index())
+                            void submit()
+                          }}
+                        >
+                          {`${choice() === index() ? "›" : " "} ${item.label}`}
+                        </Action>
+                      </box>
+                    )}
+                  </For>
+                )}
+              </Show>
             </box>
           </box>
         </Popup>

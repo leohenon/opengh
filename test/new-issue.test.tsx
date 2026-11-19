@@ -207,6 +207,8 @@ describe("new issue", () => {
     view.mockInput.pressKey("s", { ctrl: true })
     await view.flush()
     expect(view.captureCharFrame()).toContain("Create issue in anomalyco/opentui?")
+    expect(view.captureCharFrame()).toContain("Confirm")
+    expect(view.captureCharFrame()).not.toContain("Create as draft")
     view.mockInput.pressEscape()
     await Bun.sleep(30)
     await view.flush()

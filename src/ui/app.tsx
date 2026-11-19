@@ -1837,7 +1837,7 @@ function AppContent(props: AppProps) {
     if (repository.id !== origin && !disposed && !renderer.isDestroyed)
       setToast({
         id: ++toastId,
-        title: "Pull request created",
+        title: created.draft ? "Draft pull request created" : "Pull request created",
         message: `${repository.nameWithOwner}#${created.number}`,
         duration: 2000,
         tone: "success",

@@ -1735,13 +1735,14 @@ export function createGitHubClient(transport: GitHubTransport, commentStorage?: 
     if (!pull.title.trim()) throw new Error("Pull request title is required.")
     let created: PullRequestDetail
     try {
-      const { base, head, title, body } = pull
+      const { base, head, title, body, draft } = pull
       created = pullDetail(
         await transport.mutate<PullDetailResponse>(`${repositoryPath(repository)}/pulls`, "POST", {
           base,
           head,
           title,
           body,
+          ...(draft ? { draft: true } : {}),
           ...(head.includes(":") ? { maintainer_can_modify: true } : {}),
         }),
       )
