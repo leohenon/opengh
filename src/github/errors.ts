@@ -38,6 +38,13 @@ export class GitHubApiError extends Error {
   }
 }
 
+export function isDefiniteRejection(error: unknown) {
+  return (
+    error instanceof GitHubRequestNotSentError ||
+    (error instanceof GitHubApiError && error.status !== undefined && [400, 401, 403, 404, 409, 410, 422, 429].includes(error.status))
+  )
+}
+
 function httpStatus(message: string) {
   const match = message.match(/HTTP\s+(\d{3})/i)
   return match ? Number(match[1]) : undefined

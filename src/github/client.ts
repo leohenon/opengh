@@ -32,11 +32,12 @@ import { pullMergeBlocker } from "../pull-merge"
 import type { AssigneeChanges } from "../assignee-changes"
 import { repositoryName, repositoryPath, repositorySelector, type RepositoryReference } from "./repository-target"
 import { createGitHubDocuments } from "./documents"
+import { createGitHubIssueTemplates } from "./issue-templates"
 import { createIssueComments, issueComment, type IssueCommentResponse, type IssueCommentStorage } from "./issue-comments"
 import { createGitHubPullContext } from "./pull-context"
 import { createGitHubReactions, parseReactions, parseReactionState, reactionFields } from "./reactions"
 import { parseTextReferences } from "./text-references"
-import { githubTransport, type GitHubTransport, type RequestOptions } from "./transport"
+import { githubTransport, isDefiniteRejection, type GitHubTransport, type RequestOptions } from "./transport"
 import { createRequestBudget, isRequestInterrupted as interrupted, MAX_AUTOMATIC_PAGES, RequestBudgetLimitError } from "./request-budget"
 
 function detailLimit() {
@@ -454,6 +455,7 @@ function commitSummary(item: CommitResponse): CommitSummary {
 // Map endpoints into domain models here; transport owns execution/errors, the session owns async state.
 export function createGitHubClient(transport: GitHubTransport, commentStorage?: IssueCommentStorage) {
   const { documents, document } = createGitHubDocuments(transport)
+  const issueTemplates = createGitHubIssueTemplates(transport)
   const { pullContext, pullMergeability } = createGitHubPullContext(transport)
   const { addReaction, removeReaction, bodyReactions, commentReactions } = createGitHubReactions(transport)
   const metadata = async (repository: string, options?: RequestOptions): Promise<Repo> => {
@@ -884,6 +886,19 @@ export function createGitHubClient(transport: GitHubTransport, commentStorage?: 
   }
 
   const createIssueComment = createIssueComments(transport, commentStorage)
+
+  const createIssue = async (repository: Repo, title: string, body: string): Promise<IssueDetail> => {
+    if (!transport.mutate) throw new Error("GitHub transport does not support mutations.")
+    if (!title.trim()) throw new Error("Issue title is required.")
+    let created: IssueDetail
+    try {
+      created = issueDetail(await transport.mutate<IssueDetailResponse>(repositoryIssues(repository), "POST", { title, body }))
+    } catch (error) {
+      if (isDefiniteRejection(error)) throw error
+      throw new Error("Couldn't confirm the issue was created. Check the issue list before trying again.")
+    }
+    return withIssuePermissions(repository, created.number, created)
+  }
 
   const updateIssueState = async (
     repository: Repo,
@@ -1837,6 +1852,8 @@ export function createGitHubClient(transport: GitHubTransport, commentStorage?: 
     issue,
     issueComments,
     createIssueComment,
+    createIssue,
+    issueTemplates,
     addReaction,
     removeReaction,
     updateIssueState,
@@ -1876,6 +1893,8 @@ export const loadGitHubIssueKind = client.issueKind
 export const loadGitHubIssue = client.issue
 export const loadGitHubIssueComments = client.issueComments
 export const createGitHubIssueComment = client.createIssueComment
+export const createGitHubIssue = client.createIssue
+export const loadGitHubIssueTemplates = client.issueTemplates
 export const updateGitHubIssueState = client.updateIssueState
 export const updateGitHubPullState = client.updatePullState
 export const updateGitHubPullDraft = client.updatePullDraft

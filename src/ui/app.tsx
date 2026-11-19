@@ -25,6 +25,8 @@ import type {
   IssueActionKind,
   IssueActionParent,
   IssueActionResult,
+  IssueDetail,
+  IssueTemplate,
   Paginated,
   ListState,
   PullMergeDraft,
@@ -74,6 +76,7 @@ import { IssueReferencesPicker } from "./components/issue-references-picker"
 import type { InlineCommentInput, PostedInlineComment, PullReviewSession, ReviewAnchor, ReviewEligibility } from "../review-types"
 import { InlineCommentUncertainError } from "../inline-comments"
 import { createInlineDrafts, inlineDraftKey, type InlineDrafts } from "../inline-drafts"
+import { createNewIssueDrafts, type NewIssueDraft, type NewIssueDrafts } from "../new-issue-drafts"
 import { InlineCommentConfirmDialog, InlineCommentRetryDialog } from "./components/inline-comment-retry"
 import { PullReviewDialog, ReviewCommentDialog } from "./components/pull-review-dialog"
 import { IssueActionDialog, IssueActionsMenu } from "./components/issue-actions"
@@ -81,6 +84,8 @@ import { IssueAssigneesPicker } from "./components/issue-assignees-picker"
 import type { ActivityComment } from "./components/activity-comment-composer"
 import { PullMergeDialog } from "./components/pull-merge-dialog"
 import { PullDraftDialog } from "./components/pull-draft-dialog"
+import { NewIssueDialog } from "./components/new-issue-dialog"
+import { NewIssueTemplatePicker } from "./components/new-issue-template-picker"
 import { pullMergeBlocker } from "../pull-merge"
 import { Help } from "./components/help"
 import { Settings } from "./components/settings"
@@ -130,6 +135,8 @@ type Overlay =
   | "command"
   | "switch-repo"
   | "diff-viewer-setup"
+  | "new-issue"
+  | "new-issue-templates"
 type ToastState = { id: number; title: string; message: string; duration?: number; tone?: "error" | "success" | "info" }
 type ConversationCommentTarget = { repository: string; number: number; parent?: IssueActionParent }
 const conversationCommentKey = (target: ConversationCommentTarget) =>
@@ -207,10 +214,13 @@ export type AppProps = {
   onSubmitIssueAction?: (number: number, kind: IssueActionKind, parent?: IssueActionParent) => Promise<IssueActionResult>
   reviews?: PullReviewSession
   inlineDrafts?: InlineDrafts
+  newIssueDrafts?: NewIssueDrafts
   onPostInlineComment?: (input: InlineCommentInput, options?: { retryUnconfirmed?: boolean }) => Promise<PostedInlineComment>
   onMergePull?: (number: number, method: PullMergeMethod, expectedHeadSha: string, message?: PullMergeMessage) => Promise<PullRequestDetail>
   onLoadPullMergeMessage?: (number: number, expectedHeadSha: string) => Promise<PullMergeDraft>
   onUpdatePullDraft?: (number: number, draft: boolean) => Promise<PullRequestDetail>
+  onCreateIssue?: (title: string, body: string) => Promise<IssueDetail>
+  onLoadIssueTemplates?: () => Promise<IssueTemplate[]>
   pullDetail?: PullDetailState
   onLoadPull?: (number: number, options?: { force?: boolean }) => Promise<void>
   onLoadMorePullComments?: () => Promise<void>
@@ -1637,7 +1647,9 @@ function AppContent(props: AppProps) {
       overlay() === "pull-review" ||
       overlay() === "review-comment" ||
       overlay() === "inline-confirm" ||
-      overlay() === "inline-retry"
+      overlay() === "inline-retry" ||
+      overlay() === "new-issue" ||
+      overlay() === "new-issue-templates"
     ) {
       setInlineRetry()
       setInlineConfirm()
@@ -1757,6 +1769,41 @@ function AppContent(props: AppProps) {
     if (overlay() !== undefined || !props.onWorkFindChange || !workFindKind()) return false
     setFindOpen(true)
   }
+  const canOpenNewIssue = () => page() === "issues" && !diffTarget() && !activeIssueNumber()
+  const newIssueDrafts = props.newIssueDrafts ?? createNewIssueDrafts({ storage: false })
+  const [newIssueDraft, setNewIssueDraft] = createSignal<NewIssueDraft>()
+  const [newIssueTemplates, setNewIssueTemplates] = createSignal<IssueTemplate[]>()
+  const showNewIssue = (draft: NewIssueDraft) => {
+    setNewIssueDraft(draft)
+    setOverlay("new-issue")
+  }
+  const openNewIssue = () => {
+    if (overlay() !== undefined || !canOpenNewIssue()) return false
+    const repositoryId = data().repo.id
+    const current = () => !disposed && canOpenNewIssue() && data().repo.id === repositoryId
+    void newIssueDrafts.load(repositoryId).then(async (draft) => {
+      if (!current() || overlay() !== undefined) return
+      if (draft.title || draft.body || !props.onLoadIssueTemplates) return showNewIssue(draft)
+      setNewIssueTemplates(undefined)
+      setOverlay("new-issue-templates")
+      const templates = await props.onLoadIssueTemplates().catch(() => [])
+      if (!current() || overlay() !== "new-issue-templates") return
+      if (templates.length) setNewIssueTemplates(templates)
+      else showNewIssue(draft)
+    })
+  }
+  const chooseNewIssueTemplate = (template: IssueTemplate | undefined) => {
+    const draft = { title: template?.title ?? "", body: template?.body ?? "" }
+    if (template) newIssueDrafts.set(data().repo.id, draft)
+    showNewIssue(draft)
+  }
+  const createIssue = async (title: string, body: string) => {
+    const repositoryId = data().repo.id
+    const issue = await props.onCreateIssue!(title, body)
+    newIssueDrafts.set(repositoryId, { title: "", body: "" })
+    return issue
+  }
+  const newIssueContextItems = (): ContextMenuItem[] => (canOpenNewIssue() ? [{ label: "New issue", run: openNewIssue }] : [])
   const activeWorkFindKind = () => {
     const kind = workFindKind()
     return kind && data().workFinds?.[kind] ? kind : undefined
@@ -1971,7 +2018,7 @@ function AppContent(props: AppProps) {
         disabled: !props.onOpenInBrowser,
       },
     )
-    items.push(...findContextItems())
+    items.push(...newIssueContextItems(), ...findContextItems())
     openContextMenu(position, items, valid)
   }
   const openPageContext = (position: MousePosition) => {
@@ -2017,6 +2064,7 @@ function AppContent(props: AppProps) {
         })
     }
     items.push(
+      ...newIssueContextItems(),
       ...findContextItems(),
       ...commentContextItems(),
       ...issueActionsContextItems(),
@@ -2053,7 +2101,9 @@ function AppContent(props: AppProps) {
       overlay() === "pull-review" ||
       overlay() === "review-comment" ||
       overlay() === "inline-confirm" ||
-      overlay() === "inline-retry"
+      overlay() === "inline-retry" ||
+      overlay() === "new-issue" ||
+      overlay() === "new-issue-templates"
     )
       return issueActionHint()
     if (overlay() === "issue-actions") return hint(open, close)
@@ -2183,6 +2233,7 @@ function AppContent(props: AppProps) {
         ...list(hasItems),
         ["work.toggleState", "open/closed"],
         ...(props.onWorkFindChange ? [["work.find", "find"] as const] : []),
+        ...(page() === "issues" ? [["work.newIssue", "new issue"] as const] : []),
         ...(activeWorkFindKind() ? [["navigation.back", "clear find"] as const] : []),
         ...(page() === "pulls" && hasItems ? [diff] : []),
         ...refresh,
@@ -2375,6 +2426,7 @@ function AppContent(props: AppProps) {
         if (branches.value) setOverlay("branch-picker")
       },
       "work.find": openWorkFind,
+      "work.newIssue": openNewIssue,
       "work.toggleState": () => {
         if (diffTarget() || activeIssueNumber() || activePullNumber()) return false
         if (page() === "issues") setIssueState((value) => (value === "open" ? "closed" : "open"))
@@ -3001,6 +3053,32 @@ function AppContent(props: AppProps) {
                             disabled={!draftChangeAvailable()}
                             onSubmit={() => void submitDraftChange()}
                             onClose={closeDraftChange}
+                            onHintChange={setIssueActionHint}
+                          />
+                        )}
+                      </Show>
+                      <Show when={overlay() === "new-issue-templates"}>
+                        <NewIssueTemplatePicker
+                          repository={data().repo.nameWithOwner}
+                          templates={newIssueTemplates()}
+                          onSelect={chooseNewIssueTemplate}
+                          onClose={() => setOverlay()}
+                          onHintChange={setIssueActionHint}
+                        />
+                      </Show>
+                      <Show when={overlay() === "new-issue" ? newIssueDraft() : undefined} keyed>
+                        {(draft) => (
+                          <NewIssueDialog
+                            repository={data().repo.nameWithOwner}
+                            repositoryUrl={data().repo.url}
+                            defaultBranch={data().repo.defaultBranch}
+                            showScrollbar={config().showScrollbars}
+                            draft={draft}
+                            draftError={newIssueDrafts.error()}
+                            showStatusBarHints={config().showStatusBarHints}
+                            onDraftChange={(next) => newIssueDrafts.set(data().repo.id, next)}
+                            onSubmit={props.onCreateIssue ? createIssue : undefined}
+                            onClose={() => setOverlay()}
                             onHintChange={setIssueActionHint}
                           />
                         )}

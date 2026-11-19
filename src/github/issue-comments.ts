@@ -10,7 +10,7 @@ import { withIssueCommentLock } from "./issue-comment-lock"
 import { parseReactions } from "./reactions"
 import { repositoryPath, type RepositoryTarget } from "./repository-target"
 import { createRequestBudget, MAX_AUTOMATIC_PAGES } from "./request-budget"
-import { GitHubApiError, GitHubRequestNotSentError, type GitHubTransport, type RequestOptions } from "./transport"
+import { GitHubRequestNotSentError, isDefiniteRejection, type GitHubTransport, type RequestOptions } from "./transport"
 
 export type IssueCommentResponse = {
   id: number
@@ -476,10 +476,7 @@ export function createIssueComments(transport: GitHubTransport, suppliedStorage?
         }
         response = await transport.mutate(path, "POST", { body }, options)
       } catch (error) {
-        if (
-          error instanceof GitHubRequestNotSentError ||
-          (error instanceof GitHubApiError && error.status !== undefined && [400, 401, 403, 404, 409, 410, 422, 429].includes(error.status))
-        ) {
+        if (isDefiniteRejection(error)) {
           await clearRejected(attempt)
           throw error
         }

@@ -4,7 +4,7 @@ import { GitHubRequestScheduler, githubRequests } from "./request-scheduler"
 import { ResponseLimitError, type RequestBudget } from "./request-budget"
 import { githubWrites, type GitHubWrites } from "./writes"
 
-export { GitHubApiError, GitHubRequestNotSentError } from "./errors"
+export { GitHubApiError, GitHubRequestNotSentError, isDefiniteRejection } from "./errors"
 
 export type RequestOptions = { signal?: AbortSignal; maxBytes?: number; limitMessage?: string; jq?: string; budget?: RequestBudget }
 

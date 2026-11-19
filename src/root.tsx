@@ -14,6 +14,7 @@ import { openUrl } from "./open-url"
 import { loadGitHubIssueKind } from "./github/client"
 import { createInlineComments } from "./inline-comments"
 import { createInlineDrafts, type InlineDrafts } from "./inline-drafts"
+import { createNewIssueDrafts, type NewIssueDrafts } from "./new-issue-drafts"
 import { githubWrites, type GitHubWrites } from "./github/writes"
 import { createPullReviewSession } from "./pull-review-session"
 import type { PullReviewSession } from "./review-types"
@@ -47,6 +48,7 @@ export type RootServices = {
   createPullReviewSession(): PullReviewSession
   createInlineComments: typeof createInlineComments
   createInlineDrafts(): InlineDrafts
+  createNewIssueDrafts(): NewIssueDrafts
   githubWrites: GitHubWrites
   openGitHub(repository: string, target?: string | number, view?: "diff"): Promise<void>
   openUrl(url: string): Promise<void>
@@ -68,6 +70,7 @@ const defaultServices: RootServices = {
   createPullReviewSession,
   createInlineComments,
   createInlineDrafts: () => createInlineDrafts(),
+  createNewIssueDrafts: () => createNewIssueDrafts(),
   githubWrites,
   openGitHub,
   openUrl,
@@ -156,9 +159,10 @@ export function Root(props: {
   const inlineComments = services.createInlineComments()
   // Owned here to survive repository switches, which remount App.
   const inlineDrafts = services.createInlineDrafts()
+  const newIssueDrafts = services.createNewIssueDrafts()
   // Also runs when a signal destroys the renderer without quit().
   onCleanup(() => {
-    props.onShutdownWork?.(Promise.allSettled([flushRepositoryTabs(), reviews.flush(), inlineDrafts.flush()]))
+    props.onShutdownWork?.(Promise.allSettled([flushRepositoryTabs(), reviews.flush(), inlineDrafts.flush(), newIssueDrafts.flush()]))
   })
   const [dismissedInlineDraftError, setDismissedInlineDraftError] = createSignal<string>()
   createEffect(() => {
@@ -221,12 +225,19 @@ export function Root(props: {
           message: `${error instanceof Error ? error.message : "Could not save an inline comment draft"}. The draft is kept in memory; fix local storage and quit again to retry.`,
         }
       })
-    void Promise.all([tabs, flushReview(), flushInline()])
+    const flushNewIssue = () =>
+      newIssueDrafts.flush().catch((error) => {
+        throw {
+          title: "Issue draft not saved — quit cancelled",
+          message: `${error instanceof Error ? error.message : "Could not save the issue draft"}. The draft is kept in memory; fix local storage and quit again to retry.`,
+        }
+      })
+    void Promise.all([tabs, flushReview(), flushInline(), flushNewIssue()])
       .then(waitForWrites)
       .then(() => {
         // Tab saves can outlast the first drain, a review may first open while quitting,
         // and finished writes clear their drafts. Always drain again before the final flush.
-        return Promise.all([flushReview(), flushInline()])
+        return Promise.all([flushReview(), flushInline(), flushNewIssue()])
       })
       .then(finishQuit)
       .catch((error: { title: string; message: string }) => {
@@ -586,9 +597,12 @@ export function Root(props: {
                                 onSubmitIssueAction={tracked(session.submitIssueAction)}
                                 reviews={reviews}
                                 inlineDrafts={inlineDrafts}
+                                newIssueDrafts={newIssueDrafts}
                                 onPostInlineComment={tracked(inlineComments.post)}
                                 onMergePull={tracked(session.mergePull)}
                                 onUpdatePullDraft={tracked(session.updatePullDraft)}
+                                onCreateIssue={tracked(session.createIssue)}
+                                onLoadIssueTemplates={session.loadIssueTemplates}
                                 onLoadPullMergeMessage={session.loadPullMergeMessage}
                                 pullDetail={session.pullDetail()}
                                 onLoadPull={session.loadPull}

@@ -1089,6 +1089,64 @@ describe("repository session", () => {
     expect(session.issueDetail()).toBeUndefined()
   })
 
+  test("creates issues in the loaded repository, shows them in the open list and refreshes it", async () => {
+    const calls: Array<[number, string, string]> = []
+    const created = { ...issueDetailFixture, number: 999, title: "Crash", state: "open" as const, createdAt: "2026-07-01T00:00:00Z" }
+    let remote = structuredClone(githubDataFixture.issues.open.value!.items)
+    let listReads = 0
+    let countReads = 0
+    const session = createRepositorySession(
+      loaders({
+        createIssue: async (repository, title, body) => {
+          calls.push([repository.id!, title, body])
+          return created
+        },
+        issues: async (_repository, state) => {
+          if (state === "open") listReads++
+          return { items: state === "open" ? remote : structuredClone(githubDataFixture.issues.closed.value!.items), hasMore: false }
+        },
+        workCounts: async () => {
+          countReads++
+          return { issues: 61, pulls: 24 }
+        },
+      }),
+    )
+    await expect(session.createIssue("Crash", "Steps")).rejects.toThrow("Wait for the repository to load")
+    await session.load("anomalyco/opentui")
+    const [reads, counts] = [listReads, countReads]
+    remote = [{ number: 999, title: "Crash", author: created.author, createdAt: created.createdAt, state: "open" }, ...remote]
+    expect(await session.createIssue("Crash", "Steps")).toBe(created)
+    expect(calls).toEqual([[ready(session).data.repo.id!, "Crash", "Steps"]])
+    expect(ready(session).data.issues.open.value?.items[0]).toMatchObject({ number: 999, title: "Crash" })
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(listReads).toBe(reads + 1)
+    expect(countReads).toBe(counts + 1)
+    expect(ready(session).data.issues.open.status).toBe("ready")
+    expect(ready(session).data.issues.open.value?.items.filter((item) => item.number === 999)).toHaveLength(1)
+  })
+
+  test("loads issue templates once per repository and retries after a failure", async () => {
+    const template = { name: "Bug", about: "", title: "", body: "" }
+    let loads = 0
+    let failing = true
+    const session = createRepositorySession(
+      loaders({
+        issueTemplates: async () => {
+          loads++
+          if (failing) throw new Error("Forbidden")
+          return [template]
+        },
+      }),
+    )
+    expect(await session.loadIssueTemplates()).toEqual([])
+    await session.load("anomalyco/opentui")
+    await expect(session.loadIssueTemplates()).rejects.toThrow("Forbidden")
+    failing = false
+    expect(await session.loadIssueTemplates()).toEqual([template])
+    expect(await session.loadIssueTemplates()).toEqual([template])
+    expect(loads).toBe(2)
+  })
+
   test("confirmed comments survive in-flight pagination and refreshes without duplicates", async () => {
     const first = issueCommentsFixture[0]!
     const posted = { ...first, id: 9000, body: "A new comment", createdAt: "2026-07-01T00:00:00Z" }

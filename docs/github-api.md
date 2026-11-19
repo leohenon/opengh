@@ -60,6 +60,7 @@ some accumulate pages internally. GraphQL uses cursors, including nested connect
 | `src/github/transport.ts`, `process.ts`, `errors.ts`                                  | Transport, authentication, validation, cancellation, errors.                                           |
 | `src/github/client.ts`                                                                | Main API operations and domain mapping.                                                                |
 | `src/github/documents.ts`, `diff.ts`, `pull-context.ts`, `reactions.ts`, `reviews.ts` | Documents, diffs, PR context, reactions, review submission.                                            |
+| `src/github/issue-templates.ts`                                                       | Issue templates and issue forms, converted to a title and Markdown description.                        |
 | `src/github/repository.ts`                                                            | Discovery and recent history.                                                                          |
 | `src/github/releases.ts`                                                              | Latest stable release validation for `opengh update`; the bundled installer downloads public archives. |
 | `src/repository-session.ts`                                                           | Resource state, caching, refresh, pagination, actions.                                                 |

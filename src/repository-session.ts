@@ -26,6 +26,8 @@ import {
   loadGitHubRuns,
   loadGitHubRun,
   loadGitHubRunJobs,
+  createGitHubIssue,
+  loadGitHubIssueTemplates,
   createGitHubIssueComment,
   updateGitHubIssueState,
   updateGitHubPullState,
@@ -62,6 +64,7 @@ import type {
   IssueSummary,
   IssueDetail,
   IssueComment,
+  IssueTemplate,
   IssueReference,
   IssueActionKind,
   IssueActionParent,
@@ -129,6 +132,8 @@ export type RepositoryLoaders = {
   issue(repository: RepositoryTarget, number: number, options?: RequestOptions): Promise<IssueDetail>
   issueComments(repository: RepositoryTarget, number: number, page?: number, options?: RequestOptions): Promise<Page<IssueComment>>
   issueReferences(repository: RepositoryTarget, number: number, options?: RequestOptions): Promise<IssueReference[]>
+  createIssue?(repository: Repo, title: string, body: string): Promise<IssueDetail>
+  issueTemplates?(repository: Repo): Promise<IssueTemplate[]>
   createIssueComment?(
     repository: Repo,
     number: number,
@@ -193,6 +198,8 @@ export type RepositorySession = {
   pullDetail: Accessor<PullDetailState | undefined>
   loadPull(number: number, options?: { force?: boolean }): Promise<void>
   updatePullDraft(number: number, draft: boolean): Promise<PullRequestDetail>
+  createIssue(title: string, body: string): Promise<IssueDetail>
+  loadIssueTemplates(): Promise<IssueTemplate[]>
   loadPullMergeMessage(number: number, expectedHeadSha: string): Promise<PullMergeDraft>
   mergePull(number: number, method: PullMergeMethod, expectedHeadSha: string, message?: PullMergeMessage): Promise<PullRequestDetail>
   loadMorePullComments(): Promise<void>
@@ -252,6 +259,8 @@ const defaultLoaders: RepositoryLoaders = {
   issue: loadGitHubIssue,
   issueComments: loadGitHubIssueComments,
   issueReferences: loadGitHubIssueReferences,
+  createIssue: createGitHubIssue,
+  issueTemplates: loadGitHubIssueTemplates,
   createIssueComment: createGitHubIssueComment,
   updateIssueState: updateGitHubIssueState,
   updatePullState: updateGitHubPullState,
@@ -2714,6 +2723,48 @@ export function createRepositorySession(
     return updated
   }
 
+  const createIssue = async (title: string, body: string): Promise<IssueDetail> => {
+    const current = state()
+    if (current.status !== "ready") throw new Error("Wait for the repository to load before creating an issue.")
+    if (!loaders.createIssue) throw new Error("Issue creation is unavailable.")
+    const repository = current.repository
+    const created = await loaders.createIssue(current.data.repo, title, body)
+    setState((latest) => {
+      if (latest.status !== "ready" || latest.repository !== repository) return latest
+      const open = latest.data.issues.open.value
+      if (!open || latest.data.workFinds?.issues || open.items.some((item) => item.number === created.number)) return latest
+      const summary = {
+        number: created.number,
+        title: created.title,
+        author: created.author,
+        createdAt: created.createdAt,
+        state: created.state,
+      }
+      const items = [summary, ...open.items]
+      return { ...latest, data: { ...latest.data, issues: { ...latest.data.issues, open: loadingResource({ ...open, items }) } } }
+    })
+    const latest = state()
+    if (latest.status === "ready" && latest.repository === repository) {
+      const request = repositoryGeneration
+      void fetchIssues(repository, "open", request, latest.data.issues.open.value?.page)
+      void fetchWorkCounts(repository, request)
+    }
+    return created
+  }
+
+  const issueTemplateCache = new Map<number, Promise<IssueTemplate[]>>()
+  const loadIssueTemplates = (): Promise<IssueTemplate[]> => {
+    const current = state()
+    if (current.status !== "ready" || !loaders.issueTemplates) return Promise.resolve([])
+    const repo = current.data.repo
+    const cached = issueTemplateCache.get(repo.id)
+    if (cached) return cached
+    const loading = loaders.issueTemplates(repo)
+    issueTemplateCache.set(repo.id, loading)
+    loading.catch(() => issueTemplateCache.delete(repo.id))
+    return loading
+  }
+
   const updatePullDraft = async (number: number, draft: boolean): Promise<PullRequestDetail> => {
     const current = state()
     const detail = pullDetail()
@@ -3964,6 +4015,8 @@ export function createRepositorySession(
     loadPull,
     mergePull,
     updatePullDraft,
+    createIssue,
+    loadIssueTemplates,
     loadPullMergeMessage,
     loadMorePullComments,
     retryPullReferences,

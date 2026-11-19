@@ -111,6 +111,7 @@ export function Help(props: {
           entry("navigation.activate", "open issue"),
           entry("work.toggleState", "toggle open/closed"),
           entry("work.find", "find issues / PRs on GitHub"),
+          entry("work.newIssue", "new issue"),
           entry("item.open", "open on GitHub"),
           entry("item.copy", "copy issue URL"),
         ]

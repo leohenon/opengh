@@ -654,6 +654,67 @@ describe("GitHub client", () => {
     })
   })
 
+  test("creates issues with raw title and body and rejects blank titles", async () => {
+    const body = "  Markdown\r\n\n`$(not a command)`\n"
+    const calls: { path: string; method: string; body: Record<string, unknown> }[] = []
+    const client = createGitHubClient({
+      ...transport(),
+      async mutate<T>(path: string, method: "POST" | "PATCH", input: Record<string, unknown>) {
+        calls.push({ path, method, body: input })
+        return {
+          number: 43,
+          state: "open",
+          title: input.title,
+          user: { login: "viewer" },
+          created_at: "2026-01-01T00:00:00Z",
+          html_url: "https://github.com/owner/repo/issues/43",
+          body: input.body,
+          updated_at: "2026-01-01T00:00:00Z",
+          closed_at: null,
+          state_reason: null,
+          locked: false,
+          labels: [],
+          assignees: [],
+          milestone: null,
+          comments: 0,
+        } as T
+      },
+    })
+    expect(await client.createIssue(repository, "New issue", body)).toMatchObject({
+      number: 43,
+      state: "open",
+      title: "New issue",
+      body,
+      author: "viewer",
+    })
+    await expect(client.createIssue(repository, "  ", body)).rejects.toThrow("Issue title is required.")
+    await expect(createGitHubClient(transport()).createIssue(repository, "New issue", body)).rejects.toThrow("does not support mutations")
+    expect(calls).toEqual([{ path: "repositories/123/issues", method: "POST", body: { title: "New issue", body } }])
+  })
+
+  test("passes definite issue creation rejections through and warns when creation or its response is unconfirmed", async () => {
+    const failing = (error: Error) =>
+      createGitHubClient({
+        ...transport(),
+        async mutate<T>(): Promise<T> {
+          throw error
+        },
+      })
+    const rejected = new GitHubApiError("repositories/123/issues", "Validation Failed (HTTP 422)")
+    await expect(failing(rejected).createIssue(repository, "New issue", "")).rejects.toBe(rejected)
+    for (const error of [new GitHubApiError("repositories/123/issues", "Bad Gateway (HTTP 502)"), new Error("socket hang up")])
+      await expect(failing(error).createIssue(repository, "New issue", "")).rejects.toThrow(
+        "Couldn't confirm the issue was created. Check the issue list before trying again.",
+      )
+    const malformed = createGitHubClient({
+      ...transport(),
+      async mutate<T>() {
+        return null as T
+      },
+    })
+    await expect(malformed.createIssue(repository, "New issue", "")).rejects.toThrow("Couldn't confirm the issue was created.")
+  })
+
   test("maps issue mutations and preserves raw comment bodies and state reasons", async () => {
     const body = "  Markdown\r\n\n`$(not a command)`\n"
     const date = "2026-01-01T00:00:00Z"

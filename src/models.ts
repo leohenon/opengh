@@ -33,6 +33,8 @@ export type IssueSummary = {
   createdAt: string
 }
 
+export type IssueTemplate = { name: string; about: string; title: string; body: string }
+
 export type IssueDetail = IssueSummary &
   Partial<ReactionState> & {
     references?: IssueReference[]

@@ -74,6 +74,10 @@ function readySession() {
     updatePullDraft: async () => {
       throw new Error("Changing PR stage is unavailable.")
     },
+    createIssue: async () => {
+      throw new Error("Issue creation is unavailable.")
+    },
+    loadIssueTemplates: async () => [],
     loadPullMergeMessage: async () => {
       throw new Error("Merge messages are unavailable.")
     },
