@@ -1239,6 +1239,31 @@ describe("repository session", () => {
     expect(loads).toBe(2)
   })
 
+  test("loads pull request templates for the given base repository, once each, retrying after a failure", async () => {
+    const template = { filename: "pull_request_template.md", body: "## Summary" }
+    const upstream = { id: 77, nodeId: "R_77", nameWithOwner: "upstream/opentui", defaultBranch: "dev" }
+    const targets: number[] = []
+    let failing = true
+    const session = createRepositorySession(
+      loaders({
+        pullTemplates: async (target) => {
+          targets.push(target.id)
+          if (failing) throw new Error("Forbidden")
+          return [template]
+        },
+      }),
+    )
+    expect(await session.loadPullTemplates(upstream)).toEqual([])
+    await session.load("anomalyco/opentui")
+    await expect(session.loadPullTemplates(upstream)).rejects.toThrow("Forbidden")
+    failing = false
+    expect(await session.loadPullTemplates(upstream)).toEqual([template])
+    expect(await session.loadPullTemplates(upstream)).toEqual([template])
+    const repo = ready(session).data.repo
+    expect(await session.loadPullTemplates({ ...repo })).toEqual([template])
+    expect(targets).toEqual([77, 77, repo.id])
+  })
+
   test("confirmed comments survive in-flight pagination and refreshes without duplicates", async () => {
     const first = issueCommentsFixture[0]!
     const posted = { ...first, id: 9000, body: "A new comment", createdAt: "2026-07-01T00:00:00Z" }

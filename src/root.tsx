@@ -617,6 +617,7 @@ export function Root(props: {
                                 onLoadIssueTemplates={session.loadIssueTemplates}
                                 onComparePull={session.comparePullBranches}
                                 onLoadPullRepositories={session.loadPullRepositories}
+                                onLoadPullTemplates={session.loadPullTemplates}
                                 onLoadPullBranches={session.loadPullBranches}
                                 onCreatePull={tracked(session.createPull)}
                                 onCheckMerge={(base, head) => {

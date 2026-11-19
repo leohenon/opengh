@@ -30,6 +30,7 @@ import {
   createGitHubPull,
   compareGitHubPull,
   loadGitHubPullRepositories,
+  loadGitHubPullTemplates,
   loadGitHubOpenPull,
   loadGitHubIssueTemplates,
   createGitHubIssueComment,
@@ -83,6 +84,7 @@ import type {
   PullMergeDraft,
   PullContext,
   PullRequestSummary,
+  PullRequestTemplate,
   NewPull,
   PullBranchComparison,
   PullRepositories,
@@ -147,6 +149,7 @@ export type RepositoryLoaders = {
   createPull?(repository: RepositoryTarget, pull: NewPull): Promise<PullRequestDetail>
   openPull?(repository: RepositoryTarget, base: string, head: string): Promise<PullRequestSummary | undefined>
   pullRepositories?(repository: Repo): Promise<PullRepositories>
+  pullTemplates?(repository: RepositoryTarget): Promise<PullRequestTemplate[]>
   createIssueComment?(
     repository: Repo,
     number: number,
@@ -216,6 +219,7 @@ export type RepositorySession = {
   comparePullBranches(repository: RepositoryTarget, base: string, head: string): Promise<PullBranchComparison>
   createPull(repository: RepositoryTarget, pull: NewPull): Promise<PullRequestDetail>
   loadPullRepositories(): Promise<PullRepositories>
+  loadPullTemplates(repository: PullRepository): Promise<PullRequestTemplate[]>
   loadPullBranches(repository: PullRepository, page: number): Promise<Page<string>>
   loadPullMergeMessage(number: number, expectedHeadSha: string): Promise<PullMergeDraft>
   mergePull(number: number, method: PullMergeMethod, expectedHeadSha: string, message?: PullMergeMessage): Promise<PullRequestDetail>
@@ -280,6 +284,7 @@ const defaultLoaders: RepositoryLoaders = {
   issueTemplates: loadGitHubIssueTemplates,
   comparePull: compareGitHubPull,
   pullRepositories: loadGitHubPullRepositories,
+  pullTemplates: loadGitHubPullTemplates,
   createPull: createGitHubPull,
   openPull: loadGitHubOpenPull,
   createIssueComment: createGitHubIssueComment,
@@ -2810,6 +2815,17 @@ export function createRepositorySession(
     return loading
   }
 
+  const pullTemplateCache = new Map<number, Promise<PullRequestTemplate[]>>()
+  const loadPullTemplates = (target: PullRepository): Promise<PullRequestTemplate[]> => {
+    if (state().status !== "ready" || !loaders.pullTemplates) return Promise.resolve([])
+    const cached = pullTemplateCache.get(target.id)
+    if (cached) return cached
+    const loading = loaders.pullTemplates(target)
+    pullTemplateCache.set(target.id, loading)
+    loading.catch(() => pullTemplateCache.delete(target.id))
+    return loading
+  }
+
   const loadPullBranches = (target: PullRepository, page: number) => loaders.branches(target, target.defaultBranch, page, repositoryReads())
 
   const createPull = async (target: RepositoryTarget, pull: NewPull): Promise<PullRequestDetail> => {
@@ -4098,6 +4114,7 @@ export function createRepositorySession(
     loadIssueTemplates,
     comparePullBranches,
     loadPullRepositories,
+    loadPullTemplates,
     loadPullBranches,
     createPull,
     loadPullMergeMessage,

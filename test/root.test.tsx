@@ -88,6 +88,7 @@ function readySession() {
       throw new Error("Pull request repositories are unavailable.")
     },
     loadPullBranches: async () => ({ items: [], hasMore: false }),
+    loadPullTemplates: async () => [],
     loadPullMergeMessage: async () => {
       throw new Error("Merge messages are unavailable.")
     },

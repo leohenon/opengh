@@ -5,7 +5,15 @@ import { initializeHunk } from "../src/ui/hunk-host"
 import { defaultConfig } from "../src/config"
 import type { MergeCheck } from "../src/command-actions"
 import { GitHubApiError } from "../src/github/transport"
-import type { DiffTarget, NewPull, PullBranchComparison, PullRepositories, PullRepository, PullRequestDetail } from "../src/models"
+import type {
+  DiffTarget,
+  NewPull,
+  PullBranchComparison,
+  PullRepositories,
+  PullRepository,
+  PullRequestDetail,
+  PullRequestTemplate,
+} from "../src/models"
 import { createComposeDrafts, type ComposeDrafts } from "../src/compose-drafts"
 import { createSignal } from "solid-js"
 import type { DiffState } from "../src/repository-state"
@@ -52,6 +60,7 @@ async function render(
     branchesOf?: (repository: PullRepository) => string[]
     compareIn?: (repository: PullRepository, base: string, head: string) => void
     createIn?: (repository: PullRepository, pull: NewPull) => void
+    templates?: (repository: PullRepository) => Promise<PullRequestTemplate[]>
   } = {},
 ) {
   const calls: Array<[string, string]> = []
@@ -82,6 +91,7 @@ async function render(
         onLoadPullRepositories={options.repositories ? () => Promise.resolve(options.repositories!) : undefined}
         onLoadPullBranches={async (target) => ({ items: options.branchesOf?.(target) ?? [], hasMore: false })}
         onCheckMerge={options.checkMerge}
+        onLoadPullTemplates={options.templates}
       />
     ),
     { width: options.width ?? 100, height: 30 },
@@ -272,6 +282,12 @@ describe("new pull request", () => {
       title: "Sandbox/new pull request test",
       body: "",
     })
+    expect(defaultPullDraft({ ...single, message: "Fix\n\nBody" }, "x", "## Summary\r\n")).toEqual({
+      title: "Fix",
+      body: "Body\n\n## Summary\n",
+    })
+    expect(defaultPullDraft({ ...single, message: "Only a subject" }, "x", "T")).toEqual({ title: "Only a subject", body: "T" })
+    expect(defaultPullDraft({ ...single, commits: 3, aheadBy: 3 }, "topic", "T")).toEqual({ title: "Topic", body: "T" })
   })
 
   test("opens on the branch row with the title and description filled in; tab steps through the summary to the title, and ↑ returns", async () => {
@@ -877,6 +893,144 @@ describe("new pull request", () => {
       await settle(view)
       expect(frame(view)).not.toContain("Choose head repository")
       expect(frame(view)).toContain("Choose head branch")
+    })
+  })
+
+  describe("templates", () => {
+    const key = { repositoryId: githubDataFixture.repo.id, head: "next" }
+    const single: PullBranchComparison = {
+      comparison: {
+        status: "ahead",
+        aheadBy: 1,
+        behindBy: 0,
+        commits: 1,
+        files: 1,
+        additions: 6,
+        deletions: 2,
+        message: "Fix resize\n\nKeeps the sidebar open.",
+      },
+    }
+    const several = [
+      { filename: "pull_request_template.md", body: "Default" },
+      { filename: "bug.md", body: "Bug fix" },
+    ]
+
+    test("fills in the only template after a single commit's body, without a list", async () => {
+      const drafts = createComposeDrafts({ storage: false })
+      const { view } = await render({
+        localBranch: "next",
+        drafts,
+        compare: async () => single,
+        templates: async () => [{ filename: "pull_request_template.md", body: "## Summary\r\n\r\n## Test plan\r\n" }],
+      })
+      await open(view)
+      await settle(view)
+      expect(frame(view)).not.toContain("Blank pull request")
+      expect(box(view)).toBeDefined()
+      expect(await drafts.load(key)).toEqual({ title: "Fix resize", body: "Keeps the sidebar open.\n\n## Summary\n\n## Test plan\n" })
+    })
+
+    test("with several commits, the description is just the template", async () => {
+      const drafts = createComposeDrafts({ storage: false })
+      const { view } = await render({
+        localBranch: "next",
+        drafts,
+        templates: async () => [{ filename: "PULL_REQUEST_TEMPLATE.md", body: "## Summary\n" }],
+      })
+      await open(view)
+      await settle(view)
+      expect(await drafts.load(key)).toEqual({ title: "Next", body: "## Summary\n" })
+    })
+
+    test("lists several templates by file name with Blank pull request last, and fills in the one chosen", async () => {
+      for (const [downs, body] of [
+        [1, "Bug fix"],
+        [2, ""],
+      ] as const) {
+        const drafts = createComposeDrafts({ storage: false })
+        const { view } = await render({ localBranch: "next", drafts, templates: async () => several })
+        await open(view)
+        expect(box(view)).toBeUndefined()
+        const rows = ["pull_request_template.md", "bug.md", "Blank pull request"].map((label) =>
+          lines(view).findIndex((line) => line.includes(label)),
+        )
+        expect(rows.every((row, index) => row > 0 && (index === 0 || row > rows[index - 1]!))).toBe(true)
+        for (let step = 0; step < downs; step++) view.mockInput.pressArrow("down")
+        view.mockInput.pressEnter()
+        await settle(view)
+        await settle(view)
+        expect(box(view)).toBeDefined()
+        expect(await drafts.load(key)).toEqual({ title: "Next", body })
+        view.renderer.destroy()
+      }
+    })
+
+    test("an untouched template with Windows line endings still follows a new head branch", async () => {
+      const drafts = createComposeDrafts({ storage: false })
+      const { view } = await render({
+        localBranch: "next",
+        drafts,
+        templates: async () => [{ filename: "pull_request_template.md", body: "## Summary\r\n" }],
+      })
+      await open(view)
+      await settle(view)
+      await branches(view)
+      view.mockInput.pressEnter()
+      await settle(view)
+      await pick(view, "main")
+      expect(await drafts.load({ ...key, head: "main" })).toEqual({ title: "Main", body: "## Summary\n" })
+    })
+
+    test("skips the list when a draft is saved for the branch", async () => {
+      const drafts = createComposeDrafts({ storage: false })
+      drafts.set(key, { title: "Saved", body: "Mine" })
+      const { view } = await render({ localBranch: "next", drafts, templates: async () => several })
+      await open(view)
+      await settle(view)
+      expect(frame(view)).not.toContain("Blank pull request")
+      expect(box(view)).toBeDefined()
+      expect((view.renderer.root.findDescendantById("new-pull-title") as unknown as { value: string }).value).toBe("Saved")
+    })
+
+    test("come from the base repository, the original when browsing a fork", async () => {
+      const upstream: PullRepository = { id: 9002, nodeId: "R_upstream", nameWithOwner: "upstream/opentui", defaultBranch: "dev" }
+      const browsed: PullRepository = {
+        id: githubDataFixture.repo.id,
+        nodeId: githubDataFixture.repo.nodeId,
+        nameWithOwner: repository,
+        defaultBranch: "main",
+      }
+      const requested: number[] = []
+      const drafts = createComposeDrafts({ storage: false })
+      const { view } = await render({
+        localBranch: "next",
+        drafts,
+        repositories: { bases: [upstream, browsed], heads: [browsed, upstream] },
+        templates: async (target) => {
+          requested.push(target.id)
+          return [{ filename: "pull_request_template.md", body: "Upstream template" }]
+        },
+      })
+      await open(view)
+      await settle(view)
+      expect(requested).toEqual([upstream.id])
+      const owner = repository.split("/")[0]
+      expect(await drafts.load({ repositoryId: upstream.id, head: `${owner}:next` })).toEqual({ title: "Next", body: "Upstream template" })
+    })
+
+    test("opens without a template when templates can't be loaded", async () => {
+      const drafts = createComposeDrafts({ storage: false })
+      const { view } = await render({
+        localBranch: "next",
+        drafts,
+        templates: async () => {
+          throw new Error("Forbidden")
+        },
+      })
+      await open(view)
+      await settle(view)
+      expect(box(view)).toBeDefined()
+      expect(await drafts.load(key)).toEqual({ title: "Next", body: "" })
     })
   })
 })

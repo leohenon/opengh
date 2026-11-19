@@ -29,13 +29,17 @@ const createChoices = [
 
 export type PullSides = { baseRepository: PullRepository; base: string; headRepository: PullRepository; head: string }
 
-export function defaultPullDraft(comparison: PullComparison, head: string): ComposeDraft {
+export const pullHeadRef = (base: PullRepository, head: PullRepository, branch: string) =>
+  head.id === base.id ? branch : `${owner(head)}:${branch}`
+
+export function defaultPullDraft(comparison: PullComparison, head: string, template = ""): ComposeDraft {
+  const filled = template.replace(/\r\n?/g, "\n")
   if (comparison.message !== undefined) {
     const [subject = "", ...rest] = comparison.message.split(/\r?\n/)
-    return { title: subject.trim(), body: rest.join("\n").trim() }
+    return { title: subject.trim(), body: [rest.join("\n").trim(), filled].filter(Boolean).join("\n\n") }
   }
   const title = head.replace(/[-_]+/g, " ").trim()
-  return { title: title.charAt(0).toUpperCase() + title.slice(1), body: "" }
+  return { title: title.charAt(0).toUpperCase() + title.slice(1), body: filled }
 }
 
 export function NewPullDialog(props: {
@@ -45,6 +49,7 @@ export function NewPullDialog(props: {
   repositoryUrl: string
   defaultBranch: string
   localBranch?: string
+  template?: string
   branches: ResourceState<Paginated<string>>
   drafts: ComposeDrafts
   showScrollbar: boolean
@@ -121,8 +126,7 @@ export function NewPullDialog(props: {
         : `${repository.nameWithOwner}:${branch}`
   const headRef = () => {
     const branch = head()
-    if (!branch) return undefined
-    return headRepository().id === baseRepository().id ? branch : `${owner(headRepository())}:${branch}`
+    return branch ? pullHeadRef(baseRepository(), headRepository(), branch) : undefined
   }
   const baseLabel = () => label(baseRepository(), base())
   const headLabel = () => {
@@ -254,7 +258,7 @@ export function NewPullDialog(props: {
       !untouched()
     )
       return
-    apply(defaultPullDraft(current.result.comparison, branch))
+    apply(defaultPullDraft(current.result.comparison, branch, props.template))
   })
   createEffect(
     on(creatable, (ready) => {

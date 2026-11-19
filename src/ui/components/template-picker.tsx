@@ -1,6 +1,5 @@
 import { TextAttributes, type ScrollBoxRenderable } from "@opentui/core"
 import { createEffect, createMemo, createSignal, Index, onCleanup, Show } from "solid-js"
-import type { IssueTemplate } from "../../models"
 import { useKeyActions, useKeybindings } from "../keybindings"
 import { mouseClick, mouseHover } from "../mouse"
 import { scrollRowIntoView } from "../scroll-selection"
@@ -8,9 +7,14 @@ import { useTheme } from "../theme"
 import { LoadingText } from "./loading-text"
 import { Popup } from "./popup"
 
-export function NewIssueTemplatePicker(props: {
-  templates?: IssueTemplate[]
-  onSelect(template: IssueTemplate | undefined): void
+export function TemplatePicker<T>(props: {
+  idPrefix: string
+  heading: string
+  blank: string
+  templates?: readonly T[]
+  label(template: T): string
+  about?(template: T): string
+  onSelect(template: T | undefined): void
   onClose(): void
   onHintChange(hint: string | undefined): void
 }) {
@@ -18,8 +22,8 @@ export function NewIssueTemplatePicker(props: {
   const keys = useKeybindings()
   const [selected, setSelected] = createSignal(0)
   const items = createMemo(() => [
-    ...(props.templates ?? []).map((template) => ({ template, label: template.name, about: template.about })),
-    { template: undefined, label: "Blank issue", about: "" },
+    ...(props.templates ?? []).map((template) => ({ template, label: props.label(template), about: props.about?.(template) ?? "" })),
+    { template: undefined, label: props.blank, about: "" },
   ])
   const active = () => Math.min(selected(), items().length - 1)
   let list: ScrollBoxRenderable | undefined
@@ -49,9 +53,9 @@ export function NewIssueTemplatePicker(props: {
 
   return (
     <Popup width={72} height={(props.templates ? items().length : 1) + 5} placement="center" zIndex={250} onClose={props.onClose}>
-      <box id="new-issue-templates" flexGrow={1} minHeight={0} paddingX={2} paddingBottom={1} flexDirection="column">
+      <box id={`${props.idPrefix}-templates`} flexGrow={1} minHeight={0} paddingX={2} paddingBottom={1} flexDirection="column">
         <text height={1} flexShrink={0} wrapMode="none" fg={colors.text} attributes={TextAttributes.BOLD}>
-          New issue
+          {props.heading}
         </text>
         <box height={1} flexShrink={0} />
         <Show when={props.templates} fallback={<LoadingText text="Loading templates…" />}>
@@ -75,7 +79,7 @@ export function NewIssueTemplatePicker(props: {
                 )
                 return (
                   <box
-                    id={`new-issue-template-${index}`}
+                    id={`${props.idPrefix}-template-${index}`}
                     height={1}
                     flexShrink={0}
                     flexDirection="row"

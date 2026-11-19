@@ -34,6 +34,7 @@ import type {
   PullBranchComparison,
   PullRepositories,
   PullRepository,
+  PullRequestTemplate,
   PullMergeDraft,
   PullMergeMessage,
   PullMergeMethod,
@@ -91,8 +92,8 @@ import type { ActivityComment } from "./components/activity-comment-composer"
 import { PullMergeDialog } from "./components/pull-merge-dialog"
 import { PullDraftDialog } from "./components/pull-draft-dialog"
 import { NewIssueDialog } from "./components/new-issue-dialog"
-import { NewIssueTemplatePicker } from "./components/new-issue-template-picker"
-import { NewPullDialog, type PullSides } from "./components/new-pull-dialog"
+import { TemplatePicker } from "./components/template-picker"
+import { NewPullDialog, pullHeadRef, type PullSides } from "./components/new-pull-dialog"
 import { pullMergeBlocker } from "../pull-merge"
 import { Help } from "./components/help"
 import { Settings } from "./components/settings"
@@ -144,6 +145,7 @@ type Overlay =
   | "diff-viewer-setup"
   | "new-issue"
   | "new-issue-templates"
+  | "new-pull-templates"
   | "new-pull"
 type ToastState = { id: number; title: string; message: string; duration?: number; tone?: "error" | "success" | "info" }
 type ConversationCommentTarget = { repository: string; number: number; parent?: IssueActionParent }
@@ -233,6 +235,7 @@ export type AppProps = {
   onComparePull?: (repository: PullRepository, base: string, head: string) => Promise<PullBranchComparison>
   onCreatePull?: (repository: PullRepository, pull: NewPull) => Promise<PullRequestDetail>
   onLoadPullRepositories?: () => Promise<PullRepositories>
+  onLoadPullTemplates?: (repository: PullRepository) => Promise<PullRequestTemplate[]>
   onLoadPullBranches?: (repository: PullRepository, page: number) => Promise<{ items: string[]; hasMore: boolean }>
   onLoadLocalBranch?: () => Promise<string | undefined>
   onCheckMerge?: (base: string, head: string) => Promise<MergeCheck>
@@ -1663,6 +1666,7 @@ function AppContent(props: AppProps) {
       overlay() === "inline-retry" ||
       overlay() === "new-issue" ||
       overlay() === "new-issue-templates" ||
+      overlay() === "new-pull-templates" ||
       overlay() === "new-pull"
     ) {
       setInlineRetry()
@@ -1816,19 +1820,43 @@ function AppContent(props: AppProps) {
   const canOpenNewPull = () => page() === "pulls" && !diffTarget() && !activePullNumber() && !!props.onComparePull
   const [newPullLocalBranch, setNewPullLocalBranch] = createSignal<string>()
   const newPullDrafts = props.newPullDrafts ?? createComposeDrafts({ storage: false })
+  const [newPullTemplates, setNewPullTemplates] = createSignal<PullRequestTemplate[]>()
+  const [newPullTemplate, setNewPullTemplate] = createSignal<string>()
   const openNewPull = () => {
     if (overlay() !== undefined || !canOpenNewPull()) return false
-    const repositoryId = data().repo.id
+    const repo = data().repo
+    const current = () => !disposed && canOpenNewPull() && data().repo.id === repo.id
     setNewPullReturn()
+    setNewPullTemplate()
     const local =
-      props.onLoadLocalBranch && matchesLocalRepository(props.localRepository, data().repo.nameWithOwner)
+      props.onLoadLocalBranch && matchesLocalRepository(props.localRepository, repo.nameWithOwner)
         ? props.onLoadLocalBranch().catch(() => undefined)
         : Promise.resolve(undefined)
-    void local.then((branch) => {
-      if (disposed || overlay() !== undefined || !canOpenNewPull() || data().repo.id !== repositoryId) return
+    void local.then(async (branch) => {
+      if (!current() || overlay() !== undefined) return
       setNewPullLocalBranch(branch)
-      setOverlay("new-pull")
+      if (!props.onLoadPullTemplates) return setOverlay("new-pull")
+      setNewPullTemplates(undefined)
+      setOverlay("new-pull-templates")
+      const waiting = () => current() && overlay() === "new-pull-templates"
+      const browsed = { id: repo.id, nodeId: repo.nodeId, nameWithOwner: repo.nameWithOwner, defaultBranch: repo.defaultBranch }
+      const base = (await props.onLoadPullRepositories?.().catch(() => undefined))?.bases[0] ?? browsed
+      const templates = await props.onLoadPullTemplates(base).catch(() => [])
+      if (!waiting()) return
+      if (templates.length < 2) {
+        setNewPullTemplate(templates[0]?.body)
+        return setOverlay("new-pull")
+      }
+      const head = branch && branch !== repo.defaultBranch ? branch : undefined
+      const draft = head ? await newPullDrafts.load({ repositoryId: base.id, head: pullHeadRef(base, browsed, head) }) : undefined
+      if (!waiting()) return
+      if (draft?.title || draft?.body) return setOverlay("new-pull")
+      setNewPullTemplates(templates)
     })
+  }
+  const chooseNewPullTemplate = (template: PullRequestTemplate | undefined) => {
+    setNewPullTemplate(template?.body)
+    setOverlay("new-pull")
   }
   const createPull = async (repository: PullRepository, pull: NewPull) => {
     const origin = data().repo.id
@@ -2156,6 +2184,7 @@ function AppContent(props: AppProps) {
       overlay() === "inline-retry" ||
       overlay() === "new-issue" ||
       overlay() === "new-issue-templates" ||
+      overlay() === "new-pull-templates" ||
       overlay() === "new-pull"
     )
       return issueActionHint()
@@ -3121,6 +3150,7 @@ function AppContent(props: AppProps) {
                           defaultBranch={data().repo.defaultBranch}
                           drafts={newPullDrafts}
                           localBranch={newPullLocalBranch()}
+                          template={newPullTemplate()}
                           branches={data().branches}
                           showScrollbar={config().showScrollbars}
                           showStatusBarHints={config().showStatusBarHints}
@@ -3156,9 +3186,26 @@ function AppContent(props: AppProps) {
                         />
                       </Show>
                       <Show when={overlay() === "new-issue-templates"}>
-                        <NewIssueTemplatePicker
+                        <TemplatePicker
+                          idPrefix="new-issue"
+                          heading="New issue"
+                          blank="Blank issue"
                           templates={newIssueTemplates()}
+                          label={(template) => template.name}
+                          about={(template) => template.about}
                           onSelect={chooseNewIssueTemplate}
+                          onClose={() => setOverlay()}
+                          onHintChange={setIssueActionHint}
+                        />
+                      </Show>
+                      <Show when={overlay() === "new-pull-templates"}>
+                        <TemplatePicker
+                          idPrefix="new-pull"
+                          heading="New pull request"
+                          blank="Blank pull request"
+                          templates={newPullTemplates()}
+                          label={(template) => template.filename}
+                          onSelect={chooseNewPullTemplate}
                           onClose={() => setOverlay()}
                           onHintChange={setIssueActionHint}
                         />
