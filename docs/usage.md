@@ -5,37 +5,27 @@ opengh is a terminal interface for GitHub.com repositories.
 Run `opengh` to get started. See the [CLI reference](cli.md) for options. opengh needs a
 signed-in GitHub CLI; see [Installation](installation.md#authenticate).
 
-## Basic Navigation
+## Navigation
 
-Use the keyboard or mouse. Arrow keys move between tabs and items; `enter` opens an item and `esc` goes back.
+Use the keyboard or mouse. Arrow keys move between tabs and items; `enter` opens an item and `esc` goes back. Press `S` to switch repositories.
 
 Press `?` for shortcuts or right-click for actions. See [Keybindings](keybindings.md) for
 defaults and customization. Press `,` to open settings.
 
-## Actions and comments
+## Issues and pull requests
 
-- Press `a` for actions such as assigning, labeling, closing, or reopening an issue or pull request.
-- Press `c` to write a comment, then `ctrl+s` to post. `esc` saves the current draft, and `ctrl+d` clears it.
-- Type `@` while commenting to mention users.
-- Double-click a description or comment (or right-click → **React**) to pick a reaction. Choosing a reaction you already added, in the picker or by clicking its `✓` chip, removes it.
+Press `c` on a list to create an issue or pull request, or on an issue or pull request to comment, then `ctrl+s` to post. `esc` saves the draft and `ctrl+d` clears it. Type `@` while writing to mention users, and press `a` for actions such as assigning, labeling, closing, or reopening.
 
 ## Diffs
 
-- Press `D` or use the right click menu to open a commit or PR diff. `esc` to come back.
-- In a diff, use `,` / `.` to switch files, `[` / `]` to move between hunks, `t` to switch between split and unified layouts, and `w` to toggle line wrapping.
-- Press `F` to filter files and `/` to search in the diffs.
+Press `D` or use the right-click menu to open a commit or PR diff, and `esc` to come back. In a diff, `,` / `.` switch files, `[` / `]` move between hunks, `t` switches between split and unified layouts, and `w` toggles line wrapping. Press `F` to filter files and `/` to search.
 
 ## Reviews
 
-- In a PR diff, click a line's `[+]` to comment on the line.
-- On the PR page press `a` → **Review…**. Choose a review type and post review with a comment.
-
-Inline comments post separately from the review.
+In a PR diff, click a line's `[+]` to comment on it. To review, press `a` → **Review…** on the PR page, choose a review type, and post it with a comment. Inline comments post separately from the review.
 
 ## Search
 
-Press `/` to search loaded content on any page. This does not search GitHub or the entire repository; to search GitHub issues and PRs, use [Find](#find).
-
-## Find
+Press `/` to search loaded content on any page.
 
 Press `F` on an issues or pull requests list to search GitHub, e.g. `label:bug author:@me`, or `review-requested:@me -is:draft` for PRs. Results follow the Open/Closed tab, newest first, and the tabs show the number of matches. Press `esc` to clear.

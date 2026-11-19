@@ -28,10 +28,7 @@ If your terminal intercepts right-click, use keyboard shortcuts (`?` lists them)
 
 `/` (`search.start`) searches loaded, visible content; `enter` confirms, `n`/`N` (`search.next`/`search.previous`) moves next/previous. Search is literal, case-insensitive unless uppercase is used, and does not filter lists.
 
-`F` depends on the page:
-
-- On issue and PR lists, `F` (`work.find`) finds on GitHub, e.g. `label:bug author:@me`, or `review-requested:@me -is:draft` for PRs. `esc` clears it.
-- In diffs, `F` (`diff.filterFiles`) filters files by path. `esc` clears it.
+`F` depends on the page. On issue and PR lists, `F` (`work.find`) finds on GitHub, e.g. `label:bug author:@me`, or `review-requested:@me -is:draft` for PRs. In diffs, `F` (`diff.filterFiles`) filters files by path. In both, `esc` clears it.
 
 ## Defaults
 

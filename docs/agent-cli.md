@@ -17,11 +17,8 @@ The agent's environment needs `opengh` on `PATH` and a signed-in GitHub CLI. See
 
 ## Use
 
-Ask for GitHub context as part of a task:
-
-- Summarize the review feedback on owner/repo PR #123.
-- Read owner/repo issue #42, then find the relevant code in this checkout.
-
-The agent then runs commands like `opengh owner/repo --pr 123 --inline`.
+Ask for GitHub context as part of a task, such as "Summarize the review feedback on owner/repo PR #123"
+or "Read owner/repo issue #42, then find the relevant code in this checkout." The agent then runs
+commands like `opengh owner/repo --pr 123 --inline`.
 
 The [skill source](../skills/opengh/SKILL.md) is what the agent reads.

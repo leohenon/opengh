@@ -1,5 +1,3 @@
-// Releases a version: writes the notes with you, then commits the version, tags, and pushes.
-//
 //   bun run release 0.1.0             a release
 //   bun run release 0.1.0-rc.1        a pre-release
 //   bun run release 0.1.0 --dry-run   everything except the commit, tag, and push
@@ -75,15 +73,7 @@ if (!run) fail("CI has not run on this commit.")
 if (run.status !== "completed") fail("CI is still running on this commit.")
 if (run.conclusion !== "success") fail(`CI did not pass on this commit (${run.conclusion}).`)
 
-// Draft: roadmap items ticked since the last release, then the commits since it.
-// A full release is compared with the last full release, so it also covers its own pre-releases.
 const previous = git("describe", "--tags", "--abbrev=0", "--match", "v*", ...(version.includes("-") ? [] : ["--exclude", "v*-*"]), "HEAD")
-const ticked = (ref: string) => {
-  const file = git("show", `${ref}:ROADMAP.md`)
-  return file.ok ? [...file.out.matchAll(/^\s*- \[x\] (.+)$/gim)].map((match) => match[1]!.trim()) : []
-}
-const before = new Set(previous.ok ? ticked(previous.out) : [])
-const highlights = ticked("HEAD").filter((item) => !before.has(item))
 const commits = previous.ok
   ? mustGit("log", "--no-merges", "--reverse", "--format=%H%x09%h%x09%s", `${previous.out}..HEAD`)
       .split("\n")
@@ -93,8 +83,6 @@ const commits = previous.ok
         return sha && subject && !/^release \d/.test(subject) ? [{ sha, short, subject }] : []
       })
   : []
-// GitHub identifies first-time contributors from merged PRs. This endpoint only generates
-// text; it does not create a release or tag. Keep our own notes and use just its contributor list.
 const generated = Bun.spawnSync(
   [
     "gh",
@@ -138,7 +126,6 @@ const instructions = [
   "-->",
 ].join("\n")
 const draft = [
-  ...(highlights.length ? [`## What's new\n\n${highlights.map((item) => `- ${item}`).join("\n")}`] : []),
   ...(commits.length
     ? [
         `<details>\n<summary>Changes (${commits.length})</summary>\n\n${commits

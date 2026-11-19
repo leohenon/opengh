@@ -20,10 +20,10 @@
   <img src="docs/assets/screenshot-light.png" alt="opengh showing a split diff and inline review for OpenTUI PR #209" />
 </picture>
 
-- **Browse** repositories, commits, and Actions.
-- **Manage** issues and pull requests.
-- **Review** split or unified diffs, leave inline comments, and submit reviews.
-- **Navigate** by keyboard or mouse, with customizable shortcuts and themes.
+**Browse** repositories, commits, and Actions.
+**Manage** issues and pull requests.
+**Review** split or unified diffs, leave inline comments, and submit reviews.
+**Navigate** by keyboard or mouse, with customizable shortcuts and themes.
 
 ## Install · [Guide](docs/installation.md)
 

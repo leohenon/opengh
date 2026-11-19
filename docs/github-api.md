@@ -15,12 +15,12 @@ Inject the transport into client factories so tests can use fixtures.
 
 ## Validate responses
 
-- `json<T>` and `graphql<T>` parse JSON; they do not validate response shapes.
-  A malformed list must fail, not become an empty page.
-- Check GraphQL `errors` and required fields, even when `data` exists.
-- Keep REST IDs, issue/PR numbers, and GraphQL node IDs distinct.
-- REST issue listings include PRs. PR conversation comments use issue-comment
-  endpoints; inline review comments and review threads are separate resources.
+`json<T>` and `graphql<T>` parse JSON but do not validate response shapes: a malformed list
+must fail, not become an empty page. Check GraphQL `errors` and required fields, even when
+`data` exists, and keep REST IDs, issue/PR numbers, and GraphQL node IDs distinct.
+
+REST issue listings include PRs. PR conversation comments use issue-comment endpoints; inline
+review comments and review threads are separate resources.
 
 ## Paginate results
 
@@ -29,19 +29,21 @@ some accumulate pages internally. GraphQL uses cursors, including nested connect
 
 ## Preserve mutation safety
 
-- Authenticate with `gh auth login --hostname github.com`; `GH_TOKEN` and
-  `GITHUB_TOKEN` override saved credentials.
-- Verify the session viewer before writes.
-- Use validated, relative REST endpoints. `--hostname` does not constrain absolute URLs.
-- Check operation-specific permissions and repository state; read access is not write access.
-  Require a successfully loaded resource before a write, not a retained value from a failed reload.
-- Bind stored drafts to the repository's numeric ID. An `owner/name` can be reused by a
-  different repository; review drafts and inline-comment attempts refuse to submit on a mismatch.
-- Reconcile uncertain writes before retrying. Keep drafts and recovery records.
-  Use `GitHubRequestNotSentError` only for proven pre-dispatch failures.
-- Pull requests from a fork (`owner:branch` head) are created with
-  `maintainer_can_modify: true`, matching GitHub's web default and `gh pr create`.
-  There is no toggle yet; same-repository PRs don't send the field.
+Authenticate with `gh auth login --hostname github.com`; `GH_TOKEN` and `GITHUB_TOKEN`
+override saved credentials. Verify the session viewer before writes, and use validated,
+relative REST endpoints: `--hostname` does not constrain absolute URLs.
+
+Check operation-specific permissions and repository state; read access is not write access.
+Require a successfully loaded resource before a write, not a retained value from a failed
+reload. Bind stored drafts to the repository's numeric ID: an `owner/name` can be reused by a
+different repository, so review drafts and inline-comment attempts refuse to submit on a mismatch.
+
+Reconcile uncertain writes before retrying, and keep drafts and recovery records. Use
+`GitHubRequestNotSentError` only for proven pre-dispatch failures.
+
+Pull requests from a fork (`owner:branch` head) are created with `maintainer_can_modify: true`,
+matching GitHub's web default and `gh pr create`. There is no toggle yet; same-repository PRs
+don't send the field.
 
 ## Limits
 

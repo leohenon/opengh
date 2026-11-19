@@ -1,60 +1,38 @@
 # Roadmap
 
-### v0.1.0
+opengh aims to make everyday GitHub work fast from the terminal.
 
-#### Navigation
+## Already available
 
-- [x] Open file references and links
-- [ ] Full repo file explorer
-- [x] Full mouse support
-- [ ] Decide default icon style
-- [ ] Vim modal editing
-- [ ] Select and copy text with the keyboard
-- [ ] Open links with the keyboard
+- Create and search issues and PRs
+- Comment, react, and manage assignees
+- Review PRs and leave inline comments
+- Merge, close, and reopen PRs
+- Open file references and links
+- Agent skill for GitHub context retrieval
 
-#### Issues & PRs
+## Next
 
-- [x] Add comments
-- [x] Close and reopen PRs
-- [x] Submit PR reviews (approve, request changes, comment)
-- [x] Add inline review comments
-- [x] Merge PRs (merge, squash, rebase)
-- [x] Assign and unassign users
-- [x] Add and remove reactions
-- [x] Find issues and PRs with GitHub search
-- [ ] Create issues and PRs
+### Finish issue and PR workflows
+
 - [ ] Edit titles and descriptions
 - [ ] Edit and delete comments
 - [ ] Add and remove labels
-- [ ] Set and clear milestones
-- [ ] Lock and unlock conversations
-- [ ] Subscribe to or unsubscribe from conversations
-- [ ] Pin and unpin issues
-- [ ] Reply to messages in threads
+- [ ] Reply to review threads
 
-#### Repository overview
+### Improve keyboard navigation
 
-- [ ] Show repository releases
-- [ ] Show repository tags
+- [ ] Open links with the keyboard
+- [ ] Select and copy text with the keyboard
 
-#### Discussions
+### Connect reviews to coding agents
 
-- [ ] Browse repository discussions
-
-#### Agents
-
-- [x] Publish an agent skill for efficient GitHub context retrieval
 - [ ] Add private diff notes and review-context handoff to coding agents
 
-#### GitHub Actions
+## Later
 
-- [ ] Run workflows with branch/tag selection and inputs
-- [ ] Enable and disable workflows
-- [ ] View and edit workflow YAML
-- [ ] View run details, jobs, steps, and logs
-- [ ] Watch active runs and stream logs
-- [ ] Re-run jobs
-- [ ] Cancel or force-cancel runs
-- [ ] Delete runs
-- [ ] Download and delete run logs
-- [ ] Download artifacts
+- Browse repository files
+- Browse discussions and releases
+- View GitHub Actions runs, jobs, and logs
+- Run, re-run, and cancel workflows
+- Manage milestones, subscriptions, and conversation locking
