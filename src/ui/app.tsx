@@ -12,6 +12,7 @@ import {
   cloneDestination,
   matchesLocalRepository,
   type LocalRepository,
+  type MergeCheck,
   type CommandSpec,
   type CommandTask,
 } from "../command-actions"
@@ -29,6 +30,10 @@ import type {
   IssueTemplate,
   Paginated,
   ListState,
+  NewPull,
+  PullBranchComparison,
+  PullRepositories,
+  PullRepository,
   PullMergeDraft,
   PullMergeMessage,
   PullMergeMethod,
@@ -45,6 +50,7 @@ import {
   navigate,
   openDetail,
   openDiff,
+  sameDiff,
   openPage,
   type DetailTarget,
   type InitialNavigation,
@@ -76,7 +82,7 @@ import { IssueReferencesPicker } from "./components/issue-references-picker"
 import type { InlineCommentInput, PostedInlineComment, PullReviewSession, ReviewAnchor, ReviewEligibility } from "../review-types"
 import { InlineCommentUncertainError } from "../inline-comments"
 import { createInlineDrafts, inlineDraftKey, type InlineDrafts } from "../inline-drafts"
-import { createNewIssueDrafts, type NewIssueDraft, type NewIssueDrafts } from "../new-issue-drafts"
+import { createComposeDrafts, type ComposeDraft, type ComposeDrafts } from "../compose-drafts"
 import { InlineCommentConfirmDialog, InlineCommentRetryDialog } from "./components/inline-comment-retry"
 import { PullReviewDialog, ReviewCommentDialog } from "./components/pull-review-dialog"
 import { IssueActionDialog, IssueActionsMenu } from "./components/issue-actions"
@@ -86,6 +92,7 @@ import { PullMergeDialog } from "./components/pull-merge-dialog"
 import { PullDraftDialog } from "./components/pull-draft-dialog"
 import { NewIssueDialog } from "./components/new-issue-dialog"
 import { NewIssueTemplatePicker } from "./components/new-issue-template-picker"
+import { NewPullDialog, type PullSides } from "./components/new-pull-dialog"
 import { pullMergeBlocker } from "../pull-merge"
 import { Help } from "./components/help"
 import { Settings } from "./components/settings"
@@ -137,6 +144,7 @@ type Overlay =
   | "diff-viewer-setup"
   | "new-issue"
   | "new-issue-templates"
+  | "new-pull"
 type ToastState = { id: number; title: string; message: string; duration?: number; tone?: "error" | "success" | "info" }
 type ConversationCommentTarget = { repository: string; number: number; parent?: IssueActionParent }
 const conversationCommentKey = (target: ConversationCommentTarget) =>
@@ -214,13 +222,20 @@ export type AppProps = {
   onSubmitIssueAction?: (number: number, kind: IssueActionKind, parent?: IssueActionParent) => Promise<IssueActionResult>
   reviews?: PullReviewSession
   inlineDrafts?: InlineDrafts
-  newIssueDrafts?: NewIssueDrafts
+  newIssueDrafts?: ComposeDrafts
+  newPullDrafts?: ComposeDrafts
   onPostInlineComment?: (input: InlineCommentInput, options?: { retryUnconfirmed?: boolean }) => Promise<PostedInlineComment>
   onMergePull?: (number: number, method: PullMergeMethod, expectedHeadSha: string, message?: PullMergeMessage) => Promise<PullRequestDetail>
   onLoadPullMergeMessage?: (number: number, expectedHeadSha: string) => Promise<PullMergeDraft>
   onUpdatePullDraft?: (number: number, draft: boolean) => Promise<PullRequestDetail>
   onCreateIssue?: (title: string, body: string) => Promise<IssueDetail>
   onLoadIssueTemplates?: () => Promise<IssueTemplate[]>
+  onComparePull?: (repository: PullRepository, base: string, head: string) => Promise<PullBranchComparison>
+  onCreatePull?: (repository: PullRepository, pull: NewPull) => Promise<PullRequestDetail>
+  onLoadPullRepositories?: () => Promise<PullRepositories>
+  onLoadPullBranches?: (repository: PullRepository, page: number) => Promise<{ items: string[]; hasMore: boolean }>
+  onLoadLocalBranch?: () => Promise<string | undefined>
+  onCheckMerge?: (base: string, head: string) => Promise<MergeCheck>
   pullDetail?: PullDetailState
   onLoadPull?: (number: number, options?: { force?: boolean }) => Promise<void>
   onLoadMorePullComments?: () => Promise<void>
@@ -390,11 +405,7 @@ function AppContent(props: AppProps) {
   const mountDetail = (target: Page) => !focus() || (page() === target && !diffTarget())
   const resourceForDiff = (target?: DiffTarget): ResourceState<DiffContent> => {
     const loaded = target && props.diffs?.[target.kind]
-    const matches =
-      target?.kind === "commit"
-        ? loaded?.target.kind === "commit" && loaded.target.sha === target.sha
-        : target?.kind === "pull" && loaded?.target.kind === "pull" && loaded.target.number === target.number
-    return matches && loaded ? loaded.resource : { status: "loading", phase: "load" }
+    return target && loaded && sameDiff(loaded.target, target) ? loaded.resource : { status: "loading", phase: "load" }
   }
   const diffResource = createMemo(() => resourceForDiff(diffTarget()))
   const loadDiff = (target: DiffTarget) => {
@@ -440,10 +451,12 @@ function AppContent(props: AppProps) {
     setNavigation((state) => openDetail(state, { kind: "run", id }))
     void props.onLoadRun?.(id)
   }
+  const [newPullReturn, setNewPullReturn] = createSignal<PullSides>()
   const closeDiff = () => {
     const target = diffTarget()
     setNavigation(back)
     if (target) props.onCloseDiff?.(target)
+    if (target?.kind === "compare" && newPullReturn() && overlay() === undefined) setOverlay("new-pull")
   }
   const runId = createMemo(() => {
     const detail = navigation().details?.actions
@@ -1649,7 +1662,8 @@ function AppContent(props: AppProps) {
       overlay() === "inline-confirm" ||
       overlay() === "inline-retry" ||
       overlay() === "new-issue" ||
-      overlay() === "new-issue-templates"
+      overlay() === "new-issue-templates" ||
+      overlay() === "new-pull"
     ) {
       setInlineRetry()
       setInlineConfirm()
@@ -1707,11 +1721,7 @@ function AppContent(props: AppProps) {
       const diff = next.diffs?.[next.page]
       if (diff) {
         const loaded = props.diffs?.[diff.kind]?.target
-        const matches =
-          diff.kind === "commit"
-            ? loaded?.kind === "commit" && loaded.sha === diff.sha
-            : loaded?.kind === "pull" && loaded.number === diff.number
-        if (!matches) void props.onLoadDiff?.(diff)
+        if (!loaded || !sameDiff(loaded, diff)) void props.onLoadDiff?.(diff)
       }
     })
   const selectPage = (next: Page) => {
@@ -1770,10 +1780,10 @@ function AppContent(props: AppProps) {
     setFindOpen(true)
   }
   const canOpenNewIssue = () => page() === "issues" && !diffTarget() && !activeIssueNumber()
-  const newIssueDrafts = props.newIssueDrafts ?? createNewIssueDrafts({ storage: false })
-  const [newIssueDraft, setNewIssueDraft] = createSignal<NewIssueDraft>()
+  const newIssueDrafts = props.newIssueDrafts ?? createComposeDrafts({ storage: false })
+  const [newIssueDraft, setNewIssueDraft] = createSignal<ComposeDraft>()
   const [newIssueTemplates, setNewIssueTemplates] = createSignal<IssueTemplate[]>()
-  const showNewIssue = (draft: NewIssueDraft) => {
+  const showNewIssue = (draft: ComposeDraft) => {
     setNewIssueDraft(draft)
     setOverlay("new-issue")
   }
@@ -1781,7 +1791,7 @@ function AppContent(props: AppProps) {
     if (overlay() !== undefined || !canOpenNewIssue()) return false
     const repositoryId = data().repo.id
     const current = () => !disposed && canOpenNewIssue() && data().repo.id === repositoryId
-    void newIssueDrafts.load(repositoryId).then(async (draft) => {
+    void newIssueDrafts.load({ repositoryId }).then(async (draft) => {
       if (!current() || overlay() !== undefined) return
       if (draft.title || draft.body || !props.onLoadIssueTemplates) return showNewIssue(draft)
       setNewIssueTemplates(undefined)
@@ -1794,16 +1804,53 @@ function AppContent(props: AppProps) {
   }
   const chooseNewIssueTemplate = (template: IssueTemplate | undefined) => {
     const draft = { title: template?.title ?? "", body: template?.body ?? "" }
-    if (template) newIssueDrafts.set(data().repo.id, draft)
+    if (template) newIssueDrafts.set({ repositoryId: data().repo.id }, draft)
     showNewIssue(draft)
   }
   const createIssue = async (title: string, body: string) => {
     const repositoryId = data().repo.id
     const issue = await props.onCreateIssue!(title, body)
-    newIssueDrafts.set(repositoryId, { title: "", body: "" })
+    newIssueDrafts.set({ repositoryId }, { title: "", body: "" })
     return issue
   }
-  const newIssueContextItems = (): ContextMenuItem[] => (canOpenNewIssue() ? [{ label: "New issue", run: openNewIssue }] : [])
+  const canOpenNewPull = () => page() === "pulls" && !diffTarget() && !activePullNumber() && !!props.onComparePull
+  const [newPullLocalBranch, setNewPullLocalBranch] = createSignal<string>()
+  const newPullDrafts = props.newPullDrafts ?? createComposeDrafts({ storage: false })
+  const openNewPull = () => {
+    if (overlay() !== undefined || !canOpenNewPull()) return false
+    const repositoryId = data().repo.id
+    setNewPullReturn()
+    const local =
+      props.onLoadLocalBranch && matchesLocalRepository(props.localRepository, data().repo.nameWithOwner)
+        ? props.onLoadLocalBranch().catch(() => undefined)
+        : Promise.resolve(undefined)
+    void local.then((branch) => {
+      if (disposed || overlay() !== undefined || !canOpenNewPull() || data().repo.id !== repositoryId) return
+      setNewPullLocalBranch(branch)
+      setOverlay("new-pull")
+    })
+  }
+  const createPull = async (repository: PullRepository, pull: NewPull) => {
+    const origin = data().repo.id
+    const created = await props.onCreatePull!(repository, pull)
+    newPullDrafts.set({ repositoryId: repository.id, head: pull.head }, { title: "", body: "" })
+    if (repository.id !== origin && !disposed && !renderer.isDestroyed)
+      setToast({
+        id: ++toastId,
+        title: "Pull request created",
+        message: `${repository.nameWithOwner}#${created.number}`,
+        duration: 2000,
+        tone: "success",
+      })
+    return created
+  }
+  const createNew = () => (page() === "pulls" ? openNewPull() : openNewIssue())
+  const createContextItems = (): ContextMenuItem[] =>
+    canOpenNewIssue()
+      ? [{ label: "New issue", run: openNewIssue }]
+      : canOpenNewPull()
+        ? [{ label: "New pull request", run: openNewPull }]
+        : []
   const activeWorkFindKind = () => {
     const kind = workFindKind()
     return kind && data().workFinds?.[kind] ? kind : undefined
@@ -1846,7 +1893,12 @@ function AppContent(props: AppProps) {
     }
   }
   const openCurrentDiffGitHub = (target = diffTarget()) => {
-    if (target) void openInBrowser(target.kind === "pull" ? target.number : target.sha, undefined, "diff")
+    if (target)
+      void openInBrowser(
+        target.kind === "pull" ? target.number : target.kind === "compare" ? `compare/${target.base}...${target.head}` : target.sha,
+        undefined,
+        "diff",
+      )
   }
   const openDiffTool = async (target: DiffTarget) => {
     const origin = navigation()
@@ -2018,7 +2070,7 @@ function AppContent(props: AppProps) {
         disabled: !props.onOpenInBrowser,
       },
     )
-    items.push(...newIssueContextItems(), ...findContextItems())
+    items.push(...createContextItems(), ...findContextItems())
     openContextMenu(position, items, valid)
   }
   const openPageContext = (position: MousePosition) => {
@@ -2064,7 +2116,7 @@ function AppContent(props: AppProps) {
         })
     }
     items.push(
-      ...newIssueContextItems(),
+      ...createContextItems(),
       ...findContextItems(),
       ...commentContextItems(),
       ...issueActionsContextItems(),
@@ -2103,7 +2155,8 @@ function AppContent(props: AppProps) {
       overlay() === "inline-confirm" ||
       overlay() === "inline-retry" ||
       overlay() === "new-issue" ||
-      overlay() === "new-issue-templates"
+      overlay() === "new-issue-templates" ||
+      overlay() === "new-pull"
     )
       return issueActionHint()
     if (overlay() === "issue-actions") return hint(open, close)
@@ -2233,7 +2286,8 @@ function AppContent(props: AppProps) {
         ...list(hasItems),
         ["work.toggleState", "open/closed"],
         ...(props.onWorkFindChange ? [["work.find", "find"] as const] : []),
-        ...(page() === "issues" ? [["work.newIssue", "new issue"] as const] : []),
+        ...(page() === "issues" ? [["work.create", "new issue"] as const] : []),
+        ...(canOpenNewPull() ? [["work.create", "new pull request"] as const] : []),
         ...(activeWorkFindKind() ? [["navigation.back", "clear find"] as const] : []),
         ...(page() === "pulls" && hasItems ? [diff] : []),
         ...refresh,
@@ -2426,7 +2480,7 @@ function AppContent(props: AppProps) {
         if (branches.value) setOverlay("branch-picker")
       },
       "work.find": openWorkFind,
-      "work.newIssue": openNewIssue,
+      "work.create": createNew,
       "work.toggleState": () => {
         if (diffTarget() || activeIssueNumber() || activePullNumber()) return false
         if (page() === "issues") setIssueState((value) => (value === "open" ? "closed" : "open"))
@@ -2504,7 +2558,8 @@ function AppContent(props: AppProps) {
       }
       let initial: InitialNavigation
       if (target.kind === "page") initial = { page: target.page }
-      else if (target.kind === "diff") initial = { detail: target.target, diff: target.target }
+      else if (target.kind === "diff" && target.target.kind !== "compare") initial = { detail: target.target, diff: target.target }
+      else if (target.kind === "diff") initial = { diff: target.target }
       else {
         let detail: DetailTarget
         if (target.detail.kind === "number") {
@@ -3057,9 +3112,51 @@ function AppContent(props: AppProps) {
                           />
                         )}
                       </Show>
+                      <Show when={overlay() === "new-pull"}>
+                        <NewPullDialog
+                          repository={data().repo.nameWithOwner}
+                          repositoryId={data().repo.id}
+                          repositoryNodeId={data().repo.nodeId}
+                          repositoryUrl={data().repo.url}
+                          defaultBranch={data().repo.defaultBranch}
+                          drafts={newPullDrafts}
+                          localBranch={newPullLocalBranch()}
+                          branches={data().branches}
+                          showScrollbar={config().showScrollbars}
+                          showStatusBarHints={config().showStatusBarHints}
+                          onCompare={props.onComparePull!}
+                          onCheckMerge={
+                            props.onCheckMerge && matchesLocalRepository(props.localRepository, data().repo.nameWithOwner)
+                              ? props.onCheckMerge
+                              : undefined
+                          }
+                          onCreate={props.onCreatePull ? createPull : undefined}
+                          onOpenPull={(number) => {
+                            setOverlay()
+                            openPull(number)
+                          }}
+                          initial={newPullReturn()}
+                          onViewDiff={(sides, head) => {
+                            setNewPullReturn(sides)
+                            setOverlay()
+                            const { id, nodeId, nameWithOwner } = sides.baseRepository
+                            viewDiff({
+                              kind: "compare",
+                              base: sides.base,
+                              head,
+                              ...(id !== data().repo.id ? { repository: { id, nodeId, nameWithOwner } } : {}),
+                            })
+                          }}
+                          onLoadRepositories={props.onLoadPullRepositories}
+                          onLoadBranches={props.onLoadPullBranches}
+                          onLoadMoreBranches={props.onLoadMoreBranches ?? (() => Promise.resolve())}
+                          onRetryBranches={() => props.onRetryResource?.({ kind: "branches" })}
+                          onClose={() => setOverlay()}
+                          onHintChange={setIssueActionHint}
+                        />
+                      </Show>
                       <Show when={overlay() === "new-issue-templates"}>
                         <NewIssueTemplatePicker
-                          repository={data().repo.nameWithOwner}
                           templates={newIssueTemplates()}
                           onSelect={chooseNewIssueTemplate}
                           onClose={() => setOverlay()}
@@ -3076,7 +3173,7 @@ function AppContent(props: AppProps) {
                             draft={draft}
                             draftError={newIssueDrafts.error()}
                             showStatusBarHints={config().showStatusBarHints}
-                            onDraftChange={(next) => newIssueDrafts.set(data().repo.id, next)}
+                            onDraftChange={(next) => newIssueDrafts.set({ repositoryId: data().repo.id }, next)}
                             onSubmit={props.onCreateIssue ? createIssue : undefined}
                             onClose={() => setOverlay()}
                             onHintChange={setIssueActionHint}

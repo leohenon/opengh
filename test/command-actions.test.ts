@@ -3,7 +3,15 @@ import { mkdtemp, mkdir, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { homedir } from "node:os"
-import { cloneCommand, matchesLocalRepository, plainCommandOutput, resolveLocalRepository, runCommand } from "../src/command-actions"
+import {
+  checkMerge,
+  cloneCommand,
+  matchesLocalRepository,
+  plainCommandOutput,
+  readLocalBranch,
+  resolveLocalRepository,
+  runCommand,
+} from "../src/command-actions"
 
 const cwd = import.meta.dir
 
@@ -33,6 +41,92 @@ test("local identity comes from git origin, not GH_REPO, including nested cwd", 
     if (previous === undefined) delete process.env.GH_REPO
     else process.env.GH_REPO = previous
     await rm(directory, { recursive: true, force: true })
+  }
+})
+
+test("reads the local branch, ignoring a detached HEAD and directories outside git", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "opengh-branch-"))
+  const git = async (...args: string[]) => {
+    const child = Bun.spawn(["git", "-c", "core.hooksPath=/dev/null", "-c", "commit.gpgsign=false", ...args], {
+      cwd: directory,
+      stdout: "ignore",
+      stderr: "pipe",
+    })
+    expect(await child.exited).toBe(0)
+  }
+  try {
+    expect(await readLocalBranch(directory)).toBeUndefined()
+    await git("init", "--initial-branch=main")
+    await git("-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "--allow-empty", "-m", "fixture")
+    expect(await readLocalBranch(directory)).toBe("main")
+    await git("switch", "-c", "feature/new-pull")
+    expect(await readLocalBranch(directory)).toBe("feature/new-pull")
+    await git("switch", "--detach")
+    expect(await readLocalBranch(directory)).toBeUndefined()
+  } finally {
+    await rm(directory, { recursive: true, force: true })
+  }
+})
+
+test("checks whether branches merge cleanly, after fetching them, without touching the checkout", async () => {
+  const root = await mkdtemp(join(tmpdir(), "opengh-merge-"))
+  const git = async (cwd: string, ...args: string[]) => {
+    const child = Bun.spawn(
+      [
+        "git",
+        "-c",
+        "core.hooksPath=/dev/null",
+        "-c",
+        "commit.gpgsign=false",
+        "-c",
+        "user.name=Test",
+        "-c",
+        "user.email=test@example.com",
+        ...args,
+      ],
+      { cwd, stdout: "pipe", stderr: "pipe" },
+    )
+    expect(await child.exited).toBe(0)
+    return (await new Response(child.stdout).text()).trim()
+  }
+  const remote = join(root, "remote.git")
+  const work = join(root, "work")
+  const local = join(root, "local")
+  try {
+    await mkdir(remote)
+    await git(remote, "init", "--bare", "--initial-branch=main")
+    await git(root, "clone", "--quiet", remote, work)
+    await Bun.write(join(work, "shared.txt"), "one\ntwo\nthree\n")
+    await git(work, "add", ".")
+    await git(work, "commit", "--quiet", "-m", "base")
+    await git(work, "push", "--quiet", "origin", "HEAD:main")
+    await git(work, "switch", "--quiet", "-c", "feature/clean")
+    await Bun.write(join(work, "new.txt"), "new\n")
+    await git(work, "add", ".")
+    await git(work, "commit", "--quiet", "-m", "clean")
+    await git(work, "push", "--quiet", "origin", "feature/clean")
+    await git(work, "switch", "--quiet", "-c", "feature/conflict", "main")
+    await Bun.write(join(work, "shared.txt"), "one\nTWO\nthree\n")
+    await git(work, "commit", "--quiet", "-am", "conflict")
+    await git(work, "push", "--quiet", "origin", "feature/conflict")
+    await git(work, "switch", "--quiet", "main")
+    await Bun.write(join(work, "shared.txt"), "one\n2\nthree\n")
+    await git(work, "commit", "--quiet", "-am", "main moves on")
+    await git(work, "push", "--quiet", "origin", "main")
+
+    await git(root, "clone", "--quiet", remote, local)
+    const before = await git(local, "status", "--porcelain=v2", "--branch")
+    expect(await checkMerge(local, "main", "feature/clean")).toEqual({ status: "clean" })
+    expect(await checkMerge(local, "main", "feature/conflict")).toEqual({ status: "conflicts", files: ["shared.txt"] })
+    expect(await checkMerge(local, "main", "feature/missing")).toEqual({
+      status: "unavailable",
+      reason: "couldn't fetch the branches from GitHub",
+    })
+    expect(await checkMerge(local, "main", "-x")).toEqual({ status: "unavailable", reason: "unsupported branch name" })
+    expect(await git(local, "status", "--porcelain=v2", "--branch")).toBe(before)
+    expect(await git(local, "rev-parse", "refs/remotes/origin/feature/conflict")).toBe(await git(remote, "rev-parse", "feature/conflict"))
+  } finally {
+    await rm(root, { recursive: true, force: true })
   }
 })
 

@@ -1125,6 +1125,98 @@ describe("repository session", () => {
     expect(ready(session).data.issues.open.value?.items.filter((item) => item.number === 999)).toHaveLength(1)
   })
 
+  test("creates pull requests, shows them at the top of the open list and refreshes it", async () => {
+    const created = {
+      number: 999,
+      title: "Topic",
+      author: "octocat",
+      createdAt: "2026-07-01T00:00:00Z",
+      state: "open",
+      merged: false,
+      draft: false,
+    } as PullRequestDetail
+    const calls: unknown[] = []
+    let remote = structuredClone(githubDataFixture.pulls.open.value!.items)
+    let listReads = 0
+    let countReads = 0
+    const session = createRepositorySession(
+      loaders({
+        createPull: async (repository, pull) => {
+          calls.push([repository.id, pull])
+          return created
+        },
+        pulls: async (_repository, state) => {
+          if (state === "open") listReads++
+          return { items: state === "open" ? remote : structuredClone(githubDataFixture.pulls.closed.value!.items), hasMore: false }
+        },
+        workCounts: async () => {
+          countReads++
+          return { issues: 61, pulls: 25 }
+        },
+      }),
+    )
+    const pull = { base: "main", head: "topic", title: "Topic", body: "Body" }
+    await expect(session.createPull({ id: 1, nodeId: "R_1", nameWithOwner: "anomalyco/opentui" }, pull)).rejects.toThrow(
+      "Wait for the repository to load",
+    )
+    await session.load("anomalyco/opentui")
+    const [reads, counts] = [listReads, countReads]
+    remote = [
+      { number: 999, title: "Topic", author: "octocat", createdAt: created.createdAt, state: "open", merged: false, draft: false },
+      ...remote,
+    ]
+    const repo = ready(session).data.repo
+    expect(await session.createPull(repo, pull)).toBe(created)
+    expect(calls).toEqual([[ready(session).data.repo.id, pull]])
+    expect(ready(session).data.pulls.open.value?.items[0]).toMatchObject({ number: 999, title: "Topic" })
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(listReads).toBe(reads + 1)
+    expect(countReads).toBe(counts + 1)
+    expect(ready(session).data.pulls.open.status).toBe("ready")
+    expect(ready(session).data.pulls.open.value?.items.filter((item) => item.number === 999)).toHaveLength(1)
+  })
+
+  test("compares pull request branches and finds an existing pull request in the loaded repository", async () => {
+    const comparison = { status: "ahead" as const, aheadBy: 2, behindBy: 0, commits: 2, files: 3, additions: 4, deletions: 1 }
+    const existing = {
+      number: 12,
+      title: "Topic",
+      state: "open" as const,
+      author: "octocat",
+      createdAt: "2026-01-01T00:00:00Z",
+      merged: false,
+    }
+    const calls: Array<[string, number, string, string]> = []
+    let open: typeof existing | undefined = existing
+    const session = createRepositorySession(
+      loaders({
+        comparePull: async (repository, base, head) => {
+          calls.push(["compare", repository.id!, base, head])
+          return comparison
+        },
+        openPull: async (repository, base, head) => {
+          calls.push(["open", repository.id!, base, head])
+          return open
+        },
+      }),
+    )
+    await expect(
+      session.comparePullBranches({ id: 1, nodeId: "R_1", nameWithOwner: "anomalyco/opentui" }, "main", "topic"),
+    ).rejects.toThrow("Wait for the repository to load")
+    await session.load("anomalyco/opentui")
+    const id = ready(session).data.repo.id!
+    const repo = ready(session).data.repo
+    expect(await session.comparePullBranches(repo, "main", "topic")).toEqual({ comparison, existing })
+    open = undefined
+    expect(await session.comparePullBranches(repo, "main", "topic")).toEqual({ comparison })
+    expect(calls).toEqual([
+      ["compare", id, "main", "topic"],
+      ["open", id, "main", "topic"],
+      ["compare", id, "main", "topic"],
+      ["open", id, "main", "topic"],
+    ])
+  })
+
   test("loads issue templates once per repository and retries after a failure", async () => {
     const template = { name: "Bug", about: "", title: "", body: "" }
     let loads = 0

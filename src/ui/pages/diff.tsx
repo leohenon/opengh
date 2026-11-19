@@ -230,8 +230,18 @@ export function DiffScreen(props: {
   const loadingFiles = () => props.resource.status === "loading"
   const fileLoadingDots = useLoadingDots(() => active() && showFiles() && loadingFiles())
   const currentLayout = () => layout() ?? props.defaultLayout ?? (narrow() ? "unified" : "split")
-  const targetKey = () => (props.target.kind === "commit" ? props.target.sha : `PR #${props.target.number}`)
-  const label = () => (props.target.kind === "commit" ? props.target.sha.slice(0, 7) : `PR #${props.target.number}`)
+  const targetKey = () =>
+    props.target.kind === "commit"
+      ? props.target.sha
+      : props.target.kind === "compare"
+        ? `${props.target.base}...${props.target.head}`
+        : `PR #${props.target.number}`
+  const label = () =>
+    props.target.kind === "commit"
+      ? props.target.sha.slice(0, 7)
+      : props.target.kind === "compare"
+        ? `${props.target.base}...${props.target.head}`
+        : `PR #${props.target.number}`
   const error = () => (props.resource.status === "error" ? props.resource.message : parsed().error)
   const renderFile = () => (selected()?.message ? undefined : selected()?.body)
   const rows = createMemo(() =>

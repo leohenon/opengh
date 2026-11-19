@@ -3,6 +3,7 @@ import { render, testRender } from "@opentui/solid"
 import { createTestRenderer } from "@opentui/core/testing"
 import type { TextRenderable } from "@opentui/core"
 import type { CommitDetailState, DiffState, IssueDetailState, PullDetailState, RunDetailState } from "../src/repository-state"
+import type { DiffTarget } from "../src/models"
 import { initializeHunk } from "../src/ui/hunk-host"
 import { patchFixture } from "./fixtures/diff"
 import { createSignal } from "solid-js"
@@ -181,7 +182,7 @@ test("Escape unwinds a diff one level, then the current tab unwinds its detail",
 
 test("detail and diff menus retain their actions with Back at the bottom", async () => {
   const closed = { commit: 0, issue: 0, pull: 0, run: 0, diff: 0 }
-  const [diffs, setDiffs] = createSignal<Partial<Record<"commit" | "pull", DiffState>>>({})
+  const [diffs, setDiffs] = createSignal<Partial<Record<DiffTarget["kind"], DiffState>>>({})
   const view = await createTestRenderer({ width: 120, height: 28 })
   initializeHunk(view.renderer)
   await render(

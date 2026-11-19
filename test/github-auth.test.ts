@@ -823,3 +823,29 @@ test("a read GitHub drops once is retried, but writes and lasting failures are n
     spawn.mockRestore()
   }
 })
+
+test("REST errors include GitHub's reasons from the response body", async () => {
+  const transport = createGitHubTransport(new GitHubRequestScheduler())
+  const rejected = (errors: unknown[]) => () =>
+    apiResult({ message: "Validation Failed", errors }, {}, 422, "gh: Validation Failed (HTTP 422)", 1)
+  let respond = rejected([
+    { resource: "PullRequest", code: "custom", message: "A pull request already exists for owner:topic." },
+    { resource: "PullRequest", code: "custom", message: "A pull request already exists for owner:topic." },
+    { resource: "PullRequest", field: "base", code: "invalid" },
+  ])
+  const spawn = spyOn(Bun, "spawn").mockImplementation(() => respond())
+  const failure = async () => {
+    const error: unknown = await transport.json("repos/owner/repo/compare/main...topic").catch((caught: unknown) => caught)
+    if (!(error instanceof GitHubApiError)) throw new Error("Expected a GitHubApiError")
+    return error
+  }
+  try {
+    const error = await failure()
+    expect(error.status).toBe(422)
+    expect(error.message).toBe("gh: Validation Failed (HTTP 422) — A pull request already exists for owner:topic.")
+    respond = rejected([{ resource: "PullRequest", code: "missing" }])
+    expect((await failure()).message).toBe("gh: Validation Failed (HTTP 422)")
+  } finally {
+    spawn.mockRestore()
+  }
+})

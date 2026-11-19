@@ -8,7 +8,7 @@ import { keybindingContexts, resolveKeybindings } from "../src/keybindings"
 import type { InputRenderable, TextareaRenderable } from "@opentui/core"
 import type { IssueDetail, IssueTemplate } from "../src/models"
 import { App } from "../src/ui/app"
-import { issueEditorText, parseIssueEditorText } from "../src/ui/components/new-issue-dialog"
+import { draftEditorText as issueEditorText, parseDraftEditorText as parseIssueEditorText } from "../src/ui/components/compose-dialog"
 import { githubDataFixture, repositoryOperationsFixture } from "./fixtures/github-data"
 
 const active: Array<{ renderer: { destroy(): void; isDestroyed: boolean } }> = []
@@ -51,9 +51,9 @@ async function render(
 
 describe("new issue", () => {
   test("c is bound only on work lists", () => {
-    expect(resolveKeybindings()["work.newIssue"]).toEqual(["c"])
-    expect(keybindingContexts.work).toContain("work.newIssue")
-    for (const context of ["issue", "pull", "commits"]) expect(keybindingContexts[context]).not.toContain("work.newIssue")
+    expect(resolveKeybindings()["work.create"]).toEqual(["c"])
+    expect(keybindingContexts.work).toContain("work.create")
+    for (const context of ["issue", "pull", "commits"]) expect(keybindingContexts[context]).not.toContain("work.create")
   })
 
   test("c opens the new issue dialog on the issue list and Esc closes it", async () => {
@@ -67,7 +67,7 @@ describe("new issue", () => {
     expect(dialog(view)).toBeUndefined()
   })
 
-  test("c does nothing on the pull request list", async () => {
+  test("c does not open the new issue dialog on the pull request list", async () => {
     const view = await render("pulls")
     view.mockInput.pressKey("c")
     await view.flush()
@@ -116,7 +116,8 @@ describe("new issue", () => {
     await view.flush()
     const title = view.renderer.root.findDescendantById("new-issue-title") as InputRenderable
     const body = view.renderer.root.findDescendantById("new-issue-body") as TextareaRenderable
-    expect(view.captureCharFrame()).toContain("New issue · anomalyco/opentui")
+    expect(view.captureCharFrame()).toContain("New issue")
+    expect(view.captureCharFrame()).not.toContain("New issue · anomalyco/opentui")
     expect(title.focused).toBe(true)
     await view.mockInput.typeText("Crash")
     view.mockInput.pressTab()

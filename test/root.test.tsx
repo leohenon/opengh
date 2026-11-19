@@ -78,6 +78,16 @@ function readySession() {
       throw new Error("Issue creation is unavailable.")
     },
     loadIssueTemplates: async () => [],
+    comparePullBranches: async () => {
+      throw new Error("Comparing branches is unavailable.")
+    },
+    createPull: async () => {
+      throw new Error("Pull request creation is unavailable.")
+    },
+    loadPullRepositories: async () => {
+      throw new Error("Pull request repositories are unavailable.")
+    },
+    loadPullBranches: async () => ({ items: [], hasMore: false }),
     loadPullMergeMessage: async () => {
       throw new Error("Merge messages are unavailable.")
     },

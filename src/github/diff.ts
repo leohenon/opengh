@@ -7,7 +7,13 @@ import { githubTransport, type GitHubTransport } from "./transport"
 export const MAX_DIFF_BYTES = 4 * 1024 * 1024
 
 export function diffPath(repository: RepositoryReference, target: DiffTarget) {
-  return `${repositoryPath(repository)}/${target.kind === "pull" ? `pulls/${target.number}` : `commits/${encodeURIComponent(target.sha)}`}`
+  const path =
+    target.kind === "pull"
+      ? `pulls/${target.number}`
+      : target.kind === "compare"
+        ? `compare/${encodeURIComponent(target.base)}...${encodeURIComponent(target.head)}`
+        : `commits/${encodeURIComponent(target.sha)}`
+  return `${repositoryPath(repository)}/${path}`
 }
 
 export function createGitHubDiff(transport: GitHubTransport) {
@@ -60,6 +66,27 @@ export function createGitHubDiff(transport: GitHubTransport) {
 
       // An explicit degraded mode: absent patches are never represented as unchanged files.
       const files: Extract<DiffContent, { kind: "files" }>["files"] = []
+      // A comparison lists at most 300 files in one response; its pages apply to commits, not files.
+      if (target.kind === "compare") {
+        const entries = JSON.parse(
+          await transport.text(path, "application/vnd.github+json", {
+            ...options,
+            jq: ".files // [] | map({filename, previous_filename, status, additions, deletions})",
+          }),
+        )
+        options.signal.throwIfAborted()
+        if (!Array.isArray(entries)) throw new Error("GitHub returned an invalid changed-file list")
+        budget.consumeItems(entries.length)
+        for (const entry of entries)
+          files.push({
+            path: entry.filename,
+            previousPath: entry.previous_filename,
+            status: entry.status,
+            additions: entry.additions,
+            deletions: entry.deletions,
+          })
+        return { kind: "files", files, truncated: entries.length >= 300 }
+      }
       const seen = new Set<string>()
       for (let page = 1; page <= 30; page++) {
         options.signal.throwIfAborted()

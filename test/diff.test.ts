@@ -50,6 +50,33 @@ test("diff requests use authenticated API media types and preserve PR/commit ide
   expect(calls).toHaveLength(4)
 })
 
+test("comparison diffs load the patch, or a single file list, for encoded branch names", async () => {
+  const calls: Array<[string, string | undefined, string | undefined]> = []
+  let files: unknown[] = [{ filename: "a.ts", status: "modified", additions: 1, deletions: 2 }]
+  const load = createGitHubDiff(
+    transport(async (path, accept, options) => {
+      calls.push([path, accept, options?.jq])
+      return accept === "application/vnd.github.diff" ? patchFixture : JSON.stringify(files)
+    }),
+  )
+  const signal = new AbortController().signal
+  const target = { kind: "compare" as const, base: "main", head: "feature/x" }
+  expect(await load("owner/repo", target, signal)).toEqual({ kind: "patch", patch: patchFixture })
+  expect(await load("owner/repo", target, signal, true)).toEqual({
+    kind: "files",
+    files: [{ path: "a.ts", previousPath: undefined, status: "modified", additions: 1, deletions: 2 }],
+    truncated: false,
+  })
+  files = Array.from({ length: 300 }, (_, index) => ({ filename: `${index}.ts`, status: "added", additions: 1, deletions: 0 }))
+  expect(await load("owner/repo", target, signal, true)).toMatchObject({ kind: "files", truncated: true })
+  expect(calls.map(([path, accept]) => [path, accept])).toEqual([
+    ["repos/owner/repo/compare/main...feature%2Fx", "application/vnd.github.diff"],
+    ["repos/owner/repo/compare/main...feature%2Fx", "application/vnd.github+json"],
+    ["repos/owner/repo/compare/main...feature%2Fx", "application/vnd.github+json"],
+  ])
+  expect(calls[1]![2]).toContain(".files")
+})
+
 test("degraded file listings paginate without pretending absent patches are unchanged", async () => {
   const paths: string[] = []
   let fullPages = false

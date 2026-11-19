@@ -9,7 +9,6 @@ import { LoadingText } from "./loading-text"
 import { Popup } from "./popup"
 
 export function NewIssueTemplatePicker(props: {
-  repository: string
   templates?: IssueTemplate[]
   onSelect(template: IssueTemplate | undefined): void
   onClose(): void
@@ -52,7 +51,7 @@ export function NewIssueTemplatePicker(props: {
     <Popup width={72} height={(props.templates ? items().length : 1) + 5} placement="center" zIndex={250} onClose={props.onClose}>
       <box id="new-issue-templates" flexGrow={1} minHeight={0} paddingX={2} paddingBottom={1} flexDirection="column">
         <text height={1} flexShrink={0} wrapMode="none" fg={colors.text} attributes={TextAttributes.BOLD}>
-          New issue · {props.repository}
+          New issue
         </text>
         <box height={1} flexShrink={0} />
         <Show when={props.templates} fallback={<LoadingText text="Loading templates…" />}>

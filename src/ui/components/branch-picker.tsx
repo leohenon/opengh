@@ -27,9 +27,12 @@ type LoadRow = { kind: "load"; key: string; label: string; action?: "load-more" 
 type PickerRow = BranchRow | LoadRow
 
 export function BranchPicker(props: {
+  title?: string
+  currentLabel?: string
   branches: ResourceState<Paginated<string>>
-  current: string
+  current?: string
   canSwitch?: boolean
+  zIndex?: number
   showScrollbar: boolean
   onSelect: (branch: string) => void
   onLoadMore: () => Promise<void>
@@ -40,7 +43,7 @@ export function BranchPicker(props: {
   const [query, setQuery] = createSignal("")
   const source = createMemo(() => {
     const loaded = props.branches.value?.items ?? []
-    return loaded.includes(props.current) ? loaded : [props.current, ...loaded]
+    return props.current === undefined || loaded.includes(props.current) ? loaded : [props.current, ...loaded]
   })
   const hasBranchMatch = () => source().some((branch) => fuzzyScore(branch, query()) !== undefined)
   const branchSummary = () => {
@@ -82,7 +85,7 @@ export function BranchPicker(props: {
 
   return (
     <SearchablePicker
-      title={`Switch branch (${branchSummary()})`}
+      title={`${props.title ?? "Switch branch"} (${branchSummary()})`}
       placeholder="Search branches"
       items={rows()}
       itemKey={(row) => row.key}
@@ -90,8 +93,9 @@ export function BranchPicker(props: {
       match={(row, needle) => (row.kind === "branch" ? fuzzyScore(row.branch, needle) : Number.MAX_SAFE_INTEGER)}
       preferred={(row) => row.kind === "branch" && row.branch === props.current}
       height={22}
+      zIndex={props.zIndex}
       showScrollbar={props.showScrollbar}
-      empty="No matching branches"
+      empty={props.branches.status === "loading" && !props.branches.value ? "Loading branches…" : "No matching branches"}
       error={props.canSwitch === false ? "Repository is busy — wait before switching branches" : undefined}
       onQueryChange={setQuery}
       onSelect={select}
@@ -111,7 +115,7 @@ export function BranchPicker(props: {
             </text>
           </box>
           <text width={10} flexShrink={0} fg={colors.green}>
-            {row.kind === "branch" && row.branch === props.current ? "✓ current" : ""}
+            {row.kind === "branch" && row.branch === props.current ? (props.currentLabel ?? "✓ current") : ""}
           </text>
         </>
       )}

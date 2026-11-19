@@ -35,6 +35,27 @@ export type IssueSummary = {
 
 export type IssueTemplate = { name: string; about: string; title: string; body: string }
 
+export type PullRequestTemplate = { filename: string; body: string }
+
+export type NewPull = { base: string; head: string; title: string; body: string }
+
+export type PullRepository = { id: number; nodeId: string; nameWithOwner: string; defaultBranch: string }
+
+export type PullRepositories = { bases: PullRepository[]; heads: PullRepository[] }
+
+export type PullBranchComparison = { comparison: PullComparison; existing?: PullRequestSummary }
+
+export type PullComparison = {
+  status: "ahead" | "behind" | "identical" | "diverged"
+  aheadBy: number
+  behindBy: number
+  commits: number
+  files: number
+  additions: number
+  deletions: number
+  message?: string
+}
+
 export type IssueDetail = IssueSummary &
   Partial<ReactionState> & {
     references?: IssueReference[]
@@ -383,7 +404,10 @@ export type CommitDetail = CommitSummary & {
   filesTruncated: boolean
 }
 
-export type DiffTarget = { kind: "commit"; sha: string } | { kind: "pull"; number: number }
+export type DiffTarget =
+  | { kind: "commit"; sha: string }
+  | { kind: "pull"; number: number }
+  | { kind: "compare"; base: string; head: string; repository?: Pick<Repo, "id" | "nodeId" | "nameWithOwner"> }
 
 export type DiffContent =
   { kind: "patch"; patch: string; headSha?: string; baseSha?: string } | { kind: "files"; files: CommitFile[]; truncated: boolean }

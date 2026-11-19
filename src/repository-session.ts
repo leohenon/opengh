@@ -27,6 +27,10 @@ import {
   loadGitHubRun,
   loadGitHubRunJobs,
   createGitHubIssue,
+  createGitHubPull,
+  compareGitHubPull,
+  loadGitHubPullRepositories,
+  loadGitHubOpenPull,
   loadGitHubIssueTemplates,
   createGitHubIssueComment,
   updateGitHubIssueState,
@@ -79,6 +83,11 @@ import type {
   PullMergeDraft,
   PullContext,
   PullRequestSummary,
+  NewPull,
+  PullBranchComparison,
+  PullRepositories,
+  PullRepository,
+  PullComparison,
   Repo,
   RepositoryDocument,
   WorkflowRunSummary,
@@ -134,6 +143,10 @@ export type RepositoryLoaders = {
   issueReferences(repository: RepositoryTarget, number: number, options?: RequestOptions): Promise<IssueReference[]>
   createIssue?(repository: Repo, title: string, body: string): Promise<IssueDetail>
   issueTemplates?(repository: Repo): Promise<IssueTemplate[]>
+  comparePull?(repository: RepositoryTarget, base: string, head: string): Promise<PullComparison>
+  createPull?(repository: RepositoryTarget, pull: NewPull): Promise<PullRequestDetail>
+  openPull?(repository: RepositoryTarget, base: string, head: string): Promise<PullRequestSummary | undefined>
+  pullRepositories?(repository: Repo): Promise<PullRepositories>
   createIssueComment?(
     repository: Repo,
     number: number,
@@ -200,6 +213,10 @@ export type RepositorySession = {
   updatePullDraft(number: number, draft: boolean): Promise<PullRequestDetail>
   createIssue(title: string, body: string): Promise<IssueDetail>
   loadIssueTemplates(): Promise<IssueTemplate[]>
+  comparePullBranches(repository: RepositoryTarget, base: string, head: string): Promise<PullBranchComparison>
+  createPull(repository: RepositoryTarget, pull: NewPull): Promise<PullRequestDetail>
+  loadPullRepositories(): Promise<PullRepositories>
+  loadPullBranches(repository: PullRepository, page: number): Promise<Page<string>>
   loadPullMergeMessage(number: number, expectedHeadSha: string): Promise<PullMergeDraft>
   mergePull(number: number, method: PullMergeMethod, expectedHeadSha: string, message?: PullMergeMessage): Promise<PullRequestDetail>
   loadMorePullComments(): Promise<void>
@@ -261,6 +278,10 @@ const defaultLoaders: RepositoryLoaders = {
   issueReferences: loadGitHubIssueReferences,
   createIssue: createGitHubIssue,
   issueTemplates: loadGitHubIssueTemplates,
+  comparePull: compareGitHubPull,
+  pullRepositories: loadGitHubPullRepositories,
+  createPull: createGitHubPull,
+  openPull: loadGitHubOpenPull,
   createIssueComment: createGitHubIssueComment,
   updateIssueState: updateGitHubIssueState,
   updatePullState: updateGitHubPullState,
@@ -540,7 +561,7 @@ export function createRepositorySession(
   let runGeneration = 0
   const [commitDetail, setCommitDetail] = createSignal<CommitDetailState>()
   const [diffs, setDiffs] = createSignal<Partial<Record<DiffTarget["kind"], DiffState>>>({})
-  const diffGeneration: Record<DiffTarget["kind"], number> = { commit: 0, pull: 0 }
+  const diffGeneration: Record<DiffTarget["kind"], number> = { commit: 0, pull: 0, compare: 0 }
   const diffAbort: Partial<Record<DiffTarget["kind"], AbortController>> = {}
   // Diff identity is content-addressed: a commit SHA, or a PR number pinned to its base/head commits.
   const commitDiffKey = (repository: string, sha: string, filesOnly: boolean) =>
@@ -555,7 +576,7 @@ export function createRepositorySession(
     const key =
       target.kind === "commit"
         ? commitDiffKey(repository, target.sha, filesOnly)
-        : !filesOnly && value.kind === "patch"
+        : target.kind === "pull" && !filesOnly && value.kind === "patch"
           ? pullDiffKey(repository, target.number, value)
           : undefined
     if (key) diffCache.set(key, value)
@@ -572,13 +593,13 @@ export function createRepositorySession(
     const key =
       target.kind === "commit"
         ? commitDiffKey(repository, target.sha, filesOnly)
-        : filesOnly
+        : target.kind !== "pull" || filesOnly
           ? undefined
           : pullDiffKey(repository, target.number, diffPull(repository, target.number))
     return key ? diffCache.get(key)?.value : undefined
   }
   const clearDiff = (target?: DiffTarget) => {
-    const kinds = target ? [target.kind] : (["commit", "pull"] as const)
+    const kinds = target ? [target.kind] : (["commit", "pull", "compare"] as const)
     for (const kind of kinds) {
       ++diffGeneration[kind]
       diffAbort[kind]?.abort()
@@ -607,7 +628,8 @@ export function createRepositorySession(
     setDiffs((current) => ({ ...current, [kind]: { target, resource: loadingResource<DiffContent>() } }))
     try {
       if (!loaders.diff) throw new Error("Diff loading is unavailable")
-      const value = await loaders.diff(current.data.repo, target, controller.signal, filesOnly)
+      const repository = target.kind === "compare" && target.repository ? target.repository : current.data.repo
+      const value = await loaders.diff(repository, target, controller.signal, filesOnly)
       if (request === diffGeneration[kind] && !controller.signal.aborted) {
         setDiffs((current) => ({ ...current, [kind]: { target, resource: { status: "ready", value } } }))
         retainDiff(current.repository, target, value, filesOnly)
@@ -1254,7 +1276,7 @@ export function createRepositorySession(
       )
     section("workCounts", ["issues", "pulls"], () => fetchWorkCounts(repository, request))
     section("documents", ["overview"], () => fetchDocuments(repository, repo, branch, request))
-    section("branches", ["commits"], () => fetchBranches(repository, repo.defaultBranch, request, previous?.branches.value?.page))
+    section("branches", ["commits", "pulls"], () => fetchBranches(repository, repo.defaultBranch, request, previous?.branches.value?.page))
     section("commits", ["commits"], () => fetchCommits(repository, branch, request, previous?.commits.value?.page))
     section("commitCount", ["commits"], () => fetchCommitCount(repository, branch, request))
     for (const kind of ["issues", "pulls"] as const)
@@ -2765,6 +2787,63 @@ export function createRepositorySession(
     return loading
   }
 
+  const comparePullBranches = async (target: RepositoryTarget, base: string, head: string): Promise<PullBranchComparison> => {
+    const current = state()
+    if (current.status !== "ready") throw new Error("Wait for the repository to load before comparing branches.")
+    if (!loaders.comparePull || !loaders.openPull) throw new Error("Comparing branches is unavailable.")
+    const [comparison, existing] = await Promise.all([loaders.comparePull(target, base, head), loaders.openPull(target, base, head)])
+    return existing ? { comparison, existing } : { comparison }
+  }
+
+  const pullRepositoryCache = new Map<number, Promise<PullRepositories>>()
+  const loadPullRepositories = (): Promise<PullRepositories> => {
+    const current = state()
+    if (current.status !== "ready") return Promise.reject(new Error("Wait for the repository to load."))
+    const repo = current.data.repo
+    const self = { id: repo.id, nodeId: repo.nodeId, nameWithOwner: repo.nameWithOwner, defaultBranch: repo.defaultBranch }
+    if (!loaders.pullRepositories) return Promise.resolve({ bases: [self], heads: [self] })
+    const cached = pullRepositoryCache.get(repo.id)
+    if (cached) return cached
+    const loading = loaders.pullRepositories(repo)
+    pullRepositoryCache.set(repo.id, loading)
+    loading.catch(() => pullRepositoryCache.delete(repo.id))
+    return loading
+  }
+
+  const loadPullBranches = (target: PullRepository, page: number) => loaders.branches(target, target.defaultBranch, page, repositoryReads())
+
+  const createPull = async (target: RepositoryTarget, pull: NewPull): Promise<PullRequestDetail> => {
+    const current = state()
+    if (current.status !== "ready") throw new Error("Wait for the repository to load before creating a pull request.")
+    if (!loaders.createPull) throw new Error("Pull request creation is unavailable.")
+    const repository = current.repository
+    const created = await loaders.createPull(target, pull)
+    if (target.id !== current.data.repo.id) return created
+    setState((latest) => {
+      if (latest.status !== "ready" || latest.repository !== repository) return latest
+      const open = latest.data.pulls.open.value
+      if (!open || latest.data.workFinds?.pulls || open.items.some((item) => item.number === created.number)) return latest
+      const summary = {
+        number: created.number,
+        title: created.title,
+        author: created.author,
+        createdAt: created.createdAt,
+        state: created.state,
+        merged: created.merged,
+        draft: created.draft === true,
+      }
+      const items = [summary, ...open.items]
+      return { ...latest, data: { ...latest.data, pulls: { ...latest.data.pulls, open: loadingResource({ ...open, items }) } } }
+    })
+    const latest = state()
+    if (latest.status === "ready" && latest.repository === repository) {
+      const request = repositoryGeneration
+      void fetchPulls(repository, "open", request, latest.data.pulls.open.value?.page)
+      void fetchWorkCounts(repository, request)
+    }
+    return created
+  }
+
   const updatePullDraft = async (number: number, draft: boolean): Promise<PullRequestDetail> => {
     const current = state()
     const detail = pullDetail()
@@ -4017,6 +4096,10 @@ export function createRepositorySession(
     updatePullDraft,
     createIssue,
     loadIssueTemplates,
+    comparePullBranches,
+    loadPullRepositories,
+    loadPullBranches,
+    createPull,
     loadPullMergeMessage,
     loadMorePullComments,
     retryPullReferences,

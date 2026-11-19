@@ -136,6 +136,16 @@ async function request(scheduler: GitHubRequestScheduler, ...[path, accept, fiel
       try {
         const value = JSON.parse(body)
         if (!message && typeof value.message === "string") message = value.message
+        if (path !== "graphql" && Array.isArray(value.errors)) {
+          const reasons = [
+            ...new Set(
+              value.errors
+                .map((item: { message?: unknown } | null) => (typeof item?.message === "string" ? item.message.trim() : ""))
+                .filter(Boolean),
+            ),
+          ]
+          if (reasons.length) message = `${message || "GitHub rejected the request"} — ${reasons.join(" ")}`
+        }
         if (path === "graphql" && Array.isArray(value.errors)) {
           const limit = value.errors.find(
             (item: { type?: string; message?: string } | null) =>

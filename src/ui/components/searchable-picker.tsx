@@ -19,6 +19,7 @@ export function SearchablePicker<T>(props: {
   titleMeta?: string
   width?: number
   height: number
+  zIndex?: number
   placement?: "upper" | "center"
   showScrollbar?: boolean
   listTitle?: string
@@ -100,7 +101,7 @@ export function SearchablePicker<T>(props: {
   )
 
   return (
-    <Popup width={props.width ?? 64} height={props.height} placement={props.placement} zIndex={100} onClose={props.onClose}>
+    <Popup width={props.width ?? 64} height={props.height} placement={props.placement} zIndex={props.zIndex ?? 100} onClose={props.onClose}>
       <box flexGrow={1} minHeight={0} flexDirection="column" gap={1} paddingBottom={1}>
         <box flexShrink={0} paddingLeft={4} paddingRight={4}>
           <box height={1} flexDirection="row" justifyContent="space-between">

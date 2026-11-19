@@ -52,7 +52,9 @@ export function ReviewHeader(props: { repo: Repo; target: DiffTarget; totals?: {
   const label = () =>
     props.target.kind === "pull"
       ? `PR #${props.target.number}`
-      : `${dimensions().width < 45 ? "" : "Commit "}${props.target.sha.slice(0, 7)}`
+      : props.target.kind === "compare"
+        ? `${props.target.base}...${props.target.head}`
+        : `${dimensions().width < 45 ? "" : "Commit "}${props.target.sha.slice(0, 7)}`
   const totalsWidth = () => (props.totals ? Bun.stringWidth(`+${props.totals.additions} −${props.totals.deletions}`) : 0)
   const sideWidth = () => Math.max(0, Math.floor((dimensions().width - totalsWidth()) / 2))
   return (

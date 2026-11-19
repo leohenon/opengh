@@ -88,7 +88,7 @@ Source: [`src/keybindings.ts`](../src/keybindings.ts).
 | `commits.chooseBranch`      | `tab`, `shift+tab` |
 | `work.toggleState`          | `tab`, `shift+tab` |
 | `work.find`                 | `F`                |
-| `work.newIssue`             | `c`                |
+| `work.create`               | `c`                |
 | `issue.comment`             | `c`                |
 | `issue.actions`             | `a`                |
 | `detail.references`         | `p`                |

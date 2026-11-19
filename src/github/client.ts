@@ -19,7 +19,12 @@ import type {
   PullReviewDismissedEvent,
   ReviewTarget,
   ListState,
+  NewPull,
+  PullComparison,
+  PullRepositories,
+  PullRepository,
   PullRequestDetail,
+  PullRequestTemplate,
   PullMergeMethod,
   PullMergeMessage,
   PullRequestSummary,
@@ -30,7 +35,7 @@ import type {
 } from "../models"
 import { pullMergeBlocker } from "../pull-merge"
 import type { AssigneeChanges } from "../assignee-changes"
-import { repositoryName, repositoryPath, repositorySelector, type RepositoryReference } from "./repository-target"
+import { repositoryName, repositoryPath, repositorySelector, type RepositoryReference, type RepositoryTarget } from "./repository-target"
 import { createGitHubDocuments } from "./documents"
 import { createGitHubIssueTemplates } from "./issue-templates"
 import { createIssueComments, issueComment, type IssueCommentResponse, type IssueCommentStorage } from "./issue-comments"
@@ -1724,6 +1729,162 @@ export function createGitHubClient(transport: GitHubTransport, commentStorage?: 
     mergeable: item.mergeable,
   })
 
+  const createPull = async (repository: RepositoryTarget, pull: NewPull): Promise<PullRequestDetail> => {
+    if (!transport.mutate) throw new Error("GitHub transport does not support mutations.")
+    if (!pull.base.trim() || !pull.head.trim()) throw new Error("Choose a base and a head branch.")
+    if (!pull.title.trim()) throw new Error("Pull request title is required.")
+    let created: PullRequestDetail
+    try {
+      const { base, head, title, body } = pull
+      created = pullDetail(
+        await transport.mutate<PullDetailResponse>(`${repositoryPath(repository)}/pulls`, "POST", {
+          base,
+          head,
+          title,
+          body,
+          ...(head.includes(":") ? { maintainer_can_modify: true } : {}),
+        }),
+      )
+    } catch (error) {
+      if (isDefiniteRejection(error)) throw error
+      throw new Error("Couldn't confirm the pull request was created. Check the pull request list before trying again.")
+    }
+    return withPullPermissions(repository, created.number, created)
+  }
+
+  const openPull = async (
+    repository: RepositoryTarget,
+    base: string,
+    head: string,
+    options?: RequestOptions,
+  ): Promise<PullRequestSummary | undefined> => {
+    const owner = repository.nameWithOwner.split("/")[0]!
+    const query = `state=open&base=${encodeURIComponent(base)}&head=${encodeURIComponent(head.includes(":") ? head : `${owner}:${head}`)}&per_page=1`
+    const [item] = await transport.json<PullResponse[]>(`${repositoryPath(repository)}/pulls?${query}`, options)
+    return item && { ...issueSummary(item), merged: item.merged_at != null, draft: item.draft === true }
+  }
+
+  const comparePull = async (
+    repository: RepositoryTarget,
+    base: string,
+    head: string,
+    options?: RequestOptions,
+  ): Promise<PullComparison> => {
+    const response = await transport.json<{
+      status?: unknown
+      ahead_by?: unknown
+      behind_by?: unknown
+      total_commits?: unknown
+      files?: unknown
+      additions?: unknown
+      deletions?: unknown
+      message?: unknown
+    }>(`${repositoryPath(repository)}/compare/${encodeURIComponent(base)}...${encodeURIComponent(head)}`, {
+      ...options,
+      jq: "{status, ahead_by, behind_by, total_commits, files: (.files // [] | length), additions: ([.files[]?.additions] | add // 0), deletions: ([.files[]?.deletions] | add // 0), message: (if .total_commits == 1 then .commits[0].commit.message else null end)}",
+    })
+    const count = (value: unknown): value is number => typeof value === "number" && Number.isSafeInteger(value) && value >= 0
+    const { status, ahead_by, behind_by, total_commits, files, additions, deletions, message } = response
+    if (
+      (status !== "ahead" && status !== "behind" && status !== "identical" && status !== "diverged") ||
+      !count(ahead_by) ||
+      !count(behind_by) ||
+      !count(total_commits) ||
+      !count(files) ||
+      !count(additions) ||
+      !count(deletions)
+    )
+      throw new Error("GitHub returned an unexpected comparison.")
+    return {
+      status,
+      aheadBy: ahead_by,
+      behindBy: behind_by,
+      commits: total_commits,
+      files,
+      additions,
+      deletions,
+      ...(typeof message === "string" ? { message } : {}),
+    }
+  }
+
+  const pullTemplates = async (repository: RepositoryTarget, options?: RequestOptions): Promise<PullRequestTemplate[]> => {
+    if (!transport.graphql) return []
+    const selector = repositorySelector(repository)
+    const response = await transport.graphql<{
+      data?: { repository?: { pullRequestTemplates?: { filename?: unknown; body?: unknown }[] | null } | null }
+      errors?: { message?: string }[]
+    }>(`query(${selector.declarations}) { ${selector.select("pullRequestTemplates { filename body }")} }`, selector.variables, options)
+    if (response.errors?.length)
+      throw new Error(
+        response.errors
+          .map((error) => error.message)
+          .filter(Boolean)
+          .join(" · ") || "Pull request templates could not be loaded.",
+      )
+    const templates = response.data?.repository?.pullRequestTemplates
+    if (templates === null) return []
+    if (!Array.isArray(templates)) throw new Error("Pull request templates could not be loaded.")
+    return templates.flatMap((template) =>
+      typeof template?.filename === "string" && template.filename.trim() && typeof template.body === "string"
+        ? [{ filename: template.filename, body: template.body }]
+        : [],
+    )
+  }
+
+  const pullRepositories = async (
+    repository: RepositoryTarget & { defaultBranch: string },
+    options?: RequestOptions,
+  ): Promise<PullRepositories> => {
+    const browsed: PullRepository = {
+      id: repository.id,
+      nodeId: repository.nodeId,
+      nameWithOwner: repository.nameWithOwner,
+      defaultBranch: repository.defaultBranch,
+    }
+    if (!transport.graphql) return { bases: [browsed], heads: [browsed] }
+    const selector = repositorySelector(repository)
+    const fields = "databaseId id nameWithOwner isArchived viewerPermission defaultBranchRef { name }"
+    const forks = `forks(first: 100, affiliations: [OWNER, ORGANIZATION_MEMBER]) { nodes { ${fields} } }`
+    type Node = Record<string, unknown> & { forks?: { nodes?: unknown[] } | null; parent?: Node | null }
+    const response = await transport.graphql<{ data?: { repository?: Node | null }; errors?: { message?: string }[] }>(
+      `query(${selector.declarations}) { ${selector.select(`${fields} parent { ${fields} ${forks} } ${forks}`)} }`,
+      selector.variables,
+      options,
+    )
+    if (response.errors?.length)
+      throw new Error(
+        response.errors
+          .map((error) => error.message)
+          .filter(Boolean)
+          .join(" · ") || "Repositories for pull requests could not be loaded.",
+      )
+    const node = response.data?.repository
+    if (!node) throw new Error("Repositories for pull requests could not be loaded.")
+    const parse = (value: unknown, pushable = false): PullRepository | undefined => {
+      const item = record(value)
+      const defaultBranch = record(item?.defaultBranchRef)?.name
+      if (
+        !item ||
+        item.isArchived !== false ||
+        typeof item.databaseId !== "number" ||
+        !Number.isSafeInteger(item.databaseId) ||
+        item.databaseId <= 0 ||
+        typeof item.id !== "string" ||
+        typeof item.nameWithOwner !== "string" ||
+        typeof defaultBranch !== "string" ||
+        (pushable && !["WRITE", "MAINTAIN", "ADMIN"].includes(String(item.viewerPermission)))
+      )
+        return
+      return { id: item.databaseId, nodeId: item.id, nameWithOwner: item.nameWithOwner, defaultBranch }
+    }
+    const parent = node.parent ? parse(node.parent) : undefined
+    const original = parent ?? browsed
+    const owned = ((node.parent ? node.parent.forks : node.forks)?.nodes ?? []).map((fork) => parse(fork, true))
+    const unique = (items: (PullRepository | undefined)[]) =>
+      items.filter((item, index): item is PullRepository => !!item && items.findIndex((other) => other?.id === item.id) === index)
+    return { bases: unique([original, browsed]), heads: unique([browsed, original, ...owned]) }
+  }
+
   const pullCommits = async (repository: RepositoryReference, number: number, options?: RequestOptions): Promise<CommitSummary[]> => {
     const ownedBudget = options?.budget ? undefined : createRequestBudget(options?.signal)
     const budget = options?.budget ?? ownedBudget!
@@ -1853,6 +2014,11 @@ export function createGitHubClient(transport: GitHubTransport, commentStorage?: 
     issueComments,
     createIssueComment,
     createIssue,
+    createPull,
+    openPull,
+    comparePull,
+    pullTemplates,
+    pullRepositories,
     issueTemplates,
     addReaction,
     removeReaction,
@@ -1894,6 +2060,11 @@ export const loadGitHubIssue = client.issue
 export const loadGitHubIssueComments = client.issueComments
 export const createGitHubIssueComment = client.createIssueComment
 export const createGitHubIssue = client.createIssue
+export const createGitHubPull = client.createPull
+export const loadGitHubOpenPull = client.openPull
+export const compareGitHubPull = client.comparePull
+export const loadGitHubPullTemplates = client.pullTemplates
+export const loadGitHubPullRepositories = client.pullRepositories
 export const loadGitHubIssueTemplates = client.issueTemplates
 export const updateGitHubIssueState = client.updateIssueState
 export const updateGitHubPullState = client.updatePullState

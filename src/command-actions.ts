@@ -104,6 +104,67 @@ export async function resolveLocalRepository(cwd: string): Promise<LocalReposito
   }
 }
 
+export async function readLocalBranch(directory: string): Promise<string | undefined> {
+  try {
+    const branch = await git(directory, ["rev-parse", "--abbrev-ref", "HEAD"])
+    return branch && branch !== "HEAD" ? branch : undefined
+  } catch {
+    return undefined
+  }
+}
+
+export type MergeCheck = { status: "clean" } | { status: "conflicts"; files: string[] } | { status: "unavailable"; reason: string }
+
+async function gitResult(cwd: string, args: string[]) {
+  let output = ""
+  const result = await runCommand({ args: ["git", ...args], cwd }, (chunk) => {
+    output += chunk
+  }).result
+  return { code: result.exitCode, output }
+}
+
+const branchName = (name: string) => !!name && !name.startsWith("-") && !/[\s:~^?*[\\\x00-\x1f\x7f]/.test(name)
+let mergeChecks: Promise<unknown> = Promise.resolve()
+
+// Fetches both branches, then tests the merge without touching the working tree, index or local branches.
+export function checkMerge(directory: string, base: string, head: string): Promise<MergeCheck> {
+  const check = async (): Promise<MergeCheck> => {
+    if (!branchName(base) || !branchName(head)) return { status: "unavailable", reason: "unsupported branch name" }
+    const version = /(\d+)\.(\d+)/.exec((await gitResult(directory, ["version"])).output)
+    if (!version || Number(version[1]) < 2 || (Number(version[1]) === 2 && Number(version[2]) < 38))
+      return { status: "unavailable", reason: "git 2.38 or later is required" }
+    const refs = [`refs/remotes/origin/${base}`, `refs/remotes/origin/${head}`] as const
+    const fetch = await gitResult(directory, [
+      "fetch",
+      "--quiet",
+      "--no-tags",
+      "origin",
+      `+refs/heads/${base}:${refs[0]}`,
+      `+refs/heads/${head}:${refs[1]}`,
+    ])
+    if (fetch.code !== 0) return { status: "unavailable", reason: "couldn't fetch the branches from GitHub" }
+    const merge = await gitResult(directory, ["merge-tree", "--write-tree", "--name-only", "--no-messages", refs[0], refs[1]])
+    if (merge.code === 0) return { status: "clean" }
+    if (merge.code === 1)
+      return {
+        status: "conflicts",
+        files: [
+          ...new Set(
+            merge.output
+              .split("\n")
+              .slice(1)
+              .map((line) => line.trim())
+              .filter(Boolean),
+          ),
+        ],
+      }
+    return { status: "unavailable", reason: "git couldn't test the merge" }
+  }
+  const result = mergeChecks.then(check, check)
+  mergeChecks = result.catch(() => {})
+  return result
+}
+
 export function matchesLocalRepository(local: LocalRepository | undefined, repository: string) {
   return local?.repository.toLowerCase() === repository.toLowerCase()
 }

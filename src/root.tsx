@@ -7,14 +7,16 @@ import { resumeLocation, type ResumeLocation } from "./resume"
 import { loadRepositoryTabs, saveRepositoryTabs, type RepositoryTabs } from "./repository-tabs"
 import { defaultConfig, loadConfig, saveConfig, type Config } from "./config"
 import { copyToHostClipboard } from "./clipboard"
-import { resolveLocalRepository, runCommand, type LocalRepository } from "./command-actions"
+import { checkMerge, readLocalBranch, resolveLocalRepository, runCommand, type LocalRepository } from "./command-actions"
 import { loadRecentRepositories, rememberRepository, resolveRepository } from "./github/repository"
 import { openGitHub } from "./github/browser"
 import { openUrl } from "./open-url"
 import { loadGitHubIssueKind } from "./github/client"
 import { createInlineComments } from "./inline-comments"
 import { createInlineDrafts, type InlineDrafts } from "./inline-drafts"
-import { createNewIssueDrafts, type NewIssueDrafts } from "./new-issue-drafts"
+import { createComposeDrafts, createComposeDraftStorage, type ComposeDrafts } from "./compose-drafts"
+import { join } from "node:path"
+import { configDirectory } from "./paths"
 import { githubWrites, type GitHubWrites } from "./github/writes"
 import { createPullReviewSession } from "./pull-review-session"
 import type { PullReviewSession } from "./review-types"
@@ -48,12 +50,15 @@ export type RootServices = {
   createPullReviewSession(): PullReviewSession
   createInlineComments: typeof createInlineComments
   createInlineDrafts(): InlineDrafts
-  createNewIssueDrafts(): NewIssueDrafts
+  createNewIssueDrafts(): ComposeDrafts
+  createNewPullDrafts(): ComposeDrafts
   githubWrites: GitHubWrites
   openGitHub(repository: string, target?: string | number, view?: "diff"): Promise<void>
   openUrl(url: string): Promise<void>
   copyToHostClipboard(value: string): Promise<boolean>
   resolveLocalRepository: typeof resolveLocalRepository
+  readLocalBranch: typeof readLocalBranch
+  checkMerge: typeof checkMerge
   runCommand: typeof runCommand
 }
 
@@ -70,12 +75,15 @@ const defaultServices: RootServices = {
   createPullReviewSession,
   createInlineComments,
   createInlineDrafts: () => createInlineDrafts(),
-  createNewIssueDrafts: () => createNewIssueDrafts(),
+  createNewIssueDrafts: () => createComposeDrafts(),
+  createNewPullDrafts: () => createComposeDrafts({ storage: createComposeDraftStorage(join(configDirectory(), "new-pull-drafts")) }),
   githubWrites,
   openGitHub,
   openUrl,
   copyToHostClipboard,
   resolveLocalRepository,
+  readLocalBranch,
+  checkMerge,
   runCommand,
 }
 
@@ -160,9 +168,12 @@ export function Root(props: {
   // Owned here to survive repository switches, which remount App.
   const inlineDrafts = services.createInlineDrafts()
   const newIssueDrafts = services.createNewIssueDrafts()
+  const newPullDrafts = services.createNewPullDrafts()
   // Also runs when a signal destroys the renderer without quit().
   onCleanup(() => {
-    props.onShutdownWork?.(Promise.allSettled([flushRepositoryTabs(), reviews.flush(), inlineDrafts.flush(), newIssueDrafts.flush()]))
+    props.onShutdownWork?.(
+      Promise.allSettled([flushRepositoryTabs(), reviews.flush(), inlineDrafts.flush(), newIssueDrafts.flush(), newPullDrafts.flush()]),
+    )
   })
   const [dismissedInlineDraftError, setDismissedInlineDraftError] = createSignal<string>()
   createEffect(() => {
@@ -226,10 +237,10 @@ export function Root(props: {
         }
       })
     const flushNewIssue = () =>
-      newIssueDrafts.flush().catch((error) => {
+      Promise.all([newIssueDrafts.flush(), newPullDrafts.flush()]).catch((error) => {
         throw {
-          title: "Issue draft not saved — quit cancelled",
-          message: `${error instanceof Error ? error.message : "Could not save the issue draft"}. The draft is kept in memory; fix local storage and quit again to retry.`,
+          title: "Draft not saved — quit cancelled",
+          message: `${error instanceof Error ? error.message : "Could not save the draft"}. The draft is kept in memory; fix local storage and quit again to retry.`,
         }
       })
     void Promise.all([tabs, flushReview(), flushInline(), flushNewIssue()])
@@ -598,11 +609,26 @@ export function Root(props: {
                                 reviews={reviews}
                                 inlineDrafts={inlineDrafts}
                                 newIssueDrafts={newIssueDrafts}
+                                newPullDrafts={newPullDrafts}
                                 onPostInlineComment={tracked(inlineComments.post)}
                                 onMergePull={tracked(session.mergePull)}
                                 onUpdatePullDraft={tracked(session.updatePullDraft)}
                                 onCreateIssue={tracked(session.createIssue)}
                                 onLoadIssueTemplates={session.loadIssueTemplates}
+                                onComparePull={session.comparePullBranches}
+                                onLoadPullRepositories={session.loadPullRepositories}
+                                onLoadPullBranches={session.loadPullBranches}
+                                onCreatePull={tracked(session.createPull)}
+                                onCheckMerge={(base, head) => {
+                                  const local = localRepository()
+                                  return local
+                                    ? services.checkMerge(local.directory, base, head)
+                                    : Promise.resolve({ status: "unavailable", reason: "open opengh in a local checkout" })
+                                }}
+                                onLoadLocalBranch={() => {
+                                  const local = localRepository()
+                                  return local ? services.readLocalBranch(local.directory) : Promise.resolve(undefined)
+                                }}
                                 onLoadPullMergeMessage={session.loadPullMergeMessage}
                                 pullDetail={session.pullDetail()}
                                 onLoadPull={session.loadPull}
