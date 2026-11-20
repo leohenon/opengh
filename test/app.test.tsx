@@ -68,7 +68,7 @@ async function setup() {
 }
 
 describe("opengh TUI", () => {
-  test.each(["issue", "pull"] as const)("details placement updates %s pages live without changing Overview", async (kind) => {
+  test.each(["issue", "pull"] as const)("details placement updates %s pages and Overview live", async (kind) => {
     const [config, setConfig] = createSignal<Config>({ ...defaultConfig })
     const comments = { status: "ready" as const, value: { items: [], page: 1, hasMore: false } }
     const view = await testRender(
@@ -141,6 +141,17 @@ describe("opengh TUI", () => {
     const column = aboutColumn()
     expect(column).toBeGreaterThan(60)
     setConfig({ ...config(), detailsPlacement: "inline" })
+    await view.flush()
+    expect(aboutColumn()).toBeUndefined()
+    expect(view.renderer.root.findDescendantById("overview-inline-about")!.x).toBeLessThan(column!)
+    expect(view.renderer.root.findDescendantById("overview-about-sidebar")).toBeUndefined()
+    view.mockInput.pressKey("s")
+    await view.flush()
+    expect(aboutColumn()).toBeUndefined()
+    setConfig({ ...config(), detailsPlacement: "auto" })
+    await view.flush()
+    expect(aboutColumn()).toBeUndefined() // Placement does not override an explicit hide.
+    view.mockInput.pressKey("s")
     await view.flush()
     expect(aboutColumn()).toBe(column)
   })
@@ -2588,21 +2599,36 @@ describe("opengh TUI", () => {
     expect(view.captureCharFrame()).toContain("‹ README ›")
   })
 
-  test("s shows or hides the About sidebar over the width-based default", async () => {
+  test("s shows About inline on narrow terminals and preserves visibility while resizing", async () => {
     const view = await testRender(() => <App data={githubDataFixture} operations={repositoryOperationsFixture} />, {
-      width: 76,
+      width: 50,
       height: 24,
     })
     active.push(view)
     await view.flush()
+    const scroll = view.renderer.root.findDescendantById("overview-document-scroll") as ScrollBoxRenderable
+    const width = scroll.viewport.width
     expect(view.captureCharFrame()).not.toContain("About")
     view.mockInput.pressKey("s")
     await view.flush()
-    expect(view.captureCharFrame()).toContain("About")
+    expect(view.captureCharFrame()).not.toContain("About")
+    expect(scroll.viewport.width).toBe(width)
+    expect(scroll.findDescendantById("overview-inline-about")).toBeDefined()
+    expect(view.renderer.root.findDescendantById("overview-about-sidebar")).toBeUndefined()
 
-    // An explicit choice no longer follows the terminal width.
     view.resize(120, 24)
+    await view.flush()
+    expect(view.renderer.root.findDescendantById("overview-inline-about")).toBeUndefined()
+    expect(view.renderer.root.findDescendantById("overview-about-sidebar")).toBeDefined()
+    view.resize(50, 24)
+    await view.flush()
+    expect(scroll.findDescendantById("overview-inline-about")).toBeDefined()
+    expect(scroll.viewport.width).toBe(width)
+
     view.mockInput.pressKey("s")
+    await view.flush()
+    expect(scroll.findDescendantById("overview-inline-about")).toBeUndefined()
+    view.resize(120, 24)
     await view.flush()
     expect(view.captureCharFrame()).not.toContain("About")
   })

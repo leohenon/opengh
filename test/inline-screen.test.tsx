@@ -197,7 +197,7 @@ test("inline overview puts compact About above the full-width README", async () 
     ],
   }
   const output = await renderStaticPage(() => <InlineScreen config={config} data={data} />, { width: 160, config, color: false })
-  expect(output).toContain(`About · ${repo.nameWithOwner}`)
+  expect(output).not.toContain("About ·")
   expect(output).toContain(repo.description)
   const summary = output.split("\n").find((line) => line.includes("stars"))!
   expect(summary).toContain("forks")

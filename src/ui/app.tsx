@@ -2765,6 +2765,7 @@ function AppContent(props: AppProps) {
                                 showScrollbar={config().showScrollbars}
                                 aboutSidebar={aboutSidebar()}
                                 detailLayout={config().detailLayout}
+                                detailsPlacement={config().detailsPlacement}
                                 scrollRef={(value) => (overviewScroll = value)}
                               />
                             </box>

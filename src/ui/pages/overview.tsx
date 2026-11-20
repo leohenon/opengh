@@ -1,7 +1,7 @@
 import { RGBA, TextAttributes, type ScrollBoxRenderable } from "@opentui/core"
 import { useTerminalDimensions } from "@opentui/solid"
 import { createEffect, createMemo, createSignal, For, on, onCleanup, Show } from "solid-js"
-import { defaultConfig, type DetailLayout } from "../../config"
+import { defaultConfig, type DetailLayout, type DetailsPlacement } from "../../config"
 import type { Repo } from "../../models"
 import type { RepositoryDocumentState, ResourceState } from "../../repository-state"
 import { ResourceStateView } from "../components/resource-state"
@@ -34,35 +34,51 @@ function displayUrl(value: string) {
   return value.replace(/^https?:\/\//, "").replace(/\/$/, "")
 }
 
-// Auto shows the About sidebar only when the terminal leaves room beside the document.
+// Auto shows About only when the terminal leaves room beside the document.
+const ABOUT_SIDEBAR_MIN_WIDTH = 100
 export type AboutSidebar = "auto" | "show" | "hide"
-export const aboutSidebarVisible = (mode: AboutSidebar, width: number) => mode === "show" || (mode === "auto" && width >= 100)
+export const aboutSidebarVisible = (mode: AboutSidebar, width: number) =>
+  mode === "show" || (mode === "auto" && width >= ABOUT_SIDEBAR_MIN_WIDTH)
 
-function InlineAbout(props: { repo: Repo }) {
+function InlineAbout(props: { repo: Repo; interactive?: boolean }) {
   const { colors } = useTheme()
   const icons = useIcons()
   const about = createMemo(() => extractAboutContent(props.repo.description))
   return (
-    <box width="100%" minWidth={0} flexShrink={0} paddingX={2} paddingBottom={1} flexDirection="column">
-      <text width="100%" flexShrink={0} fg={colors.text} attributes={TextAttributes.BOLD}>
-        About · {props.repo.nameWithOwner}
-      </text>
+    <box
+      id="overview-inline-about"
+      width="100%"
+      minWidth={0}
+      flexShrink={0}
+      paddingBottom={1}
+      marginBottom={1}
+      border={["bottom"]}
+      borderColor={colors.border}
+      flexDirection="column"
+    >
       <text width="100%" flexShrink={0} fg={colors.text}>
         {about().description}
       </text>
       <For each={about().urls}>
         {(url) => (
           <text width="100%" flexShrink={0} fg={colors.blue}>
-            {displayUrl(url)}
+            <Show when={props.interactive !== false} fallback={displayUrl(url)}>
+              <a href={url}>{displayUrl(url)}</a>
+            </Show>
           </text>
         )}
       </For>
       <Show when={props.repo.parentRepository}>
         <text width="100%" flexShrink={0} fg={colors.muted}>
-          Forked from <span style={{ fg: colors.blue }}>{props.repo.parentRepository}</span>
+          Forked from{" "}
+          <span style={{ fg: colors.blue }}>
+            <Show when={props.interactive !== false} fallback={props.repo.parentRepository}>
+              <a href={new URL(`/${props.repo.parentRepository}`, props.repo.url).href}>{props.repo.parentRepository}</a>
+            </Show>
+          </span>
         </text>
       </Show>
-      <text width="100%" flexShrink={0} fg={colors.muted}>
+      <text width="100%" flexShrink={0} marginTop={1} fg={colors.muted}>
         {iconPrefix(icons().repository.star)}
         {count(props.repo.stars)} stars{" · "}
         {iconPrefix(icons().repository.fork)}
@@ -97,6 +113,7 @@ export function OverviewScreen(props: {
   aboutSidebar: AboutSidebar
   inlineAbout?: boolean
   detailLayout?: DetailLayout
+  detailsPlacement?: DetailsPlacement
   scrollRef: (value: ScrollBoxRenderable | undefined) => void
 }) {
   const dimensions = useTerminalDimensions()
@@ -166,7 +183,9 @@ export function OverviewScreen(props: {
     props.documents.value === undefined ? props.documents : document() ? documentResource() : { status: "ready", value: null },
   )
   const hasDocumentTabs = () => documents().length > 1
-  const showAboutSidebar = () => !props.inlineAbout && aboutSidebarVisible(props.aboutSidebar, dimensions().width)
+  const showAbout = () => (props.inlineAbout ? props.aboutSidebar !== "hide" : aboutSidebarVisible(props.aboutSidebar, dimensions().width))
+  const inlineAbout = () => props.inlineAbout || props.detailsPlacement === "inline" || dimensions().width < ABOUT_SIDEBAR_MIN_WIDTH
+  const showAboutSidebar = () => showAbout() && !inlineAbout()
   const [availableDocumentWidth, setAvailableDocumentWidth] = createSignal(0)
   const documentLabelsWidth = (includeIcons: boolean): number =>
     documents().reduce((width, item, index) => width + Bun.stringWidth(documentLabel(item, includeIcons)) + (index === 0 ? 1 : 2), 0)
@@ -203,17 +222,14 @@ export function OverviewScreen(props: {
     <box
       flexGrow={1}
       minHeight={0}
-      flexDirection={props.inlineAbout ? "column" : "row"}
-      gap={props.inlineAbout ? 0 : 2}
+      flexDirection="row"
+      gap={2}
       paddingTop={1}
       paddingBottom={1}
       paddingLeft={2}
       paddingRight={2}
       backgroundColor={colors.canvas}
     >
-      <Show when={props.inlineAbout && props.aboutSidebar !== "hide"}>
-        <InlineAbout repo={repo()} />
-      </Show>
       <scrollbox
         id="overview-document-scroll"
         focusable={false}
@@ -236,8 +252,12 @@ export function OverviewScreen(props: {
         scrollY
       >
         <box width="100%" maxWidth={detailContentWidth(props.detailLayout)} minWidth={0} flexGrow={1} flexShrink={0} flexDirection="column">
+          <Show when={showAbout() && inlineAbout()}>
+            <InlineAbout repo={repo()} interactive={props.interactive} />
+          </Show>
           <Show when={!props.hideDocumentsTab}>
             <box
+              id="overview-document-tabs"
               height={1}
               flexShrink={0}
               flexDirection="row"
@@ -355,7 +375,7 @@ export function OverviewScreen(props: {
       </scrollbox>
 
       <Show when={showAboutSidebar()}>
-        <box width={32} flexShrink={0} minHeight={0} flexDirection="column">
+        <box id="overview-about-sidebar" width={32} flexShrink={0} minHeight={0} flexDirection="column">
           <box height={1} flexShrink={0} flexDirection="row" alignItems="center" paddingLeft={2} paddingRight={2}>
             <text fg={colors.text} attributes={TextAttributes.BOLD}>
               About

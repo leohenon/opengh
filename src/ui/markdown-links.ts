@@ -80,6 +80,10 @@ export function compactMarkdownLinks(
       for (const match of text.matchAll(/\\[!"#$%&'()*+,\-./:;<=>?@[\]\\^_`{|}~]/g))
         markers.push([start + match.index!, start + match.index! + 1, "conceal", { conceal: "", isInjection: true }])
     })
+    visit(tree, "break", (node) => {
+      const start = node.position?.start.offset
+      if (start !== undefined && source[start] === "\\") markers.push([start, start + 1, "conceal", { conceal: "", isInjection: true }])
+    })
     visit(tree, "delete", (node) => {
       const start = node.position?.start.offset
       const end = node.position?.end.offset

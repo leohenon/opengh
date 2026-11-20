@@ -520,7 +520,8 @@ export function Settings(props: {
     if (selected() === "details-placement")
       return {
         title: "Details placement",
-        description: "Auto uses a sidebar when space allows. Inline keeps issue and PR details below the title.",
+        description:
+          "Auto uses a sidebar when space allows. Inline keeps issue and PR details below the title and About above the document.",
       }
     if (selected() === "diff-layout")
       return {

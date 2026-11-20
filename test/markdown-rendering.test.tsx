@@ -4,7 +4,7 @@ import type { GitHubMarkdownContext } from "../src/ui/github-markdown"
 import type { MarkdownAnchorResolver } from "../src/ui/markdown-anchors"
 import { testRender } from "@opentui/solid"
 import { createSignal } from "solid-js"
-import type { DetailLayout, MarkdownStyle } from "../src/config"
+import type { DetailLayout, DetailsPlacement, MarkdownStyle } from "../src/config"
 import type { RepositoryDocumentState, ResourceState } from "../src/repository-state"
 import { githubDataFixture, repositoryDocumentsFixture } from "./fixtures/github-data"
 import { OverviewScreen, type AboutSidebar } from "../src/ui/pages/overview"
@@ -331,6 +331,30 @@ test("references, image captions, nested fences, and plain-text documents keep t
   }
 }, 15_000)
 
+test("hard breaks render as newlines without hiding literal backslashes in code", async () => {
+  const content = [
+    "<p><em>Issue tracker.\n<br>For GSoC.</em></p>",
+    "First line.\\\nSecond line.",
+    "Inline `C:\\temp`.",
+    "```text\nfirst\\\nsecond\n```",
+  ].join("\n\n")
+  const view = await testRender(() => <MarkdownSample content={content} />, { width: 60, height: 20 })
+  try {
+    await settle(view)
+    const text = view
+      .captureCharFrame()
+      .split("\n")
+      .map((line) => line.trimEnd())
+      .join("\n")
+    expect(text).toContain("Issue tracker.\nFor GSoC.")
+    expect(text).toContain("First line.\nSecond line.")
+    expect(text).toContain("C:\\temp")
+    expect(codeBlocks(view.renderer.root).find((block) => block.filetype === "text")?.plainText).toBe("first\\\nsecond")
+  } finally {
+    view.renderer.destroy()
+  }
+})
+
 test("review comments stay hidden and prose escapes render without changing code", async () => {
   const view = await testRender(
     () => (
@@ -580,6 +604,91 @@ test("overview tabs and documents share the reading column in both layouts, with
     view.renderer.destroy()
   }
 }, 15_000)
+
+test.each(["centered", "wide"] as const)(
+  "inline About shares the %s reading column and scrolls away in short terminals",
+  async (layout) => {
+    const [placement, setPlacement] = createSignal<DetailsPlacement>("auto")
+    const [interactive, setInteractive] = createSignal(true)
+    let scroll: ScrollBoxRenderable | undefined
+    const view = await testRender(
+      () => (
+        <ThemeProvider name="github">
+          <OverviewScreen
+            repo={{ ...githubDataFixture.repo, description: "A terminal library. https://example.com", parentRepository: "parent/repo" }}
+            interactive={interactive()}
+            documents={{
+              status: "ready",
+              value: [{ ...repositoryDocumentsFixture[0]!, resource: { status: "ready", value: "Overview body.\n\n".repeat(20) } }],
+            }}
+            detailLayout={layout}
+            detailsPlacement={placement()}
+            aboutSidebar="show"
+            showScrollbar={false}
+            scrollRef={(value) => {
+              scroll = value
+            }}
+          />
+        </ThemeProvider>
+      ),
+      { width: 160, height: 24 },
+    )
+    const links = () => {
+      const urls = new Set<string>()
+      for (let y = 0; y < view.renderer.height; y++)
+        for (let x = 0; x < view.renderer.width; x++) {
+          const url = view.renderer.getLinkAt(x, y)
+          if (url) urls.add(url)
+        }
+      return urls
+    }
+    const inline = () => scroll!.findDescendantById("overview-inline-about")
+    const sidebar = () => view.renderer.root.findDescendantById("overview-about-sidebar")
+    const prose = () => codeBlocks(view.renderer.root).find((block) => block.content.includes("Overview body."))!
+    try {
+      await settle(view)
+      expect(sidebar()).toBeDefined()
+      expect(inline()).toBeUndefined()
+      setPlacement("inline")
+      await settle(view)
+      expect(sidebar()).toBeUndefined()
+      expect(inline()!.x).toBe(prose().x)
+      expect(inline()!.width).toBe(prose().width)
+      expect(prose().width).toBe(layout === "centered" ? 84 : 152)
+      const tabs = scroll!.findDescendantById("overview-document-tabs")!
+      expect(inline()!.y + inline()!.height).toBeLessThan(tabs.y)
+      expect(tabs.y + tabs.height).toBeLessThan(prose().y)
+      const children = inline()!.getChildren()
+      expect(children[0]!.y).toBe(inline()!.y)
+      expect(view.captureCharFrame()).not.toContain("About")
+      expect(children.at(-1)!.y).toBe(children.at(-2)!.y + children.at(-2)!.height + 1)
+      expect(view.captureCharFrame()).toContain("─".repeat(prose().width))
+      expect(links().has("https://example.com")).toBe(true)
+      expect(links().has("https://github.com/parent/repo")).toBe(true)
+      setInteractive(false)
+      await settle(view)
+      expect(links().size).toBe(0)
+      setInteractive(true)
+
+      view.resize(50, 8)
+      setPlacement("auto")
+      await settle(view)
+      expect(sidebar()).toBeUndefined()
+      expect(scroll!.viewport.width).toBe(46)
+      expect(scroll!.viewport.height).toBe(6)
+      expect(inline()!.width).toBe(prose().width)
+      expect(prose().width).toBe(42)
+      expect(view.captureCharFrame()).toContain("A terminal library.")
+      scroll!.scrollTo(inline()!.height + 2)
+      await view.flush()
+      expect(inline()!.y + inline()!.height).toBeLessThanOrEqual(scroll!.viewport.y)
+      expect(view.captureCharFrame()).not.toContain("A terminal library.")
+      expect(view.captureCharFrame()).toContain("Overview body.")
+    } finally {
+      view.renderer.destroy()
+    }
+  },
+)
 
 test("minimal Markdown switches live without losing structure, links, or literal code", async () => {
   const [style, setStyle] = createSignal<MarkdownStyle>("rich")
