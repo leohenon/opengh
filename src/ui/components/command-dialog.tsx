@@ -1,7 +1,7 @@
 import type { ScrollBoxRenderable } from "@opentui/core"
 import { useRenderer } from "@opentui/solid"
 import { createEffect, createSignal, onCleanup, Show } from "solid-js"
-import type { CommandSpec, CommandTask } from "../../command-actions"
+import type { CommandResult, CommandSpec, CommandTask } from "../../command-actions"
 import { createCommandOutputBuffer } from "../../command-output"
 import { copyText } from "../clipboard"
 import { mouseClick } from "../mouse"
@@ -10,7 +10,8 @@ import { Action } from "./action"
 import { useTheme } from "../theme"
 import { KeyInput, useKeyActions, useKeybindings } from "../keybindings"
 
-export type CommandAction = { title: string; destination?: string; command(destination: string): CommandSpec }
+// detail replaces the working directory in the preview of a command without a destination.
+export type CommandAction = { title: string; destination?: string; detail?: string; command(destination: string): CommandSpec }
 
 export function CommandDialog(props: {
   action: CommandAction
@@ -18,6 +19,8 @@ export function CommandDialog(props: {
   onCopy?: (output: string) => Promise<boolean>
   onCaptureCancel?: (cancel: (() => void) | undefined) => void
   onHintChange?: (hint: string | undefined) => void
+  onResult?: (result: CommandResult) => void
+  zIndex?: number
   onClose(): void
 }) {
   const { colors } = useTheme()
@@ -84,6 +87,7 @@ export function CommandDialog(props: {
       setPhase(
         `${result.cancelled ? "Cancelled" : result.exitCode === 0 ? "Succeeded" : "Failed"} (exit ${result.exitCode ?? "unavailable"})`,
       )
+      props.onResult?.(result)
     } catch (error) {
       append(`\n${error instanceof Error ? error.message : String(error)}\n`)
       setPhase(cancelled ? "Cancelled (exit unavailable)" : "Failed (exit unavailable)")
@@ -143,7 +147,7 @@ export function CommandDialog(props: {
     { when: () => phase() !== "Preview", priority: 100, modal: true },
   )
   return (
-    <Popup width={76} height={phase() === "Preview" ? 7 : 20} placement="center" zIndex={250} onClose={requestClose}>
+    <Popup width={76} height={phase() === "Preview" ? 7 : 20} placement="center" zIndex={props.zIndex ?? 250} onClose={requestClose}>
       <box flexGrow={1} minHeight={0} paddingLeft={2} paddingRight={2} paddingBottom={1} flexDirection="column">
         <text height={1} flexShrink={0} fg={colors.text}>
           {props.action.title}
@@ -162,7 +166,7 @@ export function CommandDialog(props: {
                     () => phase() === "Preview" && props.action.destination !== undefined && !editing(),
                   )}
                 >
-                  {props.action.destination !== undefined ? `Into ${destination()}` : preview()?.cwd}
+                  {props.action.destination !== undefined ? `Into ${destination()}` : (props.action.detail ?? preview()?.cwd)}
                 </text>
               }
             >

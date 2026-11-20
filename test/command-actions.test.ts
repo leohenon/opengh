@@ -8,6 +8,10 @@ import {
   cloneCommand,
   matchesLocalRepository,
   plainCommandOutput,
+  pushCommand,
+  pushableToOrigin,
+  pushCommandLine,
+  readBranchUpstream,
   readLocalBranch,
   resolveLocalRepository,
   runCommand,
@@ -337,4 +341,71 @@ test("clone arguments cannot turn destination into flags and expand home paths",
   ])
   expect(cloneCommand("cli/cli", "~/dev/cli", cwd).args[4]).toBe(join(homedir(), "dev/cli"))
   expect(plainCommandOutput("\x1b[31mprogress\rnext\x1b[0m\r\n")).toBe("progress\nnext\n")
+})
+
+test("pushes a local branch to origin with gh's credentials and tracks it; reads what a branch tracks", async () => {
+  const root = await mkdtemp(join(tmpdir(), "opengh-push-"))
+  const remote = join(root, "remote.git")
+  const work = join(root, "work")
+  try {
+    await mkdir(remote)
+    await gitIn(remote, "init", "--bare", "--initial-branch=main")
+    await gitIn(root, "clone", "--quiet", remote, work)
+    await gitIn(work, "config", "core.hooksPath", "/dev/null")
+    await gitIn(work, "commit", "--quiet", "--allow-empty", "-m", "base")
+    await gitIn(work, "push", "--quiet", "origin", "HEAD:main")
+    await gitIn(work, "switch", "--quiet", "-c", "feature/local-only")
+    await gitIn(work, "commit", "--quiet", "--allow-empty", "-m", "work")
+    // A tag of the same name must not make the pushed ref ambiguous.
+    await gitIn(work, "tag", "feature/local-only", "main")
+    // Nor may a push mapping rename it: the dialog compares the branch by its local name next.
+    await gitIn(work, "config", "remote.origin.push", "refs/heads/*:refs/heads/me/*")
+    expect(await readBranchUpstream(work, "feature/local-only")).toBeUndefined()
+
+    const spec = pushCommand(work, "feature/local-only")
+    expect(spec.cwd).toBe(work)
+    expect(spec.args).toEqual([
+      "git",
+      "-c",
+      "credential.https://github.com.helper=",
+      "-c",
+      "credential.https://github.com.helper=!gh auth git-credential",
+      "push",
+      "--progress",
+      "-u",
+      "origin",
+      "refs/heads/feature/local-only:refs/heads/feature/local-only",
+    ])
+    expect(pushCommandLine("feature/local-only")).toBe("git push -u origin feature/local-only")
+    let output = ""
+    const result = await runCommand(spec, (chunk) => {
+      output += chunk
+    }).result
+    expect(output).toContain("feature/local-only")
+    expect(result).toEqual({ exitCode: 0, cancelled: false })
+    expect(await gitIn(remote, "rev-parse", "refs/heads/feature/local-only")).toBe(await gitIn(work, "rev-parse", "HEAD"))
+    expect(await gitIn(remote, "for-each-ref", "--format=%(refname)", "refs/heads")).toBe("refs/heads/feature/local-only\nrefs/heads/main")
+    expect(await gitIn(work, "rev-parse", "--abbrev-ref", "feature/local-only@{upstream}")).toBe("origin/feature/local-only")
+    expect(await readBranchUpstream(work, "feature/local-only")).toEqual({ remote: "origin", merge: "refs/heads/feature/local-only" })
+    await gitIn(work, "branch", "--quiet", "--track", "started", "origin/main")
+    expect(await readBranchUpstream(work, "started")).toEqual({ remote: "origin", merge: "refs/heads/main" })
+    expect(await readBranchUpstream(work, "missing")).toBeUndefined()
+    expect(() => pushCommand(work, "--force")).toThrow("Unsupported branch name")
+    expect(() => pushCommand(work, "a b")).toThrow("Unsupported branch name")
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test("a branch is pushable to origin unless it's already published under its own name on another remote", () => {
+  expect(pushableToOrigin("feature", undefined)).toBe(true)
+  expect(pushableToOrigin("feature", { remote: "origin", merge: "refs/heads/main" })).toBe(true)
+  // Deleted on GitHub, say after its pull request merged: pushing publishes it again.
+  expect(pushableToOrigin("feature", { remote: "origin", merge: "refs/heads/feature" })).toBe(true)
+  expect(pushableToOrigin("feature", { remote: ".", merge: "refs/heads/main" })).toBe(true)
+  // Started from the original repository in a fork, which origin is not.
+  expect(pushableToOrigin("feature", { remote: "upstream", merge: "refs/heads/main" })).toBe(true)
+  expect(pushableToOrigin("feature", { remote: "upstream" })).toBe(true)
+  expect(pushableToOrigin("feature", { remote: "fork", merge: "refs/heads/feature" })).toBe(false)
+  expect(pushableToOrigin("feature", { remote: "https://github.com/other/repo.git", merge: "refs/heads/feature" })).toBe(false)
 })

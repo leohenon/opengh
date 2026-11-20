@@ -117,6 +117,25 @@ export async function readLocalBranch(directory: string): Promise<string | undef
   }
 }
 
+// What a local branch tracks, when it tracks anything: a remote ("." for a local branch) and the ref there.
+export type BranchUpstream = { remote: string; merge?: string }
+
+export async function readBranchUpstream(directory: string, branch: string): Promise<BranchUpstream | undefined> {
+  const read = (key: string) =>
+    git(directory, ["config", "--get", `branch.${branch}.${key}`]).then(
+      (value) => value || undefined,
+      () => undefined,
+    )
+  const [remote, merge] = await Promise.all([read("remote"), read("merge")])
+  return remote ? { remote, merge } : undefined
+}
+
+// Pushing with -u repoints the branch at origin. That's wanted when it tracks only where it started (origin/main,
+// or upstream/main in a fork), but not when it's already published under its own name on another remote.
+export function pushableToOrigin(branch: string, upstream: BranchUpstream | undefined) {
+  return !upstream || upstream.remote === "origin" || upstream.remote === "." || upstream.merge !== `refs/heads/${branch}`
+}
+
 export type MergeCheck = { status: "clean" } | { status: "conflicts"; files: string[] } | { status: "unavailable"; reason: string }
 // A branch on origin, or in another GitHub repository (owner/name).
 export type MergeSide = { branch: string; repository?: string }
@@ -212,6 +231,34 @@ export function cloneDestination(destination: string, cwd: string) {
 
 export function cloneCommand(repository: string, destination: string, cwd: string): CommandSpec {
   return { args: ["gh", "repo", "clone", `github.com/${repository}`, cloneDestination(destination, cwd), "--", "--progress"], cwd }
+}
+
+// What the push preview shows; pushCommand adds the credential helper, progress output and a full refspec.
+export function pushCommandLine(branch: string) {
+  return `git push -u origin ${branch}`
+}
+
+// Publishes a local branch to origin and tracks it. GitHub CLI supplies the HTTPS credentials, as it does for
+// clone, because prompts are disabled here; SSH remotes ignore the helper. The explicit destination keeps the branch's
+// name on GitHub, which is what the dialog compares next, even when remote.origin.push would rename it.
+export function pushCommand(directory: string, branch: string): CommandSpec {
+  if (!branchName(branch)) throw new Error("Unsupported branch name")
+  const helper = "credential.https://github.com.helper"
+  return {
+    args: [
+      "git",
+      "-c",
+      `${helper}=`,
+      "-c",
+      `${helper}=!gh auth git-credential`,
+      "push",
+      "--progress",
+      "-u",
+      "origin",
+      `refs/heads/${branch}:refs/heads/${branch}`,
+    ],
+    cwd: directory,
+  }
 }
 
 // Progress uses CR rewrites; render it as lines rather than letting control bytes affect the TUI.

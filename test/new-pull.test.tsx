@@ -3,7 +3,7 @@ import { render as mount, testRender } from "@opentui/solid"
 import { createTestRenderer } from "@opentui/core/testing"
 import { initializeHunk } from "../src/ui/hunk-host"
 import { defaultConfig } from "../src/config"
-import type { MergeCheck, MergeSide } from "../src/command-actions"
+import type { BranchUpstream, CommandResult, CommandSpec, MergeCheck, MergeSide } from "../src/command-actions"
 import { GitHubApiError } from "../src/github/transport"
 import type {
   DiffTarget,
@@ -61,6 +61,9 @@ async function render(
     compareIn?: (repository: PullRepository, base: string, head: string) => void
     createIn?: (repository: PullRepository, pull: NewPull) => void
     templates?: (repository: PullRepository) => Promise<PullRequestTemplate[]>
+    push?: (spec: CommandSpec, output: (chunk: string) => void) => Promise<CommandResult>
+    branchUpstream?: BranchUpstream
+    retried?: (kind: string) => void
   } = {},
 ) {
   const calls: Array<[string, string]> = []
@@ -73,6 +76,9 @@ async function render(
         config={{ ...defaultConfig, iconStyle: "unicode", showStatusBarHints: true }}
         localRepository={options.local === false ? undefined : { directory: "/tmp/opengh", repository }}
         onLoadLocalBranch={async () => options.localBranch}
+        onLoadBranchUpstream={async () => options.branchUpstream}
+        onRunCommand={options.push ? async (spec, output) => ({ cancel() {}, result: options.push!(spec, output) }) : undefined}
+        onRetryResource={(resource) => options.retried?.(resource.kind)}
         onComparePull={(target, base, head) => {
           options.compareIn?.(target, base, head)
           calls.push([base, head])
@@ -103,6 +109,13 @@ async function render(
 
 async function open(view: View) {
   view.mockInput.pressKey("c")
+  await settle(view)
+}
+
+async function clickText(view: View, text: string) {
+  const row = lines(view).findIndex((line) => line.includes(text))
+  expect(row).toBeGreaterThanOrEqual(0)
+  await view.mockMouse.click(Bun.stringWidth(lines(view)[row]!.slice(0, lines(view)[row]!.indexOf(text))) + 2, row)
   await settle(view)
 }
 
@@ -190,6 +203,178 @@ describe("new pull request", () => {
       ["main", "local-only"],
       ["main", "next"],
     ])
+  })
+
+  describe("pushing a local branch that isn't on GitHub", () => {
+    const unpushed = () => {
+      const state = { pushed: false }
+      const compare = async (_base: string, head: string) => {
+        await Bun.sleep(5)
+        if (head.endsWith("local-only") && !state.pushed) throw new GitHubApiError("compare", "Not Found (HTTP 404)")
+        return comparison(1, 1)
+      }
+      return { state, compare }
+    }
+
+    test("offers the push, previews it, runs it, and returns with the branch compared", async () => {
+      const { state, compare } = unpushed()
+      const ran: CommandSpec[] = []
+      const retried: string[] = []
+      const { view, calls } = await render({
+        localBranch: "local-only",
+        compare,
+        retried: (kind) => retried.push(kind),
+        push: async (spec, output) => {
+          ran.push(spec)
+          output("To github.com:owner/repo.git\n")
+          state.pushed = true
+          return { exitCode: 0, cancelled: false }
+        },
+      })
+      await open(view)
+      await settle(view)
+      expect(frame(view)).not.toContain("Choose head branch")
+      expect(frame(view)).toContain("main ← local-only  Push ›")
+      expect(frame(view)).toContain("Not on GitHub yet")
+      expect(statusLine(view)).toContain("enter push")
+      expect(box(view)!.findDescendantById("new-pull-submit")).toBeDefined()
+      view.mockInput.pressEnter()
+      await settle(view)
+      expect(frame(view)).toContain(`Push local-only to ${repository}?`)
+      expect(frame(view)).toContain("git push -u origin local-only")
+      expect(statusLine(view)).toContain("enter confirm")
+      expect(ran).toEqual([])
+      view.mockInput.pressEnter()
+      await settle(view)
+      await settle(view)
+      expect(ran.map((spec) => [spec.cwd, spec.args.slice(-5)])).toEqual([
+        ["/tmp/opengh", ["push", "--progress", "-u", "origin", "refs/heads/local-only:refs/heads/local-only"]],
+      ])
+      expect(frame(view)).not.toContain("Push local-only to")
+      expect(frame(view)).not.toContain("Push ›")
+      expect(frame(view)).toContain("main ← local-only")
+      expect(frame(view)).toContain("1 commit · 1 file · +6 −2")
+      expect(retried).toEqual(["branches"])
+      expect(calls).toEqual([
+        ["main", "local-only"],
+        ["main", "local-only"],
+      ])
+      expect(frame(view)).toContain("Local only")
+      expect(statusLine(view)).toContain("↑ branches")
+    })
+
+    test("a failed push keeps its output, and esc returns to the box with the push and the text kept", async () => {
+      const { compare } = unpushed()
+      let runs = 0
+      const { view } = await render({
+        localBranch: "local-only",
+        compare,
+        push: async (_spec, output) => {
+          runs++
+          output("remote: Permission to owner/repo.git denied\n")
+          return { exitCode: 128, cancelled: false }
+        },
+      })
+      await open(view)
+      await settle(view)
+      await toTitle(view)
+      await view.mockInput.typeText("Kept title")
+      await branches(view)
+      view.mockInput.pressEnter()
+      await settle(view)
+      view.mockInput.pressEnter()
+      await settle(view)
+      expect(runs).toBe(1)
+      expect(frame(view)).toContain("Failed (exit 128)")
+      expect(frame(view)).toContain("Permission to owner/repo.git denied")
+      view.mockInput.pressEscape()
+      await settle(view)
+      expect(frame(view)).not.toContain("Failed (exit 128)")
+      expect(frame(view)).toContain("main ← local-only  Push ›")
+      expect(frame(view)).toContain("Kept title")
+      expect(statusLine(view)).toContain("enter push")
+      view.mockInput.pressKey("s", { ctrl: true })
+      await settle(view)
+      expect(frame(view)).not.toContain("Create pull request in")
+    })
+
+    test("esc on the preview pushes nothing, and the head can still be changed", async () => {
+      const { compare } = unpushed()
+      let runs = 0
+      const { view } = await render({
+        localBranch: "local-only",
+        compare,
+        push: async () => {
+          runs++
+          return { exitCode: 0, cancelled: false }
+        },
+      })
+      await open(view)
+      await settle(view)
+      await clickText(view, "Push ›")
+      expect(frame(view)).toContain("git push -u origin local-only")
+      view.mockInput.pressEscape()
+      await settle(view)
+      expect(runs).toBe(0)
+      expect(box(view)).toBeDefined()
+      view.mockInput.pressArrow("left")
+      view.mockInput.pressEnter()
+      await settle(view)
+      await pick(view, "next")
+      await settle(view)
+      expect(frame(view)).toContain("main ← next")
+      expect(frame(view)).not.toContain("Push ›")
+      expect(frame(view)).toContain("1 commit · 1 file · +6 −2")
+    })
+
+    test("is offered on a fork whose base is the original repository, from which the branch started", async () => {
+      const browsed: PullRepository = {
+        id: githubDataFixture.repo.id,
+        nodeId: githubDataFixture.repo.nodeId,
+        nameWithOwner: repository,
+        defaultBranch: "main",
+      }
+      const upstream: PullRepository = { id: 9002, nodeId: "R_upstream", nameWithOwner: "upstream/opentui", defaultBranch: "dev" }
+      const { state, compare } = unpushed()
+      const { view } = await render({
+        localBranch: "local-only",
+        // git switch -c local-only upstream/dev
+        branchUpstream: { remote: "upstream", merge: "refs/heads/dev" },
+        repositories: { bases: [upstream, browsed], heads: [browsed, upstream] },
+        compare,
+        push: async () => {
+          state.pushed = true
+          return { exitCode: 0, cancelled: false }
+        },
+      })
+      await open(view)
+      await settle(view)
+      expect(frame(view)).toContain("upstream:dev ← local-only  Push ›")
+      expect(frame(view)).not.toContain("Not Found")
+      view.mockInput.pressEnter()
+      await settle(view)
+      expect(frame(view)).toContain(`Push local-only to ${repository}?`)
+      view.mockInput.pressEnter()
+      await settle(view)
+      await settle(view)
+      expect(frame(view)).toContain("upstream:dev ← local-only")
+      expect(frame(view)).toContain("1 commit · 1 file · +6 −2")
+    })
+
+    test("keeps the note instead when the branch is published on another remote, or commands can't run", async () => {
+      const published = { remote: "fork", merge: "refs/heads/local-only" }
+      for (const options of [{ branchUpstream: published, push: async () => ({ exitCode: 0, cancelled: false }) }, {}]) {
+        const { view } = await render({ localBranch: "local-only", compare: unpushed().compare, ...options })
+        await open(view)
+        await settle(view)
+        expect(frame(view)).toContain("Choose head branch")
+        view.mockInput.pressEscape()
+        await settle(view)
+        expect(frame(view)).toContain("local-only isn't on GitHub. Choose a head branch.")
+        expect(frame(view)).not.toContain("Push ›")
+        view.renderer.destroy()
+      }
+    })
   })
 
   test("← selects the base branch and enter changes it", async () => {

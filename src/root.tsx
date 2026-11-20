@@ -7,7 +7,14 @@ import { resumeLocation, type ResumeLocation } from "./resume"
 import { loadRepositoryTabs, saveRepositoryTabs, type RepositoryTabs } from "./repository-tabs"
 import { defaultConfig, loadConfig, saveConfig, type Config } from "./config"
 import { copyToHostClipboard } from "./clipboard"
-import { checkMerge, readLocalBranch, resolveLocalRepository, runCommand, type LocalRepository } from "./command-actions"
+import {
+  checkMerge,
+  readBranchUpstream,
+  readLocalBranch,
+  resolveLocalRepository,
+  runCommand,
+  type LocalRepository,
+} from "./command-actions"
 import { loadRecentRepositories, rememberRepository, resolveRepository } from "./github/repository"
 import { openGitHub } from "./github/browser"
 import { openUrl } from "./open-url"
@@ -60,6 +67,7 @@ export type RootServices = {
   copyToHostClipboard(value: string): Promise<boolean>
   resolveLocalRepository: typeof resolveLocalRepository
   readLocalBranch: typeof readLocalBranch
+  readBranchUpstream: typeof readBranchUpstream
   checkMerge: typeof checkMerge
   runCommand: typeof runCommand
 }
@@ -86,6 +94,7 @@ const defaultServices: RootServices = {
   copyToHostClipboard,
   resolveLocalRepository,
   readLocalBranch,
+  readBranchUpstream,
   checkMerge,
   runCommand,
 }
@@ -648,6 +657,10 @@ export function Root(props: {
                                 onLoadLocalBranch={() => {
                                   const local = localRepository()
                                   return local ? services.readLocalBranch(local.directory) : Promise.resolve(undefined)
+                                }}
+                                onLoadBranchUpstream={(branch) => {
+                                  const local = localRepository()
+                                  return local ? services.readBranchUpstream(local.directory, branch) : Promise.resolve(undefined)
                                 }}
                                 onLoadPullMergeMessage={session.loadPullMergeMessage}
                                 pullDetail={session.pullDetail()}

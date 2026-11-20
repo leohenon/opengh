@@ -11,6 +11,10 @@ import {
   cloneCommand,
   cloneDestination,
   matchesLocalRepository,
+  pushableToOrigin,
+  pushCommand,
+  pushCommandLine,
+  type BranchUpstream,
   type LocalRepository,
   type MergeCheck,
   type MergeSide,
@@ -94,7 +98,7 @@ import { PullMergeDialog } from "./components/pull-merge-dialog"
 import { PullDraftDialog } from "./components/pull-draft-dialog"
 import { NewIssueDialog } from "./components/new-issue-dialog"
 import { TemplatePicker } from "./components/template-picker"
-import { NewPullDialog, pullHeadRef, type PullSides } from "./components/new-pull-dialog"
+import { NewPullDialog, pullHeadRef, type PullPush, type PullSides } from "./components/new-pull-dialog"
 import { pullMergeBlocker } from "../pull-merge"
 import { Help } from "./components/help"
 import { Settings } from "./components/settings"
@@ -241,6 +245,7 @@ export type AppProps = {
   onLoadPullTemplates?: (repository: PullRepository) => Promise<PullRequestTemplate[]>
   onLoadPullBranches?: (repository: PullRepository, page: number) => Promise<{ items: string[]; hasMore: boolean }>
   onLoadLocalBranch?: () => Promise<string | undefined>
+  onLoadBranchUpstream?: (branch: string) => Promise<BranchUpstream | undefined>
   onCheckMerge?: (base: MergeSide, head: MergeSide) => Promise<MergeCheck>
   pullDetail?: PullDetailState
   onLoadPull?: (number: number, options?: { force?: boolean }) => Promise<void>
@@ -1822,6 +1827,24 @@ function AppContent(props: AppProps) {
   }
   const canOpenNewPull = () => page() === "pulls" && !diffTarget() && !activePullNumber() && !!props.onComparePull
   const [newPullLocalBranch, setNewPullLocalBranch] = createSignal<string>()
+  const [newPullPushable, setNewPullPushable] = createSignal(false)
+  const newPullPush = (): PullPush | undefined => {
+    const local = props.localRepository
+    const run = props.onRunCommand
+    const repository = data().repo.nameWithOwner
+    if (!run || !local || !newPullPushable() || !matchesLocalRepository(local, repository)) return undefined
+    // origin is the browsed repository, as matchesLocalRepository just checked.
+    return {
+      action: (branch) => ({
+        title: `Push ${branch} to ${repository}`,
+        detail: pushCommandLine(branch),
+        command: () => pushCommand(local.directory, branch),
+      }),
+      onRun: run,
+      onCaptureCancel: props.onCommandCaptureCancel,
+      onCopy: props.onCopyToClipboard,
+    }
+  }
   const newPullDrafts = props.newPullDrafts ?? createComposeDrafts({ storage: false })
   const [newPullTemplates, setNewPullTemplates] = createSignal<PullRequestTemplate[]>()
   const [newPullTemplate, setNewPullTemplate] = createSignal<string>()
@@ -1836,8 +1859,10 @@ function AppContent(props: AppProps) {
         ? props.onLoadLocalBranch().catch(() => undefined)
         : Promise.resolve(undefined)
     void local.then(async (branch) => {
+      const upstream = branch ? await props.onLoadBranchUpstream?.(branch).catch(() => undefined) : undefined
       if (!current() || overlay() !== undefined) return
       setNewPullLocalBranch(branch)
+      setNewPullPushable(!!branch && pushableToOrigin(branch, upstream))
       if (!props.onLoadPullTemplates) return setOverlay("new-pull")
       setNewPullTemplates(undefined)
       setOverlay("new-pull-templates")
@@ -3168,6 +3193,7 @@ function AppContent(props: AppProps) {
                               ? props.onCheckMerge
                               : undefined
                           }
+                          push={newPullPush()}
                           onCreate={props.onCreatePull ? createPull : undefined}
                           onOpenPull={(number) => {
                             setOverlay()

@@ -1,6 +1,6 @@
 import { TextAttributes, type BoxRenderable } from "@opentui/core"
 import { createEffect, createSignal, on, onCleanup, onMount, Show } from "solid-js"
-import type { MergeCheck, MergeSide } from "../../command-actions"
+import type { CommandResult, CommandSpec, CommandTask, MergeCheck, MergeSide } from "../../command-actions"
 import type { ComposeDraft, ComposeDrafts } from "../../compose-drafts"
 import type { NewPull, Paginated, PullBranchComparison, PullComparison, PullRepositories, PullRepository } from "../../models"
 import type { ResourceState } from "../../repository-state"
@@ -9,14 +9,16 @@ import { fitText } from "../format"
 import { mouseClick } from "../mouse"
 import { useTheme } from "../theme"
 import { BranchPicker } from "./branch-picker"
+import { CommandDialog, type CommandAction } from "./command-dialog"
 import { ComposeDialog, type ComposeControls } from "./compose-dialog"
 import { LoadingText } from "./loading-text"
 import { RepositoryPicker } from "./repository-picker"
 
-type Item = "base" | "head" | "existing" | "diff"
+type Item = "base" | "head" | "push" | "existing" | "diff"
 type Summary =
   | { status: "idle"; note?: string }
   | { status: "loading" }
+  | { status: "unpublished" }
   | { status: "ready"; result: PullBranchComparison }
   | { status: "error"; message: string }
 
@@ -28,6 +30,14 @@ const createChoices = [
 ]
 
 export type PullSides = { baseRepository: PullRepository; base: string; headRepository: PullRepository; head: string }
+
+// Publishes the checkout's branch. action builds the push and describes it, so the preview matches what runs.
+export type PullPush = {
+  action(branch: string): CommandAction
+  onRun(spec: CommandSpec, output: (chunk: string) => void, signal: AbortSignal): Promise<CommandTask>
+  onCaptureCancel?: (cancel: (() => void) | undefined) => void
+  onCopy?: (output: string) => Promise<boolean>
+}
 
 export const pullHeadRef = (base: PullRepository, head: PullRepository, branch: string) =>
   head.id === base.id ? branch : `${owner(head)}:${branch}`
@@ -59,6 +69,7 @@ export function NewPullDialog(props: {
   onLoadRepositories?(): Promise<PullRepositories>
   onLoadBranches?(repository: PullRepository, page: number): Promise<{ items: string[]; hasMore: boolean }>
   onCheckMerge?(base: MergeSide, head: MergeSide): Promise<MergeCheck>
+  push?: PullPush
   onOpenPull(number: number): void
   onViewDiff?(sides: PullSides, head: string): void
   initial?: PullSides
@@ -88,6 +99,10 @@ export function NewPullDialog(props: {
   const [saved, setSaved] = createSignal<{ key: string; draft: ComposeDraft }>()
   const [merge, setMerge] = createSignal<MergeCheck | { status: "checking" }>()
   const [rowWidth, setRowWidth] = createSignal(0)
+  const [pushing, setPushing] = createSignal<{ action: CommandAction; push: PullPush }>()
+  const [compared, setCompared] = createSignal(0)
+  const [composeHint, setComposeHint] = createSignal<string>()
+  const [commandHint, setCommandHint] = createSignal<string>()
   let row: BoxRenderable | undefined
   let controls: ComposeControls | undefined
   let applied: ComposeDraft = { title: "", body: "" }
@@ -96,8 +111,11 @@ export function NewPullDialog(props: {
   let disposed = false
   onCleanup(() => {
     disposed = true
+    props.onHintChange(undefined)
   })
+  createEffect(() => props.onHintChange(pushing() ? commandHint() : composeHint()))
 
+  const unpublished = () => summary().status === "unpublished"
   const existing = () => {
     const current = summary()
     return current.status === "ready" ? current.result.existing : undefined
@@ -110,7 +128,13 @@ export function NewPullDialog(props: {
     const current = summary()
     return !!props.onViewDiff && current.status === "ready" && current.result.comparison.aheadBy > 0
   }
-  const items = (): Item[] => ["base", "head", ...(existing() ? ["existing" as const] : []), ...(diffable() ? ["diff" as const] : [])]
+  const items = (): Item[] => [
+    "base",
+    "head",
+    ...(unpublished() ? ["push" as const] : []),
+    ...(existing() ? ["existing" as const] : []),
+    ...(diffable() ? ["diff" as const] : []),
+  ]
   const next = () => {
     const all = items()
     const index = all.indexOf(selected())
@@ -181,7 +205,23 @@ export function NewPullDialog(props: {
       const pull = existing()
       if (pull) props.onOpenPull(pull.number)
     } else if (item === "diff") viewDiff()
+    else if (item === "push") openPush()
     else openPicker(item)
+  }
+  const openPush = () => {
+    const branch = head()
+    const push = props.push
+    if (!push || !branch || !unpublished()) return
+    setPushing({ push, action: push.action(branch) })
+  }
+  // A failed or cancelled push keeps its output open; closing it returns here with the push still on offer.
+  const pushed = (result: CommandResult) => {
+    if (result.cancelled || result.exitCode !== 0) return
+    setPushing()
+    controls?.focus("title")
+    // The branch lists were loaded before this branch existed on GitHub.
+    props.onRetryBranches()
+    setCompared((count) => count + 1)
   }
   const choose = (branch: string) => {
     const current = picker()
@@ -207,22 +247,28 @@ export function NewPullDialog(props: {
   }
 
   createEffect(
-    on([baseRepository, base, headRef], ([repository, base, ref]) => {
+    on([baseRepository, base, headRef, compared], ([repository, base, ref]) => {
       const id = ++request
-      const head = ref
-      if (!head) return setSummary((current) => (current.status === "idle" ? current : { status: "idle" }))
+      if (!ref) return setSummary((current) => (current.status === "idle" ? current : { status: "idle" }))
+      // Only the checkout's branch can be missing from GitHub; every other head was picked from GitHub's lists.
+      const unpushed = head() === local && headRepository().id === browsed.id
       setSummary({ status: "loading" })
-      props.onCompare(repository, base, head).then(
+      props.onCompare(repository, base, ref).then(
         (result) => {
           if (!disposed && id === request) setSummary({ status: "ready", result })
         },
         (error) => {
           if (disposed || id !== request) return
-          if (head === local && repository.id === browsed.id && error instanceof GitHubApiError && error.status === 404) {
-            setSummary({ status: "idle", note: `${head} isn't on GitHub. Choose a head branch.` })
+          if (unpushed && error instanceof GitHubApiError && error.status === 404) {
+            controls?.focus("top")
+            if (props.push) {
+              setSummary({ status: "unpublished" })
+              setSelected("push")
+              return
+            }
+            setSummary({ status: "idle", note: `${local} isn't on GitHub. Choose a head branch.` })
             setHead(undefined)
             setSelected("head")
-            controls?.focus("top")
             setPicker({ side: "head", repository: headRepository() })
             return
           }
@@ -306,6 +352,7 @@ export function NewPullDialog(props: {
     if (current.status === "idle")
       return { text: current.note ?? "Choose a head branch", color: current.note ? colors.yellow : colors.muted }
     if (current.status === "error") return { text: current.message, color: colors.red }
+    if (current.status === "unpublished") return { text: "Not on GitHub yet", color: colors.yellow }
     if (current.status !== "ready") return undefined
     const { comparison, existing } = current.result
     if (existing) return { text: `Pull request #${existing.number} already exists`, color: colors.yellow }
@@ -370,7 +417,7 @@ export function NewPullDialog(props: {
         draftError={props.drafts.error()}
         initialField="top"
         blocked={!creatable()}
-        suspended={!!picker()}
+        suspended={!!picker() || !!pushing()}
         onReady={(value) => {
           controls = value
         }}
@@ -394,7 +441,7 @@ export function NewPullDialog(props: {
             : undefined
         }
         onClose={props.onClose}
-        onHintChange={props.onHintChange}
+        onHintChange={setComposeHint}
         top={{
           label: "branches",
           keys: {
@@ -408,7 +455,13 @@ export function NewPullDialog(props: {
             [["navigation.previousTab", "navigation.nextTab"], "base/head"],
             [
               "navigation.activate",
-              selected() === "existing" ? `open #${existing()?.number}` : selected() === "diff" ? "view diff" : `change ${selected()}`,
+              selected() === "existing"
+                ? `open #${existing()?.number}`
+                : selected() === "diff"
+                  ? "view diff"
+                  : selected() === "push"
+                    ? "push"
+                    : `change ${selected()}`,
             ],
             ...(diffable() && selected() !== "diff" ? [["item.diff", "diff"] as const] : []),
             ...(items().indexOf(selected()) < items().length - 1 ? [["dialog.nextField", "next"] as const] : []),
@@ -454,6 +507,21 @@ export function NewPullDialog(props: {
               >
                 {headLabel()}
               </text>
+              <Show when={unpublished()}>
+                <text
+                  id="new-pull-push"
+                  flexShrink={0}
+                  selectable={false}
+                  fg={itemColor("push", active())}
+                  attributes={itemAttributes("push", active())}
+                  {...mouseClick(() => {
+                    focus()
+                    activate("push")
+                  })}
+                >
+                  {"  Push ›"}
+                </text>
+              </Show>
               <Show when={existing()}>
                 {(pull) => (
                   <text
@@ -519,6 +587,20 @@ export function NewPullDialog(props: {
           ),
         }}
       />
+      <Show when={pushing()} keyed>
+        {(current) => (
+          <CommandDialog
+            action={current.action}
+            zIndex={300}
+            onRun={current.push.onRun}
+            onCaptureCancel={current.push.onCaptureCancel}
+            onCopy={current.push.onCopy}
+            onHintChange={setCommandHint}
+            onResult={pushed}
+            onClose={() => setPushing()}
+          />
+        )}
+      </Show>
       <Show when={picker()}>
         {(current) => (
           <Show
