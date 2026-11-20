@@ -28,13 +28,14 @@ type Setting =
   | "diff-layout"
   | "diff-wrap"
   | "diff-fullscreen"
+  | "copy-on-select"
 
 const sectionOrder = ["Appearance", "Layout", "Usability", "Diffs"] as const
 type Section = (typeof sectionOrder)[number]
 const sectionSettings: Record<Section, readonly Setting[]> = {
   Appearance: ["theme", "color-mode", "markdown-style"],
   Layout: ["compact-header", "tab-counts", "hide-documents-tab", "detail-layout", "details-placement"],
-  Usability: ["icon-style", "status-bar-hints", "scrollbars", "reduced-motion", "tab-shortcuts"],
+  Usability: ["icon-style", "status-bar-hints", "scrollbars", "reduced-motion", "tab-shortcuts", "copy-on-select"],
   Diffs: ["diff-layout", "diff-wrap", "diff-fullscreen"],
 }
 const settingOrder = sectionOrder.flatMap((section) => sectionSettings[section])
@@ -55,6 +56,7 @@ const settingDefinitions: Record<Setting, { title: string; value: (config: Confi
   "status-bar-hints": { title: "Shortcut hints", value: (config) => (config.showStatusBarHints ? "on" : "off") },
   scrollbars: { title: "Scrollbars", value: (config) => (config.showScrollbars ? "on" : "off") },
   "reduced-motion": { title: "Reduced motion", value: (config) => (config.reducedMotion ? "on" : "off") },
+  "copy-on-select": { title: "Copy on selection", value: (config) => (config.copyOnSelect ? "on" : "off") },
   "diff-layout": { title: "Diff layout", value: (config) => config.diffLayout },
   "diff-wrap": { title: "Diff wrapping", value: (config) => (config.diffWrap ? "on" : "off") },
   "diff-fullscreen": { title: "Fullscreen diffs", value: (config) => (config.diffFullscreen ? "on" : "off") },
@@ -164,6 +166,7 @@ export function Settings(props: {
   const toggleBoolean = async (
     key:
       | "reducedMotion"
+      | "copyOnSelect"
       | "showScrollbars"
       | "showStatusBarHints"
       | "compactHeader"
@@ -297,6 +300,9 @@ export function Settings(props: {
         break
       case "reduced-motion":
         void toggleBoolean("reducedMotion")
+        break
+      case "copy-on-select":
+        void toggleBoolean("copyOnSelect")
         break
       case "markdown-style":
         void changeMarkdownStyle()
@@ -463,6 +469,11 @@ export function Settings(props: {
       return {
         title: "Reduced motion",
         description: "Replace animated loading dots with static dots.",
+      }
+    if (selected() === "copy-on-select")
+      return {
+        title: "Copy on selection",
+        description: "Copy selected text to the clipboard on mouse release. When off, the text stays selected.",
       }
     if (selected() === "markdown-style")
       return {

@@ -462,7 +462,9 @@ export function Root(props: {
       <ThemeProvider name={config().theme} mode={config().colorMode}>
         <MotionProvider reduced={config().reducedMotion}>
           <MouseSurface>
-            <SelectionClipboard onCopy={services.copyToHostClipboard} />
+            <Show when={config().copyOnSelect}>
+              <SelectionClipboard onCopy={services.copyToHostClipboard} />
+            </Show>
             <Show
               when={view() === "repository" && !loadingMessage()}
               fallback={

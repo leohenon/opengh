@@ -6,6 +6,7 @@ import { initializeHunk } from "../src/ui/hunk-host"
 import { resumeLocation, type ResumeLocation } from "../src/resume"
 import type { DiffTarget, RepositoryDocument } from "../src/models"
 import { waitForText } from "./fixtures/wait"
+import { clickControl } from "./fixtures/mouse"
 import { patchFixture } from "./fixtures/diff"
 import { BoxRenderable, CodeRenderable, RGBA, type Renderable, type TextareaRenderable } from "@opentui/core"
 import { createSignal } from "solid-js"
@@ -714,6 +715,70 @@ describe("application root", () => {
     expect(view.captureCharFrame()).toContain("‹ off ›")
   })
 
+  test("turning off Copy on selection preserves the selection without affecting explicit copies", async () => {
+    let config = defaultConfig
+    const copies: string[] = []
+    const view = await testRender(
+      () => (
+        <Root
+          cwd="/work"
+          services={{
+            checkForUpdate: async () => undefined,
+            createPullReviewSession: createTestReviewSession,
+            resolveRepository: async () => "cli/cli",
+            resolveLocalRepository: async () => undefined,
+            loadRecentRepositories: async () => [],
+            rememberRepository: async () => {},
+            loadRepositoryTabs: async () => ({}),
+            saveRepositoryTabs: async () => {},
+            createRepositorySession: readySession,
+            loadConfig: async () => config,
+            saveConfig: async (next) => {
+              config = next
+            },
+            copyToHostClipboard: async (text) => {
+              copies.push(text)
+              return true
+            },
+          }}
+        />
+      ),
+      { width: 120, height: 45 },
+    )
+    active.push(view)
+    await waitForText(view, "TypeScript library")
+    const toggle = async () => {
+      view.mockInput.pressKey(",")
+      await clickControl(view, "setting-copy-on-select")
+      view.mockInput.pressEscape()
+      await Bun.sleep(30)
+      await view.flush()
+    }
+    const select = async () => {
+      const lines = view.captureCharFrame().split("\n")
+      const y = lines.findIndex((line) => line.includes("TypeScript library"))
+      const x = lines[y]!.indexOf("TypeScript library")
+      await view.mockMouse.drag(x, y, x + 10, y)
+      await view.flush()
+    }
+
+    await toggle()
+    expect(config.copyOnSelect).toBe(false)
+    await select()
+    const text = view.renderer.getSelection()?.getSelectedText()
+    expect(text).toContain("TypeScript")
+    expect(copies).toEqual([])
+    view.mockInput.pressKey("y")
+    await view.flush()
+    expect(copies).toEqual([githubDataFixture.repo.url])
+
+    await toggle()
+    expect(config.copyOnSelect).toBe(true)
+    await select()
+    expect(copies).toEqual([githubDataFixture.repo.url, text!])
+    expect(view.renderer.getSelection()).toBeNull()
+  })
+
   test("persists settings before applying them and blocks edits or cancellation while saving", async () => {
     const saved: Config[] = []
     const writes = [deferred<void>(), deferred<void>()]
@@ -742,6 +807,7 @@ describe("application root", () => {
               diffLayout: "auto",
               diffWrap: false,
               diffFullscreen: true,
+              copyOnSelect: true,
               showStatusBarHints: true,
               showTabShortcuts: true,
               showTabCounts: true,
@@ -782,6 +848,7 @@ describe("application root", () => {
         diffLayout: "auto",
         diffWrap: false,
         diffFullscreen: true,
+        copyOnSelect: true,
         showStatusBarHints: true,
         showTabShortcuts: true,
         showTabCounts: true,
@@ -835,6 +902,7 @@ describe("application root", () => {
       diffLayout: "auto",
       diffWrap: false,
       diffFullscreen: true,
+      copyOnSelect: true,
       showStatusBarHints: true,
       showTabShortcuts: true,
       showTabCounts: true,

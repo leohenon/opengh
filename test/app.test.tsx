@@ -1811,6 +1811,7 @@ describe("opengh TUI", () => {
       diffLayout: "auto",
       diffWrap: false,
       diffFullscreen: true,
+      copyOnSelect: true,
       showStatusBarHints: true,
       showTabShortcuts: true,
       showTabCounts: true,
@@ -1901,6 +1902,7 @@ describe("opengh TUI", () => {
       diffLayout: "auto",
       diffWrap: false,
       diffFullscreen: true,
+      copyOnSelect: true,
       showStatusBarHints: true,
       showTabShortcuts: true,
       showTabCounts: true,
@@ -2071,7 +2073,7 @@ describe("opengh TUI", () => {
     view.mockInput.pressKey(",")
     await view.flush()
     expect(view.captureCharFrame()).toContain("Diffs")
-    for (let i = 0; i < 13; i++) view.mockInput.pressArrow("down")
+    for (let i = 0; i < 14; i++) view.mockInput.pressArrow("down")
     await view.flush()
     expect(view.captureCharFrame()).toContain("Diff layout")
     expect(view.captureCharFrame()).toContain("‹ auto ›")
@@ -2118,6 +2120,7 @@ describe("opengh TUI", () => {
       diffLayout: "auto",
       diffWrap: false,
       diffFullscreen: true,
+      copyOnSelect: true,
       showStatusBarHints: true,
       showTabShortcuts: true,
       showTabCounts: true,
@@ -2238,6 +2241,7 @@ describe("opengh TUI", () => {
       diffLayout: "auto",
       diffWrap: false,
       diffFullscreen: true,
+      copyOnSelect: true,
       showStatusBarHints: true,
       showTabShortcuts: true,
       showTabCounts: true,
@@ -2297,6 +2301,7 @@ describe("opengh TUI", () => {
             diffLayout: "auto",
             diffWrap: false,
             diffFullscreen: true,
+            copyOnSelect: true,
             showStatusBarHints: true,
             showTabShortcuts: true,
             showTabCounts: true,

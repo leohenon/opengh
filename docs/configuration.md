@@ -40,6 +40,7 @@ Omitted options use defaults. An absolute `XDG_CONFIG_HOME` changes the path to
 | `showStatusBarHints` | `false`                                       | Shortcut hints.                                                                |
 | `showScrollbars`     | `false`                                       | Scrollbars for overflowing content.                                            |
 | `reducedMotion`      | `false`                                       | Static loading indicators.                                                     |
+| `copyOnSelect`       | `true`                                        | Copy selected text on mouse release. Turn off to leave the text selected.      |
 | `checkForUpdates`    | `true`                                        | Check daily for a new stable release (skipped when run from source).           |
 | `diffViewerCommand`  | `hunk patch {patch}` when `hunk` is on `PATH` | External diff viewer.                                                          |
 | `keybindings`        | No overrides                                  | [Customize shortcuts](keybindings.md#change-a-shortcut).                       |

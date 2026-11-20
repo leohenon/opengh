@@ -18,6 +18,7 @@ export type Config = {
   theme: ThemeName
   colorMode: ColorMode
   reducedMotion: boolean
+  copyOnSelect: boolean
   markdownStyle: MarkdownStyle
   detailLayout: DetailLayout
   detailsPlacement: DetailsPlacement
@@ -40,6 +41,7 @@ export const defaultConfig: Config = {
   theme: defaultTheme,
   colorMode: "system",
   reducedMotion: false,
+  copyOnSelect: true,
   markdownStyle: "rich",
   detailLayout: "centered",
   detailsPlacement: "auto",
@@ -90,6 +92,7 @@ function normalizeConfig(value: unknown): Config {
           ? "light"
           : defaultConfig.colorMode,
     reducedMotion: typeof input.reducedMotion === "boolean" ? input.reducedMotion : defaultConfig.reducedMotion,
+    copyOnSelect: typeof input.copyOnSelect === "boolean" ? input.copyOnSelect : defaultConfig.copyOnSelect,
     markdownStyle: input.markdownStyle === "rich" || input.markdownStyle === "minimal" ? input.markdownStyle : defaultConfig.markdownStyle,
     detailLayout: input.detailLayout === "centered" || input.detailLayout === "wide" ? input.detailLayout : defaultConfig.detailLayout,
     detailsPlacement:
