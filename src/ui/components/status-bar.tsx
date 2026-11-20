@@ -1,5 +1,7 @@
+import { TextAttributes } from "@opentui/core"
 import { useTerminalDimensions } from "@opentui/solid"
 import { Show } from "solid-js"
+import type { UpdateNotice } from "../../update-check"
 import { useTheme } from "../theme"
 import { LoadingText } from "./loading-text"
 
@@ -48,7 +50,15 @@ export function fitStatusHints(hint: string | undefined, available: number) {
   return visible.join(" · ")
 }
 
-export function StatusBar(props: { kind?: StatusKind; detail?: string; error?: string; context?: string; hint?: string; zIndex?: number }) {
+export function StatusBar(props: {
+  kind?: StatusKind
+  detail?: string
+  error?: string
+  context?: string
+  hint?: string
+  zIndex?: number
+  updateNotice?: UpdateNotice
+}) {
   const { colors } = useTheme()
   const dimensions = useTerminalDimensions()
   const hint = () => {
@@ -62,6 +72,14 @@ export function StatusBar(props: { kind?: StatusKind; detail?: string; error?: s
     if (!props.kind) return undefined
     if (props.kind === "loading-resource" && props.detail) return `Loading ${props.detail}…`
     return loadingMessages[props.kind]
+  }
+
+  const updateLabel = () => (props.updateNotice ? `↑ v${props.updateNotice.latestVersion} available` : "")
+  const showUpdate = () => {
+    if (!props.updateNotice || props.error || loadingMessage()) return false
+    // Measure only after choosing the normal hints: updates must never displace them.
+    const used = Bun.stringWidth(context() ?? "") + Bun.stringWidth(hint()) + (context() && hint() ? 3 : 0)
+    return used + (used ? 2 : 0) + Bun.stringWidth(updateLabel()) <= dimensions().width - 4
   }
 
   // Keep the footer row even with hints off, so loading feedback never resizes
@@ -107,6 +125,20 @@ export function StatusBar(props: { kind?: StatusKind; detail?: string; error?: s
         {(props.error || loadingMessage() || context()) && hint() ? " · " : ""}
         {hint()}
       </text>
+      <Show when={showUpdate()}>
+        <box flexGrow={1} minWidth={0} />
+        <text
+          id="status-update"
+          height={1}
+          flexShrink={0}
+          wrapMode="none"
+          fg={colors.blue}
+          attributes={TextAttributes.DIM}
+          selectable={false}
+        >
+          {updateLabel()}
+        </text>
+      </Show>
     </box>
   )
 }

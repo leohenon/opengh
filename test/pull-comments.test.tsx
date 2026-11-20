@@ -80,6 +80,7 @@ test("Root PR conversation comments use the shared editor, retain drafts, confir
       <Root
         cwd="/fixture"
         services={{
+          checkForUpdate: async () => undefined,
           createPullReviewSession: createTestReviewSession,
           resolveRepository: async () => githubDataFixture.repo.nameWithOwner,
           resolveLocalRepository: async () => undefined,

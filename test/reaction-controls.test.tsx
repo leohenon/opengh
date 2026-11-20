@@ -64,6 +64,7 @@ async function setup(overrides: Partial<RepositoryLoaders> = {}, launcher = fals
       <Root
         cwd="/fixture"
         services={{
+          checkForUpdate: async () => undefined,
           resolveRepository: async () => (launcher ? undefined : "anomalyco/opentui"),
           resolveLocalRepository: async () => undefined,
           loadRecentRepositories: async () => ["anomalyco/opentui", "owner/other"],

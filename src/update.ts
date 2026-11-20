@@ -89,12 +89,16 @@ function isJavaScriptInstallation(executable: string) {
 }
 
 export function installationUpdateHint(executable: string) {
-  if (executable.startsWith("/nix/store/"))
-    return "This installation is managed by Nix. Find its entry with nix profile list, then update it with nix profile upgrade."
-  if (isJavaScriptInstallation(executable))
-    return "This installation is managed by a JavaScript package manager. Use the manager that installed it; for a global npm install: npm install --global @leohenon/opengh"
+  if (executable.startsWith("/nix/store/")) return "Run: nix profile upgrade opengh"
+  if (isJavaScriptInstallation(executable)) return "Run: npm install --global @leohenon/opengh"
   if (executable.includes("/Cellar/opengh/") || existsSync(join(dirname(dirname(executable)), "INSTALL_RECEIPT.json")))
-    return "This installation is managed by Homebrew. Run: brew update && brew upgrade leohenon/tap/opengh"
+    return "Run: brew update && brew upgrade leohenon/tap/opengh"
+}
+
+export const isSourceCheckout = () => !buildTarget
+
+export async function updateInstruction(): Promise<string> {
+  return installationUpdateHint(await realpath(process.execPath)) ?? "Run: opengh update"
 }
 
 function updatedMessage(version: string) {

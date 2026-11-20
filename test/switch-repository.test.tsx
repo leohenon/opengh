@@ -114,6 +114,7 @@ test("repository switch popup isolates input, preserves cancelled navigation, an
         cwd="/work"
         repositoryArgument="anomalyco/opentui"
         services={{
+          checkForUpdate: async () => undefined,
           resolveRepository: async () => "anomalyco/opentui",
           resolveLocalRepository: async () => undefined,
           loadRepositoryTabs: async () => ({}),

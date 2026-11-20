@@ -91,6 +91,7 @@ for (const parent of ["issue", "pull"] as const) {
               initialDetail={{ kind: parent, number }}
               cwd="/work"
               services={{
+                checkForUpdate: async () => undefined,
                 createRepositorySession: () => session,
                 createPullReviewSession: createTestReviewSession,
                 resolveRepository: async () => repository,

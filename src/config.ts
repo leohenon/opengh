@@ -30,6 +30,7 @@ export type Config = {
   hideDocumentsTab: boolean
   showTabShortcuts: boolean
   showTabCounts: boolean
+  checkForUpdates: boolean
   diffViewerCommand?: string[]
   keybindings?: KeybindingOverrides
 }
@@ -51,6 +52,7 @@ export const defaultConfig: Config = {
   hideDocumentsTab: false,
   showTabShortcuts: true,
   showTabCounts: true,
+  checkForUpdates: true,
 }
 
 export class ConfigFileError extends Error {
@@ -105,6 +107,7 @@ function normalizeConfig(value: unknown): Config {
     hideDocumentsTab: typeof input.hideDocumentsTab === "boolean" ? input.hideDocumentsTab : defaultConfig.hideDocumentsTab,
     showTabShortcuts: typeof input.showTabShortcuts === "boolean" ? input.showTabShortcuts : defaultConfig.showTabShortcuts,
     showTabCounts: typeof input.showTabCounts === "boolean" ? input.showTabCounts : defaultConfig.showTabCounts,
+    checkForUpdates: typeof input.checkForUpdates === "boolean" ? input.checkForUpdates : defaultConfig.checkForUpdates,
     ...(input.diffViewerCommand === undefined ? {} : { diffViewerCommand: validateExternalCommand(input.diffViewerCommand) }),
     ...(input.keybindings === undefined ? {} : { keybindings: normalizeKeybindings(input.keybindings) }),
   }

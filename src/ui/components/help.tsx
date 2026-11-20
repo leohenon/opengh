@@ -1,6 +1,7 @@
 import { TextAttributes, type ScrollBoxRenderable } from "@opentui/core"
 import { useTerminalDimensions } from "@opentui/solid"
-import { createMemo, For, type JSX } from "solid-js"
+import { createMemo, For, Show, type JSX } from "solid-js"
+import type { UpdateNotice } from "../../update-check"
 import { parseKey, type KeyAction } from "../../keybindings"
 import { useKeyActions, useKeybindings } from "../keybindings"
 import type { Page } from "../../navigation"
@@ -50,6 +51,7 @@ function Shortcut(props: { keys: string; keyWidth: number; children: JSX.Element
 }
 
 export function Help(props: {
+  updateNotice?: UpdateNotice
   onClose: () => void
   focus?: boolean
   view: Page | "run" | "commit" | "issue" | "pull" | "diff"
@@ -236,11 +238,24 @@ export function Help(props: {
       Math.max(1, Math.floor((width() - padding() * 2) * 0.55)),
       Math.max(1, ...shortcuts().map((item) => Bun.stringWidth(item.keys) + 2)),
     )
+  const updateText = () => {
+    const notice = props.updateNotice
+    return notice ? `Installed: v${notice.currentVersion}\nLatest: v${notice.latestVersion}\n${notice.instruction}` : ""
+  }
+  const updateRows = () =>
+    updateText()
+      ? updateText()
+          .split("\n")
+          .reduce((rows, line) => rows + Math.max(1, Math.ceil(Bun.stringWidth(line) / Math.max(1, width() - padding() * 2))), 1)
+      : 0
   const height = () =>
     Math.max(
       1,
       Math.min(
-        shortcuts().reduce((rows, item) => rows + Math.max(1, Math.ceil(Bun.stringWidth(item.keys) / Math.max(1, keyWidth() - 2))), 4),
+        shortcuts().reduce(
+          (rows, item) => rows + Math.max(1, Math.ceil(Bun.stringWidth(item.keys) / Math.max(1, keyWidth() - 2))),
+          4 + updateRows(),
+        ),
         dimensions().height - 2,
       ),
     )
@@ -266,6 +281,12 @@ export function Help(props: {
           scrollX={false}
           scrollbarOptions={{ visible: false }}
         >
+          <Show when={props.updateNotice}>
+            <text id="help-update" flexShrink={0} wrapMode="char" fg={colors.blue}>
+              {updateText()}
+            </text>
+            <box height={1} flexShrink={0} />
+          </Show>
           <For each={shortcuts()}>
             {(shortcut) => (
               <Shortcut keys={shortcut.keys} keyWidth={keyWidth()}>

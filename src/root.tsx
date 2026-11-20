@@ -22,6 +22,7 @@ import { createPullReviewSession } from "./pull-review-session"
 import type { PullReviewSession } from "./review-types"
 import { createRepositorySession, type RepositoryScope, type RepositorySession } from "./repository-session"
 import type { RepositoryState } from "./repository-state"
+import { checkForUpdate, type UpdateNotice } from "./update-check"
 import { App } from "./ui/app"
 import { ThemeProvider } from "./ui/theme"
 import { MotionProvider } from "./ui/motion"
@@ -38,6 +39,7 @@ type ReadyState = Extract<RepositoryState, { status: "ready" }>
 type ErrorState = Extract<RepositoryState, { status: "error" }>
 
 export type RootServices = {
+  checkForUpdate(): Promise<UpdateNotice | undefined>
   resolveRepository(argument: string | undefined, cwd: string): Promise<string | undefined>
   loadIssueKind(repository: string, number: number): Promise<"issue" | "pull">
   loadRecentRepositories(): Promise<string[]>
@@ -63,6 +65,7 @@ export type RootServices = {
 }
 
 const defaultServices: RootServices = {
+  checkForUpdate,
   resolveRepository,
   loadIssueKind: loadGitHubIssueKind,
   loadRecentRepositories,
@@ -110,6 +113,18 @@ export function Root(props: {
   const [focus, setFocus] = createSignal(props.focus ?? false)
   const [view, setView] = createSignal<View>("resolving")
   const [recent, setRecent] = createSignal<string[]>([])
+  const [updateNotice, setUpdateNotice] = createSignal<UpdateNotice>()
+  let disposed = false
+  onCleanup(() => {
+    disposed = true
+  })
+  const startUpdateCheck = () =>
+    void services
+      .checkForUpdate()
+      .then((notice) => {
+        if (!disposed && !renderer.isDestroyed) setUpdateNotice(notice)
+      })
+      .catch(() => {})
   const [pickerError, setPickerError] = createSignal("")
   const [launchError, setLaunchError] = createSignal<LaunchRequest & { message: string }>()
   const [config, setConfig] = createSignal(props.initialConfig ?? defaultConfig)
@@ -415,6 +430,7 @@ export function Root(props: {
       if (renderer.isDestroyed) return
       setRecent(repositories)
       setConfig(loadedConfig)
+      if (loadedConfig.checkForUpdates) startUpdateCheck()
       setRepositoryTabs(savedTabs)
       if (savedResume) {
         pendingState = savedResume
@@ -552,6 +568,7 @@ export function Root(props: {
                                 onPageChange={(page) => {
                                   if (!focus()) rememberTab(repositoryName, page)
                                 }}
+                                updateNotice={config().checkForUpdates ? updateNotice() : undefined}
                                 config={config()}
                                 configSaving={configSaving() || configReloading()}
                                 configError={configError()}

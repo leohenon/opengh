@@ -14,6 +14,7 @@ import { appColors, resolveTheme } from "../src/theme"
 import type { CommitDetailState, DiffState, IssueDetailState, PullDetailState, RepositoryState } from "../src/repository-state"
 import { parseLaunchArguments } from "../src/launch-target"
 import { Root } from "../src/root"
+import type { UpdateNotice } from "../src/update-check"
 import { createRepositorySession } from "../src/repository-session"
 import { createPullReviewSession } from "../src/pull-review-session"
 import { createInlineDrafts } from "../src/inline-drafts"
@@ -119,6 +120,110 @@ function readySession() {
 }
 
 describe("application root", () => {
+  test("checks for updates without blocking startup; without room in the status bar, the update shows only in help", async () => {
+    const update = deferred<UpdateNotice | undefined>()
+    let checks = 0
+    const view = await testRender(
+      () => (
+        <Root
+          repositoryArgument="cli/cli"
+          cwd="/work"
+          services={{
+            checkForUpdate: () => {
+              checks++
+              return update.promise
+            },
+            createPullReviewSession: createTestReviewSession,
+            resolveRepository: async () => "cli/cli",
+            resolveLocalRepository: async () => undefined,
+            loadRecentRepositories: async () => [],
+            rememberRepository: async () => {},
+            loadRepositoryTabs: async () => ({}),
+            saveRepositoryTabs: async () => {},
+            loadConfig: async () => ({ ...defaultConfig, showStatusBarHints: true }),
+            createRepositorySession: readySession,
+          }}
+        />
+      ),
+      { width: 60, height: 30 },
+    )
+    active.push(view)
+    await waitForText(view, githubDataFixture.repo.nameWithOwner)
+    expect(checks).toBe(1)
+    expect(view.captureCharFrame()).not.toContain("available")
+    update.resolve({ currentVersion: "1.0.0", latestVersion: "1.2.3", instruction: "Run: opengh update" })
+    await Bun.sleep(50)
+    await view.flush()
+    expect(view.captureCharFrame()).not.toContain("1.2.3")
+    view.mockInput.pressKey("?")
+    await waitForText(view, "Help")
+    expect(view.captureCharFrame()).toContain("1.2.3")
+    expect(checks).toBe(1)
+  })
+
+  test("checkForUpdates: false in the config skips the update check", async () => {
+    let checks = 0
+    const view = await testRender(
+      () => (
+        <Root
+          repositoryArgument="cli/cli"
+          cwd="/work"
+          services={{
+            checkForUpdate: async () => {
+              checks++
+              return { currentVersion: "1.0.0", latestVersion: "1.2.3", instruction: "Run: opengh update" }
+            },
+            createPullReviewSession: createTestReviewSession,
+            resolveRepository: async () => "cli/cli",
+            resolveLocalRepository: async () => undefined,
+            loadRecentRepositories: async () => [],
+            rememberRepository: async () => {},
+            loadRepositoryTabs: async () => ({}),
+            saveRepositoryTabs: async () => {},
+            loadConfig: async () => ({ ...defaultConfig, showStatusBarHints: true, checkForUpdates: false }),
+            createRepositorySession: readySession,
+          }}
+        />
+      ),
+      { width: 160, height: 30 },
+    )
+    active.push(view)
+    await waitForText(view, githubDataFixture.repo.nameWithOwner)
+    await Bun.sleep(50)
+    await view.flush()
+    expect(checks).toBe(0)
+    expect(view.captureCharFrame()).not.toContain("available")
+  })
+
+  test("a failed optional update check does not surface a startup error", async () => {
+    const view = await testRender(
+      () => (
+        <Root
+          repositoryArgument="cli/cli"
+          cwd="/work"
+          services={{
+            checkForUpdate: async () => {
+              throw new Error("Release check offline")
+            },
+            createPullReviewSession: createTestReviewSession,
+            resolveRepository: async () => "cli/cli",
+            resolveLocalRepository: async () => undefined,
+            loadRecentRepositories: async () => [],
+            rememberRepository: async () => {},
+            loadRepositoryTabs: async () => ({}),
+            saveRepositoryTabs: async () => {},
+            loadConfig: async () => defaultConfig,
+            createRepositorySession: readySession,
+          }}
+        />
+      ),
+      { width: 80, height: 24 },
+    )
+    active.push(view)
+    await waitForText(view, githubDataFixture.repo.nameWithOwner)
+    expect(view.captureCharFrame()).not.toContain("Release check offline")
+  })
+
   test("wires overview Markdown links to the session and navigates to its accepted document ID", async () => {
     const repository = githubDataFixture.repo.nameWithOwner
     const [state, setState] = createSignal<RepositoryState>({
@@ -169,6 +274,7 @@ describe("application root", () => {
           repositoryArgument={repository}
           cwd="/work"
           services={{
+            checkForUpdate: async () => undefined,
             createPullReviewSession: createTestReviewSession,
             resolveRepository: async () => repository,
             resolveLocalRepository: async () => undefined,
@@ -214,6 +320,7 @@ describe("application root", () => {
           unexpectedError={unexpected}
           onDismissUnexpectedError={() => setUnexpected(undefined)}
           services={{
+            checkForUpdate: async () => undefined,
             createPullReviewSession: createTestReviewSession,
             resolveRepository: async () => "cli/cli",
             resolveLocalRepository: async () => undefined,
@@ -281,6 +388,7 @@ describe("application root", () => {
           {...parseLaunchArguments(["9999"])}
           cwd="/work"
           services={{
+            checkForUpdate: async () => undefined,
             createPullReviewSession: createTestReviewSession,
             resolveRepository: async (argument) => {
               expect(argument).toBe(".")
@@ -352,6 +460,7 @@ describe("application root", () => {
           {...parseLaunchArguments(["cli/cli", "9999"])}
           cwd="/work"
           services={{
+            checkForUpdate: async () => undefined,
             createPullReviewSession: createTestReviewSession,
             resolveRepository: async () => "cli/cli",
             loadIssueKind: async () => {
@@ -424,6 +533,7 @@ describe("application root", () => {
           cwd="/work"
           initialConfig={config}
           services={{
+            checkForUpdate: async () => undefined,
             createPullReviewSession: createTestReviewSession,
             createRepositorySession: () => ({ ...readySession(), state: () => ({ status: "loading" as const, repository: "cli/cli" }) }),
             resolveRepository: () => resolution.promise,
@@ -477,6 +587,7 @@ describe("application root", () => {
           repositoryArgument="."
           cwd="/work/repository"
           services={{
+            checkForUpdate: async () => undefined,
             createPullReviewSession: createTestReviewSession,
             resolveRepository: (argument, cwd) => {
               receivedArgument = argument
@@ -527,6 +638,7 @@ describe("application root", () => {
           repositoryArgument="."
           cwd="/work/repository"
           services={{
+            checkForUpdate: async () => undefined,
             createPullReviewSession: createTestReviewSession,
             resolveRepository: async () => {
               throw error
@@ -563,6 +675,7 @@ describe("application root", () => {
           initialConfig={preloaded ? defaultConfig : undefined}
           initialConfigError={preloaded ? "Malformed config" : undefined}
           services={{
+            checkForUpdate: async () => undefined,
             createPullReviewSession: createTestReviewSession,
             resolveRepository: async () => undefined,
             loadRepositoryTabs: async () => ({}),
@@ -611,6 +724,7 @@ describe("application root", () => {
           repositoryArgument="cli/cli"
           cwd="/work/repository"
           services={{
+            checkForUpdate: async () => undefined,
             createPullReviewSession: createTestReviewSession,
             resolveRepository: async () => "cli/cli",
             loadRepositoryTabs: async () => ({}),
@@ -631,6 +745,7 @@ describe("application root", () => {
               showStatusBarHints: true,
               showTabShortcuts: true,
               showTabCounts: true,
+              checkForUpdates: true,
               hideDocumentsTab: false,
               compactHeader: false,
               iconStyle: "unicode",
@@ -670,6 +785,7 @@ describe("application root", () => {
         showStatusBarHints: true,
         showTabShortcuts: true,
         showTabCounts: true,
+        checkForUpdates: true,
         hideDocumentsTab: false,
         compactHeader: false,
         iconStyle: "unicode",
@@ -722,6 +838,7 @@ describe("application root", () => {
       showStatusBarHints: true,
       showTabShortcuts: true,
       showTabCounts: true,
+      checkForUpdates: true,
       hideDocumentsTab: false,
       compactHeader: false,
       iconStyle: "unicode",
@@ -764,6 +881,7 @@ test("always remembers a main tab per repository and restores it on direct open"
         cwd="/work"
         repositoryArgument="cli/cli"
         services={{
+          checkForUpdate: async () => undefined,
           createPullReviewSession: createTestReviewSession,
           resolveRepository: async (argument) => argument,
           resolveLocalRepository: async () => undefined,
@@ -852,6 +970,7 @@ test("a teardown without quit, such as SIGTERM, hands pending tab and review sav
         repositoryArgument="cli/cli"
         onShutdownWork={(work) => shutdown.push(work)}
         services={{
+          checkForUpdate: async () => undefined,
           createPullReviewSession: () => {
             const reviews = createTestReviewSession()
             return {
@@ -905,6 +1024,7 @@ test("quit waits for changes being sent to GitHub, and quitting again stops wait
           cwd="/work"
           repositoryArgument="cli/cli"
           services={{
+            checkForUpdate: async () => undefined,
             createPullReviewSession: createTestReviewSession,
             githubWrites: { ...writes, abandon: () => (abandoned = true) },
             resolveRepository: async (argument) => argument,
@@ -970,6 +1090,7 @@ test("quit retains unsaved issue and PR drafts, then retries and waits for revie
       <Root
         cwd="/work"
         services={{
+          checkForUpdate: async () => undefined,
           resolveRepository: async () => "cli/cli",
           resolveLocalRepository: async () => undefined,
           loadRecentRepositories: async () => [],
@@ -1085,6 +1206,7 @@ test.each([false, true])("quit drains late review edits after delayed tab saves 
       <Root
         cwd="/work"
         services={{
+          checkForUpdate: async () => undefined,
           resolveRepository: async () => "cli/cli",
           resolveLocalRepository: async () => undefined,
           loadRecentRepositories: async () => [],
@@ -1157,6 +1279,7 @@ test("quit waits for inline comment drafts and a failed save cancels it without 
       <Root
         cwd="/work"
         services={{
+          checkForUpdate: async () => undefined,
           resolveRepository: async () => "cli/cli",
           resolveLocalRepository: async () => undefined,
           loadRecentRepositories: async () => [],
@@ -1200,6 +1323,7 @@ test("failed tab saves remain pending and are retried on exit without writing un
         cwd="/work"
         repositoryArgument="cli/cli"
         services={{
+          checkForUpdate: async () => undefined,
           createPullReviewSession: createTestReviewSession,
           resolveRepository: async () => "cli/cli",
           resolveLocalRepository: async () => undefined,
@@ -1242,6 +1366,7 @@ test.each(["c", "x"])("Ctrl+%s clears and dismisses picker/search inputs, then q
       <Root
         cwd="/unused"
         services={{
+          checkForUpdate: async () => undefined,
           createPullReviewSession: createTestReviewSession,
           resolveRepository: async () => "cli/cli",
           loadRecentRepositories: async () => ["cli/cli"],
@@ -1321,6 +1446,7 @@ test("Ctrl+C clears a comment draft undoably, dismisses only the active dialog, 
         cwd="/unused"
         initialDetail={{ kind: "issue", number: issueDetailFixture.number }}
         services={{
+          checkForUpdate: async () => undefined,
           createPullReviewSession: createTestReviewSession,
           resolveRepository: async () => "cli/cli",
           loadRecentRepositories: async () => [],
@@ -1387,6 +1513,7 @@ test("reloads bindings in place, keeps the last valid config on failure, and rem
       <Root
         cwd="/unused"
         services={{
+          checkForUpdate: async () => undefined,
           createPullReviewSession: createTestReviewSession,
           resolveRepository: async () => undefined,
           loadRecentRepositories: async () => ["cli/cli"],
@@ -1459,6 +1586,7 @@ test("references isolate Root quit while preserving remapped list actions and di
       <Root
         cwd="/unused"
         services={{
+          checkForUpdate: async () => undefined,
           createPullReviewSession: createTestReviewSession,
           resolveRepository: async () => "cli/cli",
           loadRecentRepositories: async () => [],
@@ -1509,6 +1637,7 @@ test("settings cannot save or dismiss during a deferred config reload", async ()
       <Root
         cwd="/unused"
         services={{
+          checkForUpdate: async () => undefined,
           createPullReviewSession: createTestReviewSession,
           resolveRepository: async () => "cli/cli",
           loadRecentRepositories: async () => [],
@@ -1562,6 +1691,7 @@ test("remapped interrupt cancels commands first, dismisses completed output, the
       <Root
         cwd="/unused"
         services={{
+          checkForUpdate: async () => undefined,
           createPullReviewSession: createTestReviewSession,
           resolveRepository: async () => "cli/cli",
           loadRecentRepositories: async () => [],
@@ -1736,6 +1866,7 @@ test("mouse hyperlinks resolve entities and preserve Back across repositories an
         repositoryArgument={source}
         initialDetail={{ kind: "issue", number: 1 }}
         services={{
+          checkForUpdate: async () => undefined,
           createPullReviewSession: createTestReviewSession,
           createRepositorySession: () => session,
           resolveRepository: async () => source,
@@ -1845,6 +1976,7 @@ test.each(["issue", "diff"] as const)(
           resumeLocation={saved}
           onNavigationChange={(location) => locations.push(location)}
           services={{
+            checkForUpdate: async () => undefined,
             createPullReviewSession: () => ({
               ...createTestReviewSession(),
               open: async (repository, number) => {
@@ -1944,6 +2076,7 @@ test.each([false, true])(
           resumeLocation={resumeLocation("cli/cli", { page: "issues", details: { issues: { kind: "issue", number: 42 } } })}
           onNavigationChange={(location) => locations.push(location)}
           services={{
+            checkForUpdate: async () => undefined,
             createPullReviewSession: createTestReviewSession,
             resolveLocalRepository: async () => undefined,
             loadRecentRepositories: async () => [],
@@ -2010,6 +2143,7 @@ test("resume keeps the selected overview document through async discovery and fa
           location = next
         }}
         services={{
+          checkForUpdate: async () => undefined,
           createPullReviewSession: createTestReviewSession,
           resolveLocalRepository: async () => undefined,
           loadRecentRepositories: async () => [],

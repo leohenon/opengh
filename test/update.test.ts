@@ -76,9 +76,11 @@ test.each([
 })
 
 test("managed installations are identified before any release request or file replacement", async () => {
-  expect(installationUpdateHint("/nix/store/hash-opengh/bin/.opengh-wrapped")).toContain("Nix")
-  expect(installationUpdateHint("/tmp/node_modules/@leohenon/opengh/bin/opengh")).toContain("npm install --global @leohenon/opengh")
-  expect(installationUpdateHint("/opt/homebrew/Cellar/opengh/0.1.0/bin/opengh")).toContain("brew upgrade")
+  expect(installationUpdateHint("/nix/store/hash-opengh/bin/.opengh-wrapped")).toBe("Run: nix profile upgrade opengh")
+  expect(installationUpdateHint("/tmp/node_modules/@leohenon/opengh/bin/opengh")).toBe("Run: npm install --global @leohenon/opengh")
+  expect(installationUpdateHint("/opt/homebrew/Cellar/opengh/0.1.0/bin/opengh")).toBe(
+    "Run: brew update && brew upgrade leohenon/tap/opengh",
+  )
   for (const relative of ["node_modules/opengh-darwin-arm64/bin/opengh", "custom-cellar/opengh/0.1.0/bin/opengh"]) {
     const f = await fixture(relative)
     if (relative.startsWith("custom-cellar")) await writeFile(join(dirname(dirname(f.executable)), "INSTALL_RECEIPT.json"), "{}")
@@ -89,7 +91,7 @@ test("managed installations are identified before any release request or file re
           throw new Error("Unexpected request")
         },
       }),
-    ).rejects.toThrow("managed by")
+    ).rejects.toThrow(relative.startsWith("custom-cellar") ? "Run: brew update" : "Run: npm install --global")
     expect(await readFile(f.executable, "utf8")).toBe(f.original)
     expect(existsSync(f.lock)).toBe(false)
   }
@@ -99,7 +101,7 @@ test("symlinks cannot bypass package manager protection", async () => {
   const f = await fixture("node_modules/opengh-darwin-arm64/bin/opengh")
   const alias = join(f.directory, "opengh")
   await symlink(f.executable, alias)
-  await expect(runUpdate({ ...f.options, executable: alias })).rejects.toThrow("JavaScript package manager")
+  await expect(runUpdate({ ...f.options, executable: alias })).rejects.toThrow("Run: npm install --global @leohenon/opengh")
   expect(await readFile(f.executable, "utf8")).toBe(f.original)
 })
 
@@ -138,7 +140,7 @@ test.each([
         return 0
       },
     }),
-  ).rejects.toThrow("JavaScript package manager")
+  ).rejects.toThrow("Run: npm install --global @leohenon/opengh")
   expect(requests).toBe(0)
   expect(installs).toBe(0)
   expect(await readFile(f.executable, "utf8")).toBe(f.original)

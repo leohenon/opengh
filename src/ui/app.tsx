@@ -99,6 +99,7 @@ import { pullMergeBlocker } from "../pull-merge"
 import { Help } from "./components/help"
 import { Settings } from "./components/settings"
 import { StatusBar, type StatusKind } from "./components/status-bar"
+import type { UpdateNotice } from "../update-check"
 import { copyText } from "./clipboard"
 import { Toast } from "./components/toast"
 import { ActionsScreen } from "./pages/actions"
@@ -154,6 +155,7 @@ const conversationCommentKey = (target: ConversationCommentTarget) =>
   JSON.stringify([target.repository, target.parent ?? "issue", target.number])
 
 export type AppProps = {
+  updateNotice?: UpdateNotice
   data: RepositoryData | (() => RepositoryData)
   operations: RepositoryOperations | (() => RepositoryOperations)
   config?: Config
@@ -2679,6 +2681,7 @@ function AppContent(props: AppProps) {
                         <StatusPromptBar
                           fallback={
                             <StatusBar
+                              updateNotice={props.updateNotice}
                               kind={
                                 diffTarget() &&
                                 (status() === "loading-resource" || status() === "refreshing" || status() === "loading-more")
@@ -3058,6 +3061,7 @@ function AppContent(props: AppProps) {
                       </Show>
                       <Show when={overlay() === "help"}>
                         <Help
+                          updateNotice={props.updateNotice}
                           onClose={() => setOverlay()}
                           focus={focus()}
                           view={
