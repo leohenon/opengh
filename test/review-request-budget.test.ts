@@ -1,11 +1,11 @@
 import { expect, test } from "bun:test"
 import { createGitHubReviews } from "../src/github/reviews"
-import { createRequestBudget, MAX_DETAIL_REQUESTS, RequestBudgetLimitError } from "../src/github/request-budget"
+import { createRequestBudget, MAX_AUTOMATIC_PAGES, RequestBudgetLimitError } from "../src/github/request-budget"
 import type { GitHubTransport, RequestOptions } from "../src/github/transport"
 import type { ReviewDraft, InlineCommentInput } from "../src/review-types"
 import { createInlineComments, InlineCommentUncertainError } from "../src/inline-comments"
 
-test("review reconciliation shares its request ceiling across candidate comment collections", async () => {
+test("review reconciliation shares one budget and stays unconfirmed when a pull request has too many comments to read", async () => {
   let calls = 0
   let owned: RequestOptions | undefined
   const draft: ReviewDraft = {
@@ -25,23 +25,14 @@ test("review reconciliation shares its request ceiling across candidate comment 
       calls++
       owned ??= options
       expect(options!.budget).toBe(owned!.budget)
-      if (path.includes("/comments?")) return [{ path: "file", line: 1, side: "RIGHT", body: "different" }] as T
-      return (
-        path.endsWith("page=1")
-          ? Array.from({ length: 100 }, (_, i) => ({
-              id: i + 1,
-              user: { id: 1 },
-              state: "APPROVED",
-              body: "",
-              commit_id: draft.headSha,
-              submitted_at: "2026-01-01",
-            }))
-          : []
-      ) as T
+      // An endless listing of other reviews' comments: the candidate below has none, but that is never established.
+      if (path.includes("/pulls/1/comments?"))
+        return Array.from({ length: 100 }, () => ({ pull_request_review_id: 2, path: "file", line: 1, side: "RIGHT", body: "other" })) as T
+      return [{ id: 1, user: { id: 1 }, state: "APPROVED", body: "", commit_id: draft.headSha, submitted_at: "2026-01-01" }] as T
     },
   }
   await expect(createGitHubReviews(transport).reconcile(draft)).rejects.toBeInstanceOf(RequestBudgetLimitError)
-  expect(calls).toBe(MAX_DETAIL_REQUESTS)
+  expect(calls).toBe(1 + MAX_AUTOMATIC_PAGES)
   expect(owned!.budget!.signal.aborted).toBe(true)
 })
 

@@ -59,6 +59,12 @@ function fixture() {
           user: { id: data.author },
         } as T
       if (path.includes("/files?")) return [{ filename: "a.ts", patch: "@@ -1,2 +1,2 @@\n old\n-new\n+new" }] as T
+      // GitHub's per-review listing omits line and side; only the pull request's listing has them.
+      const perReview = /\/reviews\/(\d+)\/comments\?/.exec(path)
+      if (perReview)
+        return data.comments
+          .filter((comment) => comment.pull_request_review_id === Number(perReview[1]))
+          .map(({ line, original_line, side, start_line, original_start_line, start_side, ...legacy }) => legacy) as T
       if (path.includes("/comments?")) return data.comments as T
       if (path.includes("/reviews?")) return data.reviews as T
       throw new Error(`Unexpected path ${path}`)
@@ -84,7 +90,7 @@ function fixture() {
       }
       if (data.recordPost) {
         data.reviews.push(review)
-        data.comments = body.comments as any[]
+        data.comments = (body.comments as any[]).map((comment) => ({ ...comment, pull_request_review_id: review.id }))
       }
       if (data.failPost) throw new Error("connection lost")
       return review as T
@@ -543,6 +549,80 @@ describe("pull reviews", () => {
     })
     expect(await session.submit()).toBe(true)
     expect(data.posts).toHaveLength(1)
+  })
+  test("a lost response reconciles inline comments from the pull request listing, which has their lines", async () => {
+    const { data, transport } = fixture()
+    const api = createGitHubReviews(transport)
+    const inline = (id: string, line: number, body: string, startLine?: number) => ({
+      id,
+      path: "a.ts",
+      line,
+      side: "RIGHT" as const,
+      ...(startLine === undefined ? {} : { startLine, startSide: "RIGHT" as const }),
+      body,
+    })
+    const sent: ReviewDraft = {
+      ...draft(),
+      comments: [inline("a", 2, "Single"), inline("b", 2, "Range", 1), inline("c", 1, "Outdated")],
+      submission: { startedAt: new Date().toISOString(), reviewIds: [99] },
+    }
+    const review = (id: number) => ({
+      id,
+      user: { id: 7 },
+      state: "COMMENTED",
+      body: "Review",
+      commit_id: sha,
+      submitted_at: new Date().toISOString(),
+    })
+    const remote = (id: number) => [
+      {
+        pull_request_review_id: id,
+        path: "a.ts",
+        line: 2,
+        original_line: 2,
+        side: "RIGHT",
+        start_line: null,
+        start_side: null,
+        body: "Single",
+      },
+      {
+        pull_request_review_id: id,
+        path: "a.ts",
+        line: 2,
+        original_line: 2,
+        side: "RIGHT",
+        start_line: 1,
+        original_start_line: 1,
+        start_side: "RIGHT",
+        body: "Range",
+      },
+      // After the head moves GitHub clears line and keeps the original.
+      {
+        pull_request_review_id: id,
+        path: "a.ts",
+        line: null,
+        original_line: 1,
+        side: "RIGHT",
+        start_line: null,
+        start_side: null,
+        body: "Outdated",
+      },
+    ]
+    data.reviews = [review(99), review(100)]
+    data.comments = [...remote(99), ...remote(100)]
+    expect(await api.reconcile(sent)).toBe(true)
+    // A review from before the submission is never taken for it, whatever its comments.
+    data.comments = remote(99)
+    expect(await api.reconcile(sent)).toBe(false)
+    data.comments = remote(100).slice(1)
+    expect(await api.reconcile(sent)).toBe(false)
+    data.comments = remote(100).map((comment) => ({ ...comment, side: "LEFT" }))
+    expect(await api.reconcile(sent)).toBe(false)
+    // A review with inline comments is not a body-only submission.
+    data.comments = remote(100)
+    expect(await api.reconcile({ ...sent, comments: [] })).toBe(false)
+    data.comments = []
+    expect(await api.reconcile({ ...sent, comments: [] })).toBe(true)
   })
   test("definitive rejection releases only its matching marker and permits corrected empty approval", async () => {
     const { data, transport } = fixture()

@@ -92,6 +92,7 @@ type RemoteReview = {
   submitted_at?: string
 }
 type RemoteComment = {
+  pull_request_review_id?: number | null
   path: string
   line: number | null
   original_line?: number
@@ -280,9 +281,13 @@ export function createGitHubReviews(transport: GitHubTransport = githubTransport
         review.commit_id === draft.headSha &&
         Boolean(review.submitted_at),
     )
+    if (!candidates.length) return false
+    // GitHub's per-review comment listing omits line and side, so read the pull request's listing.
+    // Too many comments to page through leaves the submission unconfirmed, never assumed.
+    const comments = await pages<RemoteComment>(`${endpoint(draft.repository, draft.number)}/comments`, options)
     for (const review of candidates) {
-      const comments = await pages<RemoteComment>(`${endpoint(draft.repository, draft.number)}/reviews/${review.id}/comments`, options)
       const actual = comments
+        .filter((comment) => comment.pull_request_review_id === review.id)
         .map((comment) =>
           JSON.stringify([
             comment.path,
