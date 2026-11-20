@@ -2742,6 +2742,8 @@ function AppContent(props: AppProps) {
                             repo={data().repo}
                             target={target}
                             totals={diffTotals()[page()]?.target === target ? diffTotals()[page()] : undefined}
+                            interactive={overlay() === undefined}
+                            onBack={goBack}
                           />
                         )}
                       </Show>

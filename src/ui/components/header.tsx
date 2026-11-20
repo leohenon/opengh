@@ -8,7 +8,7 @@ import type { Page } from "../../navigation"
 import type { RepositoryData } from "../../repository-state"
 import { useTheme } from "../theme"
 import { useIcons } from "../icon-style"
-import { mouseClick } from "../mouse"
+import { mouseClick, mouseHover } from "../mouse"
 import { useLoadingDots } from "../motion"
 
 function RepositoryName(props: { repo: Repo; short?: boolean; interactive?: boolean; onOpen?: () => void }) {
@@ -46,9 +46,19 @@ function RepositoryName(props: { repo: Repo; short?: boolean; interactive?: bool
   )
 }
 
-export function ReviewHeader(props: { repo: Repo; target: DiffTarget; totals?: { additions: number; deletions: number } }) {
+export function ReviewHeader(props: {
+  repo: Repo
+  target: DiffTarget
+  totals?: { additions: number; deletions: number }
+  interactive?: boolean
+  onBack?: () => void
+}) {
   const { colors } = useTheme()
   const dimensions = useTerminalDimensions()
+  const enabled = () => props.interactive !== false && Boolean(props.onBack)
+  const identity = () => props.target
+  const hover = mouseHover(enabled, identity)
+  const backMouse = mouseClick(() => props.onBack?.(), enabled, identity, hover)
   const label = () =>
     props.target.kind === "pull"
       ? `PR #${props.target.number}`
@@ -60,7 +70,17 @@ export function ReviewHeader(props: { repo: Repo; target: DiffTarget; totals?: {
   return (
     <box height={1} flexShrink={0} minWidth={0} flexDirection="row" backgroundColor={colors.header} overflow="hidden">
       <box height={1} width={sideWidth()} flexShrink={0} minWidth={0} flexDirection="row" overflow="hidden" gap={1}>
-        <text height={1} flexGrow={1} minWidth={0} wrapMode="none" truncate fg={colors.muted}>
+        <text
+          id="review-repository-back"
+          height={1}
+          flexShrink={1}
+          minWidth={0}
+          wrapMode="none"
+          truncate
+          selectable={false}
+          fg={enabled() && hover.hovered() ? colors.text : colors.muted}
+          {...backMouse}
+        >
           {dimensions().width < 60 ? props.repo.nameWithOwner.split("/").at(-1) : props.repo.nameWithOwner}
         </text>
       </box>

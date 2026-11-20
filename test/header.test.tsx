@@ -2,7 +2,7 @@ import { expect, test } from "bun:test"
 import { testRender } from "@opentui/solid"
 import { createSignal } from "solid-js"
 import type { Page } from "../src/navigation"
-import { Header } from "../src/ui/components/header"
+import { Header, ReviewHeader } from "../src/ui/components/header"
 import { githubDataFixture } from "./fixtures/github-data"
 import { clickControl } from "./fixtures/mouse"
 
@@ -13,6 +13,52 @@ const tabs: ReadonlyArray<{ page: Page; label: string }> = [
   { page: "pulls", label: "Pull requests" },
   { page: "actions", label: "Actions" },
 ]
+
+test.each([120, 35])("fullscreen repository back label hovers and guards clicks at width %i", async (width) => {
+  const [interactive, setInteractive] = createSignal(true)
+  let backs = 0
+  const view = await testRender(
+    () => (
+      <ReviewHeader
+        repo={githubDataFixture.repo}
+        target={{ kind: "commit", sha: "abcdef123456" }}
+        interactive={interactive()}
+        onBack={() => backs++}
+      />
+    ),
+    { width, height: 4 },
+  )
+  const foreground = () => view.captureSpans().lines[0]!.spans.find((span) => span.text.includes("opentui"))!.fg
+  try {
+    await view.flush()
+    const control = view.renderer.root.findDescendantById("review-repository-back")!
+    const normal = foreground()
+    expect(control.width).toBe(Bun.stringWidth(width < 60 ? "opentui" : "anomalyco/opentui"))
+    await view.mockMouse.moveTo(control.x, control.y)
+    await view.flush()
+    expect(foreground()).not.toEqual(normal)
+    expect(backs).toBe(0)
+    await view.mockMouse.moveTo(width - 1, 2)
+    await view.flush()
+    expect(foreground()).toEqual(normal)
+    await view.mockMouse.moveTo(control.x + 1, control.y)
+    await view.flush()
+    setInteractive(false)
+    await view.flush()
+    expect(foreground()).toEqual(normal)
+    await clickControl(view, "review-repository-back")
+    expect(backs).toBe(0)
+    setInteractive(true)
+    await view.flush()
+    for (const button of [1, 2] as const) await view.mockMouse.click(control.x, control.y, button)
+    await view.mockMouse.drag(control.x, control.y, control.x + 2, control.y)
+    expect(backs).toBe(0)
+    await clickControl(view, "review-repository-back")
+    expect(backs).toBe(1)
+  } finally {
+    view.renderer.destroy()
+  }
+})
 
 test("mouse tabs include their underline, respect disabled/drag guards, and reveal hidden tabs", async () => {
   const [page, setPage] = createSignal<Page>("overview")
