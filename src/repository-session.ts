@@ -648,6 +648,11 @@ export function createRepositorySession(
   const [issueActions, setIssueActions] = createSignal<Record<string, IssueActionState>>({})
   const emptyIssueAction: IssueActionState = { body: "", reason: "completed", operation: idle() }
   const repositoryIds = new Map<string, number>()
+  const overviewWriteRevision = new Map<number, number>()
+  const invalidateOverview = (repositoryId: number) => {
+    overviewWriteRevision.set(repositoryId, (overviewWriteRevision.get(repositoryId) ?? 0) + 1)
+    repositoryCache.markStale((repository) => repositoryIds.get(repository) === repositoryId)
+  }
   const cacheRepositoryKey = (repository: string) =>
     `${repository.toLowerCase()}@${repositoryIds.get(repository.toLowerCase()) ?? "unknown"}`
   const issueKey = (repository: string, number: number, parent: IssueActionParent = "issue") =>
@@ -661,7 +666,7 @@ export function createRepositorySession(
     // Confirmed writes may land after the page closed; a retained snapshot must revalidate before reuse.
     const [repository, rest] = key.split("#")
     // The stable write key names the origin, even when another repository is now active.
-    if (repository) repositoryCache.markStale(repository.split("@")[0]!)
+    if (repository) invalidateOverview(Number(repository.split("@")[1]))
     const number = Number(rest?.replace(":pull", ""))
     if (repository && Number.isSafeInteger(number))
       (rest?.endsWith(":pull") ? pullCache : issueCache).markStale(`${repository}:${rest?.endsWith(":pull") ? "pull" : "issue"}:${number}`)
@@ -711,6 +716,8 @@ export function createRepositorySession(
   const emptyReactionAction: ReactionActionState = { operation: idle() }
   const reactionEpoch = { issue: 0, pull: 0 }
   let reactionRevision = 0
+  // A detached write must also invalidate reads started by a reopened page.
+  const detachedReactionRevision = new Map<string, number>()
   const confirmedReactions = new Map<string, { revision: number; value: ReactionState }>()
   const reactionRequests = new Map<string, { token: object; kind: ReactionKind; remove: boolean; promise: Promise<ReactionState> }>()
   const resetReactionOwner = (owner: "issue" | "pull") => {
@@ -843,6 +850,7 @@ export function createRepositorySession(
         : Promise.reject(new Error("A reaction is already in progress for this message."))
     const scope = repositoryScope
     const owner = reactionParent(target)
+    const cacheKey = detailCacheKey(current.repository, target.number, owner)
     const epoch = reactionEpoch[owner]
     const token = {}
     const owns = () =>
@@ -875,6 +883,10 @@ export function createRepositorySession(
                 )
             }
             applyReaction(target, value)
+          } else {
+            detachedReactionRevision.set(cacheKey, (detachedReactionRevision.get(cacheKey) ?? 0) + 1)
+            const cache = owner === "issue" ? issueCache : pullCache
+            cache.markStale(cacheKey)
           }
           publish(idle())
           return value
@@ -1835,6 +1847,8 @@ export function createRepositorySession(
     }
     const revision = reactionRevision
     const repository = current.repository
+    const cacheKey = detailCacheKey(repository, number, "pull")
+    const detachedRevision = detachedReactionRevision.get(cacheKey)
     const budget = createRequestBudget(pullAbort.signal)
     const requestOptions = { signal: pullAbort.signal, budget }
     try {
@@ -1901,7 +1915,8 @@ export function createRepositorySession(
           pull.commitCount > 0 ? fetchPullCommits(repository, number, request, commits, requestOptions) : Promise.resolve(),
           fetchPullContext(repository, number, request, context, requestOptions),
         ])
-        if (request === pullGeneration && draftGeneration === pullDraftGeneration) retainPull(pullDetail(), true)
+        if (request === pullGeneration && draftGeneration === pullDraftGeneration)
+          retainPull(pullDetail(), detachedRevision === detachedReactionRevision.get(cacheKey))
       } catch (error) {
         if (request === pullGeneration && draftGeneration === pullDraftGeneration)
           setPullDetail((latest) => ({
@@ -2130,6 +2145,8 @@ export function createRepositorySession(
     }
     const reactionRead = reactionRevision
     const repository = current.repository
+    const cacheKey = detailCacheKey(repository, number)
+    const detachedRevision = detachedReactionRevision.get(cacheKey)
     const budget = createRequestBudget(issueAbort.signal)
     const requestOptions = { signal: issueAbort.signal, budget }
     try {
@@ -2202,7 +2219,7 @@ export function createRepositorySession(
           hasComments ? fetchIssueComments(repository, number, request, comments?.page ?? 1, comments, requestOptions) : Promise.resolve(),
           fetchIssueReferences(repository, number, request, references, requestOptions),
         ])
-        if (request === issueGeneration) retainIssue(issueDetail(), true)
+        if (request === issueGeneration) retainIssue(issueDetail(), detachedRevision === detachedReactionRevision.get(cacheKey))
       } catch (error) {
         if (request === issueGeneration)
           setIssueDetail((latest) => ({
@@ -2756,6 +2773,7 @@ export function createRepositorySession(
     if (!loaders.createIssue) throw new Error("Issue creation is unavailable.")
     const repository = current.repository
     const created = await loaders.createIssue(current.data.repo, title, body)
+    invalidateOverview(current.data.repo.id)
     setState((latest) => {
       if (latest.status !== "ready" || latest.repository !== repository) return latest
       const open = latest.data.issues.open.value
@@ -2788,7 +2806,9 @@ export function createRepositorySession(
     if (cached) return cached
     const loading = loaders.issueTemplates(repo)
     issueTemplateCache.set(repo.id, loading)
-    loading.catch(() => issueTemplateCache.delete(repo.id))
+    loading.catch(() => {
+      if (issueTemplateCache.get(repo.id) === loading) issueTemplateCache.delete(repo.id)
+    })
     return loading
   }
 
@@ -2811,7 +2831,9 @@ export function createRepositorySession(
     if (cached) return cached
     const loading = loaders.pullRepositories(repo)
     pullRepositoryCache.set(repo.id, loading)
-    loading.catch(() => pullRepositoryCache.delete(repo.id))
+    loading.catch(() => {
+      if (pullRepositoryCache.get(repo.id) === loading) pullRepositoryCache.delete(repo.id)
+    })
     return loading
   }
 
@@ -2822,7 +2844,9 @@ export function createRepositorySession(
     if (cached) return cached
     const loading = loaders.pullTemplates(target)
     pullTemplateCache.set(target.id, loading)
-    loading.catch(() => pullTemplateCache.delete(target.id))
+    loading.catch(() => {
+      if (pullTemplateCache.get(target.id) === loading) pullTemplateCache.delete(target.id)
+    })
     return loading
   }
 
@@ -2834,6 +2858,7 @@ export function createRepositorySession(
     if (!loaders.createPull) throw new Error("Pull request creation is unavailable.")
     const repository = current.repository
     const created = await loaders.createPull(target, pull)
+    invalidateOverview(target.id)
     if (target.id !== current.data.repo.id) return created
     setState((latest) => {
       if (latest.status !== "ready" || latest.repository !== repository) return latest
@@ -3342,10 +3367,11 @@ export function createRepositorySession(
     pulls: { open: retainable(data.pulls.open), closed: retainable(data.pulls.closed) },
     runs: retainable(data.runs),
   })
-  const retainRepository = (current: RepositoryState, fresh: boolean) => {
+  const retainRepository = (current: RepositoryState, fresh: boolean, writeRevision?: number) => {
     if (current.status !== "ready" || current.operations.branch.status === "loading") return
-    const data = settledData(current.data)
+    const data = current.data
     const key = current.repository.toLowerCase()
+    // Retained values are reusable, but pending reads cannot certify their freshness.
     const whole =
       complete([
         data.workCounts,
@@ -3359,8 +3385,9 @@ export function createRepositorySession(
         data.pulls.closed,
         data.runs,
       ]) && !data.documents.value?.some((document) => document.resource.status !== "ready")
-    repositoryCache.set(key, data, fresh && whole)
-    if (!whole) repositoryCache.markStale(key)
+    const unchanged = writeRevision === undefined || writeRevision === (overviewWriteRevision.get(data.repo.id) ?? 0)
+    repositoryCache.set(key, settledData(data), fresh && whole && unchanged)
+    if (!whole || !unchanged) repositoryCache.markStale(key)
   }
   const invalidRepositories = new Set<string>()
   const clearRepositoryDetails = () => {
@@ -3432,6 +3459,7 @@ export function createRepositorySession(
         await ensure(scope)
         return
       }
+      const writeRevision = overviewWriteRevision.get(data.repo.id) ?? 0
       try {
         const repo = await loaders.metadata(repository, repositoryReads())
         if (request !== repositoryGeneration) return
@@ -3470,7 +3498,7 @@ export function createRepositorySession(
         }))
         if (request === repositoryGeneration) {
           await ensure(scope)
-          retainRepository(state(), true)
+          retainRepository(state(), true, writeRevision)
         }
       } catch (error) {
         // Sections never left without a value and no way to retry.
@@ -3503,8 +3531,9 @@ export function createRepositorySession(
         data: initialData(repo),
         operations: { refresh: idle(), branch: idle() },
       })
+      const writeRevision = overviewWriteRevision.get(repo.id) ?? 0
       await loadResources(canonical, repo.defaultBranch, repo, request, undefined, scope, true)
-      if (request === repositoryGeneration) retainRepository(state(), true)
+      if (request === repositoryGeneration) retainRepository(state(), true, writeRevision)
     } catch (error) {
       if (request === repositoryGeneration) {
         setState({ status: "error", repository, message: messageFrom(error) })
@@ -3525,9 +3554,14 @@ export function createRepositorySession(
       return
 
     resetRepositoryReads()
+    // Picker choices can include upstream repositories, not just the browsed one.
+    issueTemplateCache.clear()
+    pullTemplateCache.clear()
+    pullRepositoryCache.clear()
     const request = ++repositoryGeneration
     ++branchGeneration
     const repository = current.repository
+    const writeRevision = overviewWriteRevision.get(current.data.repo.id) ?? 0
     // Repository refresh is an explicit freshness request; this repository's retained details revalidate on next open.
     const inRepository = (key: string) => key.startsWith(`${cacheRepositoryKey(repository)}:`)
     issueCache.markStale(inRepository)
@@ -3585,8 +3619,8 @@ export function createRepositorySession(
         ...latest,
         operations: { ...latest.operations, refresh: idle() },
       }))
-      // Refreshed data is fresh; returning later should not reload it again.
-      if (request === repositoryGeneration) retainRepository(state(), true)
+      // Only certify a refresh that did not overlap a newer write.
+      if (request === repositoryGeneration) retainRepository(state(), true, writeRevision)
     } catch (error) {
       updateReady(setState, request, generation, repository, (latest) => ({
         ...latest,
