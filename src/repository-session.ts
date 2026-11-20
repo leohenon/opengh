@@ -1849,6 +1849,7 @@ export function createRepositorySession(
     const repository = current.repository
     const cacheKey = detailCacheKey(repository, number, "pull")
     const detachedRevision = detachedReactionRevision.get(cacheKey)
+    const repositoryRead = repositoryGeneration
     const budget = createRequestBudget(pullAbort.signal)
     const requestOptions = { signal: pullAbort.signal, budget }
     try {
@@ -1916,7 +1917,7 @@ export function createRepositorySession(
           fetchPullContext(repository, number, request, context, requestOptions),
         ])
         if (request === pullGeneration && draftGeneration === pullDraftGeneration)
-          retainPull(pullDetail(), detachedRevision === detachedReactionRevision.get(cacheKey))
+          retainPull(pullDetail(), repositoryRead === repositoryGeneration && detachedRevision === detachedReactionRevision.get(cacheKey))
       } catch (error) {
         if (request === pullGeneration && draftGeneration === pullDraftGeneration)
           setPullDetail((latest) => ({
@@ -2147,6 +2148,7 @@ export function createRepositorySession(
     const repository = current.repository
     const cacheKey = detailCacheKey(repository, number)
     const detachedRevision = detachedReactionRevision.get(cacheKey)
+    const repositoryRead = repositoryGeneration
     const budget = createRequestBudget(issueAbort.signal)
     const requestOptions = { signal: issueAbort.signal, budget }
     try {
@@ -2219,7 +2221,8 @@ export function createRepositorySession(
           hasComments ? fetchIssueComments(repository, number, request, comments?.page ?? 1, comments, requestOptions) : Promise.resolve(),
           fetchIssueReferences(repository, number, request, references, requestOptions),
         ])
-        if (request === issueGeneration) retainIssue(issueDetail(), detachedRevision === detachedReactionRevision.get(cacheKey))
+        if (request === issueGeneration)
+          retainIssue(issueDetail(), repositoryRead === repositoryGeneration && detachedRevision === detachedReactionRevision.get(cacheKey))
       } catch (error) {
         if (request === issueGeneration)
           setIssueDetail((latest) => ({

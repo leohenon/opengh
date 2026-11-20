@@ -116,6 +116,55 @@ function heldOverviewReads() {
 }
 
 describe("repository cache regressions", () => {
+  test.each(["issue", "pull"] as const)("a pending %s detail read cannot undo a repository refresh", async (kind) => {
+    const started = deferred<void>()
+    const release = deferred<void>()
+    const hold = () => {
+      started.resolve()
+      return release.promise
+    }
+    let title = "Before refresh"
+    let reads = 0
+    const readTitle = () => {
+      reads++
+      return title
+    }
+    const session = createRepositorySession(
+      loaders({
+        issue: async () => ({ ...issueDetailFixture, number: 1, title: readTitle() }),
+        pull: async () => ({ ...pullFixture(), title: readTitle() }),
+        issueReferences: async () => {
+          if (kind === "issue") await hold()
+          return []
+        },
+        pullContext: async () => {
+          await hold()
+          return structuredClone(pullContextFixture)
+        },
+      }),
+      undefined,
+      cacheOptions,
+    )
+    const open = () => (kind === "issue" ? session.loadIssue(1) : session.loadPull(1))
+    const close = kind === "issue" ? session.clearIssue : session.clearPull
+    const detail = kind === "issue" ? session.issueDetail : session.pullDetail
+    await session.load(A)
+    const pending = open()
+    await started.promise
+    expect(detail()?.resource.value?.title).toBe("Before refresh")
+    title = "After refresh"
+    await session.refresh()
+    release.resolve()
+    await pending
+    close()
+    await open()
+    expect(reads).toBe(2)
+    expect(detail()?.resource.value?.title).toBe(title)
+    close()
+    await open()
+    expect(reads).toBe(2) // The post-refresh read is reusable.
+  })
+
   test("an unrelated pending refresh resource cannot hide a pull created from another repository", async () => {
     const creationStarted = deferred<void>()
     const creation = deferred<void>()
