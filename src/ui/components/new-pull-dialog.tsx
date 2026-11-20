@@ -1,6 +1,6 @@
 import { TextAttributes, type BoxRenderable } from "@opentui/core"
 import { createEffect, createSignal, on, onCleanup, onMount, Show } from "solid-js"
-import type { MergeCheck } from "../../command-actions"
+import type { MergeCheck, MergeSide } from "../../command-actions"
 import type { ComposeDraft, ComposeDrafts } from "../../compose-drafts"
 import type { NewPull, Paginated, PullBranchComparison, PullComparison, PullRepositories, PullRepository } from "../../models"
 import type { ResourceState } from "../../repository-state"
@@ -58,7 +58,7 @@ export function NewPullDialog(props: {
   onCreate?(repository: PullRepository, pull: NewPull): Promise<unknown>
   onLoadRepositories?(): Promise<PullRepositories>
   onLoadBranches?(repository: PullRepository, page: number): Promise<{ items: string[]; hasMore: boolean }>
-  onCheckMerge?(base: string, head: string): Promise<MergeCheck>
+  onCheckMerge?(base: MergeSide, head: MergeSide): Promise<MergeCheck>
   onOpenPull(number: number): void
   onViewDiff?(sides: PullSides, head: string): void
   initial?: PullSides
@@ -265,11 +265,11 @@ export function NewPullDialog(props: {
       const id = ++mergeRequest
       const branch = head()
       if (!ready || !branch) return setMerge()
-      if (baseRepository().id !== browsed.id || headRepository().id !== browsed.id)
-        return setMerge({ status: "unavailable", reason: "not checked across repositories yet" })
       if (!props.onCheckMerge) return setMerge({ status: "unavailable", reason: "open opengh in a local checkout" })
+      const side = (repository: PullRepository, branch: string): MergeSide =>
+        repository.id === browsed.id ? { branch } : { branch, repository: repository.nameWithOwner }
       setMerge({ status: "checking" })
-      props.onCheckMerge(base(), branch).then(
+      props.onCheckMerge(side(baseRepository(), base()), side(headRepository(), branch)).then(
         (result) => {
           if (!disposed && id === mergeRequest) setMerge(result)
         },

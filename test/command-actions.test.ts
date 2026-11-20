@@ -15,6 +15,26 @@ import {
 
 const cwd = import.meta.dir
 
+async function gitIn(directory: string, ...args: string[]) {
+  const child = Bun.spawn(
+    [
+      "git",
+      "-c",
+      "core.hooksPath=/dev/null",
+      "-c",
+      "commit.gpgsign=false",
+      "-c",
+      "user.name=Test",
+      "-c",
+      "user.email=test@example.com",
+      ...args,
+    ],
+    { cwd: directory, stdout: "pipe", stderr: "pipe" },
+  )
+  expect(await child.exited).toBe(0)
+  return (await new Response(child.stdout).text()).trim()
+}
+
 test("local identity comes from git origin, not GH_REPO, including nested cwd", async () => {
   const directory = await mkdtemp(join(tmpdir(), "opengh-command-"))
   const previous = process.env.GH_REPO
@@ -70,25 +90,7 @@ test("reads the local branch, ignoring a detached HEAD and directories outside g
 
 test("checks whether branches merge cleanly, after fetching them, without touching the checkout", async () => {
   const root = await mkdtemp(join(tmpdir(), "opengh-merge-"))
-  const git = async (cwd: string, ...args: string[]) => {
-    const child = Bun.spawn(
-      [
-        "git",
-        "-c",
-        "core.hooksPath=/dev/null",
-        "-c",
-        "commit.gpgsign=false",
-        "-c",
-        "user.name=Test",
-        "-c",
-        "user.email=test@example.com",
-        ...args,
-      ],
-      { cwd, stdout: "pipe", stderr: "pipe" },
-    )
-    expect(await child.exited).toBe(0)
-    return (await new Response(child.stdout).text()).trim()
-  }
+  const git = gitIn
   const remote = join(root, "remote.git")
   const work = join(root, "work")
   const local = join(root, "local")
@@ -116,15 +118,88 @@ test("checks whether branches merge cleanly, after fetching them, without touchi
 
     await git(root, "clone", "--quiet", remote, local)
     const before = await git(local, "status", "--porcelain=v2", "--branch")
-    expect(await checkMerge(local, "main", "feature/clean")).toEqual({ status: "clean" })
-    expect(await checkMerge(local, "main", "feature/conflict")).toEqual({ status: "conflicts", files: ["shared.txt"] })
-    expect(await checkMerge(local, "main", "feature/missing")).toEqual({
+    const main = { branch: "main" }
+    expect(await checkMerge(local, main, { branch: "feature/clean" })).toEqual({ status: "clean" })
+    expect(await checkMerge(local, main, { branch: "feature/conflict" })).toEqual({ status: "conflicts", files: ["shared.txt"] })
+    expect(await checkMerge(local, main, { branch: "feature/missing" })).toEqual({
       status: "unavailable",
       reason: "couldn't fetch the branches from GitHub",
     })
-    expect(await checkMerge(local, "main", "-x")).toEqual({ status: "unavailable", reason: "unsupported branch name" })
+    expect(await checkMerge(local, main, { branch: "-x" })).toEqual({ status: "unavailable", reason: "unsupported branch name" })
     expect(await git(local, "status", "--porcelain=v2", "--branch")).toBe(before)
+    expect(await Bun.file(join(local, ".git", "FETCH_HEAD")).exists()).toBe(false)
     expect(await git(local, "rev-parse", "refs/remotes/origin/feature/conflict")).toBe(await git(remote, "rev-parse", "feature/conflict"))
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test("fetches a branch from another repository by its GitHub URL in origin's style, leaving nothing behind", async () => {
+  const root = await mkdtemp(join(tmpdir(), "opengh-merge-fork-"))
+  const git = gitIn
+  const github = join(root, "github")
+  const upstream = join(github, "upstream", "repo.git")
+  const fork = join(github, "you", "repo.git")
+  const work = join(root, "work")
+  const commit = async (file: string, text: string, message: string) => {
+    await Bun.write(join(work, file), text)
+    await git(work, "add", ".")
+    await git(work, "commit", "--quiet", "-m", message)
+  }
+  // A checkout whose origin is a GitHub URL, which git rewrites to the local repositories (as `insteadOf` can for anyone).
+  const checkout = async (name: string, source: string, origin: string, style: string) => {
+    const directory = join(root, name)
+    await git(root, "clone", "--quiet", source, directory)
+    await git(directory, "remote", "set-url", "origin", origin)
+    await git(directory, "config", `url.${github}/.insteadOf`, style)
+    return directory
+  }
+  try {
+    await mkdir(upstream, { recursive: true })
+    await git(upstream, "init", "--bare", "--initial-branch=main")
+    await git(root, "clone", "--quiet", upstream, work)
+    await commit("shared.txt", "one\ntwo\nthree\n", "base")
+    await git(work, "push", "--quiet", "origin", "HEAD:main")
+    await mkdir(join(github, "you"))
+    await git(root, "clone", "--quiet", "--bare", upstream, fork)
+    await git(work, "switch", "--quiet", "-c", "clean")
+    await commit("new.txt", "new\n", "clean")
+    await git(work, "push", "--quiet", fork, "clean")
+    await git(work, "switch", "--quiet", "-c", "conflict", "main")
+    await commit("shared.txt", "one\nTWO\nthree\n", "conflict")
+    await git(work, "push", "--quiet", fork, "conflict")
+    await git(work, "switch", "--quiet", "main")
+    await commit("shared.txt", "one\n2\nthree\n", "main moves on")
+    await git(work, "push", "--quiet", "origin", "main")
+
+    const original = await checkout("original", upstream, "https://github.com/upstream/repo.git", "https://github.com/")
+    const before = await git(original, "status", "--porcelain=v2", "--branch")
+    const main = { branch: "main" }
+    expect(await checkMerge(original, main, { branch: "clean", repository: "you/repo" })).toEqual({ status: "clean" })
+    expect(await checkMerge(original, main, { branch: "conflict", repository: "you/repo" })).toEqual({
+      status: "conflicts",
+      files: ["shared.txt"],
+    })
+    const unfetched = { status: "unavailable", reason: "couldn't fetch the branches from GitHub" } as const
+    expect(await checkMerge(original, main, { branch: "missing", repository: "you/repo" })).toEqual(unfetched)
+    expect(await checkMerge(original, main, { branch: "clean", repository: "nobody/repo" })).toEqual(unfetched)
+    expect(await checkMerge(original, main, { branch: "clean", repository: "not a repo" })).toEqual({
+      status: "unavailable",
+      reason: "unsupported repository name",
+    })
+
+    const forked = await checkout("forked", fork, "git@github.com:you/repo.git", "git@github.com:")
+    const upstreamMain = { branch: "main", repository: "upstream/repo" }
+    expect(await checkMerge(forked, upstreamMain, { branch: "conflict" })).toEqual({ status: "conflicts", files: ["shared.txt"] })
+    expect(await checkMerge(forked, upstreamMain, { branch: "clean" })).toEqual({ status: "clean" })
+    expect(await checkMerge(forked, upstreamMain, upstreamMain)).toEqual({ status: "clean" })
+
+    expect(await git(original, "status", "--porcelain=v2", "--branch")).toBe(before)
+    for (const directory of [original, forked]) {
+      expect(await git(directory, "for-each-ref", "refs/opengh")).toBe("")
+      expect(await git(directory, "remote")).toBe("origin")
+      expect(await Bun.file(join(directory, ".git", "FETCH_HEAD")).exists()).toBe(false)
+    }
   } finally {
     await rm(root, { recursive: true, force: true })
   }

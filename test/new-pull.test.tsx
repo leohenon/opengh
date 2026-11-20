@@ -3,7 +3,7 @@ import { render as mount, testRender } from "@opentui/solid"
 import { createTestRenderer } from "@opentui/core/testing"
 import { initializeHunk } from "../src/ui/hunk-host"
 import { defaultConfig } from "../src/config"
-import type { MergeCheck } from "../src/command-actions"
+import type { MergeCheck, MergeSide } from "../src/command-actions"
 import { GitHubApiError } from "../src/github/transport"
 import type {
   DiffTarget,
@@ -53,7 +53,7 @@ async function render(
     page?: "issues" | "pulls"
     drafts?: ComposeDrafts
     create?: (pull: NewPull) => Promise<PullRequestDetail>
-    checkMerge?: (base: string, head: string) => Promise<MergeCheck>
+    checkMerge?: (base: MergeSide, head: MergeSide) => Promise<MergeCheck>
     local?: boolean
     width?: number
     repositories?: PullRepositories | Promise<PullRepositories>
@@ -532,7 +532,7 @@ describe("new pull request", () => {
         [{ status: "conflicts", files: ["a", "b", "c", "d", "e"] }, "conflicts in a, b, c, and 2 more"],
         [{ status: "unavailable", reason: "git 2.38 or later is required" }, "Merge check unavailable — git 2.38 or later is required"],
       ] as const) {
-        const calls: Array<[string, string]> = []
+        const calls: Array<[MergeSide, MergeSide]> = []
         const { view } = await render({
           localBranch: "next",
           width: 150,
@@ -544,7 +544,7 @@ describe("new pull request", () => {
         await open(view)
         expect(merge(view)).toBeDefined()
         expect(frame(view)).toContain(text)
-        expect(calls).toEqual([["main", "next"]])
+        expect(calls).toEqual([[{ branch: "main" }, { branch: "next" }]])
         view.renderer.destroy()
       }
     })
@@ -621,7 +621,7 @@ describe("new pull request", () => {
       const { view } = await render({
         localBranch: "next",
         checkMerge: (base) =>
-          base === "main"
+          base.branch === "main"
             ? new Promise((resolve) => {
                 finishFirst = resolve
               })
@@ -742,14 +742,19 @@ describe("new pull request", () => {
     const fork: PullRepository = { id: 9001, nodeId: "R_fork", nameWithOwner: "you/opentui", defaultBranch: "main" }
     const upstream: PullRepository = { id: 9002, nodeId: "R_upstream", nameWithOwner: "upstream/opentui", defaultBranch: "dev" }
 
-    test("picks the head repository first, then a branch from it, and compares owner:branch", async () => {
+    test("picks the head repository first, then a branch from it, compares owner:branch, and checks the merge across repositories", async () => {
       const compared: Array<[number, string, string]> = []
+      const checked: Array<[MergeSide, MergeSide]> = []
       const { view } = await render({
         localBranch: "next",
         width: 150,
         repositories: { bases: [browsed], heads: [browsed, fork] },
         branchesOf: (target) => (target.id === fork.id ? ["topic", "main"] : []),
         compareIn: (target, base, head) => compared.push([target.id, base, head]),
+        checkMerge: async (base, head) => {
+          checked.push([base, head])
+          return { status: "clean" }
+        },
       })
       await open(view)
       view.mockInput.pressEnter()
@@ -761,7 +766,8 @@ describe("new pull request", () => {
       await pick(view, "topic")
       expect(frame(view)).toContain("main ← you:topic")
       expect(compared.at(-1)).toEqual([browsed.id, "main", "you:topic"])
-      expect(frame(view)).toContain("Merge check unavailable — not checked across repositories yet")
+      expect(checked.at(-1)).toEqual([{ branch: "main" }, { branch: "topic", repository: "you/opentui" }])
+      expect(frame(view)).toContain("✓ Able to merge")
     })
 
     test("picks a base repository, and creates the pull request there with an owner:branch head", async () => {
@@ -813,15 +819,21 @@ describe("new pull request", () => {
 
     test("when browsing a fork, the base starts on the original repository's default branch", async () => {
       const compared: Array<[number, string, string]> = []
+      const checked: Array<[MergeSide, MergeSide]> = []
       const { view } = await render({
         localBranch: "next",
         repositories: { bases: [upstream, browsed], heads: [browsed, upstream] },
         compareIn: (target, base, head) => compared.push([target.id, base, head]),
+        checkMerge: async (base, head) => {
+          checked.push([base, head])
+          return { status: "conflicts", files: ["a.ts"] }
+        },
       })
       await open(view)
       const owner = repository.split("/")[0]
       expect(frame(view)).toContain("upstream:dev ← next")
       expect(compared.at(-1)).toEqual([upstream.id, "dev", `${owner}:next`])
+      expect(checked.at(-1)).toEqual([{ branch: "dev", repository: "upstream/opentui" }, { branch: "next" }])
     })
 
     test("keeps a base you chose before the repositories finished loading", async () => {

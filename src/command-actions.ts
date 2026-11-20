@@ -92,13 +92,17 @@ async function git(cwd: string, args: string[]) {
   return output.trim()
 }
 
+const githubRemote = (url: string) => {
+  const match = /^(https:\/\/github\.com\/|git@github\.com:|ssh:\/\/git@github\.com\/)([\w.-]+\/[\w.-]+?)(?:\.git)?\/?$/i.exec(url.trim())
+  return match ? { prefix: match[1]!, repository: match[2]! } : undefined
+}
+
 export async function resolveLocalRepository(cwd: string): Promise<LocalRepository | undefined> {
   try {
     const directory = await git(cwd, ["rev-parse", "--show-toplevel"])
-    const remote = await git(directory, ["remote", "get-url", "origin"])
-    const match = /^(?:https:\/\/github\.com\/|git@github\.com:|ssh:\/\/git@github\.com\/)([\w.-]+\/[\w.-]+?)(?:\.git)?\/?$/i.exec(remote)
-    if (!match) return undefined
-    return { directory, repository: match[1]! }
+    const remote = githubRemote(await git(directory, ["remote", "get-url", "origin"]))
+    if (!remote) return undefined
+    return { directory, repository: remote.repository }
   } catch {
     return undefined
   }
@@ -114,6 +118,8 @@ export async function readLocalBranch(directory: string): Promise<string | undef
 }
 
 export type MergeCheck = { status: "clean" } | { status: "conflicts"; files: string[] } | { status: "unavailable"; reason: string }
+// A branch on origin, or in another GitHub repository (owner/name).
+export type MergeSide = { branch: string; repository?: string }
 
 async function gitResult(cwd: string, args: string[]) {
   let output = ""
@@ -124,45 +130,74 @@ async function gitResult(cwd: string, args: string[]) {
 }
 
 const branchName = (name: string) => !!name && !name.startsWith("-") && !/[\s:~^?*[\\\x00-\x1f\x7f]/.test(name)
+const repositoryName = (name: string) => /^[\w.-]+\/[\w.-]+$/.test(name)
 let mergeChecks: Promise<unknown> = Promise.resolve()
 
-// Fetches both branches, then tests the merge without touching the working tree, index or local branches.
-export function checkMerge(directory: string, base: string, head: string): Promise<MergeCheck> {
+// Fetches both branches, then tests the merge without touching the working tree, index, local branches,
+// remotes or FETCH_HEAD. A branch in another repository is fetched from its GitHub URL, written in origin's
+// style, into a temporary ref removed afterwards.
+export function checkMerge(directory: string, base: MergeSide, head: MergeSide): Promise<MergeCheck> {
   const check = async (): Promise<MergeCheck> => {
-    if (!branchName(base) || !branchName(head)) return { status: "unavailable", reason: "unsupported branch name" }
+    const sides = [base, head] as const
+    if (!branchName(base.branch) || !branchName(head.branch)) return { status: "unavailable", reason: "unsupported branch name" }
+    if (sides.some((side) => side.repository !== undefined && !repositoryName(side.repository)))
+      return { status: "unavailable", reason: "unsupported repository name" }
     const version = /(\d+)\.(\d+)/.exec((await gitResult(directory, ["version"])).output)
     if (!version || Number(version[1]) < 2 || (Number(version[1]) === 2 && Number(version[2]) < 38))
       return { status: "unavailable", reason: "git 2.38 or later is required" }
-    const refs = [`refs/remotes/origin/${base}`, `refs/remotes/origin/${head}`] as const
-    const fetch = await gitResult(directory, [
-      "fetch",
-      "--quiet",
-      "--no-tags",
-      "origin",
-      `+refs/heads/${base}:${refs[0]}`,
-      `+refs/heads/${head}:${refs[1]}`,
-    ])
-    if (fetch.code !== 0) return { status: "unavailable", reason: "couldn't fetch the branches from GitHub" }
-    const merge = await gitResult(directory, ["merge-tree", "--write-tree", "--name-only", "--no-messages", refs[0], refs[1]])
-    if (merge.code === 0) return { status: "clean" }
-    if (merge.code === 1)
-      return {
-        status: "conflicts",
-        files: [
-          ...new Set(
-            merge.output
-              .split("\n")
-              .slice(1)
-              .map((line) => line.trim())
-              .filter(Boolean),
-          ),
-        ],
+    const unfetched = { status: "unavailable", reason: "couldn't fetch the branches from GitHub" } as const
+    const refs = sides.map((side, index) =>
+      side.repository ? `refs/opengh/merge-check/${index ? "head" : "base"}` : `refs/remotes/origin/${side.branch}`,
+    )
+    try {
+      const remote = sides.some((side) => side.repository)
+        ? (githubRemote((await gitResult(directory, ["config", "--get", "remote.origin.url"])).output) ??
+          githubRemote((await gitResult(directory, ["remote", "get-url", "origin"])).output))
+        : undefined
+      const sources = new Map<string, number[]>()
+      for (const [index, side] of sides.entries()) {
+        if (side.repository && !remote) return unfetched
+        const source = side.repository ? `${remote!.prefix}${side.repository}.git` : "origin"
+        sources.set(source, [...(sources.get(source) ?? []), index])
       }
-    return { status: "unavailable", reason: "git couldn't test the merge" }
+      for (const [source, indexes] of sources) {
+        const fetch = await gitResult(directory, [
+          "fetch",
+          "--quiet",
+          "--no-tags",
+          "--no-write-fetch-head",
+          source,
+          ...indexes.map((index) => `+refs/heads/${sides[index]!.branch}:${refs[index]}`),
+        ])
+        if (fetch.code !== 0) return unfetched
+      }
+      return await mergeTree(directory, refs[0]!, refs[1]!)
+    } finally {
+      for (const [index, side] of sides.entries()) if (side.repository) await gitResult(directory, ["update-ref", "-d", refs[index]!])
+    }
   }
   const result = mergeChecks.then(check, check)
   mergeChecks = result.catch(() => {})
   return result
+}
+
+async function mergeTree(directory: string, base: string, head: string): Promise<MergeCheck> {
+  const merge = await gitResult(directory, ["merge-tree", "--write-tree", "--name-only", "--no-messages", base, head])
+  if (merge.code === 0) return { status: "clean" }
+  if (merge.code === 1)
+    return {
+      status: "conflicts",
+      files: [
+        ...new Set(
+          merge.output
+            .split("\n")
+            .slice(1)
+            .map((line) => line.trim())
+            .filter(Boolean),
+        ),
+      ],
+    }
+  return { status: "unavailable", reason: "git couldn't test the merge" }
 }
 
 export function matchesLocalRepository(local: LocalRepository | undefined, repository: string) {

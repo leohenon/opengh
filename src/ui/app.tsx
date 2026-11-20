@@ -13,6 +13,7 @@ import {
   matchesLocalRepository,
   type LocalRepository,
   type MergeCheck,
+  type MergeSide,
   type CommandSpec,
   type CommandTask,
 } from "../command-actions"
@@ -238,7 +239,7 @@ export type AppProps = {
   onLoadPullTemplates?: (repository: PullRepository) => Promise<PullRequestTemplate[]>
   onLoadPullBranches?: (repository: PullRepository, page: number) => Promise<{ items: string[]; hasMore: boolean }>
   onLoadLocalBranch?: () => Promise<string | undefined>
-  onCheckMerge?: (base: string, head: string) => Promise<MergeCheck>
+  onCheckMerge?: (base: MergeSide, head: MergeSide) => Promise<MergeCheck>
   pullDetail?: PullDetailState
   onLoadPull?: (number: number, options?: { force?: boolean }) => Promise<void>
   onLoadMorePullComments?: () => Promise<void>
