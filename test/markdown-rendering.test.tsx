@@ -503,10 +503,10 @@ test("overview still updates relative links and plain-text mode when the documen
   }
 })
 
-test("overview layout centers documents or uses available width independently of the About sidebar", async () => {
+test("overview tabs and documents share the reading column in both layouts, with or without About", async () => {
   const [layout, setLayout] = createSignal<DetailLayout>("centered")
   const [sidebar, setSidebar] = createSignal<AboutSidebar>("hide")
-  const documents = [
+  const [documents, setDocuments] = createSignal<RepositoryDocumentState[]>([
     {
       ...repositoryDocumentsFixture[0]!,
       resource: {
@@ -514,13 +514,14 @@ test("overview layout centers documents or uses available width independently of
         value: "Overview prose.\n\n```text\nexample code\n```",
       },
     },
-  ]
+    ...repositoryDocumentsFixture.slice(1),
+  ])
   const view = await testRender(
     () => (
       <ThemeProvider name="github">
         <OverviewScreen
           repo={githubDataFixture.repo}
-          documents={{ status: "ready", value: documents }}
+          documents={{ status: "ready", value: documents() }}
           detailLayout={layout()}
           aboutSidebar={sidebar()}
           showScrollbar={false}
@@ -530,6 +531,11 @@ test("overview layout centers documents or uses available width independently of
     ),
     { width: 160, height: 30 },
   )
+  const tabRow = () =>
+    view
+      .captureCharFrame()
+      .split("\n")
+      .find((row) => row.includes("README"))!
   try {
     for (const about of ["hide", "show"] as const) {
       setSidebar(about)
@@ -540,11 +546,14 @@ test("overview layout centers documents or uses available width independently of
       expect(prose().width).toBe(84)
       expect(panel().width).toBe(84)
       const centeredX = prose().screenX
+      expect(tabRow()).toContain("Contributing")
+      expect(tabRow().search(/\S/)).toBe(centeredX)
       setLayout("wide")
       await settle(view)
       expect(prose().width).toBeGreaterThan(84)
       expect(panel().width).toBe(prose().width)
       expect(prose().screenX).toBeLessThan(centeredX)
+      expect(tabRow().search(/\S/)).toBe(prose().screenX)
       expect(view.captureCharFrame().includes("About")).toBe(about === "show")
     }
     view.resize(76, 30)
@@ -554,8 +563,19 @@ test("overview layout centers documents or uses available width independently of
       await settle(view)
       const prose = codeBlocks(view.renderer.root).find((block) => block.content.includes("Overview prose"))!
       expect(prose.width).toBeLessThanOrEqual(76)
+      expect(tabRow().search(/\S/)).toBe(prose.screenX)
       expect(view.captureCharFrame()).toContain("example code")
     }
+
+    view.resize(160, 30)
+    const license = "GNU Lesser General Public License v2.1"
+    setDocuments((items) => items.map((item) => (item.path === "LICENSE" ? { ...item, label: license } : item)))
+    setLayout("centered")
+    await settle(view)
+    expect(tabRow()).toContain("‹ README ›")
+    setLayout("wide")
+    await settle(view)
+    expect(tabRow()).toContain(license)
   } finally {
     view.renderer.destroy()
   }

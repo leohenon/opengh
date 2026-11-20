@@ -167,9 +167,9 @@ export function OverviewScreen(props: {
   )
   const hasDocumentTabs = () => documents().length > 1
   const showAboutSidebar = () => !props.inlineAbout && aboutSidebarVisible(props.aboutSidebar, dimensions().width)
-  const availableDocumentWidth = () => Math.max(1, dimensions().width - (showAboutSidebar() ? 42 : 8))
+  const [availableDocumentWidth, setAvailableDocumentWidth] = createSignal(0)
   const documentLabelsWidth = (includeIcons: boolean): number =>
-    documents().reduce((width, item) => width + Bun.stringWidth(documentLabel(item, includeIcons)) + 2, 0)
+    documents().reduce((width, item, index) => width + Bun.stringWidth(documentLabel(item, includeIcons)) + (index === 0 ? 1 : 2), 0)
   const showDocumentIcons = (): boolean => documentLabelsWidth(true) <= availableDocumentWidth()
   const compactDocuments = () => hasDocumentTabs() && documentLabelsWidth(false) > availableDocumentWidth()
   const markdownStyle = createReactiveMarkdownStyle(colors, theme)
@@ -227,130 +227,131 @@ export function OverviewScreen(props: {
         minWidth={0}
         minHeight={0}
         backgroundColor={colors.canvas}
-        paddingTop={props.hideDocumentsTab ? 1 : 0}
-        paddingBottom={1}
+        contentOptions={{
+          paddingX: 2,
+          paddingTop: props.hideDocumentsTab ? 1 : 0,
+          paddingBottom: 1,
+          alignItems: centered() ? "center" : "stretch",
+        }}
         scrollY
       >
-        <Show when={!props.hideDocumentsTab}>
-          <box
-            height={1}
-            flexShrink={0}
-            flexDirection="row"
-            alignItems="center"
-            gap={0}
-            paddingLeft={1}
-            paddingRight={2}
-            minWidth={0}
-            overflow="hidden"
-          >
-            <Show
-              when={hasDocumentTabs()}
-              fallback={
-                <box paddingLeft={1}>
+        <box width="100%" maxWidth={detailContentWidth(props.detailLayout)} minWidth={0} flexGrow={1} flexShrink={0} flexDirection="column">
+          <Show when={!props.hideDocumentsTab}>
+            <box
+              height={1}
+              flexShrink={0}
+              flexDirection="row"
+              alignItems="center"
+              minWidth={0}
+              overflow="hidden"
+              onSizeChange={function () {
+                setAvailableDocumentWidth(this.width)
+              }}
+            >
+              <Show
+                when={hasDocumentTabs()}
+                fallback={
                   <text fg={colors.text} attributes={TextAttributes.BOLD}>
                     {currentLabel()}
                   </text>
-                </box>
-              }
-            >
+                }
+              >
+                <Show
+                  when={!compactDocuments()}
+                  fallback={
+                    <box flexDirection="row" gap={1}>
+                      <text
+                        fg={colors.muted}
+                        selectable={false}
+                        {...mouseClick(
+                          () => props.onMoveDocument?.(-1),
+                          () => props.interactive !== false && Boolean(props.onMoveDocument),
+                        )}
+                      >
+                        ‹
+                      </text>
+                      <text fg={colors.text} bg={colors.panel} attributes={TextAttributes.BOLD}>
+                        {currentLabel()}
+                      </text>
+                      <text
+                        fg={colors.muted}
+                        selectable={false}
+                        {...mouseClick(
+                          () => props.onMoveDocument?.(1),
+                          () => props.interactive !== false && Boolean(props.onMoveDocument),
+                        )}
+                      >
+                        ›
+                      </text>
+                    </box>
+                  }
+                >
+                  <For each={documents()}>
+                    {(item, index) => {
+                      const active = () => item.id === document()?.id
+                      const enabled = () => props.interactive !== false && Boolean(props.onSelectDocument)
+                      const hover = mouseHover(enabled, () => item.id)
+                      return (
+                        <box
+                          height={1}
+                          flexShrink={0}
+                          flexDirection="row"
+                          paddingLeft={index() === 0 ? 0 : 1}
+                          paddingRight={1}
+                          backgroundColor={
+                            hover.hovered() && !active() ? colors.panelHover : active() ? colors.canvas : inactiveTabBackground()
+                          }
+                          {...mouseClick(
+                            () => props.onSelectDocument?.(item.id),
+                            enabled,
+                            () => item.id,
+                            hover,
+                          )}
+                        >
+                          <text
+                            height={1}
+                            wrapMode="none"
+                            fg={active() || hover.hovered() ? colors.text : colors.muted}
+                            attributes={active() ? TextAttributes.BOLD : TextAttributes.NONE}
+                            selectable={false}
+                          >
+                            {documentLabel(item)}
+                          </text>
+                        </box>
+                      )
+                    }}
+                  </For>
+                </Show>
+              </Show>
+            </box>
+            <box height={1} flexShrink={0} />
+          </Show>
+          <ResourceStateView resource={viewResource()}>
+            {() => (
               <Show
-                when={!compactDocuments()}
+                when={document()}
                 fallback={
-                  <box flexDirection="row" gap={1} paddingLeft={1}>
-                    <text
-                      fg={colors.muted}
-                      selectable={false}
-                      {...mouseClick(
-                        () => props.onMoveDocument?.(-1),
-                        () => props.interactive !== false && Boolean(props.onMoveDocument),
-                      )}
-                    >
-                      ‹
-                    </text>
-                    <text fg={colors.text} bg={colors.panel} attributes={TextAttributes.BOLD}>
-                      {currentLabel()}
-                    </text>
-                    <text
-                      fg={colors.muted}
-                      selectable={false}
-                      {...mouseClick(
-                        () => props.onMoveDocument?.(1),
-                        () => props.interactive !== false && Boolean(props.onMoveDocument),
-                      )}
-                    >
-                      ›
-                    </text>
+                  <box flexGrow={1} alignItems="center" justifyContent="center">
+                    <text fg={colors.muted}>No repository documentation.</text>
                   </box>
                 }
               >
-                <For each={documents()}>
-                  {(item) => {
-                    const active = () => item.id === document()?.id
-                    const enabled = () => props.interactive !== false && Boolean(props.onSelectDocument)
-                    const hover = mouseHover(enabled, () => item.id)
-                    return (
-                      <box
-                        height={1}
-                        flexShrink={0}
-                        flexDirection="row"
-                        paddingX={1}
-                        backgroundColor={
-                          hover.hovered() && !active() ? colors.panelHover : active() ? colors.canvas : inactiveTabBackground()
-                        }
-                        {...mouseClick(
-                          () => props.onSelectDocument?.(item.id),
-                          enabled,
-                          () => item.id,
-                          hover,
-                        )}
-                      >
-                        <text
-                          height={1}
-                          wrapMode="none"
-                          fg={active() || hover.hovered() ? colors.text : colors.muted}
-                          attributes={active() ? TextAttributes.BOLD : TextAttributes.NONE}
-                          selectable={false}
-                        >
-                          {documentLabel(item)}
-                        </text>
-                      </box>
-                    )
-                  }}
-                </For>
+                {(_) => (
+                  <GitHubMarkdown
+                    content={documentContent()}
+                    anchorRef={(resolve) => {
+                      setResolveAnchor(() => resolve)
+                    }}
+                    syntaxStyle={markdownStyle()}
+                    context={markdownContext()}
+                    plainText={plainDocument()}
+                    wide={!centered()}
+                  />
+                )}
               </Show>
-            </Show>
-          </box>
-          <box height={1} flexShrink={0} />
-        </Show>
-        <ResourceStateView resource={viewResource()}>
-          {() => (
-            <Show
-              when={document()}
-              fallback={
-                <box flexGrow={1} alignItems="center" justifyContent="center">
-                  <text fg={colors.muted}>No repository documentation.</text>
-                </box>
-              }
-            >
-              {(_) => (
-                <box width="100%" paddingX={2} flexShrink={0} alignItems={centered() ? "center" : "stretch"}>
-                  <box width="100%" maxWidth={detailContentWidth(props.detailLayout)} minWidth={0} flexShrink={0} flexDirection="column">
-                    <GitHubMarkdown
-                      content={documentContent()}
-                      anchorRef={(resolve) => {
-                        setResolveAnchor(() => resolve)
-                      }}
-                      syntaxStyle={markdownStyle()}
-                      context={markdownContext()}
-                      plainText={plainDocument()}
-                      wide={!centered()}
-                    />
-                  </box>
-                </box>
-              )}
-            </Show>
-          )}
-        </ResourceStateView>
+            )}
+          </ResourceStateView>
+        </box>
       </scrollbox>
 
       <Show when={showAboutSidebar()}>

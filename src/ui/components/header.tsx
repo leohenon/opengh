@@ -100,6 +100,8 @@ export function ReviewHeader(props: {
   )
 }
 
+const shortLabels: Record<Page, string> = { overview: "Repo", commits: "Commits", issues: "Issues", pulls: "PRs", actions: "CI" }
+
 export function Header(props: {
   repo: Repo
   page: Page
@@ -139,7 +141,7 @@ export function Header(props: {
       labels.reduce((sum, label) => sum + Bun.stringWidth(label), 0) + Math.max(0, labels.length - 1) * 3
     if (totalWidth(tabs.map((tab) => tab.counted)) > width) {
       tabs = tabs.map((tab, index) => {
-        const label = tabLabel(index, props.tabs[index]!.label)
+        const label = tabLabel(index, tab.page === "pulls" ? shortLabels.pulls : props.tabs[index]!.label)
         return { ...tab, label, counted: label + tab.counted.slice(tab.label.length) }
       })
     }
@@ -169,10 +171,24 @@ export function Header(props: {
         }
       }
     }
+    // Shorten Overview only when doing so keeps an additional tab visible.
+    const overview = labels.findIndex((tab) => tab.page === "overview")
+    const repoLabel = overview < 0 ? "" : tabLabel(overview, shortLabels.overview)
+    const savedWidth = overview < 0 ? 0 : Bun.stringWidth(labels[overview]!.label) - Bun.stringWidth(repoLabel)
+    let shortenOverview = false
+    for (let left = 0; left <= active && left <= overview; left++) {
+      for (let right = Math.max(active, overview) + 1; right <= labels.length; right++) {
+        if (right - left > end - start && windowWidth(left, right) - savedWidth <= available) {
+          start = left
+          end = right
+          shortenOverview = true
+        }
+      }
+    }
+    if (shortenOverview) labels[overview] = { ...labels[overview]!, label: repoLabel }
     const visible = labels.slice(start, end)
     // At exceptionally small widths, use a complete short name, never a partial tab.
     if (windowWidth(start, end) > available && visible[0]) {
-      const shortLabels: Record<Page, string> = { overview: "Repo", commits: "Commits", issues: "Issues", pulls: "PRs", actions: "CI" }
       visible[0] = { ...visible[0], label: tabLabel(active, shortLabels[visible[0].page]) }
       if (Bun.stringWidth(visible[0].label) + (start > 0 ? 2 : 0) + (end < labels.length ? 2 : 0) > available)
         visible[0] = { ...visible[0], label: tabKey(active) || shortLabels[visible[0].page] }

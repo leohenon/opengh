@@ -84,8 +84,8 @@ export const nerdIcons: IconSet = {
 
 export const unicodeIcons: IconSet = {
   navigation: {
-    overview: "≡",
-    commits: "◇",
+    overview: "⌂",
+    commits: "─○─",
     issues: "◉",
     pulls: "⑂",
     actions: "▷",
@@ -103,9 +103,9 @@ export const unicodeIcons: IconSet = {
     neutral: "−",
   },
   document: {
-    readme: "≡",
+    readme: "◫",
     conduct: "♡",
-    contributing: "+",
+    contributing: "✎",
     license: "⚖",
     security: "⛨",
     file: "▧",

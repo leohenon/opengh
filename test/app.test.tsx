@@ -759,6 +759,10 @@ describe("opengh TUI", () => {
     view.resize(76, 32)
     await view.flush()
     expect(header()).not.toContain(nerdIcons.navigation.overview)
+    expect(header()).toContain("PRs (24)")
+    view.resize(180, 32)
+    await view.flush()
+    expect(header()).toContain(`${nerdIcons.navigation.pulls} Pull requests (24)`)
   })
 
   test("shows stable open totals in work tabs across loading, state filters, and compact mode", async () => {

@@ -111,8 +111,10 @@ test("mouse tabs include their underline, respect disabled/drag guards, and reve
     setCompact(true)
     view.resize(24, 8)
     await view.flush()
-    await click("›")
+    await click("4 PRs")
     expect(page()).toBe("pulls")
+    await click("›")
+    expect(page()).toBe("actions")
     await click("‹")
     expect(page()).toBe("issues")
     expect(view.captureCharFrame()).not.toContain("anomalyco/opentui")
@@ -138,6 +140,68 @@ test("mouse tabs include their underline, respect disabled/drag guards, and reve
   }
 })
 
+test.each([true, false])(
+  "Repo keeps another tab visible, but Overview stays when shortening does not help (shortcuts: %s)",
+  async (showTabShortcuts) => {
+    const [page, setPage] = createSignal<Page>("overview")
+    const [compact, setCompact] = createSignal(false)
+    const view = await testRender(
+      () => (
+        <Header
+          repo={githubDataFixture.repo}
+          tabs={tabs}
+          page={page()}
+          compact={compact()}
+          showTabShortcuts={showTabShortcuts}
+          showTabCounts={false}
+          onSelect={setPage}
+        />
+      ),
+      { width: 160, height: 8 },
+    )
+    const label = (index: number, name: string) => `${showTabShortcuts ? `${index + 1} ` : ""}${name}`
+    const full = tabs.map((tab, index) => label(index, tab.page === "pulls" ? "PRs" : tab.label))
+    const repoWidth = Bun.stringWidth(full.join("   ")) // Repo saves the four columns used by header padding.
+    const row = () => view.captureCharFrame().split("\n")[compact() ? 0 : 3]!
+    try {
+      for (const mode of [false, true]) {
+        setCompact(mode)
+        for (const active of ["overview", "actions"] as const) {
+          setPage(active)
+          view.resize(160, 8)
+          await view.flush()
+          expect(row()).toContain("Overview")
+          expect(row()).toContain("Pull requests")
+          view.resize(repoWidth + 4, 8)
+          await view.flush()
+          expect(row()).toContain(label(0, "Overview"))
+          expect(row()).not.toMatch(/[‹›]/)
+          view.resize(repoWidth, 8)
+          await view.flush()
+          for (const text of [label(0, "Repo"), ...full.slice(1)]) expect(row()).toContain(text)
+          expect(row()).not.toContain("Overview")
+          expect(row()).not.toContain("CI")
+          expect(row()).not.toMatch(/[‹›]/)
+          if (active === "actions") {
+            const text = label(0, "Repo")
+            await view.mockMouse.click(row().indexOf(text), compact() ? 0 : 3)
+            await view.flush()
+            expect(page()).toBe("overview")
+            setPage(active)
+          }
+          view.resize(repoWidth - 1, 8)
+          await view.flush()
+          expect(row()).not.toContain(label(0, "Repo"))
+          expect(row()).toContain(active === "overview" ? "Overview" : "Actions")
+          expect(row()).toMatch(/[‹›]/)
+        }
+      }
+    } finally {
+      view.renderer.destroy()
+    }
+  },
+)
+
 test("header prioritizes tabs over repository identity and counts, then reveals whole tabs on navigation", async () => {
   const repo = { ...githubDataFixture.repo, nameWithOwner: "a-very-long-owner/pi-anthropic-oauth" }
   const [page, setPage] = createSignal<Page>("overview")
@@ -160,6 +224,8 @@ test("header prioritizes tabs over repository identity and counts, then reveals 
   const row = () => view.captureCharFrame().split("\n")[compact() ? 0 : 3]!
   const bare = tabs.map((tab, index) => `${index + 1} ${tab.label}`)
   const counted = bare.map((label, index) => (index === 2 ? `${label} (61)` : index === 3 ? `${label} (24)` : label))
+  const narrow = bare.map((label) => label.replace("Pull requests", "PRs"))
+  const narrowCounted = counted.map((label) => label.replace("Pull requests", "PRs"))
   const width = (labels: string[]) => Bun.stringWidth(labels.join("   "))
   try {
     await view.flush()
@@ -178,9 +244,12 @@ test("header prioritizes tabs over repository identity and counts, then reveals 
     expect(row()).not.toContain("pi-anthropic-oauth")
     for (const label of counted) expect(row()).toContain(label)
 
-    view.resize(width(bare) + 4, 8)
+    view.resize(width(narrowCounted) + 4, 8)
     await view.flush()
-    for (const label of bare) expect(row()).toContain(label)
+    for (const label of narrowCounted) expect(row()).toContain(label)
+    view.resize(width(narrowCounted) + 3, 8)
+    await view.flush()
+    for (const label of narrow) expect(row()).toContain(label)
     expect(row()).not.toContain("(")
     expect(row()).not.toContain("‹")
     expect(row()).not.toContain("›")
@@ -192,13 +261,13 @@ test("header prioritizes tabs over repository identity and counts, then reveals 
         for (const [index, tab] of tabs.entries()) {
           setPage(tab.page)
           await view.flush()
-          expect(row()).toContain(bare[index]!)
+          expect(row()).toContain(narrow[index]!)
           expect(row()).not.toContain("(")
           expect(row()).toMatch(/[‹›]/)
           // Every displayed shortcut belongs to a full tab, never a clipped label.
-          const withoutTabs = bare.reduce((text, label) => text.replace(label, ""), row())
+          const withoutTabs = narrow.reduce((text, label) => text.replace(label, ""), row())
           expect(withoutTabs.replace(/[‹›\s]/g, "")).toBe("")
-          if (!mode) expect(view.captureCharFrame().split("\n")[4]).toContain("─".repeat(Bun.stringWidth(bare[index]!)))
+          if (!mode) expect(view.captureCharFrame().split("\n")[4]).toContain("─".repeat(Bun.stringWidth(narrow[index]!)))
         }
       }
     }
