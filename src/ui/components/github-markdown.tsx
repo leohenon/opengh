@@ -90,6 +90,9 @@ export function GitHubMarkdown(props: {
   let disposed = false
   const resolveAnchor: MarkdownAnchorResolver = async (fragment) => {
     const document = prepared()
+    // The first render starts highlighting. Reading its promises earlier can miss anchor registration.
+    await renderer.idle()
+    if (disposed || document !== prepared()) return
     await Promise.all([...prose, ...codeNodes()].filter((node) => !node.isDestroyed).map((node) => node.highlightingDone))
     await renderer.idle()
     if (disposed || document !== prepared()) return

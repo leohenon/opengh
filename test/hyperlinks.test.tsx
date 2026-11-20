@@ -1,5 +1,14 @@
-import { expect, test } from "bun:test"
-import { CodeRenderable, measureEditText, NativeSession, RGBA, ScrollBoxRenderable, TextAttributes, type Renderable } from "@opentui/core"
+import { expect, spyOn, test } from "bun:test"
+import {
+  CodeRenderable,
+  getTreeSitterClient,
+  measureEditText,
+  NativeSession,
+  RGBA,
+  ScrollBoxRenderable,
+  TextAttributes,
+  type Renderable,
+} from "@opentui/core"
 import { Writable } from "node:stream"
 import { testRender } from "@opentui/solid"
 import { createSignal, Show } from "solid-js"
@@ -10,6 +19,7 @@ import { TimelineCommits } from "../src/ui/components/pull-commits"
 import { Popup } from "../src/ui/components/popup"
 import { messageReactionMouse, type ReactionControls } from "../src/ui/components/reactions"
 import { HyperlinkProvider, HyperlinkSurface, useHyperlinkMouse } from "../src/ui/hyperlinks"
+import { anchorMarker } from "../src/ui/markdown-anchors"
 import { createReactiveMarkdownStyle } from "../src/ui/markdown-style"
 import { ThemeProvider, useTheme } from "../src/ui/theme"
 import { MarkdownProvider } from "../src/ui/markdown-preferences"
@@ -51,6 +61,32 @@ async function settleMarkdown(view: View) {
     await view.renderOnce()
     await Promise.all(codeBlocks(view.renderer.root).map((block) => block.highlightingDone))
     await view.flush()
+  }
+}
+
+async function delayAnchorHighlight(view: View, id: string, navigate: () => void | Promise<void>) {
+  const client = getTreeSitterClient()
+  const highlight = client.highlightOnce.bind(client)
+  const marker = anchorMarker(id)
+  const gate = Promise.withResolvers<void>()
+  let started = false
+  const spy = spyOn(client, "highlightOnce").mockImplementation(async (content, filetype) => {
+    if (content.includes(marker)) {
+      started = true
+      await gate.promise
+    }
+    return highlight(content, filetype)
+  })
+  try {
+    await navigate()
+    // Let the renderer go idle while the destination's anchor is still unregistered.
+    await view.renderer.idle()
+    expect(started).toBe(true)
+    gate.resolve()
+    await settleMarkdown(view)
+  } finally {
+    gate.resolve()
+    spy.mockRestore()
   }
 }
 
@@ -511,9 +547,11 @@ test("overview opens nested Markdown on demand, keeps loading and retry local, a
     await waitForText(view, "Guide unavailable")
     await view.mockInput.pressKey("r")
     expect(data().linkedDocuments![0]!.resource.status).toBe("loading")
-    update("docs/guide.md", {
-      status: "ready",
-      value: `# Guide top\n\n${"Filler paragraph.\n\n".repeat(30)}## Target\n\nTarget reached.\n\n[Child](nested/child.MARKDOWN)\n\n[Home](../README.md)`,
+    await delayAnchorHighlight(view, "target", () => {
+      update("docs/guide.md", {
+        status: "ready",
+        value: `# Guide top\n\n${"Filler paragraph.\n\n".repeat(30)}## Target\n\nTarget reached.\n\n[Child](nested/child.MARKDOWN)\n\n[Home](../README.md)`,
+      })
     })
     await waitForText(view, "Target reached")
     expect(view.captureCharFrame()).not.toContain("Guide top")
@@ -654,10 +692,12 @@ The heading target is here.
     scroll.scrollTo(0)
     await view.flush()
     await click(documentUrl.replace("README.md", "GUIDE.md#guide-1"))
-    expect(view.captureCharFrame()).toContain("Second heading target")
+    await waitForText(view, "Second heading target")
     expect(view.captureCharFrame()).not.toContain("First heading.")
-    await click(backlinkUrl)
-    // Cross-document anchor scrolling finishes asynchronously after the destination mounts.
+    await delayAnchorHighlight(view, "user-content-fnref-short-2", async () => {
+      const cell = linkCells(view, backlinkUrl)[0]!
+      await view.mockMouse.click(cell.x, cell.y)
+    })
     await waitForText(view, "Second reference")
     expect(external).toEqual([])
   } finally {
@@ -865,6 +905,7 @@ test("source-line ranges resolve original Markdown prose, code, moved footnotes 
     top().scrollTo(0)
     await view.flush()
     await click(documentUrl.replace("README.md", "LICENSE#L30"))
+    await waitForText(view, "License source line 30")
     expect(view.captureCharFrame().split("\n")[top().viewport.y]).toContain("License source line 30")
     expect(external).toEqual([])
   } finally {
