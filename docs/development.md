@@ -35,14 +35,6 @@ bun run build --all             # Every target; first: bun install --frozen-lock
 After build or dependency changes, manually check diff syntax highlighting;
 the smoke test cannot open the app.
 
-## Sandbox
-
-Use [leohenon/opengh-sandbox](https://github.com/leohenon/opengh-sandbox) for live manual testing.
-
-```sh
-bun run dev leohenon/opengh-sandbox
-```
-
 ## References
 
 [GitHub API integration](github-api.md) · [Dependency patches](../patches/README.md)

@@ -19,6 +19,7 @@ export function SearchablePicker<T>(props: {
   titleMeta?: string
   width?: number
   height: number
+  rowHeight?: number
   zIndex?: number
   placement?: "upper" | "center"
   showScrollbar?: boolean
@@ -179,7 +180,7 @@ export function SearchablePicker<T>(props: {
                     return (
                       <box
                         id={`picker-row-${index}`}
-                        height={1}
+                        height={props.rowHeight ?? 1}
                         flexShrink={0}
                         flexDirection="row"
                         paddingLeft={3}
@@ -187,7 +188,7 @@ export function SearchablePicker<T>(props: {
                         backgroundColor={active() || hover.hovered() ? colors.panelHover : colors.panel}
                         {...mouseClick(() => activate(index), enabled, identity, hover)}
                       >
-                        <text width={2} fg={colors.blue}>
+                        <text width={2} height={1} flexShrink={0} fg={colors.blue}>
                           {active() ? "›" : " "}
                         </text>
                         {props.children(item(), active, rowIndex)}

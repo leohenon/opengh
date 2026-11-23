@@ -24,7 +24,7 @@ type RequestArguments = [
   options?: RequestOptions,
 ]
 
-const REQUEST_TIMEOUT_MS = 20_000
+export const REQUEST_TIMEOUT_MS = 20_000
 const HEADER_ALLOWANCE_BYTES = 64 * 1024
 export const MAX_RESPONSE_BYTES = 8 * 1024 * 1024
 const MAX_DIAGNOSTIC_BYTES = 64 * 1024

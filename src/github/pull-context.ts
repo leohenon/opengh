@@ -26,21 +26,21 @@ async function workers<T extends unknown[]>(tasks: [...T], controller: AbortCont
 
 type ObjectValue = Record<string, unknown>
 
-function object(value: unknown): ObjectValue {
+export function object(value: unknown): ObjectValue {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("Invalid PR details response")
   return value as ObjectValue
 }
 
-function text(value: unknown): string {
+export function text(value: unknown): string {
   if (typeof value !== "string") throw new Error("Invalid PR details text")
   return value
 }
 
-function optionalText(value: unknown): string | undefined {
+export function optionalText(value: unknown): string | undefined {
   return value == null ? undefined : text(value)
 }
 
-function boolean(value: unknown): boolean {
+export function boolean(value: unknown): boolean {
   if (typeof value !== "boolean") throw new Error("Invalid PR details boolean")
   return value
 }
@@ -64,11 +64,11 @@ class HeadChangedError extends Error {
 const pageInfo = "pageInfo { hasNextPage endCursor }"
 // The diff hunk is requested once per thread (rootComment below): replies repeat their root's
 // hunk, which can be tens of kilobytes, and only the root's is shown.
-const commentFields = `id author { login } authorAssociation body createdAt updatedAt url
+export const commentFields = `id author { login } authorAssociation body createdAt updatedAt url
   pullRequestReview { databaseId } replyTo { id }
   ${reactionFields}`
 
-function comment(value: unknown): ReviewThreadComment {
+export function comment(value: unknown): ReviewThreadComment {
   const node = object(value)
   return {
     id: text(node.id),
@@ -282,7 +282,7 @@ export function createGitHubPullContext(transport: GitHubTransport) {
           const nodes = await collection(
             "PullThreads",
             `headRefOid reviewThreads(first: 100, after: $cursor) {
-          nodes { id path line originalLine startLine originalStartLine diffSide isResolved isOutdated resolvedBy { login }
+          nodes { id path line originalLine startLine originalStartLine diffSide isResolved isOutdated viewerCanReply resolvedBy { login }
             rootComment: comments(first: 1) { nodes { id diffHunk } }
             comments(first: 100) { nodes { ${commentFields} } ${pageInfo} }
           } ${pageInfo}
@@ -345,6 +345,7 @@ export function createGitHubPullContext(transport: GitHubTransport) {
                   originalStartLine: optionalNumber(node.originalStartLine),
                   originalLine: optionalNumber(node.originalLine),
                   isResolved: boolean(node.isResolved),
+                  canReply: node.viewerCanReply == null ? undefined : boolean(node.viewerCanReply),
                   isOutdated: boolean(node.isOutdated),
                   resolvedBy: node.resolvedBy == null ? undefined : login(node.resolvedBy),
                   createdAt: items[0]?.createdAt,

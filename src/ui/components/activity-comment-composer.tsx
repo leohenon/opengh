@@ -21,6 +21,15 @@ export type ActivityComment = {
   onHintChange(hint: string | undefined): void
 }
 
+export type ThreadReplyEditor = {
+  threadId: string
+  path: string
+  active: boolean
+  title: string
+  comment: ActivityComment
+}
+export const replyEditorId = (reply: ThreadReplyEditor) => (reply.active ? "reply-comment" : `reply-draft:${reply.threadId}`)
+
 export function focusActivityComment(event: MouseEvent, idPrefix: string, comment?: ActivityComment) {
   if (!comment || event.button !== MouseButton.LEFT) return
   for (let node = event.target; node; node = node.parent) {
@@ -36,10 +45,12 @@ export function focusActivityComment(event: MouseEvent, idPrefix: string, commen
 export function ActivityCommentComposer(props: {
   comment: ActivityComment
   idPrefix: string
+  title?: string
   interactive: boolean
   repositoryUrl: string
   sourceUrl?: string
   defaultBranch?: string
+  revealFromId?: string
   scroll(): ScrollBoxRenderable | undefined
 }) {
   const renderer = useRenderer()
@@ -67,13 +78,20 @@ export function ActivityCommentComposer(props: {
       const offset = top + scrollTop
       const requested = pendingReveal
       pendingReveal = undefined
+      const hidden = top + holder.height - scroll.viewport.height
+      const fit = (delta: number, followingLayout = false) => {
+        const from = props.revealFromId ? scroll.content.findDescendantById(props.revealFromId) : undefined
+        if (followingLayout && !from) return delta
+        const first = from ? Math.min(top, Math.max(from.y - scroll.viewport.y, hidden)) : top
+        return Math.min(first, Math.max(hidden, delta))
+      }
       if (requested && (requested.scrollTop === undefined || requested.scrollTop === scrollTop)) {
-        const hidden = top + holder.height - scroll.viewport.height
-        if (hidden > 0) scroll.scrollBy(Math.min(hidden, top))
+        const delta = fit(0)
+        if (delta) scroll.scrollBy(delta)
       } else if (previous?.visible && previous.scrollTop === scrollTop) {
         // Follow layout shifts, not the user's scrolling.
         const delta = offset - previous.offset
-        if (delta) scroll.scrollBy(delta)
+        if (delta) scroll.scrollBy(fit(delta, true))
       }
       const y = top - (scroll.scrollTop - scrollTop)
       previous = { offset, scrollTop: scroll.scrollTop, visible: y < scroll.viewport.height && y + holder.height > 0 }
@@ -95,7 +113,7 @@ export function ActivityCommentComposer(props: {
     on(
       saved,
       (visible) => {
-        if (!visible || !props.interactive) return
+        if (!visible || !props.interactive || props.revealFromId) return
         const scroll = props.scroll()
         if (!scroll || scroll.scrollTop < scroll.scrollHeight - scroll.viewport.height) return
         const scrollTop = scroll.scrollTop
@@ -142,7 +160,7 @@ export function ActivityCommentComposer(props: {
           }
         >
           <InlineCommentComposer
-            title="Comment"
+            title={props.title ?? "Comment"}
             idPrefix={props.idPrefix}
             body={props.comment.body}
             width={width()}

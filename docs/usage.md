@@ -14,7 +14,7 @@ defaults and customization. Press `,` to open settings.
 
 ## Issues and pull requests
 
-Press `c` on a list to create an issue or pull request, or on an issue or pull request to comment, then `ctrl+s` to post. `esc` saves the draft and `ctrl+d` clears it. Type `@` while writing to mention users, and press `a` for actions such as assigning, labeling, closing, or reopening.
+Press `c` on a list to create an issue or pull request, or on an issue or pull request to comment, then `ctrl+s` to post. `esc` saves the draft and `ctrl+d` clears it. Type `@` to mention users, and press `a` for actions such as assigning or closing.
 
 ## Diffs
 
@@ -22,7 +22,7 @@ Press `D` or use the right-click menu to open a commit or PR diff, and `esc` to 
 
 ## Reviews
 
-In a PR diff, click a line's `[+]` to comment on it. To review, press `a` → **Review…** on the PR page, choose a review type, and post it with a comment. Inline comments post separately from the review.
+In a PR diff, click a line's `[+]` to comment on it. To review, press `a` → **Review…** on the PR page, choose a review type, and post it with a comment. Inline comments post separately from the review. Press `R` to reply to a review thread.
 
 ## Search
 

@@ -1,4 +1,10 @@
 import {
+  ActivityCommentComposer,
+  focusActivityComment,
+  replyEditorId,
+  type ThreadReplyEditor,
+} from "../components/activity-comment-composer"
+import {
   BoxRenderable,
   MouseButton,
   RGBA,
@@ -33,7 +39,15 @@ import {
   type JSX,
 } from "solid-js"
 import type { DiffContent, DiffTarget, PullReviewThread } from "../../models"
-import { createDiffCommentCards, isCommentCard, isSavedDraftCard, isSourceRowY, noteBox, type SavedDiffDraft } from "../diff-comment-cards"
+import {
+  createDiffCommentCards,
+  diffReplyLocation,
+  isCommentCard,
+  isSavedDraftCard,
+  isSourceRowY,
+  noteBox,
+  type SavedDiffDraft,
+} from "../diff-comment-cards"
 import type { ResourceState } from "../../repository-state"
 import { SelectableList } from "../components/selectable-list"
 import { ListLine } from "../components/list-line"
@@ -102,6 +116,7 @@ export function DiffScreen(props: {
   target: DiffTarget
   hideHeader?: boolean
   onTotalsChange?: (totals: { additions: number; deletions: number } | undefined) => void
+  onPathsChange?: (paths: ReadonlySet<string> | undefined) => void
   resource: ResourceState<DiffContent>
   interactive: boolean
   active?: boolean
@@ -122,6 +137,9 @@ export function DiffScreen(props: {
   onDraftInput?: (body: string) => void
   onContextMenu?: (position: MousePosition, items: ContextMenuItem[]) => void
   threads?: readonly PullReviewThread[]
+  onReply?: (threadId: string, commentId: string) => void
+  reply?: ThreadReplyEditor
+  replies?: ReadonlyMap<string, ThreadReplyEditor>
   repositoryUrl?: string
   review?: {
     headSha: string
@@ -162,6 +180,7 @@ export function DiffScreen(props: {
           ),
     )
   })
+  createEffect(() => props.onPathsChange?.(content() ? new Set(parsed().files.map((file) => file.path)) : undefined))
   const [path, setPath] = createSignal<string>()
   const selected = createMemo(() => parsed().files.find((file) => file.path === path()) ?? parsed().files[0])
   // Typing in the open composer must not rebuild posted cards or saved-draft markers.
@@ -435,14 +454,60 @@ export function DiffScreen(props: {
       ))
       return dispose
     }, owner)
+  const replyComposers = new Map<
+    string,
+    { reply: ThreadReplyEditor; holder: BoxRenderable; dispose: () => void; place(id: string): void }
+  >()
+  const closeReplyComposer = (threadId: string) => {
+    const composer = replyComposers.get(threadId)
+    if (!composer) return
+    composer.dispose()
+    composer.holder.parent?.remove(composer.holder)
+    composer.holder.destroyRecursively()
+    replyComposers.delete(threadId)
+  }
+  const attachReply = (threadId: string, card: BoxRenderable, contextId: string) => {
+    const reply = props.replies?.get(threadId)
+    if (!reply) return
+    if (replyComposers.get(threadId)?.reply !== reply) {
+      closeReplyComposer(threadId)
+      const holder = new BoxRenderable(renderer, { width: "100%", flexShrink: 0, flexDirection: "column" })
+      const [contextId, place] = createSignal<string>()
+      const dispose = createRoot((dispose) => {
+        insert(holder, () => (
+          <ActivityCommentComposer
+            title={reply.title}
+            comment={reply.comment}
+            idPrefix={replyEditorId(reply)}
+            revealFromId={contextId()}
+            interactive={interactive()}
+            repositoryUrl={props.repositoryUrl ?? ""}
+            defaultBranch={props.resource.value?.kind === "patch" ? props.resource.value.headSha : undefined}
+            scroll={() => scroll}
+          />
+        ))
+        return dispose
+      }, owner)
+      replyComposers.set(threadId, { reply, holder, dispose, place })
+    }
+    const { holder, place } = replyComposers.get(threadId)!
+    place(contextId)
+    card.add(holder)
+    return () => {
+      if (!holder.isDestroyed) holder.parent?.remove(holder)
+    }
+  }
   const cards = new Map<string, ReturnType<typeof createDiffCommentCards>>()
   const clearCards = () => {
     for (const card of cards.values()) card.clear()
   }
   let cardsDirty = true
+  let shownReply: ThreadReplyEditor | undefined
   const refreshCards = () => {
     if (!disposed && host() && cardsDirty) {
       cardsDirty = false
+      const active = props.reply
+      const wasShown = !!active && shownReply === active
       for (const file of visibleFiles()) {
         const entry = panes.get(file.path)
         if (!entry) continue
@@ -451,19 +516,21 @@ export function DiffScreen(props: {
           card = createDiffCommentCards(renderer, renderComment, renderDraft)
           cards.set(file.path, card)
         }
-        card.render(
-          entry.box,
-          rows().filter((row) => row.left?.path === file.path || row.right?.path === file.path),
-          file.path,
-          props.threads ?? [],
+        card.render(entry.box, {
+          rows: rows().filter((row) => row.left?.path === file.path || row.right?.path === file.path),
+          path: file.path,
+          threads: props.threads ?? [],
           colors,
-          currentLayout(),
-          width(),
-          icons().comment,
-          commentsCollapsed(),
-          savedDrafts().filter((draft) => draft.anchor.path === file.path),
-        )
+          layout: currentLayout(),
+          width: width(),
+          commentIcon: icons().comment,
+          collapsed: commentsCollapsed(),
+          savedDrafts: savedDrafts().filter((draft) => draft.anchor.path === file.path),
+          reply: { active: active?.threadId, attach: attachReply },
+        })
       }
+      shownReply = active && replyComposers.get(active.threadId)?.holder.parent ? active : undefined
+      if (active && wasShown && !shownReply) active.comment.onClose()
     }
   }
   // Like posted cards, the composer lives in Hunk's row. It keeps its editor across React and card
@@ -879,6 +946,8 @@ export function DiffScreen(props: {
     theme(),
     props.threads,
     commentsCollapsed(),
+    props.reply,
+    props.replies,
     savedDrafts(),
     colors.text,
     colors.muted,
@@ -1005,6 +1074,28 @@ export function DiffScreen(props: {
     }),
   )
 
+  createEffect(
+    on(
+      () => props.reply,
+      (reply) => {
+        if (!reply) return
+        const file = parsed().files.find((entry) => entry.path === reply.path)
+        if (!file) return
+        if (!filteredFiles().includes(file)) setFileFilter("")
+        if (selected() !== file) setPath(file.path)
+      },
+    ),
+  )
+
+  createEffect(
+    on(
+      () => props.replies,
+      (replies) => {
+        for (const [threadId, composer] of replyComposers) if (replies?.get(threadId) !== composer.reply) closeReplyComposer(threadId)
+      },
+    ),
+  )
+
   let navigatingToFile = false
   let navigatedScrollTop: number | undefined
   const followScroll = () => {
@@ -1035,6 +1126,7 @@ export function DiffScreen(props: {
     // Release our additions before React releases its portal and Solid removes the host.
     clearCards()
     closeComposer()
+    for (const threadId of [...replyComposers.keys()]) closeReplyComposer(threadId)
     for (const entry of panes.values()) entry.pane?.dispose()
     panes.clear()
     const container = host()
@@ -1118,6 +1210,7 @@ export function DiffScreen(props: {
   const toggleLayout = () => setLayout(currentLayout() === "split" ? "unified" : "split")
   const toggleWrap = () => setWrapOverride(!wrap())
   let contextLocation: ReviewLocation | undefined
+  let contextReply: ReturnType<typeof diffReplyLocation>
   // A line inside the selected range comments on the whole range.
   const rangeAt = (hit: ReviewLocation) => {
     const range = location()
@@ -1154,8 +1247,10 @@ export function DiffScreen(props: {
     { label: "Open diff in external viewer", run: () => props.onOpenExternal?.() },
   ]
   const contextMouse = mouseContextMenu(
-    (position) =>
+    (position) => {
+      const reply = contextReply
       props.onContextMenu?.(position, [
+        ...(reply && props.onReply ? [{ label: "Reply in thread…", run: () => props.onReply?.(reply.threadId, reply.commentId) }] : []),
         ...externalItems(),
         ...(props.review && contextLocation
           ? [
@@ -1175,9 +1270,10 @@ export function DiffScreen(props: {
           },
         },
         { label: "Toggle files", run: toggleSidebar },
-      ]),
+      ])
+    },
     interactive,
-    targetKey,
+    () => `${targetKey()}:${contextReply?.threadId ?? ""}:${contextReply?.commentId ?? ""}`,
   )
   const pan = (delta: number) => {
     if (wrap() || !renderFile()) return
@@ -1343,14 +1439,21 @@ export function DiffScreen(props: {
     <box
       {...(props.onContextMenu ? contextMouse : {})}
       onMouseDown={(event) => {
+        if (interactive()) focusActivityComment(event, "reply-comment", props.reply?.comment)
         if (!props.onContextMenu) return
         if (event.button === MouseButton.RIGHT) {
+          contextReply = diffReplyLocation(event.target)
           const hit = clickedLocation(event)
           contextLocation = hit && rangeAt(hit)
           setLocation(contextLocation)
           if (contextLocation) setHunk(contextLocation.hunk)
         }
         contextMouse.onMouseDown(event)
+      }}
+      onMouseUp={(event) => {
+        if (!props.onContextMenu) return
+        if (event.button === MouseButton.RIGHT) contextReply = diffReplyLocation(event.target)
+        contextMouse.onMouseUp(event)
       }}
       flexGrow={1}
       minHeight={0}

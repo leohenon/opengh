@@ -2,7 +2,7 @@ import { posix } from "node:path"
 import type { Element, ElementContent, Root, Text } from "hast"
 import { toHtml } from "hast-util-to-html"
 import { parseFragment } from "parse5"
-import type { PhrasingContent, Root as MarkdownRoot } from "mdast"
+import type { Nodes, PhrasingContent, Root as MarkdownRoot } from "mdast"
 import rehypeRaw from "rehype-raw"
 import rehypeRemark from "rehype-remark"
 import remarkGfm from "remark-gfm"
@@ -791,6 +791,26 @@ function plainCodeFences() {
 }
 const panelProcessor = processor().use(plainCodeFences)
 const discussionPanelProcessor = discussionProcessor().use(plainCodeFences)
+
+export function gitHubMarkdownPreview(value: string): string {
+  const source = value.trimStart().slice(0, 512)
+  function readable(node: Nodes): string {
+    if (node.type === "text" || node.type === "code" || node.type === "inlineCode") return node.value
+    if (node.type === "image" || node.type === "imageReference") return node.alt ?? ""
+    if (node.type === "break") return " "
+    if (!("children" in node)) return ""
+    const delimiter = ["blockquote", "list", "listItem", "table", "tableRow"].includes(node.type) ? " " : ""
+    return node.children.map(readable).join(delimiter)
+  }
+  try {
+    assertMarkdownParseComplexity(source)
+    for (const block of processor.parse(source).children) {
+      const text = readable(block).replace(/\s+/g, " ").trim()
+      if (text) return text
+    }
+  } catch {}
+  return ""
+}
 
 export function normalizeGitHubMarkdown(
   value: string,

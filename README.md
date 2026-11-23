@@ -6,7 +6,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/leohenon/opengh/releases"><img src="https://img.shields.io/github/v/release/leohenon/opengh?sort=semver&amp;style=flat-square&amp;labelColor=24292f&amp;color=orange" alt="Latest release" /></a>&nbsp;
+  <a href="https://github.com/leohenon/opengh/releases"><img src="https://img.shields.io/github/v/release/leohenon/opengh?sort=semver&amp;style=flat-square&amp;labelColor=24292f&amp;color=0969da" alt="Latest release" /></a>&nbsp;
   <a href="https://github.com/leohenon/opengh/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/leohenon/opengh/ci.yml?style=flat-square&amp;branch=main&amp;label=CI&amp;labelColor=24292f" alt="CI" /></a>
 </p>
 

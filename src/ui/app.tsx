@@ -87,13 +87,17 @@ import { mouseContextMenu, type MousePosition } from "./mouse"
 import { IssueReferencesPicker } from "./components/issue-references-picker"
 import type { InlineCommentInput, PostedInlineComment, PullReviewSession, ReviewAnchor, ReviewEligibility } from "../review-types"
 import { InlineCommentUncertainError } from "../inline-comments"
+import { ReviewReplyUncertainError } from "../github/review-replies"
 import { createInlineDrafts, inlineDraftKey, type InlineDrafts } from "../inline-drafts"
 import { createComposeDrafts, type ComposeDraft, type ComposeDrafts } from "../compose-drafts"
-import { InlineCommentConfirmDialog, InlineCommentRetryDialog } from "./components/inline-comment-retry"
-import { PullReviewDialog, ReviewCommentDialog } from "./components/pull-review-dialog"
+import { createReplyDrafts, type ReplyDraftKey, type ReplyDrafts } from "../reply-drafts"
+import { CommentConfirmDialog, InlineCommentConfirmDialog, InlineCommentRetryDialog } from "./components/inline-comment-retry"
+import { SearchablePicker } from "./components/searchable-picker"
+import { PullReviewDialog, ReviewCommentDialog, ReviewEditor } from "./components/pull-review-dialog"
 import { IssueActionDialog, IssueActionsMenu } from "./components/issue-actions"
 import { IssueAssigneesPicker } from "./components/issue-assignees-picker"
-import type { ActivityComment } from "./components/activity-comment-composer"
+import type { ActivityComment, ThreadReplyEditor } from "./components/activity-comment-composer"
+import { gitHubMarkdownPreview } from "./github-markdown"
 import { PullMergeDialog } from "./components/pull-merge-dialog"
 import { PullDraftDialog } from "./components/pull-draft-dialog"
 import { NewIssueDialog } from "./components/new-issue-dialog"
@@ -144,6 +148,9 @@ type Overlay =
   | "pull-draft"
   | "pull-review"
   | "review-comment"
+  | "reply-picker"
+  | "review-reply"
+  | "reply-confirm"
   | "inline-confirm"
   | "inline-retry"
   | "command"
@@ -153,6 +160,8 @@ type Overlay =
   | "new-issue-templates"
   | "new-pull-templates"
   | "new-pull"
+const REPLY_PICKER_ROW_HEIGHT = 2
+
 type ToastState = { id: number; title: string; message: string; duration?: number; tone?: "error" | "success" | "info" }
 type ConversationCommentTarget = { repository: string; number: number; parent?: IssueActionParent }
 const conversationCommentKey = (target: ConversationCommentTarget) =>
@@ -233,6 +242,7 @@ export type AppProps = {
   inlineDrafts?: InlineDrafts
   newIssueDrafts?: ComposeDrafts
   newPullDrafts?: ComposeDrafts
+  replyDrafts?: ReplyDrafts
   onPostInlineComment?: (input: InlineCommentInput, options?: { retryUnconfirmed?: boolean }) => Promise<PostedInlineComment>
   onMergePull?: (number: number, method: PullMergeMethod, expectedHeadSha: string, message?: PullMergeMessage) => Promise<PullRequestDetail>
   onLoadPullMergeMessage?: (number: number, expectedHeadSha: string) => Promise<PullMergeDraft>
@@ -253,6 +263,7 @@ export type AppProps = {
   onRetryPullReferences?: () => Promise<void>
   onRetryPullCommits?: () => Promise<void>
   onRetryPullContext?: () => Promise<void>
+  onPostReviewReply?: (number: number, threadId: string, body: string) => Promise<void>
   onClosePull?: () => void
   onInvalidatePull?: (repository: string, number: number) => void
   onOpenInBrowser?: (target?: string | number, repository?: string, view?: "diff") => Promise<void>
@@ -331,6 +342,7 @@ function AppContent(props: AppProps) {
   const overviewDocument = () => navigation().document
   const setOverviewDocument = (document: string | undefined) => setNavigation((state) => ({ ...state, document }))
   const [diffTotals, setDiffTotals] = createSignal<Partial<Record<Page, { target: DiffTarget; additions: number; deletions: number }>>>({})
+  const [diffPaths, setDiffPaths] = createSignal<Partial<Record<Page, { target: DiffTarget; paths: ReadonlySet<string> }>>>({})
   const [diffCommentsCollapsed, setDiffCommentsCollapsed] = createSignal<Partial<Record<Page, boolean>>>({})
   const [overlay, setOverlay] = createSignal<Overlay>()
   const [toast, setToast] = createSignal<ToastState>()
@@ -375,6 +387,7 @@ function AppContent(props: AppProps) {
     issueEditorExpanded() &&
     ((overlay() === "pull-review" && reviewEditorActive()) ||
       overlay() === "review-comment" ||
+      overlay() === "review-reply" ||
       (overlay() === "issue-action" && issueEditorActive()))
   const [commandHint, setCommandHint] = createSignal<string>()
   const [settingsHint, setSettingsHint] = createSignal<string>()
@@ -577,7 +590,11 @@ function AppContent(props: AppProps) {
       const result = await props.onSubmitIssueAction(action.number, action.kind, action.parent)
       if (disposed || renderer.isDestroyed || data().repo.nameWithOwner !== repository) return
       if (action.kind === "comment") rememberLocalCommentDraft({ repository, number: action.number, parent: action.parent }, "")
-      if ((result.comment || retry) && (action.parent === "pull" ? activePullNumber() : activeIssueNumber()) === action.number)
+      if (
+        (result.comment || retry) &&
+        (action.parent === "pull" ? activePullNumber() : activeIssueNumber()) === action.number &&
+        !currentReply()
+      )
         setRevealActivity({ number: action.number, id: ++revealId, parent: action.parent })
       setToast({
         id: ++toastId,
@@ -766,6 +783,216 @@ function AppContent(props: AppProps) {
       .map((item) => item.thread)
     return [...remote, ...posted]
   }
+  type ReplyTarget = {
+    repositoryId: number
+    number: number
+    thread: PullReviewThread
+    commentId: string
+    key: string
+    headSha: string
+    inDiff: boolean
+  }
+  const [replyTarget, setReplyTarget] = createSignal<ReplyTarget>()
+  const [replyFocused, setReplyFocused] = createSignal(false)
+  const [replyHint, setReplyHint] = createSignal<string>()
+  const [replyConfirm, setReplyConfirm] = createSignal<string>()
+  const [replyPickerHeight, setReplyPickerHeight] = createSignal(17)
+  const replyDrafts = props.replyDrafts ?? createReplyDrafts({ storage: false })
+  const replyNumber = () => {
+    const target = diffTarget()
+    return target ? (target.kind === "pull" ? target.number : undefined) : activePullNumber()
+  }
+  const replyThreads = createMemo(() => {
+    const detail = props.pullDetail
+    if (
+      !props.onPostReviewReply ||
+      !detail ||
+      detail.number !== replyNumber() ||
+      detail.resource.status !== "ready" ||
+      detail.context.status !== "ready"
+    )
+      return []
+    const target = diffTarget()
+    if (target) {
+      const value = resourceForDiff(target).value
+      if (value?.kind !== "patch" || value.headSha !== detail.context.value.readiness.headSha) return []
+    }
+    return detail.context.value.threads.filter((thread) => thread.canReply)
+  })
+  const replyKey = (number: number, threadId: string) => `${data().repo.id}:${number}:${threadId}`
+  const replyLabel = (thread: PullReviewThread) => {
+    const line = thread.line ?? thread.originalLine
+    return `${thread.path}${line === undefined ? "" : `:${line}`} · @${thread.comments[0]?.author ?? "ghost"}`
+  }
+  const replyDraft = (number: number, threadId: string): ReplyDraftKey => ({ repositoryId: data().repo.id, number, threadId })
+  const loadReplyDrafts = (number: number, threadIds: readonly string[]) =>
+    replyDrafts.load(threadIds.map((threadId) => replyDraft(number, threadId)))
+  const replyDraftThreads = () => {
+    const detail = props.pullDetail
+    return props.onPostReviewReply && detail && detail.number === replyNumber() ? (detail.context.value?.threads ?? []) : []
+  }
+  createEffect(
+    on(
+      () =>
+        `${data().repo.id}:${replyNumber()}:${replyDraftThreads()
+          .map((thread) => thread.id)
+          .join(":")}`,
+      () => {
+        const number = replyNumber()
+        const threads = replyDraftThreads()
+        if (number && threads.length)
+          void loadReplyDrafts(
+            number,
+            threads.map((thread) => thread.id),
+          )
+      },
+    ),
+  )
+  const openReply = (threadId: string, commentId?: string) => {
+    const number = replyNumber()
+    const repositoryId = data().repo.id
+    if (!number) return
+    void loadReplyDrafts(number, [threadId]).then(() => {
+      if (!disposed && data().repo.id === repositoryId && replyNumber() === number) showReply(number, threadId, commentId)
+    })
+  }
+  const showReply = (number: number, threadId: string, commentId?: string) => {
+    if (overlay() && overlay() !== "reply-picker") return
+    const thread = replyThreads().find((item) => item.id === threadId)
+    const comment = thread?.comments.find((item) => item.id === commentId) ?? thread?.comments[0]
+    if (!thread || !comment) return
+    const key = replyKey(number, threadId)
+    if (replyDrafts.posting().has(key)) return
+    const diff = diffTarget()
+    const shown = diffPaths()[page()]
+    const inDiff = !!diff && shown?.target === diff && shown.paths.has(thread.path)
+    batch(() => {
+      if (diff && !inDiff) openPull(number)
+      setConversationCommentFocused(false)
+      setInlineDraftOpen(false)
+      setReplyTarget({
+        repositoryId: data().repo.id,
+        number,
+        thread,
+        commentId: comment.id,
+        key,
+        headSha: props.pullDetail!.context.value!.readiness.headSha,
+        inDiff,
+      })
+      setReplyFocused(true)
+      setOverlay()
+    })
+  }
+  const replyOrigin = (target: ReplyTarget) => data().repo.id === target.repositoryId && replyNumber() === target.number
+  const currentReply = createMemo(() => {
+    const target = replyTarget()
+    return target && replyOrigin(target) && target.inDiff === !!diffTarget() ? target : undefined
+  })
+  const closeReplyOverlay = () => {
+    setReplyConfirm()
+    setOverlay()
+  }
+  createEffect(() => {
+    const target = currentReply()
+    const unlisted = target && !target.inDiff && !replyDraftThreads().some((thread) => thread.id === target.thread.id)
+    if (replyTarget() && (!target || unlisted)) {
+      setReplyTarget()
+      if (overlay() === "review-reply" || overlay() === "reply-confirm") closeReplyOverlay()
+    }
+  })
+  const targetDraft = (target: ReplyTarget): ReplyDraftKey => ({
+    repositoryId: target.repositoryId,
+    number: target.number,
+    threadId: target.thread.id,
+  })
+  const saveReplyDraft = (target: ReplyTarget, body: string) => replyDrafts.set(targetDraft(target), body)
+  const compactReply = createMemo(() => (overlay() === "review-reply" ? undefined : currentReply()))
+  const replyCommentFor = (draft: ReplyDraftKey, target: ReplyTarget | undefined): ActivityComment => {
+    const key = replyKey(draft.number, draft.threadId)
+    const threadId = draft.threadId
+    const posting = replyDrafts.posting().has(key)
+    const available = !posting && replyThreads().some((thread) => thread.id === threadId)
+    return {
+      open: !!target && overlay() !== "review-reply",
+      body: replyDrafts.body(draft),
+      saved: !target && !posting && replyDrafts.drafted().has(key),
+      focused: !!target && replyFocused(),
+      enabled: !!target || available,
+      canPost: available,
+      onOpen: () => openReply(threadId),
+      onInput: (body) => target && saveReplyDraft(target, body),
+      onPost: (body) => {
+        if (!target) return
+        saveReplyDraft(target, body)
+        setReplyConfirm(body)
+        setOverlay("reply-confirm")
+      },
+      onClose: () => target && setReplyTarget(),
+      onExpand: () => {
+        if (!target) return
+        setIssueEditorExpanded(true)
+        setOverlay("review-reply")
+      },
+      onFocusChange: (focused) => target && setReplyFocused(focused),
+      onHintChange: (hint) => target && setReplyHint(hint),
+    }
+  }
+  const replyEditorCache = new Map<string, ThreadReplyEditor>()
+  const replyEditorFor = (number: number, thread: PullReviewThread) => {
+    const draft = replyDraft(number, thread.id)
+    const key = replyKey(number, thread.id)
+    const target = () => (currentReply()?.key === key ? currentReply() : undefined)
+    const editor = replyEditorCache.get(key) ?? {
+      threadId: thread.id,
+      path: thread.path,
+      get active() {
+        return !!target()
+      },
+      get title() {
+        const reply = target()
+        return `Reply to @${reply?.thread.comments.find((item) => item.id === reply.commentId)?.author ?? "ghost"}`
+      },
+      get comment() {
+        return replyCommentFor(draft, target())
+      },
+    }
+    replyEditorCache.set(key, editor)
+    return editor
+  }
+  const replyEditors = createMemo<ReadonlyMap<string, ThreadReplyEditor>>((previous) => {
+    const number = replyNumber()
+    const current = currentReply()
+    const drafted = replyDrafts.drafted()
+    const next = new Map<string, ThreadReplyEditor>()
+    if (number)
+      for (const thread of replyDraftThreads())
+        if (current?.key === replyKey(number, thread.id) || drafted.has(replyKey(number, thread.id)))
+          next.set(thread.id, replyEditorFor(number, thread))
+    return next.size === previous.size && [...next].every(([id, editor]) => previous.get(id) === editor) ? previous : next
+  }, new Map())
+  const replyEditor = createMemo(() => {
+    const target = currentReply()
+    return target && replyEditors().get(target.thread.id)
+  })
+  const submitReply = async (target: ReplyTarget, body: string) => {
+    const post = props.onPostReviewReply
+    if (!post || !replyOrigin(target) || !body.trim() || replyDrafts.posting().has(target.key)) return
+    saveReplyDraft(target, body)
+    setReplyTarget()
+    closeReplyOverlay()
+    try {
+      await replyDrafts.post(targetDraft(target), () => post(target.number, target.thread.id, body))
+      if (!disposed && !renderer.isDestroyed && replyOrigin(target))
+        setToast({ id: ++toastId, title: "Reply posted", message: replyLabel(target.thread), duration: 2000, tone: "success" })
+    } catch (error) {
+      if (!disposed && !renderer.isDestroyed && data().repo.id === target.repositoryId)
+        setToast({
+          id: ++toastId,
+          title: error instanceof ReviewReplyUncertainError ? "Reply not confirmed" : "Reply not posted",
+          message: `${replyOrigin(target) ? "" : `#${target.number} ${replyLabel(target.thread)}: `}${error instanceof Error ? error.message : String(error)}`,
+        })
+    }
+  }
   // Reopening reviews clears eligibility while loading. Holding the last answer, which is checked
   // against the PR below, keeps an open draft and the [+] column still; errors drop it.
   const reviewEligibility = createMemo<ReviewEligibility | undefined>((previous) => {
@@ -878,6 +1105,7 @@ function AppContent(props: AppProps) {
       comments: [],
       jump: reviewJump(),
       onComment: (anchor: ReviewAnchor) => {
+        setReplyTarget()
         const context = {
           accountId: eligible.accountId,
           repositoryId: eligible.repositoryId,
@@ -1132,6 +1360,7 @@ function AppContent(props: AppProps) {
     setRevealActivity({ number: target.number, parent: target.parent, id: ++revealId })
   const openConversationComment = (target: ConversationCommentTarget) => {
     if (!canOpenConversationComment(target)) return
+    setReplyTarget()
     if (!sameConversationComment(target) || !conversationCommentOpen()) {
       props.onPrepareIssueAction?.(target.number, "comment", target.parent)
       rememberLocalCommentDraft(target, conversationDraft(target))
@@ -1457,6 +1686,7 @@ function AppContent(props: AppProps) {
     const pendingDraft = pendingDraftUpdates().find((pending) => pending.repository === data().repo.nameWithOwner)
     if (pendingDraft) return pendingDraft.draft ? "marking-draft" : "marking-ready"
     if (postingInline()?.repository === data().repo.nameWithOwner) return "posting-comment"
+    if ([...replyDrafts.posting()].some((key) => key.startsWith(`${data().repo.id}:`))) return "posting-comment"
     if (reviewSubmitting()?.repository === data().repo.nameWithOwner) return "submitting-review"
     if (pendingMerges().some((pending) => pending.repository === data().repo.nameWithOwner)) return "merging-pull"
     const pendingAction = pendingIssueActions().find((action) => action.repository === data().repo.nameWithOwner)
@@ -1664,11 +1894,14 @@ function AppContent(props: AppProps) {
     setNavigation((state) => navigate(back(state), "overview"))
     if (
       overlay() === "issue-references" ||
+      overlay() === "reply-picker" ||
       overlay() === "issue-actions" ||
       overlay() === "issue-action" ||
       overlay() === "pull-merge" ||
       overlay() === "pull-draft" ||
       overlay() === "pull-review" ||
+      overlay() === "review-reply" ||
+      overlay() === "reply-confirm" ||
       overlay() === "review-comment" ||
       overlay() === "inline-confirm" ||
       overlay() === "inline-retry" ||
@@ -2072,11 +2305,13 @@ function AppContent(props: AppProps) {
       : []
   const openMessageContext = (target: ReactionTarget, body: string, position: MousePosition) => {
     const message = () => reactionMessages().find((message) => sameReactionTarget(message.target, target))
-    const current = message()
-    if (!current) return
+    if (!message()) return
+    const commentId = target.kind === "review-comment" ? target.id : undefined
+    const thread = commentId ? replyThreads().find((thread) => thread.comments.some((comment) => comment.id === commentId)) : undefined
     openContextMenu(
       position,
       [
+        ...(thread ? [{ label: "Reply in thread…", run: () => openReply(thread.id, commentId) }] : []),
         {
           label: "React",
           run: () => openReactions(target),
@@ -2207,6 +2442,8 @@ function AppContent(props: AppProps) {
       overlay() === "pull-merge" ||
       overlay() === "pull-draft" ||
       overlay() === "pull-review" ||
+      overlay() === "review-reply" ||
+      overlay() === "reply-confirm" ||
       overlay() === "review-comment" ||
       overlay() === "inline-confirm" ||
       overlay() === "inline-retry" ||
@@ -2216,6 +2453,7 @@ function AppContent(props: AppProps) {
       overlay() === "new-pull"
     )
       return issueActionHint()
+    if (overlay() === "reply-picker") return hint(["picker.accept", "reply"], [["picker.up", "picker.down"], "select"], close)
     if (overlay() === "issue-actions") return hint(open, close)
     if (overlay() === "help") return hint(close)
     if (overlay() === "diff-viewer-setup") return issueActionHint()
@@ -2223,6 +2461,7 @@ function AppContent(props: AppProps) {
     if (overlay() === "command") return commandHint()
     if (overlay() === "branch-picker" || overlay() === "switch-repo") return hint(...picker)
     if (overlay() === "issue-references") return hint(open, close, ["references.switchTab", "switch tabs"], copy)
+    if (compactReply() && replyFocused()) return replyHint()
     if (editingConversationComment()) return conversationCommentHint()
     // Arrays are priority lists, identical at every terminal width. The footer
     // fits whole hints without hiding recovery/primary actions behind copy/open.
@@ -2270,6 +2509,7 @@ function AppContent(props: AppProps) {
         ["diff.toggleFiles", "toggle files"],
         ["diff.filterFiles", "filter files"],
         ...comments,
+        ...(replyThreads().length ? [["pull.reply", "reply"] as const] : []),
         ...(failed
           ? []
           : ([
@@ -2324,6 +2564,7 @@ function AppContent(props: AppProps) {
         diff,
         ...(canComment() ? [["issue.comment", "comment"] as const] : []),
         ...(hasIssueActions() ? [["issue.actions", "actions"] as const] : []),
+        ...(replyThreads().length ? [["pull.reply", "reply"] as const] : []),
         ...more(pullDetail().comments.status !== "loading" && pullDetail().comments.value?.hasMore),
         timeline,
         ...(pullMenuItems().length ? [["detail.references", "references"] as const] : []),
@@ -2504,6 +2745,12 @@ function AppContent(props: AppProps) {
           if (resource?.status === "error" && target) props.onRetryResource?.(target)
           else props.onRefresh?.()
         }
+      },
+      "pull.reply": () => {
+        const count = replyThreads().length
+        if (!count || inlineDraftFocused()[page()]) return false
+        setReplyPickerHeight(6 + Math.min(6, count) * REPLY_PICKER_ROW_HEIGHT)
+        setOverlay("reply-picker")
       },
       "issue.comment": () => {
         if (diffTarget() || !canComment()) return false
@@ -2951,6 +3198,8 @@ function AppContent(props: AppProps) {
                                   summary={pullSummary()}
                                   detail={pullDetail()}
                                   comment={activityCommentFor(number, "pull")}
+                                  reply={diffTarget() ? undefined : replyEditor()}
+                                  replies={diffTarget() ? undefined : replyEditors()}
                                   onOpenReference={openReference}
                                   timelineCollapsed={timelineCollapsed()}
                                   checksExpanded={checksExpanded()}
@@ -2991,6 +3240,9 @@ function AppContent(props: AppProps) {
                                       if (context) saveInlineDraft(context, body)
                                     }}
                                     threads={threadsForDiff(target)}
+                                    onReply={target.kind === "pull" && props.onPostReviewReply ? openReply : undefined}
+                                    reply={owner === "pulls" && diffTarget() === target ? replyEditor() : undefined}
+                                    replies={owner === "pulls" && diffTarget() === target ? replyEditors() : undefined}
                                     repositoryUrl={data().repo.url}
                                     interactive={page() === owner && overlay() === undefined}
                                     onOpenGitHub={() => openCurrentDiffGitHub(target)}
@@ -3005,6 +3257,9 @@ function AppContent(props: AppProps) {
                                       )
                                     }
                                     onDraftFocusChange={(focused) => setInlineDraftFocused((current) => ({ ...current, [owner]: focused }))}
+                                    onPathsChange={(paths) =>
+                                      setDiffPaths((current) => ({ ...current, [owner]: paths && { target, paths } }))
+                                    }
                                     onTotalsChange={(totals) =>
                                       setDiffTotals((current) => ({ ...current, [owner]: totals ? { target, ...totals } : undefined }))
                                     }
@@ -3327,6 +3582,72 @@ function AppContent(props: AppProps) {
                               if (context && JSON.stringify({ ...context, body: input.body }) === JSON.stringify(input))
                                 void submitInlineComment(input.body)
                             }}
+                          />
+                        )}
+                      </Show>
+                      <Show when={overlay() === "reply-picker"}>
+                        <SearchablePicker
+                          title="Reply to a review thread"
+                          placeholder="Filter by file, author, or comment…"
+                          items={replyThreads()}
+                          itemKey={(thread) => thread.id}
+                          itemDisabled={(thread) => replyDrafts.posting().has(replyKey(replyNumber()!, thread.id))}
+                          match={(thread, query) =>
+                            `${replyLabel(thread)} ${thread.comments[0]?.body ?? ""}`.toLowerCase().includes(query.toLowerCase())
+                              ? 0
+                              : undefined
+                          }
+                          onSelect={(thread) => openReply(thread.id)}
+                          onClose={() => setOverlay()}
+                          showScrollbar={config().showScrollbars}
+                          empty="No matching review threads."
+                          height={replyPickerHeight()}
+                          rowHeight={REPLY_PICKER_ROW_HEIGHT}
+                        >
+                          {(thread) => (
+                            <box flexGrow={1} flexBasis={0} minWidth={0} flexDirection="column">
+                              <text height={1} flexShrink={0} wrapMode="none" truncate fg={colors.text}>
+                                {gitHubMarkdownPreview(thread.comments[0]?.body ?? "") || "No comment preview"}
+                              </text>
+                              <text height={1} flexShrink={0} wrapMode="none" truncate fg={colors.muted}>
+                                {replyLabel(thread)}
+                                {replyDrafts.drafted().has(replyKey(replyNumber()!, thread.id)) ? " · draft saved" : ""}
+                              </text>
+                            </box>
+                          )}
+                        </SearchablePicker>
+                      </Show>
+                      <Show when={overlay() === "reply-confirm" ? currentReply() : undefined} keyed>
+                        {(target) => (
+                          <CommentConfirmDialog
+                            title="Post reply to review thread?"
+                            location={replyLabel(target.thread)}
+                            onConfirm={() => void submitReply(target, replyConfirm() ?? "")}
+                            onClose={closeReplyOverlay}
+                            onHintChange={setIssueActionHint}
+                          />
+                        )}
+                      </Show>
+                      <Show when={overlay() === "review-reply" ? currentReply() : undefined} keyed>
+                        {(target) => (
+                          <ReviewEditor
+                            title={`Reply · ${replyLabel(target.thread)}`}
+                            body={replyDrafts.body(targetDraft(target))}
+                            repositoryUrl={data().repo.url}
+                            headSha={target.headSha}
+                            saveLabel="Post reply"
+                            confirmTitle="Post reply to review thread?"
+                            showScrollbar={config().showScrollbars}
+                            expanded={issueEditorExpanded()}
+                            onExpandedChange={(expanded) => {
+                              setIssueEditorExpanded(expanded)
+                              if (!expanded) closeReplyOverlay()
+                            }}
+                            showStatusBarHints={config().showStatusBarHints}
+                            onChange={(body) => saveReplyDraft(target, body)}
+                            onSave={(body) => void submitReply(target, body)}
+                            onClose={closeReplyOverlay}
+                            onHintChange={setIssueActionHint}
                           />
                         )}
                       </Show>

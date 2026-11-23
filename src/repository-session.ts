@@ -49,6 +49,7 @@ import {
 } from "./github/client"
 import { GitHubApiError, type RequestOptions } from "./github/transport"
 import type { PullMergeability } from "./github/pull-context"
+import { postGitHubReviewReply, ReviewReplyUncertainError, ReviewThreadChangedError } from "./github/review-replies"
 import { loadGitHubMentionableUsers } from "./github/mentionable-users"
 import type { IssueCommentConfirmation, IssueCommentDraft } from "./github/issue-comments"
 import { createRequestBudget, MAX_AUTOMATIC_PAGES, RequestBudgetLimitError } from "./github/request-budget"
@@ -179,6 +180,7 @@ export type RepositoryLoaders = {
   hasIssues?(repository: RepositoryTarget, state: ListState, options?: RequestOptions): Promise<boolean>
   pull(repository: RepositoryTarget, number: number, options?: RequestOptions): Promise<PullRequestDetail>
   pullCommits(repository: RepositoryTarget, number: number, options?: RequestOptions): Promise<CommitSummary[]>
+  postReviewReply?: typeof postGitHubReviewReply
   pullContext(repository: RepositoryTarget, number: number, options?: RequestOptions): Promise<PullContext>
   pullMergeability?(repository: RepositoryTarget, number: number, options?: RequestOptions): Promise<PullMergeability>
   pulls(
@@ -227,6 +229,7 @@ export type RepositorySession = {
   retryPullReferences(): Promise<void>
   retryPullCommits(): Promise<void>
   retryPullContext(): Promise<void>
+  postReviewReply?(number: number, threadId: string, body: string): Promise<void>
   clearPull(): void
   // Marks a retained PR stale after a change made outside the session (reviews, inline comments).
   // Optional so hand-built test sessions need not stub it.
@@ -303,6 +306,7 @@ const defaultLoaders: RepositoryLoaders = {
   pull: loadGitHubPull,
   pullCommits: loadGitHubPullCommits,
   pullContext: loadGitHubPullContext,
+  postReviewReply: postGitHubReviewReply,
   pullMergeability: loadGitHubPullMergeability,
   pulls: loadGitHubPulls,
   runs: loadGitHubRuns,
@@ -1796,6 +1800,52 @@ export function createRepositorySession(
       return
     setPullDetail({ ...detail, context: loadingResource(detail.context.value) })
     return fetchPullContext(current.repository, detail.number, pullGeneration, detail.context.value)
+  }
+
+  const postReviewReply = async (number: number, threadId: string, body: string) => {
+    const current = state()
+    const detail = pullDetail()
+    const post = loaders.postReviewReply
+    if (
+      !post ||
+      current.status !== "ready" ||
+      detail?.number !== number ||
+      detail.resource.status !== "ready" ||
+      detail.context.status !== "ready" ||
+      !detail.context.value.threads.some((thread) => thread.id === threadId && thread.canReply)
+    )
+      throw new Error("Refresh the pull request to check whether you can reply to this thread.")
+    const {
+      repository,
+      data: { repo },
+    } = current
+    const origin = () => {
+      const active = state()
+      return active.status === "ready" && active.data.repo.id === repo.id && pullDetail()?.number === number
+    }
+    try {
+      const reply = await post(repo, number, threadId, body)
+      invalidatePull(repository, number)
+      if (!origin()) return
+      const active = pullDetail()!
+      const context = active.context.value
+      if (active.context.status !== "ready" || !context || !context.threads.some((thread) => thread.id === threadId)) {
+        void loadPull(number, { force: true })
+        return
+      }
+      const threads = context.threads.map((thread) =>
+        thread.id === threadId && !thread.comments.some((item) => item.id === reply.id)
+          ? { ...thread, comments: [...thread.comments, reply] }
+          : thread,
+      )
+      setPullDetail({ ...active, context: { status: "ready", value: { ...context, threads } } })
+    } catch (error) {
+      if (error instanceof ReviewReplyUncertainError || error instanceof ReviewThreadChangedError) {
+        invalidatePull(repository, number)
+        if (origin()) void retryPullContext()
+      }
+      throw error
+    }
   }
 
   const retryPullCommits = async () => {
@@ -4159,6 +4209,7 @@ export function createRepositorySession(
     retryPullReferences,
     retryPullCommits,
     retryPullContext,
+    postReviewReply: loaders.postReviewReply ? postReviewReply : undefined,
     clearPull,
     invalidatePull,
     issueDetail,

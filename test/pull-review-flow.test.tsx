@@ -1,10 +1,18 @@
 import { expect, test } from "bun:test"
-import { TextBufferRenderable, type Renderable, type TextareaRenderable, type TextRenderable } from "@opentui/core"
+import {
+  type ScrollBoxRenderable,
+  TextBufferRenderable,
+  type Renderable,
+  type TextareaRenderable,
+  type TextRenderable,
+} from "@opentui/core"
 import { createTestRenderer } from "@opentui/core/testing"
 import { render } from "@opentui/solid"
 import { createSignal } from "solid-js"
 import type { PullReviewThread } from "../src/models"
 import { defaultConfig } from "../src/config"
+import type { ComposeDraft } from "../src/compose-drafts"
+import { createReplyDrafts } from "../src/reply-drafts"
 import type { InlineCommentInput, PostedInlineComment, PullReviewSession, ReviewSessionState } from "../src/review-types"
 import { InlineCommentUncertainError } from "../src/inline-comments"
 import { App } from "../src/ui/app"
@@ -99,6 +107,7 @@ test("draft PR inline comments open from Hunk's [+] in opengh's editor and publi
         data={githubDataFixture}
         operations={repositoryOperationsFixture}
         reviews={reviews}
+        onPostReviewReply={async () => {}}
         onPostInlineComment={async (input, options) => {
           inlinePosts.push(input)
           retryOptions.push(options)
@@ -455,12 +464,29 @@ test("draft PR inline comments open from Hunk's [+] in opengh's editor and publi
     expect(setup.renderer.root.findDescendantById("review-submit")).toBeUndefined()
     setup.mockInput.pressEscape()
     await settle()
+
+    setThreads((items) => items.map((thread) => (thread.id === remoteThread.id ? { ...thread, canReply: true } : thread)))
+    setup.mockInput.pressKey("R")
+    await settle()
+    setup.mockInput.pressEnter()
+    await settle()
+    expect(setup.renderer.root.findDescendantById("reply-comment-editor")).toBeDefined()
+    setup.mockInput.pressKey("o", { ctrl: true })
+    await settle()
+    expect(setup.renderer.root.findDescendantById("review-editor-body")).toBeDefined()
+    setup.mockInput.pressKey("o", { ctrl: true })
+    await settle()
+    expect(setup.renderer.root.findDescendantById("reply-comment-editor")).toBeDefined()
+    setup.mockInput.pressEscape()
+    await settle()
+
     setup.mockInput.pressKey("a")
     await settle()
     await clickControl(setup, "issue-menu-review")
     await settle()
     setup.mockInput.pressEnter()
     await settle()
+    expect(setup.captureCharFrame()).toContain("ctrl+o expand")
     await setup.mockInput.typeText("Overall review feedback")
     await settle()
     setup.mockInput.pressKey("s", { ctrl: true })
@@ -481,3 +507,488 @@ test("draft PR inline comments open from Hunk's [+] in opengh's editor and publi
     setup.renderer.destroy()
   }
 }, 15_000)
+
+async function replyFixture(options: { files?: number; commenting?: boolean } = {}) {
+  const summary = githubDataFixture.pulls.open.value!.items[0]!
+  const { number } = summary
+  const headSha = "a".repeat(40)
+  const baseSha = "b".repeat(40)
+  const root = {
+    id: "review-root",
+    body: "## Could this be **simpler**?",
+    diffHunk: "@@ -1 +1 @@\n-const oldValue = 1\n+const newValue = 2",
+    author: "alice",
+    authorAssociation: "MEMBER",
+    createdAt: "2026-01-01",
+    updatedAt: "2026-01-01",
+    url: `${githubDataFixture.repo.url}/pull/${number}#discussion_r1`,
+  }
+  const trailingLines = Array.from({ length: 60 }, (_, index) => `Later content ${index + 1}`)
+  const patch =
+    patchFixture.replace("@@ -1 +1 @@", "@@ -1,61 +1,61 @@") +
+    trailingLines.map((line) => ` // ${line}\n`).join("") +
+    Array.from(
+      { length: options.files ?? 0 },
+      (_, index) =>
+        `diff --git a/f${index}.ts b/f${index}.ts\nindex 1111111..2222222 100644\n--- a/f${index}.ts\n+++ b/f${index}.ts\n@@ -1 +1 @@\n-a\n+b\n`,
+    ).join("")
+  const followup = { ...root, id: "followup", author: "bob", body: "I agree", replyToId: root.id }
+  const [threads, setThreads] = createSignal<PullReviewThread[]>([
+    {
+      kind: "review-thread",
+      id: "reply-here",
+      path: "example.ts",
+      line: 1,
+      diffSide: "RIGHT",
+      isResolved: false,
+      isOutdated: false,
+      canReply: true,
+      createdAt: root.createdAt,
+      comments: [root, followup],
+    },
+    {
+      kind: "review-thread",
+      id: "no-reply",
+      path: "example.ts",
+      line: 1,
+      diffSide: "LEFT",
+      isResolved: false,
+      isOutdated: false,
+      canReply: false,
+      comments: [{ ...root, id: "another-comment" }],
+    },
+  ])
+  const calls: [number, string, string][] = []
+  const stored = new Map<string, ComposeDraft>([[`${number}:reply-here`, { title: "", body: "Draft from last time" }]])
+  const drafts = createReplyDrafts({
+    delay: 0,
+    storage: {
+      load: async (key) => stored.get(key.head!),
+      save: async (key, draft) => void stored.set(key.head!, draft),
+      remove: async (key) => void stored.delete(key.head!),
+    },
+  })
+  let failing: { reject(error: Error): void } | undefined
+  const [conversationDraft, setConversationDraft] = createSignal("")
+  let landComment: (() => void) | undefined
+  const setup = await createTestRenderer({ width: 120, height: 42 })
+  initializeHunk(setup.renderer)
+  await render(
+    () => (
+      <App
+        data={githubDataFixture}
+        operations={repositoryOperationsFixture}
+        config={{ ...defaultConfig, showStatusBarHints: true }}
+        initialNavigation={{ detail: { kind: "pull", number } }}
+        onLoadDiff={async () => {}}
+        getReactionAction={() => ({ operation: { status: "idle" } })}
+        onAddReaction={async () => ({ reactions: {}, viewerReactions: [], canReact: true })}
+        replyDrafts={drafts}
+        {...(options.commenting
+          ? {
+              getIssueAction: () => ({ body: conversationDraft(), reason: "completed" as const, operation: { status: "idle" as const } }),
+              onIssueDraftChange: (_number: number, draft: { body?: string }) => {
+                if (draft.body !== undefined) setConversationDraft(draft.body)
+              },
+              onPrepareIssueAction: () => {},
+              onSubmitIssueAction: async () => {
+                await new Promise<void>((resolve) => (landComment = resolve))
+                setConversationDraft("")
+                return { comment: { ...root, id: 100, createdAt: "2026-03-02", body: "A conversation comment" } }
+              },
+            }
+          : {})}
+        onPostReviewReply={async (pr, threadId, body) => {
+          calls.push([pr, threadId, body])
+          if (body === "Lost reply") await new Promise((_, reject) => (failing = { reject }))
+          setThreads((threads) =>
+            threads.map((thread) =>
+              thread.id === threadId
+                ? { ...thread, comments: [...thread.comments, { ...root, id: `reply-${calls.length}`, replyToId: root.id, body }] }
+                : thread,
+            ),
+          )
+        }}
+        pullDetail={{
+          number,
+          resource: {
+            status: "ready",
+            value: {
+              ...summary,
+              draft: false,
+              merged: false,
+              permissions: options.commenting ? { comment: true } : undefined,
+              body: "PR body",
+              headSha,
+              url: `${githubDataFixture.repo.url}/pull/${number}`,
+              updatedAt: summary.createdAt,
+              baseBranch: "main",
+              headBranch: "test",
+              additions: 1,
+              deletions: 1,
+              changedFiles: 1,
+              commitCount: 1,
+              commentCount: 0,
+              labels: [],
+              assignees: [],
+              reviewers: [],
+              mergeable: null,
+            },
+          },
+          commits: { status: "ready", value: [] },
+          comments: {
+            status: "ready",
+            value: {
+              items: [{ ...root, id: 99, createdAt: "2026-03-01", body: trailingLines.join("\n\n") }],
+              page: 1,
+              hasMore: false,
+            },
+          },
+          references: { status: "ready", value: [] },
+          context: {
+            status: "ready",
+            value: { ...pullContextFixture, readiness: { ...pullContextFixture.readiness, headSha }, threads: threads() },
+          },
+        }}
+        diffs={{
+          pull: {
+            target: { kind: "pull", number },
+            resource: { status: "ready", value: { kind: "patch", patch, headSha, baseSha } },
+          },
+        }}
+      />
+    ),
+    setup.renderer,
+  )
+  const settle = async () => {
+    await Bun.sleep(40)
+    await setup.flush()
+    await setup.renderer.idle()
+    await setup.flush()
+  }
+  const send = async (body: string) => {
+    await setup.mockInput.typeText(body)
+    setup.mockInput.pressKey("s", { ctrl: true })
+    await settle()
+    expect(calls.some((call) => call[2] === body)).toBe(false)
+    expect(setup.captureCharFrame()).toContain("Post reply to review thread?")
+    setup.mockInput.pressEnter()
+    await settle()
+    expect(calls.at(-1)).toEqual([number, "reply-here", body])
+  }
+  const rightClick = async (id: string) => {
+    const node = setup.renderer.root.findDescendantById(id)
+    expect(node).toBeDefined()
+
+    await setup.mockMouse.click(node!.x + 2, node!.y, 2)
+    await settle()
+    expect(setup.renderer.root.findDescendantById("context-menu")).toBeDefined()
+  }
+  const expectReplyBelow = (lastReplyId: string) => {
+    const lastReply = setup.renderer.root.findDescendantById(lastReplyId)!
+    const area = setup.renderer.root.findDescendantById("reply-comment-area")!
+    expect(area.y).toBeGreaterThanOrEqual(lastReply.y + lastReply.height)
+  }
+  const scrollBox = (id: string) => setup.renderer.root.findDescendantById(id) as ScrollBoxRenderable
+  const scrollPast = async (scroll: ScrollBoxRenderable, commentId: string) => {
+    scroll.scrollTo(scroll.scrollHeight)
+    await settle()
+    const comment = setup.renderer.root.findDescendantById(commentId)!
+    expect(comment.y + comment.height).toBeLessThanOrEqual(scroll.viewport.y)
+  }
+  const expectVisibleReply = (scroll: ScrollBoxRenderable, contextId: string) => {
+    const context = setup.renderer.root.findDescendantById(contextId)!
+    const editor = setup.renderer.root.findDescendantById("reply-comment-area")!
+    expect(context.y).toBeGreaterThanOrEqual(scroll.viewport.y)
+    expect(editor.y + editor.height).toBeLessThanOrEqual(scroll.viewport.y + scroll.viewport.height)
+  }
+  const selectReplyFromPicker = async () => {
+    setup.mockInput.pressKey("R")
+    await settle()
+    await setup.mockInput.typeText("simpler")
+    await settle()
+    setup.mockInput.pressEnter()
+    await settle()
+  }
+  return {
+    number,
+    root,
+    followup,
+    threads,
+    setThreads,
+    calls,
+    stored,
+    drafts,
+    setup,
+    settle,
+    send,
+    rightClick,
+    expectReplyBelow,
+    scrollBox,
+    scrollPast,
+    expectVisibleReply,
+    selectReplyFromPicker,
+    rejectReply: (error: Error) => failing!.reject(error),
+    landComment: () => landComment!(),
+  }
+}
+
+test("reply to the same review thread from the PR conversation and the diff", async () => {
+  const {
+    number,
+    root,
+    followup,
+    threads,
+    setThreads,
+    calls,
+    stored,
+    drafts,
+    setup,
+    settle,
+    send,
+    rightClick,
+    expectReplyBelow,
+    scrollBox,
+    scrollPast,
+    expectVisibleReply,
+    selectReplyFromPicker,
+    rejectReply,
+  } = await replyFixture()
+  try {
+    await settle()
+    const timelineScroll = scrollBox("pull-detail-scroll")
+    const timelineComment = `message-review-${number}-review-root`
+    await scrollPast(timelineScroll, timelineComment)
+    const resume = "reply-draft:reply-here-resume"
+    expect(setup.renderer.root.findDescendantById(resume)).toBeDefined()
+    setup.mockInput.pressKey("R")
+    await settle()
+    const frame = setup.captureCharFrame()
+    expect(frame).toContain("Reply to a review thread")
+    const lines = frame.split("\n")
+    const preview = lines.findIndex((line) => line.includes("Could this be simpler?"))
+    expect(preview).toBeGreaterThanOrEqual(0)
+    expect(lines[preview]).not.toContain("example.ts:1")
+    expect(lines[preview + 1]).toContain("example.ts:1 · @alice")
+    expect(setup.renderer.root.findDescendantById("picker-row-0")?.height).toBe(2)
+    expect(frame).not.toContain("## Could this")
+    expect(frame).toContain("enter reply")
+    expect(frame).toContain("select · esc close")
+    const query = setup.renderer.root.findDescendantById("picker-query")!
+    const queryY = query.y
+    await setup.mockInput.typeText("impossible match")
+    await settle()
+    expect(setup.captureCharFrame()).toContain("No matching review threads.")
+    expect(query.y).toBe(queryY)
+    setup.mockInput.pressEscape()
+    await settle()
+    await selectReplyFromPicker()
+    expectVisibleReply(timelineScroll, "review-code-reply-here")
+    expectVisibleReply(timelineScroll, "review-thread-header:reply-here")
+    const editor = setup.renderer.root.findDescendantById("reply-comment-editor") as TextareaRenderable
+    expect(editor).toBeDefined()
+    expectReplyBelow(`message-review-${number}-followup`)
+    expect(editor.plainText).toBe("Draft from last time")
+    setup.mockInput.pressKey("d", { ctrl: true })
+    await setup.mockInput.typeText("Draft reply")
+    setup.mockInput.pressKey("s", { ctrl: true })
+    await settle()
+    expect(setup.captureCharFrame()).toContain("Post reply to review thread?")
+    setup.mockInput.pressEscape()
+    await settle()
+    expect(setup.renderer.root.findDescendantById("reply-comment-editor")).toBe(editor)
+    expect(editor.plainText).toBe("Draft reply")
+    setup.mockInput.pressEscape()
+    await settle()
+    expect(setup.renderer.root.findDescendantById("reply-comment-editor")).toBeUndefined()
+    expect(setup.captureCharFrame()).toContain("Draft saved · Resume")
+    await clickControl(setup, resume)
+    await settle()
+    expect((setup.renderer.root.findDescendantById("reply-comment-editor") as TextareaRenderable).plainText).toBe("Draft reply")
+    setup.mockInput.pressEscape()
+    await settle()
+    setup.mockInput.pressKey("R")
+    await settle()
+    expect(setup.captureCharFrame()).toContain("example.ts:1 · @alice · draft saved")
+    setup.mockInput.pressEscape()
+    await settle()
+    await rightClick(`message-review-${number}-followup`)
+    expect(setup.captureCharFrame()).toContain("Reply in thread…")
+    expect(setup.captureCharFrame()).toContain("Copy text")
+    await clickControl(setup, "context-menu-row-0")
+    await settle()
+    expect((setup.renderer.root.findDescendantById("reply-comment-editor") as TextareaRenderable).plainText).toBe("Draft reply")
+    expect(setup.captureCharFrame()).toContain("Reply to @bob")
+    setup.mockInput.pressKey("d", { ctrl: true })
+    await send("Reply from the conversation")
+
+    setup.mockInput.pressKey("D")
+    await settle()
+    const diffScroll = scrollBox("diff-body-scroll")
+    const diffComment = "diff-comment-card:reply-here"
+    await scrollPast(diffScroll, diffComment)
+    await selectReplyFromPicker()
+    expectVisibleReply(diffScroll, diffComment)
+    expectReplyBelow("diff-comment-card:reply-here:body:2")
+    const diffEditor = setup.renderer.root.findDescendantById("reply-comment-editor") as TextareaRenderable
+    await setup.mockInput.typeText("Kept")
+    setup.mockInput.pressArrow("left")
+    await settle()
+    const scrollTop = diffScroll.scrollTop
+    setThreads((threads) => threads.map((thread) => ({ ...thread })))
+    await settle()
+    setup.renderer.resize(118, 42)
+    await settle()
+    expect(setup.renderer.root.findDescendantById("reply-comment-editor")).toBe(diffEditor)
+    expect([diffEditor.plainText, diffEditor.cursorOffset, diffEditor.focused]).toEqual(["Kept", 3, true])
+    expect(diffScroll.scrollTop).toBe(scrollTop)
+    expectVisibleReply(diffScroll, diffComment)
+    setup.mockInput.pressEscape()
+    await settle()
+    const card = setup.renderer.root.findDescendantById(diffComment)!
+    const saved = setup.renderer.root.findDescendantById(resume)!
+    expect(saved.y).toBeGreaterThan(card.y)
+    expect(saved.y).toBeLessThan(card.y + card.height)
+    await clickControl(setup, resume)
+    await settle()
+    expect((setup.renderer.root.findDescendantById("reply-comment-editor") as TextareaRenderable).plainText).toBe("Kept")
+    setup.mockInput.pressKey("d", { ctrl: true })
+    setup.mockInput.pressEscape()
+    await settle()
+    expect(setup.renderer.root.findDescendantById(resume)).toBeUndefined()
+    diffScroll.scrollTo(0)
+    await settle()
+    await rightClick("diff-comment-card:no-reply")
+    expect(setup.captureCharFrame()).not.toContain("Reply in thread…")
+    setup.mockInput.pressEscape()
+    await settle()
+    await rightClick("diff-comment-card:reply-here:header:1")
+    expect(setup.captureCharFrame()).toContain("Reply in thread…")
+    expect(setup.captureCharFrame()).not.toContain("Add review comment…")
+    await clickControl(setup, "context-menu-row-0")
+    await settle()
+    expect(setup.renderer.root.findDescendantById("reply-comment-editor")).toBeDefined()
+    expect(setup.renderer.root.findDescendantById("review-editor-body")).toBeUndefined()
+    expectReplyBelow("diff-comment-card:reply-here:body:2")
+    await send("Reply from the diff")
+    expect(threads()[0]?.comments.map((comment) => comment.body)).toEqual([
+      root.body,
+      followup.body,
+      "Reply from the conversation",
+      "Reply from the diff",
+    ])
+    await drafts.flush()
+    expect(stored.size).toBe(0)
+
+    await selectReplyFromPicker()
+    await setup.mockInput.typeText("Lost reply")
+    setup.mockInput.pressKey("s", { ctrl: true })
+    await settle()
+    setup.mockInput.pressEnter()
+    await Bun.sleep(220)
+    await settle()
+    expect(setup.captureCharFrame()).toContain("Posting comment")
+    expect(setup.renderer.root.findDescendantById(resume)).toBeUndefined()
+    setup.mockInput.pressEscape()
+    await settle()
+    setup.mockInput.pressEscape()
+    await settle()
+    expect(setup.renderer.root.findDescendantById("pull-detail-scroll")).toBeUndefined()
+    rejectReply(new Error("GitHub is down"))
+    await settle()
+    const failed = setup.captureCharFrame()
+    for (const part of [`Reply not posted: #${number} example.ts:1`, "@alice: GitHub is down"]) expect(failed).toContain(part)
+    await drafts.flush()
+    expect(stored.get(`${number}:reply-here`)?.body).toBe("Lost reply")
+    expect(setup.captureCharFrame()).not.toContain("Posting comment")
+    setup.mockInput.pressEnter()
+    await settle()
+    expect(setup.renderer.root.findDescendantById(resume)).toBeDefined()
+  } finally {
+    setup.renderer.destroy()
+  }
+})
+
+test("a reply editor neither takes the keyboard unseen nor moves the page under the reader", async () => {
+  const { setup, settle, scrollBox, setThreads, threads, selectReplyFromPicker, rejectReply, landComment } = await replyFixture({
+    files: 52,
+    commenting: true,
+  })
+  const editor = () => setup.renderer.root.findDescendantById("reply-comment-editor") as TextareaRenderable | undefined
+  const editing = () => setup.captureCharFrame().includes("ctrl+s post")
+  const resume = "reply-draft:reply-here-resume"
+  try {
+    await settle()
+    const page = scrollBox("pull-detail-scroll")
+    setup.mockInput.pressKey("c")
+    await settle()
+    await setup.mockInput.typeText("A conversation comment")
+    setup.mockInput.pressKey("s", { ctrl: true })
+    await settle()
+    setup.mockInput.pressEnter()
+    await settle()
+    await selectReplyFromPicker()
+    await setup.mockInput.typeText(" and more")
+    await settle()
+    const writing = page.scrollTop
+    landComment()
+    await settle()
+    expect(page.scrollTop).toBe(writing)
+    expect(editor()!.focused).toBe(true)
+
+    const typing = editor()!
+    setup.mockInput.pressArrow("left")
+    setup.mockInput.pressArrow("left")
+    await settle()
+    const cursor = typing.cursorOffset
+    setThreads((threads) => threads.map((thread) => ({ ...thread })))
+    await settle()
+    expect(editor()).toBe(typing)
+    expect(typing.cursorOffset).toBe(cursor)
+
+    setup.mockInput.pressKey("d", { ctrl: true })
+    await setup.mockInput.typeText("Lost reply")
+    setup.mockInput.pressKey("s", { ctrl: true })
+    await settle()
+    setup.mockInput.pressEnter()
+    await settle()
+    page.scrollTo(page.scrollHeight)
+    await settle()
+    const reading = page.scrollTop
+    expect(reading).toBeGreaterThan(writing)
+    rejectReply(new Error("GitHub is down"))
+    await settle()
+    expect(setup.renderer.root.findDescendantById(resume)).toBeDefined()
+    expect(page.scrollTop).toBe(reading)
+
+    page.scrollTo(0)
+    await settle()
+    await selectReplyFromPicker()
+    expect(editing()).toBe(true)
+    const listed = threads()
+    setThreads((threads) => threads.filter((thread) => thread.id !== "reply-here"))
+    await settle()
+    expect([!!editor(), editing()]).toEqual([false, false])
+    setThreads(listed)
+    await settle()
+    expect(setup.renderer.root.findDescendantById(resume)).toBeDefined()
+
+    setup.mockInput.pressKey("D")
+    await settle()
+    expect(setup.captureCharFrame()).toContain("single-file view")
+    await selectReplyFromPicker()
+    expect(editor()!.focused).toBe(true)
+    const other = setup
+      .captureCharFrame()
+      .split("\n")
+      .findIndex((line) => line.trimStart().startsWith("f0.ts"))
+    await setup.mockMouse.click(4, other)
+    await settle()
+    expect([!!editor(), editing()]).toEqual([false, false])
+    await selectReplyFromPicker()
+    expect(editor()!.plainText).toBe("Lost reply")
+    expect(setup.renderer.root.findDescendantById("diff-comment-card:reply-here")).toBeDefined()
+  } finally {
+    setup.renderer.destroy()
+  }
+})

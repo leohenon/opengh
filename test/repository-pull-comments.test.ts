@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test"
 import type { IssueComment, PullRequestDetail } from "../src/models"
 import { createRepositorySession, type RepositoryLoaders } from "../src/repository-session"
 import type { AssigneeChanges } from "../src/github/client"
+import { ReviewThreadChangedError } from "../src/github/review-replies"
 import {
   commitDetailFixture,
   githubDataFixture,
@@ -449,4 +450,77 @@ describe("pull request conversation comments", () => {
       })
     }
   })
+})
+
+test("a confirmed inline reply updates just its thread without appending to the PR conversation", async () => {
+  const root = {
+    id: "root",
+    body: "Review comment",
+    url: "https://github.com/owner/repo/pull/421#discussion_r1",
+    author: "alice",
+    authorAssociation: "MEMBER",
+    createdAt: "2026-01-01",
+    updatedAt: "2026-01-01",
+  }
+  const reply = { ...root, id: "reply", replyToId: root.id, body: "Review thread reply" }
+  const session = await setup({
+    pullContext: async () => ({
+      ...pullContextFixture,
+      threads: [
+        { kind: "review-thread", id: "thread", path: "example.ts", isResolved: false, isOutdated: true, canReply: true, comments: [root] },
+        {
+          kind: "review-thread",
+          id: "locked",
+          path: "example.ts",
+          isResolved: false,
+          isOutdated: false,
+          canReply: false,
+          comments: [root],
+        },
+      ],
+    }),
+    postReviewReply: async (repository, number, threadId, body) => {
+      expect([repository.nameWithOwner, number, threadId, body]).toEqual(["owner/repo", 421, "thread", reply.body])
+      return reply
+    },
+  })
+  await expect(session.postReviewReply!(421, "locked", reply.body)).rejects.toThrow("Refresh the pull request")
+  await session.postReviewReply!(421, "thread", reply.body)
+  expect(session.pullDetail()?.context.value?.threads.map((thread) => thread.comments)).toEqual([[root, reply], [root]])
+  expect(session.pullDetail()?.comments.value?.items).toEqual(issueCommentsFixture)
+})
+
+test("a reply that changed the thread without being published as written reloads the thread", async () => {
+  const root = {
+    id: "root",
+    body: "Review comment",
+    url: "https://github.com/owner/repo/pull/421#discussion_r1",
+    author: "alice",
+    authorAssociation: "MEMBER",
+    createdAt: "2026-01-01",
+    updatedAt: "2026-01-01",
+  }
+  let reads = 0
+  const session = await setup({
+    pullContext: async () => ({
+      ...pullContextFixture,
+      threads: [
+        {
+          kind: "review-thread",
+          id: "thread",
+          path: "example.ts",
+          isResolved: false,
+          isOutdated: false,
+          canReply: true,
+          comments: reads++ ? [root, { ...root, id: "earlier", replyToId: root.id }] : [root],
+        },
+      ],
+    }),
+    postReviewReply: async () => {
+      throw new ReviewThreadChangedError("Your earlier reply is already on this thread.")
+    },
+  })
+  await expect(session.postReviewReply!(421, "thread", "Edited reply")).rejects.toThrow("earlier reply")
+  await Bun.sleep(0)
+  expect(session.pullDetail()?.context.value?.threads[0]?.comments.map((item) => item.id)).toEqual(["root", "earlier"])
 })

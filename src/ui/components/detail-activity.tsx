@@ -494,6 +494,8 @@ export function DetailActivity(props: {
   onOpenReference?: (reference: IssueReference) => void
   events?: readonly IssueTimelineEvent[]
   threads?: readonly PullReviewThread[]
+  replyThreadId?: string
+  renderReply?: (threadId: string) => JSX.Element
   threadsLoading?: boolean
   threadsUnavailable?: boolean
   subject?: "issue" | "pull"
@@ -587,7 +589,8 @@ export function DetailActivity(props: {
                 <Match when={match((entry) => "kind" in entry && entry.kind === "review-thread")}>
                   {(thread) => (
                     <ReviewThread
-                      collapsed={props.collapsed}
+                      collapsed={props.collapsed && props.replyThreadId !== thread().id}
+                      renderReply={props.renderReply}
                       number={props.number}
                       reactionControls={props.reactionControls}
                       interactive={props.interactive}

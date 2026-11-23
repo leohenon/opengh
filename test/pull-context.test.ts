@@ -67,6 +67,7 @@ test("PR context paginates threads, replies and checks without hiding data on pr
         })
       if (name === "PullThreads") {
         // The hunk is requested once per thread, not repeated for every reply.
+        expect(query).toContain("viewerCanReply")
         expect(query).toContain("rootComment: comments(first: 1) { nodes { id diffHunk } }")
         expect(query.match(/diffHunk/g)).toHaveLength(1)
       }
@@ -79,6 +80,7 @@ test("PR context paginates threads, replies and checks without hiding data on pr
                 nodes: [
                   {
                     id: "thread2",
+                    viewerCanReply: false,
                     path: "old.ts",
                     line: null,
                     originalLine: 9,
@@ -95,6 +97,7 @@ test("PR context paginates threads, replies and checks without hiding data on pr
                 nodes: [
                   {
                     id: "thread1",
+                    viewerCanReply: true,
                     path: "src/index.ts",
                     line: 12,
                     originalLine: 12,
@@ -168,7 +171,8 @@ test("PR context paginates threads, replies and checks without hiding data on pr
   expect(budget.signal.aborted).toBe(false)
   budget.dispose()
   expect(context.threads).toHaveLength(2)
-  expect(context.threads[0]).toMatchObject({ diffSide: "RIGHT", startLine: 12, originalStartLine: 12 })
+  expect(context.threads[0]).toMatchObject({ diffSide: "RIGHT", startLine: 12, originalStartLine: 12, canReply: true })
+  expect(context.threads[1]?.canReply).toBe(false)
   expect(context.threads[0]?.comments[0]?.diffHunk).toBe(hunk)
   expect(context.threads[0]?.comments[1]?.diffHunk).toBeUndefined()
   expect(context.threads[0]?.comments.map((entry) => entry.id)).toEqual(["root", "reply"])

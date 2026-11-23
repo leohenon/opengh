@@ -88,6 +88,7 @@ Source: [`src/keybindings.ts`](../src/keybindings.ts).
 | `work.create`               | `c`                |
 | `issue.comment`             | `c`                |
 | `issue.actions`             | `a`                |
+| `pull.reply`                | `R`                |
 | `detail.references`         | `p`                |
 | `detail.toggleTimeline`     | `z`                |
 
@@ -105,6 +106,7 @@ Source: [`src/keybindings.ts`](../src/keybindings.ts).
 | `diff.toggleLayout`   | `t`          |
 | `diff.toggleWrap`     | `w`          |
 | `diff.toggleComments` | `z`          |
+| `pull.reply`          | `R`          |
 | `diff.panLeft`        | `left`, `h`  |
 | `diff.panRight`       | `right`, `l` |
 

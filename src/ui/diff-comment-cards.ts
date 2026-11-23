@@ -7,7 +7,27 @@ import { reviewSplitBoundary, type ReviewRow } from "./review-lines"
 
 const prefix = "diff-comment-card:"
 export type SavedDiffDraft = { id: string; anchor: ReviewAnchor }
+export type DiffCommentCardOptions = {
+  rows: readonly ReviewRow[]
+  path: string | undefined
+  threads: readonly PullReviewThread[]
+  colors: Record<"text" | "muted" | "panel" | "blue" | "border", TextOptions["fg"]>
+  layout: "split" | "unified"
+  width: number
+  commentIcon: string
+  collapsed: boolean
+  savedDrafts?: readonly SavedDiffDraft[]
+  reply?: { active?: string; attach(threadId: string, card: BoxRenderable, contextId: string): (() => void) | undefined }
+}
 export const isCommentCard = (node: Renderable) => node.id.startsWith(prefix)
+type ReplyLocation = { threadId: string; commentId: string }
+const replyLocations = new WeakMap<Renderable, ReplyLocation>()
+export function diffReplyLocation(target: Renderable | null) {
+  for (let node = target; node; node = node.parent) {
+    const location = replyLocations.get(node)
+    if (location) return location
+  }
+}
 export const isSavedDraftCard = (node: Renderable) => node.id.startsWith(`${prefix}draft:`)
 
 // Review cards sit under their line, indented to its code. A wide split side holds the card for
@@ -52,21 +72,7 @@ export function createDiffCommentCards(
     clear,
     render(
       host: BoxRenderable,
-      rows: readonly ReviewRow[],
-      path: string | undefined,
-      threads: readonly PullReviewThread[],
-      colors: {
-        text: TextOptions["fg"]
-        muted: TextOptions["fg"]
-        panel: TextOptions["fg"]
-        blue: TextOptions["fg"]
-        border: TextOptions["fg"]
-      },
-      layout: "split" | "unified",
-      width: number,
-      commentIcon: string,
-      collapsed: boolean,
-      savedDrafts: readonly SavedDiffDraft[] = [],
+      { rows, path, threads, colors, layout, width, commentIcon, collapsed, savedDrafts = [], reply }: DiffCommentCardOptions,
     ) {
       clear()
       if (host.isDestroyed) return
@@ -84,8 +90,10 @@ export function createDiffCommentCards(
         const line = thread.line ?? thread.originalLine
         // Cards away from their line say where they belong.
         const location = anchor ? "" : `${thread.isOutdated ? "Outdated" : "Unplaced"} · ${thread.path}${line ? `:${line}` : ""}`
+        const replying = reply?.active === thread.id
+        const fold = collapsed && !replying
         const count = `${thread.comments.length} ${thread.comments.length === 1 ? "comment" : "comments"}`
-        const title = [location, collapsed ? count : "", thread.isResolved ? "resolved" : ""].filter(Boolean).join(" · ")
+        const title = [location, fold ? count : "", thread.isResolved ? "resolved" : ""].filter(Boolean).join(" · ")
         const card = new BoxRenderable(renderer, {
           id: `${prefix}${thread.id}`,
           ...noteBox(width, layout, anchor ? thread.diffSide : undefined),
@@ -99,9 +107,11 @@ export function createDiffCommentCards(
           paddingLeft: 1,
           paddingRight: 1,
         })
+        const root = thread.comments[0]
+        if (thread.canReply && root) replyLocations.set(card, { threadId: thread.id, commentId: root.id })
         const disposeBodies: (() => void)[] = []
         owned.push({ card, disposeBodies })
-        const comments = collapsed ? thread.comments.slice(0, 1) : thread.comments
+        const comments = fold ? thread.comments.slice(0, 1) : thread.comments
         for (const [index, comment] of comments.entries()) {
           if (index > 0)
             card.add(
@@ -135,7 +145,7 @@ export function createDiffCommentCards(
               truncate: true,
             }),
           )
-          if (!collapsed && Number.isFinite(Date.parse(comment.createdAt)))
+          if (!fold && Number.isFinite(Date.parse(comment.createdAt)))
             header.add(
               new TextRenderable(renderer, {
                 id: `${prefix}${thread.id}:time:${index}`,
@@ -147,7 +157,9 @@ export function createDiffCommentCards(
               }),
             )
           card.add(header)
-          if (collapsed) continue
+          const location = { threadId: thread.id, commentId: comment.id }
+          if (thread.canReply) replyLocations.set(header, location)
+          if (fold) continue
           const body = new BoxRenderable(renderer, {
             id: `${prefix}${thread.id}:body:${index}`,
             width: "100%",
@@ -156,8 +168,11 @@ export function createDiffCommentCards(
             flexDirection: "column",
           })
           card.add(body)
+          if (thread.canReply) replyLocations.set(body, location)
           disposeBodies.push(renderBody(body, comment))
         }
+        const detach = reply?.attach(thread.id, card, anchor?.id ?? card.id)
+        if (detach) disposeBodies.push(detach)
         // Host children follow the file diff when no current source-side anchor exists.
         ;(anchor ?? host).add(card)
       }

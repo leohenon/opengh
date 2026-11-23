@@ -6,7 +6,7 @@ opengh aims to make everyday GitHub work fast from the terminal.
 
 - Create and search issues and PRs
 - Comment, react, and manage assignees
-- Review PRs and leave inline comments
+- Review PRs, leave inline comments, and reply to review threads
 - Merge, close, and reopen PRs
 - Open file references and links
 - Agent skill for GitHub context retrieval
@@ -18,7 +18,6 @@ opengh aims to make everyday GitHub work fast from the terminal.
 - [ ] Edit titles and descriptions
 - [ ] Edit and delete comments
 - [ ] Add and remove labels
-- [ ] Reply to review threads
 
 ### Improve keyboard navigation
 

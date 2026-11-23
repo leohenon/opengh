@@ -22,6 +22,7 @@ import { loadGitHubIssueKind } from "./github/client"
 import { createInlineComments } from "./inline-comments"
 import { createInlineDrafts, type InlineDrafts } from "./inline-drafts"
 import { createComposeDrafts, createComposeDraftStorage, type ComposeDrafts } from "./compose-drafts"
+import { createReplyDrafts, type ReplyDrafts } from "./reply-drafts"
 import { join } from "node:path"
 import { configDirectory } from "./paths"
 import { githubWrites, type GitHubWrites } from "./github/writes"
@@ -61,6 +62,7 @@ export type RootServices = {
   createInlineDrafts(): InlineDrafts
   createNewIssueDrafts(): ComposeDrafts
   createNewPullDrafts(): ComposeDrafts
+  createReplyDrafts(): ReplyDrafts
   githubWrites: GitHubWrites
   openGitHub(repository: string, target?: string | number, view?: "diff"): Promise<void>
   openUrl(url: string): Promise<void>
@@ -88,6 +90,7 @@ const defaultServices: RootServices = {
   createInlineDrafts: () => createInlineDrafts(),
   createNewIssueDrafts: () => createComposeDrafts(),
   createNewPullDrafts: () => createComposeDrafts({ storage: createComposeDraftStorage(join(configDirectory(), "new-pull-drafts")) }),
+  createReplyDrafts: () => createReplyDrafts(),
   githubWrites,
   openGitHub,
   openUrl,
@@ -193,10 +196,18 @@ export function Root(props: {
   const inlineDrafts = services.createInlineDrafts()
   const newIssueDrafts = services.createNewIssueDrafts()
   const newPullDrafts = services.createNewPullDrafts()
+  const replyDrafts = services.createReplyDrafts()
   // Also runs when a signal destroys the renderer without quit().
   onCleanup(() => {
     props.onShutdownWork?.(
-      Promise.allSettled([flushRepositoryTabs(), reviews.flush(), inlineDrafts.flush(), newIssueDrafts.flush(), newPullDrafts.flush()]),
+      Promise.allSettled([
+        flushRepositoryTabs(),
+        reviews.flush(),
+        inlineDrafts.flush(),
+        newIssueDrafts.flush(),
+        newPullDrafts.flush(),
+        replyDrafts.flush(),
+      ]),
     )
   })
   const [dismissedInlineDraftError, setDismissedInlineDraftError] = createSignal<string>()
@@ -261,7 +272,7 @@ export function Root(props: {
         }
       })
     const flushNewIssue = () =>
-      Promise.all([newIssueDrafts.flush(), newPullDrafts.flush()]).catch((error) => {
+      Promise.all([newIssueDrafts.flush(), newPullDrafts.flush(), replyDrafts.flush()]).catch((error) => {
         throw {
           title: "Draft not saved — quit cancelled",
           message: `${error instanceof Error ? error.message : "Could not save the draft"}. The draft is kept in memory; fix local storage and quit again to retry.`,
@@ -638,6 +649,7 @@ export function Root(props: {
                                 inlineDrafts={inlineDrafts}
                                 newIssueDrafts={newIssueDrafts}
                                 newPullDrafts={newPullDrafts}
+                                replyDrafts={replyDrafts}
                                 onPostInlineComment={tracked(inlineComments.post)}
                                 onMergePull={tracked(session.mergePull)}
                                 onUpdatePullDraft={tracked(session.updatePullDraft)}
@@ -669,6 +681,7 @@ export function Root(props: {
                                 onRetryPullReferences={session.retryPullReferences}
                                 onRetryPullCommits={session.retryPullCommits}
                                 onRetryPullContext={session.retryPullContext}
+                                onPostReviewReply={session.postReviewReply ? tracked(session.postReviewReply) : undefined}
                                 onClosePull={session.clearPull}
                                 onInvalidatePull={session.invalidatePull}
                                 onOpenInBrowser={(target, repository, view) =>

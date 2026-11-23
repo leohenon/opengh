@@ -26,7 +26,7 @@ export type ReviewCommentDialogProps = ComposerPresentation & {
 }
 
 // Kept mounted while previewing: hiding the native editor preserves cursor and undo.
-function ReviewEditor(
+export function ReviewEditor(
   props: ComposerPresentation & {
     title: string
     body: string
@@ -34,6 +34,7 @@ function ReviewEditor(
     headSha: string
     showScrollbar: boolean
     saveLabel: string
+    confirmTitle?: string
     allowEmpty?: boolean
     onChange?(body: string): void
     onSave(body: string): void
@@ -203,7 +204,7 @@ function ReviewEditor(
         <Popup width={64} height={7} placement="center" zIndex={350} onClose={close}>
           <box flexGrow={1} minHeight={0} paddingX={2} paddingBottom={1} flexDirection="column">
             <text height={1} flexShrink={0} fg={colors.text} attributes={TextAttributes.BOLD}>
-              Post inline comment?
+              {props.confirmTitle ?? "Post inline comment?"}
             </text>
             <text maxHeight={3} flexShrink={0} wrapMode="word" fg={colors.text}>
               {props.title}

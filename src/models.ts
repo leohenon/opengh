@@ -259,6 +259,7 @@ export type PullReviewThread = {
   line?: number
   originalLine?: number
   isResolved: boolean
+  canReply?: boolean
   isOutdated: boolean
   resolvedBy?: string
   createdAt?: string

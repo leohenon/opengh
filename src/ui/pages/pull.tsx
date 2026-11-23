@@ -6,7 +6,14 @@ import { defaultConfig, type DetailLayout } from "../../config"
 import type { PullRequestDetail, PullRequestSummary, PullContext, IssueTimelineEvent, IssueReference } from "../../models"
 import type { PullDetailState, ResourceState } from "../../repository-state"
 import { DetailActivity } from "../components/detail-activity"
-import { ActivityCommentComposer, focusActivityComment, type ActivityComment } from "../components/activity-comment-composer"
+import {
+  ActivityCommentComposer,
+  focusActivityComment,
+  replyEditorId,
+  type ActivityComment,
+  type ThreadReplyEditor,
+} from "../components/activity-comment-composer"
+import { reviewThreadHeaderId } from "../components/pull-review-threads"
 import { TimelineEntry } from "../components/timeline-entry"
 import { MetadataField, MetadataSummary } from "../components/detail-metadata"
 import { GitHubMarkdown } from "../components/github-markdown"
@@ -148,6 +155,8 @@ export function PullScreen(props: {
   checksExpanded?: boolean
   onChecksExpandedChange?: (expanded: boolean) => void
   comment?: ActivityComment
+  reply?: ThreadReplyEditor
+  replies?: ReadonlyMap<string, ThreadReplyEditor>
   interactive: boolean
   showScrollbar: boolean
   defaultBranch?: string
@@ -221,7 +230,10 @@ export function PullScreen(props: {
         focusable={false}
         onMouseScroll={(event) => event.stopPropagation()}
         onMouseDown={(event) => {
-          if (props.interactive) focusActivityComment(event, "pull-comment", props.comment)
+          if (props.interactive) {
+            focusActivityComment(event, "pull-comment", props.comment)
+            focusActivityComment(event, "reply-comment", props.reply?.comment)
+          }
         }}
         id="pull-detail-scroll"
         ref={(value) => {
@@ -346,6 +358,24 @@ export function PullScreen(props: {
                   onOpenReference={props.onOpenReference}
                   events={props.detail.events}
                   threads={props.detail.context.value?.threads}
+                  replyThreadId={props.reply?.threadId}
+                  renderReply={(threadId) => (
+                    <Show when={props.replies?.get(threadId)} keyed>
+                      {(reply) => (
+                        <ActivityCommentComposer
+                          comment={reply.comment}
+                          title={reply.title}
+                          idPrefix={replyEditorId(reply)}
+                          revealFromId={reviewThreadHeaderId(threadId)}
+                          interactive={props.interactive}
+                          repositoryUrl={markdownContext().repositoryUrl}
+                          sourceUrl={markdownContext().sourceUrl}
+                          defaultBranch={props.detail.context.value?.readiness.headSha}
+                          scroll={() => scroll}
+                        />
+                      )}
+                    </Show>
+                  )}
                   threadsLoading={props.detail.context.status === "loading"}
                   threadsUnavailable={props.detail.context.status === "error"}
                   subject="pull"

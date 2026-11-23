@@ -1,5 +1,5 @@
 import type { SyntaxStyle } from "@opentui/core"
-import { createMemo, For, Show } from "solid-js"
+import { createMemo, For, Show, type JSX } from "solid-js"
 import type { PullReviewThread, ReviewThreadComment } from "../../models"
 import { relativeTime } from "../format"
 import type { GitHubMarkdownContext } from "../github-markdown"
@@ -9,6 +9,8 @@ import { GitHubMarkdown } from "./github-markdown"
 import { type ReactionControls, Reactions, messageReactionMouse } from "./reactions"
 import { TimelineEntry, TimelineHeader } from "./timeline-entry"
 import { reviewSnippet } from "../review-snippet"
+
+export const reviewThreadHeaderId = (id: string) => `review-thread-header:${id}`
 
 function ThreadComment(props: {
   comment: ReviewThreadComment
@@ -83,6 +85,7 @@ function ThreadComment(props: {
 
 export function ReviewThread(props: {
   thread: PullReviewThread
+  renderReply?: (threadId: string) => JSX.Element
   collapsed?: boolean
   number?: number
   reactionControls?: ReactionControls
@@ -94,13 +97,21 @@ export function ReviewThread(props: {
   const { colors, theme } = useTheme()
   const icons = useIcons()
   const line = () => props.thread.line ?? props.thread.originalLine
+  const threadId = createMemo(() => props.thread.id)
   const snippet = createMemo(() => reviewSnippet(props.thread))
   const gutterWidth = () =>
     Math.max(3, ...snippet().flatMap((line) => [String(line.oldLine ?? "").length, String(line.newLine ?? "").length]))
   return (
     <TimelineEntry icon={icons().user} color={props.thread.isResolved ? colors.muted : colors.yellow}>
       <box width="100%" minWidth={0} flexShrink={0} overflow="hidden" backgroundColor={props.backgroundColor} flexDirection="column">
-        <box height={1} flexShrink={0} paddingX={1} flexDirection="row" backgroundColor={colors.header}>
+        <box
+          id={reviewThreadHeaderId(props.thread.id)}
+          height={1}
+          flexShrink={0}
+          paddingX={1}
+          flexDirection="row"
+          backgroundColor={colors.header}
+        >
           <text flexGrow={1} flexBasis={0} minWidth={0} height={1} wrapMode="none" truncate fg={colors.text}>
             <Show when={props.collapsed}>
               <span style={{ fg: colors.muted }}>Review thread · </span>
@@ -181,8 +192,8 @@ export function ReviewThread(props: {
             </For>
           </box>
         </Show>
-        <Show when={!props.collapsed}>
-          <box width="100%" minWidth={0} flexShrink={0} paddingX={2} paddingBottom={1} flexDirection="column">
+        <box width="100%" minWidth={0} flexShrink={0} paddingX={2} paddingBottom={props.collapsed ? 0 : 1} flexDirection="column">
+          <Show when={!props.collapsed}>
             <For each={props.thread.comments.map((comment) => comment.id)} fallback={<text fg={colors.muted}>No comments available.</text>}>
               {(id, index) => {
                 const comment = () => props.thread.comments.find((comment) => comment.id === id)!
@@ -200,8 +211,9 @@ export function ReviewThread(props: {
                 )
               }}
             </For>
-          </box>
-        </Show>
+          </Show>
+          {props.renderReply?.(threadId())}
+        </box>
       </box>
     </TimelineEntry>
   )

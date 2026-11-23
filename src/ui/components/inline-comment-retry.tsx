@@ -74,6 +74,16 @@ export function InlineCommentConfirmDialog(props: {
   onClose(): void
   onHintChange(hint: string | undefined): void
 }) {
+  return <CommentConfirmDialog {...props} title="Post inline comment?" location={reviewAnchorLabel(props.input.anchor)} />
+}
+
+export function CommentConfirmDialog(props: {
+  title: string
+  location: string
+  onConfirm(): void
+  onClose(): void
+  onHintChange(hint: string | undefined): void
+}) {
   const { colors } = useTheme()
   const keys = useKeybindings()
   createEffect(() => props.onHintChange(keys.hints(["dialog.confirm", "confirm"], ["dialog.close", "back"])))
@@ -83,10 +93,10 @@ export function InlineCommentConfirmDialog(props: {
     <Popup width={64} height={7} placement="center" zIndex={350} onClose={props.onClose}>
       <box flexGrow={1} minHeight={0} paddingX={2} paddingBottom={1} flexDirection="column">
         <text height={1} flexShrink={0} fg={colors.text} attributes={TextAttributes.BOLD}>
-          Post inline comment?
+          {props.title}
         </text>
         <text maxHeight={3} flexShrink={0} wrapMode="word" fg={colors.text}>
-          {reviewAnchorLabel(props.input.anchor)}
+          {props.location}
         </text>
         <box flexGrow={1} minHeight={0} />
         <Action id="inline-comment-confirm" onActivate={props.onConfirm}>
