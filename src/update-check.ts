@@ -3,7 +3,7 @@ import { version } from "../package.json"
 import { atomicPrivateWrite, readPrivateJson } from "./filesystem"
 import { loadLatestStableRelease, type StableRelease } from "./github/releases"
 import { configDirectory } from "./paths"
-import { isSourceCheckout, updateInstruction } from "./update"
+import { isSourceCheckout } from "./update"
 
 export type UpdateNotice = { currentVersion: string; latestVersion: string; instruction: string }
 const cacheLifetime = 24 * 60 * 60 * 1000
@@ -56,7 +56,7 @@ export async function checkForUpdate(
     return {
       currentVersion,
       latestVersion,
-      instruction: await (options.instruction ?? updateInstruction)(),
+      instruction: options.instruction ? await options.instruction() : "Run: opengh update",
     }
   } catch {
     return undefined

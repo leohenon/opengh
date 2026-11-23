@@ -22,7 +22,7 @@ export type LaunchOptions = {
 export const launchUsage = `Usage:
   opengh                                  Open the repository picker
   opengh --resume                         Restore the last repository and page
-  opengh update                           Update to the latest stable release
+  opengh update                           Update using your installation method
   opengh <owner/repo|path>                Open a repository
   opengh issues|pulls|actions             Open a repository page (current directory)
   opengh issues --repo <owner/repo|path>  Open a page in an explicit repository
@@ -63,10 +63,11 @@ Options:
 `
 
 export const updateUsage = `Usage:
-  opengh update                           Update a standalone binary to the latest stable release
+  opengh update                           Update using your installation method
 
-Homebrew, npm, Nix, and source installs must be updated using their installation method.
-opengh update prints instructions for these installs instead of replacing them.
+Standalone binaries update to the latest stable release. Managed installs update
+through Homebrew, global npm, or an unpinned Nix profile. If the owning install
+cannot be verified, or it needs a manual update, opengh prints instructions.
 
 Options:
   -h, --help                              Show this help

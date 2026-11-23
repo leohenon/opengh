@@ -1,8 +1,10 @@
-import { existsSync, readFileSync } from "node:fs"
 import { mkdir, realpath, rm } from "node:fs/promises"
 import { basename, dirname, join } from "node:path"
 import { version } from "../package.json"
 import { loadLatestStableRelease, type StableRelease } from "./github/releases"
+import { installationManager, runManagedUpdate } from "./managed-update"
+
+export { installationUpdateHint } from "./managed-update"
 
 // Replaced with immutable literals by scripts/build.ts; absent when running from source.
 declare const OPENGH_BUILD_TARGET: string
@@ -67,39 +69,7 @@ export async function runUpdateInstaller(script: string, options: InstallerOptio
   }
 }
 
-function isJavaScriptInstallation(executable: string) {
-  if (executable.split("/").includes("node_modules")) return true
-  // npm/workspace links can resolve the native package outside node_modules.
-  const path = join(dirname(dirname(executable)), "package.json")
-  let manifest: unknown
-  try {
-    manifest = JSON.parse(readFileSync(path, "utf8"))
-  } catch (error) {
-    const code = (error as NodeJS.ErrnoException).code
-    if (code === "ENOENT" || code === "ENOTDIR") return false
-    throw new Error(`Cannot inspect installation metadata at ${path}. Use the original installation method to update.`)
-  }
-  if (!manifest || typeof manifest !== "object" || Array.isArray(manifest))
-    throw new Error(`Invalid installation metadata at ${path}. Use the original installation method to update.`)
-  const name = (manifest as Record<string, unknown>).name
-  return (
-    typeof name === "string" &&
-    (name === "opengh" || name === "@leohenon/opengh" || /^opengh-(?:darwin-(?:arm64|x64)|linux-(?:arm64|x64)(?:-musl)?)$/.test(name))
-  )
-}
-
-export function installationUpdateHint(executable: string) {
-  if (executable.startsWith("/nix/store/")) return "Run: nix profile upgrade opengh"
-  if (isJavaScriptInstallation(executable)) return "Run: npm install --global @leohenon/opengh"
-  if (executable.includes("/Cellar/opengh/") || existsSync(join(dirname(dirname(executable)), "INSTALL_RECEIPT.json")))
-    return "Run: brew update && brew upgrade leohenon/tap/opengh"
-}
-
 export const isSourceCheckout = () => !buildTarget
-
-export async function updateInstruction(): Promise<string> {
-  return installationUpdateHint(await realpath(process.execPath)) ?? "Run: opengh update"
-}
 
 function updatedMessage(version: string) {
   if (!process.stdout.isTTY) return `Updated to opengh ${version}.`
@@ -111,11 +81,14 @@ export async function runUpdate(options: UpdateOptions = {}): Promise<void> {
   const target = options.target ?? buildTarget
   if (!target)
     throw new Error("This is a source checkout. Pull the desired changes, then run bun install --frozen-lockfile in that checkout.")
+  const executable = await realpath(options.executable ?? process.execPath)
+  const currentVersion = options.currentVersion ?? version
+  const log = options.log ?? console.log
+  const manager = installationManager(executable)
+  if (manager) return runManagedUpdate(manager, executable, { target, currentVersion, log })
+
   const installer = options.installer ?? installScript
   if (!installer) throw new Error("This build has no bundled installer. Reinstall opengh using its original installation method.")
-  const executable = await realpath(options.executable ?? process.execPath)
-  const managed = installationUpdateHint(executable)
-  if (managed) throw new Error(managed)
 
   const lock = `${executable}.update-lock`
   try {
@@ -129,10 +102,8 @@ export async function runUpdate(options: UpdateOptions = {}): Promise<void> {
   }
 
   try {
-    const currentVersion = options.currentVersion ?? version
     const latest = await (options.latest ?? loadLatestStableRelease)()
     const order = Bun.semver.order(latest.version, currentVersion)
-    const log = options.log ?? console.log
     if (order <= 0) {
       log(
         order === 0
