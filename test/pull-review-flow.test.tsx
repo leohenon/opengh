@@ -170,6 +170,20 @@ test("draft PR inline comments open from Hunk's [+] in opengh's editor and publi
     await setup.renderer.idle()
     await setup.flush()
   }
+  const openReviewEditor = async () => {
+    setup.mockInput.pressKey("a")
+    await settle()
+    await clickControl(setup, "issue-menu-review")
+    await settle()
+    setup.mockInput.pressEnter()
+    await settle()
+  }
+  const exitReviewEditor = async () => {
+    setup.mockInput.pressEscape()
+    await settle()
+    setup.mockInput.pressEscape()
+    await settle()
+  }
   try {
     await settle()
     setup.mockInput.pressKey("R")
@@ -183,6 +197,29 @@ test("draft PR inline comments open from Hunk's [+] in opengh's editor and publi
     expect(setup.captureCharFrame()).toContain("Approval and request changes require a non-draft")
     setup.mockInput.pressEscape()
     await settle()
+
+    setThreads((items) => items.map((thread) => (thread.id === remoteThread.id ? { ...thread, canReply: true } : thread)))
+    for (const exit of ["escape", "restore"]) {
+      setup.mockInput.pressKey("R")
+      await settle()
+      setup.mockInput.pressEnter()
+      await settle()
+      expect(setup.renderer.root.findDescendantById("reply-comment-editor")).toBeDefined()
+      setup.mockInput.pressKey("o", { ctrl: true })
+      await settle()
+      expect(setup.renderer.root.findDescendantById("review-editor-body")).toBeDefined()
+      if (exit === "escape") setup.mockInput.pressEscape()
+      else setup.mockInput.pressKey("o", { ctrl: true })
+      await settle()
+      expect(setup.renderer.root.findDescendantById("reply-comment-editor")).toBeDefined()
+      setup.mockInput.pressEscape()
+      await settle()
+
+      await openReviewEditor()
+      expect(setup.captureCharFrame()).toContain("ctrl+o expand")
+      await exitReviewEditor()
+    }
+
     setup.mockInput.pressKey("D")
     await settle()
     expect(setup.captureCharFrame()).toContain("Existing GitHub comment")
@@ -465,27 +502,13 @@ test("draft PR inline comments open from Hunk's [+] in opengh's editor and publi
     setup.mockInput.pressEscape()
     await settle()
 
-    setThreads((items) => items.map((thread) => (thread.id === remoteThread.id ? { ...thread, canReply: true } : thread)))
-    setup.mockInput.pressKey("R")
-    await settle()
-    setup.mockInput.pressEnter()
-    await settle()
-    expect(setup.renderer.root.findDescendantById("reply-comment-editor")).toBeDefined()
+    await openReviewEditor()
+    expect(setup.captureCharFrame()).toContain("ctrl+o expand")
     setup.mockInput.pressKey("o", { ctrl: true })
     await settle()
-    expect(setup.renderer.root.findDescendantById("review-editor-body")).toBeDefined()
-    setup.mockInput.pressKey("o", { ctrl: true })
-    await settle()
-    expect(setup.renderer.root.findDescendantById("reply-comment-editor")).toBeDefined()
-    setup.mockInput.pressEscape()
-    await settle()
-
-    setup.mockInput.pressKey("a")
-    await settle()
-    await clickControl(setup, "issue-menu-review")
-    await settle()
-    setup.mockInput.pressEnter()
-    await settle()
+    expect(setup.captureCharFrame()).toContain("ctrl+o restore")
+    await exitReviewEditor()
+    await openReviewEditor()
     expect(setup.captureCharFrame()).toContain("ctrl+o expand")
     await setup.mockInput.typeText("Overall review feedback")
     await settle()

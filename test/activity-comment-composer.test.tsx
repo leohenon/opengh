@@ -58,7 +58,7 @@ for (const parent of ["issue", "pull"] as const) {
           assignees: [],
           reviewers: [],
           mergeable: null,
-          permissions: { comment: true },
+          permissions: { comment: true, close: true },
         },
       },
       comments: { status: "ready", value: { items: comments, page: 1, hasMore: false } },
@@ -118,8 +118,47 @@ for (const parent of ["issue", "pull"] as const) {
     const editor = () => view.renderer.root.findDescendantById(`${prefix}-editor`) as TextareaRenderable | undefined
     const footer = () => view.captureCharFrame().split("\n")[29]!.trim()
     const scroll = () => view.renderer.root.findDescendantById(`${parent}-detail-scroll`) as ScrollBoxRenderable
+    const openCloseEditor = async () => {
+      view.mockInput.pressKey("a")
+      await settle()
+      await clickControl(view, "issue-menu-close")
+      await settle()
+      if (parent === "issue") {
+        view.mockInput.pressEnter()
+        await settle()
+      }
+    }
+    const exitCloseEditor = async () => {
+      view.mockInput.pressEscape()
+      await settle()
+      if (parent === "issue") {
+        view.mockInput.pressEscape()
+        await settle()
+      }
+    }
     try {
       await settle()
+      view.mockInput.pressKey("c")
+      await settle()
+      view.mockInput.pressKey("o", { ctrl: true })
+      await settle()
+      expect(footer()).toContain("ctrl+o restore")
+      view.mockInput.pressEscape()
+      await settle()
+      expect(editor()?.focused).toBe(true)
+      view.mockInput.pressEscape()
+      await settle()
+      await openCloseEditor()
+      expect(footer()).toContain("ctrl+o expand")
+
+      view.mockInput.pressKey("o", { ctrl: true })
+      await settle()
+      expect(footer()).toContain("ctrl+o restore")
+      await exitCloseEditor()
+      await openCloseEditor()
+      expect(footer()).toContain("ctrl+o expand")
+      await exitCloseEditor()
+
       view.mockInput.pressKey("c")
       await settle()
       expect(editor()?.focused).toBe(true)

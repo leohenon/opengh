@@ -165,7 +165,7 @@ export function IssueActionDialog(props: {
   showStatusBarHints?: boolean
   expanded?: boolean
   onExpandedChange?(expanded: boolean): void
-  onEditorActiveChange?(active: boolean): void
+  onFullscreenChange?(fullscreen: boolean): void
   locked?: boolean
   repositoryUrl: string
   defaultBranch?: string
@@ -186,11 +186,11 @@ export function IssueActionDialog(props: {
   const [editorOpened, setEditorOpened] = createSignal(!startsWithReason)
   const [reasonChoice, setReasonChoice] = createSignal(props.state.reason)
   const closeReasons: readonly IssueCloseReason[] = ["completed", "not_planned"]
-  createEffect(() => props.onEditorActiveChange?.(stage() === "edit" && props.kind !== "duplicate" && !props.confirmOnly))
-  onCleanup(() => props.onEditorActiveChange?.(false))
   const [body, setBody] = createSignal(props.state.body)
   const [localExpanded, setLocalExpanded] = createSignal(false)
   const expanded = () => props.expanded ?? localExpanded()
+  createEffect(() => props.onFullscreenChange?.(stage() === "edit" && props.kind !== "duplicate" && !props.confirmOnly && expanded()))
+  onCleanup(() => props.onFullscreenChange?.(false))
   const toggleExpanded = () => {
     const next = !expanded()
     setLocalExpanded(next)

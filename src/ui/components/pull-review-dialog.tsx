@@ -242,7 +242,7 @@ export function ReviewCommentDialog(props: ReviewCommentDialogProps) {
 
 export type PullReviewDialogProps = ComposerPresentation & {
   number?: number
-  onEditorActiveChange?(active: boolean): void
+  onFullscreenChange?(fullscreen: boolean): void
   session: PullReviewSession
   onSubmit(): void
   onClose(): void
@@ -264,8 +264,6 @@ export function PullReviewDialog(props: PullReviewDialogProps) {
   const [stage, setStage] = createSignal<"choose" | "edit">("choose")
   const [editorOpened, setEditorOpened] = createSignal(false)
   const [choice, setChoice] = createSignal<ReviewEvent>()
-  createEffect(() => props.onEditorActiveChange?.(stage() === "edit"))
-  onCleanup(() => props.onEditorActiveChange?.(false))
   const [confirmation, setConfirmation] = createSignal<"submit" | "head" | "legacy">()
   const [localError, setLocalError] = createSignal<string>()
   let writer: TextareaRenderable | undefined
@@ -278,6 +276,8 @@ export function PullReviewDialog(props: PullReviewDialogProps) {
     editable: () => !!draft() && !locked(),
     onError: setLocalError,
   })
+  createEffect(() => props.onFullscreenChange?.(stage() === "edit" && composer.expanded()))
+  onCleanup(() => props.onFullscreenChange?.(false))
   const state = () => props.session.state()
   const draft = () => state().draft
   const eligibility = () => state().eligibility

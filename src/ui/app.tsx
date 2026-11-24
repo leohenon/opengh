@@ -380,15 +380,13 @@ function AppContent(props: AppProps) {
   const [draftTarget, setDraftTarget] = createSignal<{ repository: string; number: number; draft: boolean }>()
   const [pendingDraftUpdates, setPendingDraftUpdates] = createSignal<Array<NonNullable<ReturnType<typeof draftTarget>>>>([])
   const [issueActionHint, setIssueActionHint] = createSignal<string>()
-  const [issueEditorExpanded, setIssueEditorExpanded] = createSignal(false)
-  const [reviewEditorActive, setReviewEditorActive] = createSignal(false)
-  const [issueEditorActive, setIssueEditorActive] = createSignal(false)
+  const [reviewEditorFullscreen, setReviewEditorFullscreen] = createSignal(false)
+  const [issueEditorFullscreen, setIssueEditorFullscreen] = createSignal(false)
   const fullscreenEditorOpen = () =>
-    issueEditorExpanded() &&
-    ((overlay() === "pull-review" && reviewEditorActive()) ||
-      overlay() === "review-comment" ||
-      overlay() === "review-reply" ||
-      (overlay() === "issue-action" && issueEditorActive()))
+    overlay() === "review-reply" ||
+    overlay() === "review-comment" ||
+    (overlay() === "pull-review" && reviewEditorFullscreen()) ||
+    (overlay() === "issue-action" && issueEditorFullscreen())
   const [commandHint, setCommandHint] = createSignal<string>()
   const [settingsHint, setSettingsHint] = createSignal<string>()
   const [revealActivity, setRevealActivity] = createSignal<{ number: number; id: number; parent?: IssueActionParent }>()
@@ -929,9 +927,7 @@ function AppContent(props: AppProps) {
       },
       onClose: () => target && setReplyTarget(),
       onExpand: () => {
-        if (!target) return
-        setIssueEditorExpanded(true)
-        setOverlay("review-reply")
+        if (target) setOverlay("review-reply")
       },
       onFocusChange: (focused) => target && setReplyFocused(focused),
       onHintChange: (hint) => target && setReplyHint(hint),
@@ -1139,9 +1135,7 @@ function AppContent(props: AppProps) {
       onDraftCancel: () => setInlineDraftOpen(false),
       // The full editor adds preview, expansion and the external editor; closing it returns here.
       onDraftExpand: () => {
-        if (!inlineContext()) return
-        setIssueEditorExpanded(true)
-        setOverlay("review-comment")
+        if (inlineContext()) setOverlay("review-comment")
       },
       onOpenReview: () => {
         void openReview(target.number)
@@ -1420,7 +1414,6 @@ function AppContent(props: AppProps) {
         if (!sameConversationComment(target) || !conversationCommentEditable(target)) return
         setIssueAction({ number, parent, kind: "comment" })
         setCommentConfirmOnly(false)
-        setIssueEditorExpanded(true)
         setOverlay("issue-action")
       },
       onFocusChange: (focused) => {
@@ -3518,13 +3511,11 @@ function AppContent(props: AppProps) {
                       </Show>
                       <Show when={overlay() === "pull-review" && props.reviews && reviewTarget()}>
                         <PullReviewDialog
-                          onEditorActiveChange={setReviewEditorActive}
+                          onFullscreenChange={setReviewEditorFullscreen}
                           number={reviewTarget()?.number}
                           session={props.reviews!}
                           repositoryUrl={data().repo.url}
                           showScrollbar={config().showScrollbars}
-                          expanded={issueEditorExpanded()}
-                          onExpandedChange={setIssueEditorExpanded}
                           showStatusBarHints={config().showStatusBarHints}
                           onSubmit={() => {
                             void submitReview()
@@ -3638,9 +3629,8 @@ function AppContent(props: AppProps) {
                             saveLabel="Post reply"
                             confirmTitle="Post reply to review thread?"
                             showScrollbar={config().showScrollbars}
-                            expanded={issueEditorExpanded()}
+                            expanded
                             onExpandedChange={(expanded) => {
-                              setIssueEditorExpanded(expanded)
                               if (!expanded) closeReplyOverlay()
                             }}
                             showStatusBarHints={config().showStatusBarHints}
@@ -3659,9 +3649,8 @@ function AppContent(props: AppProps) {
                             headSha={context.headSha}
                             repositoryUrl={data().repo.url}
                             showScrollbar={config().showScrollbars}
-                            expanded={issueEditorExpanded()}
+                            expanded
                             onExpandedChange={(expanded) => {
-                              setIssueEditorExpanded(expanded)
                               if (!expanded) setOverlay()
                             }}
                             showStatusBarHints={config().showStatusBarHints}
@@ -3708,7 +3697,7 @@ function AppContent(props: AppProps) {
                                     ? action.number === activePullNumber() && canActOnPull(action.kind)
                                     : action.number === activeIssueNumber() && canActOnIssue(action.kind)
                                 }
-                                onEditorActiveChange={setIssueEditorActive}
+                                onFullscreenChange={setIssueEditorFullscreen}
                                 parent={action.parent}
                                 state={
                                   props.getIssueAction?.(action.number, action.parent) ??
@@ -3725,10 +3714,9 @@ function AppContent(props: AppProps) {
                                 }
                                 showScrollbar={config().showScrollbars}
                                 showStatusBarHints={config().showStatusBarHints}
-                                expanded={action.kind !== "duplicate" && issueEditorExpanded()}
+                                expanded={action.kind === "comment" && !commentConfirmOnly() ? true : undefined}
                                 onExpandedChange={(expanded) => {
-                                  setIssueEditorExpanded(expanded)
-                                  if (!expanded && action.kind === "comment" && conversationCommentOpen()) closeConversationCommentDialog()
+                                  if (!expanded && action.kind === "comment") closeConversationCommentDialog()
                                 }}
                                 locked={
                                   action.parent === "pull" ? pullDetail().resource.value?.locked : issueDetail().resource.value?.locked
