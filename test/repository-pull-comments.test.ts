@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import type { IssueComment, PullRequestDetail } from "../src/models"
+import type { IssueComment, PullContext, PullRequestDetail, PullReviewThread } from "../src/models"
 import { createRepositorySession, type RepositoryLoaders } from "../src/repository-session"
 import type { AssigneeChanges } from "../src/github/client"
 import { ReviewThreadChangedError } from "../src/github/review-replies"
@@ -452,22 +452,33 @@ describe("pull request conversation comments", () => {
   })
 })
 
+const root = {
+  id: "root",
+  body: "Review comment",
+  url: "https://github.com/owner/repo/pull/421#discussion_r1",
+  author: "alice",
+  authorAssociation: "MEMBER",
+  createdAt: "2026-01-01",
+  updatedAt: "2026-01-01",
+}
+const reply = { ...root, id: "reply", replyToId: root.id, body: "Review thread reply" }
+const replyThread: PullReviewThread = {
+  kind: "review-thread",
+  id: "thread",
+  path: "example.ts",
+  isResolved: false,
+  isOutdated: true,
+  canReply: true,
+  comments: [root],
+}
+const replyContext = { ...pullContextFixture, threads: [replyThread] }
+
 test("a confirmed inline reply updates just its thread without appending to the PR conversation", async () => {
-  const root = {
-    id: "root",
-    body: "Review comment",
-    url: "https://github.com/owner/repo/pull/421#discussion_r1",
-    author: "alice",
-    authorAssociation: "MEMBER",
-    createdAt: "2026-01-01",
-    updatedAt: "2026-01-01",
-  }
-  const reply = { ...root, id: "reply", replyToId: root.id, body: "Review thread reply" }
   const session = await setup({
     pullContext: async () => ({
       ...pullContextFixture,
       threads: [
-        { kind: "review-thread", id: "thread", path: "example.ts", isResolved: false, isOutdated: true, canReply: true, comments: [root] },
+        replyThread,
         {
           kind: "review-thread",
           id: "locked",
@@ -490,16 +501,62 @@ test("a confirmed inline reply updates just its thread without appending to the 
   expect(session.pullDetail()?.comments.value?.items).toEqual(issueCommentsFixture)
 })
 
-test("a reply that changed the thread without being published as written reloads the thread", async () => {
-  const root = {
-    id: "root",
-    body: "Review comment",
-    url: "https://github.com/owner/repo/pull/421#discussion_r1",
-    author: "alice",
-    authorAssociation: "MEMBER",
-    createdAt: "2026-01-01",
-    updatedAt: "2026-01-01",
+for (const outcome of ["fails", "returns the old thread"]) {
+  test(`a confirmed thread reply stays visible when an overlapping PR refresh ${outcome}`, async () => {
+    const write = deferred<typeof reply>()
+    const read = deferred<PullRequestDetail>()
+    let loads = 0
+    const session = await setup({
+      pull: async () => (++loads === 1 ? pull() : read.promise),
+      pullContext: async () => replyContext,
+      postReviewReply: async () => write.promise,
+    })
+    const posting = session.postReviewReply!(421, replyThread.id, reply.body)
+    const refreshing = session.loadPull(421, { force: true })
+    write.resolve(reply)
+    await posting
+    expect(session.pullDetail()?.context.status).toBe("loading")
+    expect(session.pullDetail()?.context.value?.threads[0]?.comments).toEqual([root, reply])
+    if (outcome === "fails") read.reject(new Error("Offline"))
+    else read.resolve(pull())
+    await refreshing
+    expect(session.pullDetail()?.resource.status).toBe(outcome === "fails" ? "error" : "ready")
+    expect(session.pullDetail()?.context.value?.threads[0]?.comments).toEqual([root, reply])
+    expect(loads).toBe(2)
+  })
+}
+
+test("an overlapping thread read keeps confirmed replies without overriding server updates or resurrecting threads", async () => {
+  const edited = { ...reply, body: "Edited on GitHub" }
+  for (const [returned, expected] of [
+    [[root], [root, reply]],
+    [
+      [root, edited],
+      [root, edited],
+    ],
+    [undefined, undefined],
+  ] as const) {
+    const write = deferred<typeof reply>()
+    const read = deferred<PullContext>()
+    let loads = 0
+    const session = await setup({
+      pullContext: async () => (++loads === 1 ? replyContext : read.promise),
+      postReviewReply: async () => write.promise,
+    })
+    const posting = session.postReviewReply!(421, replyThread.id, reply.body)
+    const refreshing = session.retryPullContext()
+    write.resolve(reply)
+    await posting
+    read.resolve({ ...replyContext, threads: returned ? [{ ...replyThread, isResolved: true, comments: [...returned] }] : [] })
+    await refreshing
+    expect(session.pullDetail()?.context.value?.threads).toEqual(
+      expected ? [{ ...replyThread, isResolved: true, comments: [...expected] }] : [],
+    )
+    expect(loads).toBe(2)
   }
+})
+
+test("a reply that changed the thread without being published as written reloads the thread", async () => {
   let reads = 0
   const session = await setup({
     pullContext: async () => ({

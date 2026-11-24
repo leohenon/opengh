@@ -334,7 +334,10 @@ export function DiffScreen(props: {
   >()
   let disposed = false
   let rememberedScroll = 0
-  let pending: { file: DiffFile | undefined; index: number | null; scrollTop?: number; anchor?: ReviewAnchor } | undefined
+  let pending:
+    | { file: DiffFile | undefined; index: number | null; scrollTop?: number; anchor?: ReviewAnchor }
+    | { reply: ThreadReplyEditor }
+    | undefined
   let waiting = false
 
   // Only navigation schedules a layout wait. Layout/commit callbacks never feed a reactive effect.
@@ -348,7 +351,10 @@ export function DiffScreen(props: {
         if (disposed || !pending || !scroll || !active()) return
         const navigation = pending
         pending = undefined
-        if (navigation.index === null && navigation.file && streaming()) {
+        if ("reply" in navigation) {
+          const { reply } = navigation
+          if (interactive() && props.reply === reply && reply.comment.focused) scroll.scrollChildIntoView(`${replyEditorId(reply)}-area`)
+        } else if (navigation.index === null && navigation.file && streaming()) {
           const header = host()?.findDescendantById(`diff-file:${navigation.file.path}`)
           if (header) {
             navigatingToFile = true
@@ -1082,7 +1088,14 @@ export function DiffScreen(props: {
         const file = parsed().files.find((entry) => entry.path === reply.path)
         if (!file) return
         if (!filteredFiles().includes(file)) setFileFilter("")
-        if (selected() !== file) setPath(file.path)
+        if (selected() === file) return
+        setPath(file.path)
+        if (streaming()) return
+        queueMicrotask(() => {
+          if (disposed || props.reply !== reply || selected() !== file) return
+          pending = { reply }
+          revealPending()
+        })
       },
     ),
   )

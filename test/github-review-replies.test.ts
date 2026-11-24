@@ -5,6 +5,7 @@ import { join } from "node:path"
 import {
   createGitHubReviewReplies,
   createReviewReplyAttemptStorage,
+  type ReviewReplyAttemptStorage,
   ReviewReplyUncertainError,
   ReviewThreadChangedError,
 } from "../src/github/review-replies"
@@ -12,9 +13,12 @@ import { GitHubApiError } from "../src/github/transport"
 
 const repository = { id: 1, nodeId: "repo-id", nameWithOwner: "owner/repo" }
 const body = "Thanks!\n\nI'll update this."
+const author = { id: "viewer", login: "author" }
+const legacyKey = "1:42:thread-id"
+const legacyAttempt = (login: string) => ({ login, body, known: ["root"], settles: 0, whole: true })
 const root = {
   id: "root",
-  author: { login: "reviewer" },
+  author: { id: "reviewer-id", login: "reviewer" },
   authorAssociation: "MEMBER",
   body: "Could we simplify this?",
   createdAt: "2026-01-01",
@@ -31,6 +35,7 @@ function harness(
     pendingReview?: boolean
     staged?: boolean
     failure?: Failure
+    storage?: ReviewReplyAttemptStorage
     cut?: boolean
     lag?: number
   } = {},
@@ -38,6 +43,7 @@ function harness(
   let now = 0
   let waited = 0
   let comments = [root]
+  let viewer = author
   let failure = options.failure
   let down = false
   let lag = 0
@@ -48,7 +54,7 @@ function harness(
   const replyWith = (text: string, id: string) => ({
     ...root,
     id,
-    author: { login: "author" },
+    author: viewer,
     body: text,
     replyTo: { id: "root" },
     state: options.staged ? "PENDING" : "SUBMITTED",
@@ -63,6 +69,7 @@ function harness(
     async graphql<T>(query: string, variables: Record<string, string>) {
       const { id } = variables
       expect(id).toBe("thread-id")
+      expect(query).toContain("author { ... on Node { id } }")
       if (query.startsWith("mutation")) {
         sent.push(variables.body!)
         expect(query).toContain("pullRequestReviewThreadId: $id")
@@ -89,13 +96,15 @@ function harness(
       if (variables.before !== undefined) {
         reads.older++
         expect(query).toContain("comments(last: 100, before: $before)")
-        return { data: { node: { comments: page(Number(variables.before), 100) } } } as T
+        expect(query).toContain("viewer { id }")
+        return { data: { viewer, node: { comments: page(Number(variables.before), 100) } } } as T
       }
+      expect(query).toContain("viewer { id login }")
       expect(query).toContain("viewerCanReply")
       expect(query).toContain("reviews(first: 1, states: PENDING)")
       return {
         data: {
-          viewer: { id: "viewer", login: "author" },
+          viewer,
           node: {
             id,
             viewerCanReply: options.canReply ?? true,
@@ -119,7 +128,7 @@ function harness(
         waited += ms
         whileWaiting?.()
       },
-      storage: {
+      storage: options.storage ?? {
         load: async (key) => stored.get(key),
         save: async (key, attempt) => void stored.set(key, attempt),
         remove: async (key) => void stored.delete(key),
@@ -132,8 +141,16 @@ function harness(
     waited: () => waited,
     olderReads: () => reads.older,
     recorded: () => stored.size,
+    seedLegacy: (login: string) => stored.set(legacyKey, legacyAttempt(login)),
+    signIn: (id: string, login: string) => {
+      viewer = { id, login }
+      comments = comments.map((item) => (item.author.id === id ? { ...item, author: viewer } : item))
+    },
     recover: () => {
       failure = undefined
+    },
+    offline: () => {
+      down = true
     },
     online: () => {
       down = false
@@ -242,6 +259,104 @@ test("an unconfirmed reply is still settled first after a restart", async () => 
   expect([api.sent().length, api.recorded()]).toEqual([1, 0])
 })
 
+test("another viewer can post identical text without consuming the first viewer's attempt", async () => {
+  const api = harness({ failure: "lost", cut: true })
+  await expect(api.post()).rejects.toBeInstanceOf(ReviewReplyUncertainError)
+  api.online()
+  api.recover()
+  api.restart()
+  api.signIn("viewer-b", "bob")
+  expect(await api.post()).toMatchObject({ id: "reply-2", author: "bob" })
+  expect([api.sent(), api.recorded()]).toEqual([[body, body], 1])
+
+  api.restart()
+  api.signIn(author.id, "renamed")
+  expect(await api.post()).toMatchObject({ id: "reply-1", author: "renamed" })
+  expect([api.sent(), api.recorded()]).toEqual([[body, body], 0])
+})
+
+test("two unresolved attempts remain independent even if the second viewer takes the first viewer's old login", async () => {
+  const api = harness({ failure: "lost", cut: true })
+  await expect(api.post()).rejects.toBeInstanceOf(ReviewReplyUncertainError)
+  api.online()
+  api.restart()
+  api.signIn(author.id, "renamed")
+  api.signIn("viewer-b", author.login)
+  await expect(api.post()).rejects.toBeInstanceOf(ReviewReplyUncertainError)
+  expect([api.sent().length, api.recorded()]).toEqual([2, 2])
+
+  api.online()
+  api.restart()
+  expect(await api.post()).toMatchObject({ id: "reply-2", author: author.login })
+  api.restart()
+  api.signIn(author.id, "renamed")
+  expect(await api.post()).toMatchObject({ id: "reply-1", author: "renamed" })
+  expect([api.sent().length, api.recorded()]).toEqual([2, 0])
+})
+
+test("a viewer change during settlement cannot prove publication or absence", async () => {
+  const api = harness({ failure: "unsent" })
+  api.during(() => {
+    api.signIn("viewer-b", "bob")
+    api.discover("bobs-reply")
+  })
+  await expect(api.post()).rejects.toBeInstanceOf(ReviewReplyUncertainError)
+  expect([api.sent().length, api.recorded()]).toEqual([1, 1])
+})
+
+test("a recycled legacy login and another author's reply are not proof of publication or absence", async () => {
+  const api = harness()
+  api.seedLegacy(author.login)
+  api.discover("legacy-reply")
+  api.signIn(author.id, "renamed")
+  api.signIn("viewer-b", author.login)
+  api.restart()
+  await expect(api.post()).rejects.toBeInstanceOf(ReviewReplyUncertainError)
+  api.discover("also-bobs")
+  await expect(api.post()).rejects.toBeInstanceOf(ReviewReplyUncertainError)
+  expect([api.sent(), api.recorded()]).toEqual([[], 1])
+})
+
+test("unverifiable viewer or legacy identity retains the old record without posting", async () => {
+  for (const [login, id, currentLogin] of [
+    ["old-name", author.id, author.login],
+    ["", author.id, author.login],
+    [author.login, "", author.login],
+  ] as const) {
+    const api = harness()
+    api.seedLegacy(login)
+    api.discover("legacy-reply")
+    api.signIn(id, currentLogin)
+    api.restart()
+    await expect(api.post()).rejects.toBeInstanceOf(ReviewReplyUncertainError)
+    expect([api.sent(), api.recorded()]).toEqual([[], 1])
+  }
+})
+
+test("a first preflight failure is not an uncertain mutation", async () => {
+  const api = harness()
+  api.offline()
+  const error = await api.post().catch((error) => error)
+  expect(error).not.toBeInstanceOf(ReviewReplyUncertainError)
+  expect(error.message).toBe("Offline")
+  expect(api.sent()).toEqual([])
+})
+
+test("read-only storage preserves confirmation and same-session recovery", async () => {
+  const readOnly = async () => {
+    throw new Error("Read-only filesystem")
+  }
+  const storage = { load: async () => undefined, save: readOnly, remove: readOnly }
+  const api = harness({ failure: "lost", cut: true, storage })
+  await expect(api.post()).rejects.toBeInstanceOf(ReviewReplyUncertainError)
+  await expect(api.post()).rejects.toBeInstanceOf(ReviewReplyUncertainError)
+  api.online()
+  expect(await api.post()).toMatchObject({ id: "reply-1" })
+  api.recover()
+  expect(await api.post()).toMatchObject({ id: "reply-2" })
+  expect(api.sent()).toEqual([body, body])
+})
+
 test("an edited retry does not add a second reply unasked once the first is found on the thread", async () => {
   const api = harness({ failure: "lost", cut: true })
   await expect(api.post()).rejects.toBeInstanceOf(ReviewReplyUncertainError)
@@ -289,19 +404,20 @@ test("a reply GitHub staged in a pending review is not reported as posted, with 
   }
 })
 
-test("the record of an attempt is one private file per thread, read back by a later session and removed when settled", async () => {
+test("a later session reconciles the original login-only file without resending or removing another thread's file", async () => {
   const parent = mkdtempSync(join(tmpdir(), "opengh-reply-attempts-"))
   try {
     const directory = join(parent, "attempts")
     const storage = createReviewReplyAttemptStorage(directory)
-    expect(await storage.load("1:42:thread-id")).toBeUndefined()
-    await storage.save("1:42:thread-id", { body })
+    await storage.save(legacyKey, legacyAttempt("AUTHOR"))
     await storage.save("1:42:other", { body: "Other" })
     expect(readdirSync(directory)).toHaveLength(2)
-    expect(await createReviewReplyAttemptStorage(directory).load("1:42:thread-id")).toEqual({ body })
-    await storage.remove("1:42:thread-id")
-    expect(await storage.load("1:42:thread-id")).toBeUndefined()
-    expect(readdirSync(directory)).toHaveLength(1)
+    const api = harness({ storage: createReviewReplyAttemptStorage(directory) })
+    api.discover("legacy-reply")
+    expect(await api.post()).toMatchObject({ id: "legacy-reply", author: author.login })
+    expect(api.sent()).toEqual([])
+    expect(await storage.load(legacyKey)).toBeUndefined()
+    expect(await storage.load("1:42:other")).toEqual({ body: "Other" })
   } finally {
     rmSync(parent, { recursive: true, force: true })
   }

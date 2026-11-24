@@ -1703,6 +1703,19 @@ export function createRepositorySession(
     }
   }
 
+  const keepConcurrentReplies = (loaded: PullContext, before: PullContext | undefined, retained: PullContext | undefined): PullContext => {
+    if (!before || !retained || before.threads === retained.threads) return loaded
+    const known = new Set([...before.threads, ...loaded.threads].flatMap((thread) => thread.comments.map((comment) => comment.id)))
+    const added = new Map(retained.threads.map((thread) => [thread.id, thread.comments.filter((comment) => !known.has(comment.id))]))
+    return {
+      ...loaded,
+      threads: loaded.threads.map((thread) => {
+        const replies = added.get(thread.id)
+        return replies?.length ? { ...thread, comments: [...thread.comments, ...replies] } : thread
+      }),
+    }
+  }
+
   const fetchPullContext = async (
     repository: string,
     number: number,
@@ -1727,7 +1740,7 @@ export function createRepositorySession(
         pull?.state === "open" &&
         !pull.merged &&
         !options.signal?.aborted
-      const reacted = withThreadReactions(number, loaded, revision)
+      const reacted = withThreadReactions(number, keepConcurrentReplies(loaded, previous, current?.context.value), revision)
       const value = recheck ? { ...reacted, readiness: { ...reacted.readiness, mergeablePending: true } } : reacted
       setPullDetail((current) => (current?.number === number ? { ...current, context: { status: "ready", value } } : current))
       if (recheck) recheckMergeability(repository, number, request, value.readiness.headSha, options.signal ?? pullAbort.signal)
@@ -1829,7 +1842,7 @@ export function createRepositorySession(
       if (!origin()) return
       const active = pullDetail()!
       const context = active.context.value
-      if (active.context.status !== "ready" || !context || !context.threads.some((thread) => thread.id === threadId)) {
+      if (!context || !context.threads.some((thread) => thread.id === threadId)) {
         void loadPull(number, { force: true })
         return
       }
@@ -1838,7 +1851,7 @@ export function createRepositorySession(
           ? { ...thread, comments: [...thread.comments, reply] }
           : thread,
       )
-      setPullDetail({ ...active, context: { status: "ready", value: { ...context, threads } } })
+      setPullDetail({ ...active, context: { ...active.context, value: { ...context, threads } } })
     } catch (error) {
       if (error instanceof ReviewReplyUncertainError || error instanceof ReviewThreadChangedError) {
         invalidatePull(repository, number)
@@ -1909,7 +1922,7 @@ export function createRepositorySession(
       let comments = previous?.number === number ? previous.comments.value : undefined
       const references = previous?.number === number ? previous.references.value : undefined
       const commits = previous?.number === number ? previous.commits.value : undefined
-      let context = previous?.number === number ? previous.context.value : undefined
+      const initialContext = previous?.number === number ? previous.context.value : undefined
       const events = previous?.number === number ? (previous.events ?? []) : []
       setPullDetail({
         number,
@@ -1918,7 +1931,7 @@ export function createRepositorySession(
         references: loadingResource(references),
         events,
         commits: loadingResource(commits),
-        context: loadingResource(context),
+        context: loadingResource(initialContext),
       })
       try {
         const key = issueKey(repository, number, "pull")
@@ -1949,7 +1962,7 @@ export function createRepositorySession(
         if (value?.nodeId && loaded.nodeId && value.nodeId !== loaded.nodeId) resetReactionOwner("pull")
         const pull = withReactionFields({ kind: "pull", number }, loaded, revision)
         comments = pullDetail()?.comments.value ?? comments
-        context = pullDetail()?.context.value ?? context
+        const context = pullDetail()?.context.value ?? initialContext
         const hasComments = pull.commentCount > 0 || (postedComments.get(key)?.length ?? 0) > 0
         setPullDetail({
           number,
@@ -1964,7 +1977,7 @@ export function createRepositorySession(
           hasComments ? fetchPullComments(repository, number, request, comments?.page ?? 1, comments, requestOptions) : Promise.resolve(),
           fetchPullReferences(repository, number, request, references, requestOptions),
           pull.commitCount > 0 ? fetchPullCommits(repository, number, request, commits, requestOptions) : Promise.resolve(),
-          fetchPullContext(repository, number, request, context, requestOptions),
+          fetchPullContext(repository, number, request, initialContext, requestOptions),
         ])
         if (request === pullGeneration && draftGeneration === pullDraftGeneration)
           retainPull(pullDetail(), repositoryRead === repositoryGeneration && detachedRevision === detachedReactionRevision.get(cacheKey))

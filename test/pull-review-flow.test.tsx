@@ -531,7 +531,7 @@ test("draft PR inline comments open from Hunk's [+] in opengh's editor and publi
   }
 }, 15_000)
 
-async function replyFixture(options: { files?: number; commenting?: boolean } = {}) {
+async function replyFixture(options: { files?: number; commenting?: boolean; longSecondFile?: boolean } = {}) {
   const summary = githubDataFixture.pulls.open.value!.items[0]!
   const { number } = summary
   const headSha = "a".repeat(40)
@@ -547,13 +547,15 @@ async function replyFixture(options: { files?: number; commenting?: boolean } = 
     url: `${githubDataFixture.repo.url}/pull/${number}#discussion_r1`,
   }
   const trailingLines = Array.from({ length: 60 }, (_, index) => `Later content ${index + 1}`)
+  const contextLines = trailingLines.map((line) => ` // ${line}\n`).join("")
   const patch =
     patchFixture.replace("@@ -1 +1 @@", "@@ -1,61 +1,61 @@") +
-    trailingLines.map((line) => ` // ${line}\n`).join("") +
+    contextLines +
     Array.from(
       { length: options.files ?? 0 },
       (_, index) =>
-        `diff --git a/f${index}.ts b/f${index}.ts\nindex 1111111..2222222 100644\n--- a/f${index}.ts\n+++ b/f${index}.ts\n@@ -1 +1 @@\n-a\n+b\n`,
+        `diff --git a/f${index}.ts b/f${index}.ts\nindex 1111111..2222222 100644\n--- a/f${index}.ts\n+++ b/f${index}.ts\n` +
+        (index === 0 && options.longSecondFile ? `@@ -1,61 +1,61 @@\n-a\n+b\n${contextLines}` : "@@ -1 +1 @@\n-a\n+b\n"),
     ).join("")
   const followup = { ...root, id: "followup", author: "bob", body: "I agree", replyToId: root.id }
   const [threads, setThreads] = createSignal<PullReviewThread[]>([
@@ -1011,6 +1013,44 @@ test("a reply editor neither takes the keyboard unseen nor moves the page under 
     await selectReplyFromPicker()
     expect(editor()!.plainText).toBe("Lost reply")
     expect(setup.renderer.root.findDescendantById("diff-comment-card:reply-here")).toBeDefined()
+  } finally {
+    setup.renderer.destroy()
+  }
+})
+
+test("picker reveals a reply far down a different single-file diff", async () => {
+  const { setup, settle, scrollBox, setThreads, selectReplyFromPicker, expectVisibleReply } = await replyFixture({
+    files: 52,
+    longSecondFile: true,
+  })
+  try {
+    setThreads((threads) => threads.map((thread) => (thread.canReply ? { ...thread, line: 60 } : thread)))
+    await settle()
+    setup.mockInput.pressKey("D")
+    await settle()
+    expect(setup.captureCharFrame()).toContain("single-file view")
+    const other = setup
+      .captureCharFrame()
+      .split("\n")
+      .findIndex((line) => line.trimStart().startsWith("f0.ts"))
+    expect(other).toBeGreaterThanOrEqual(0)
+    await setup.mockMouse.click(4, other)
+    await settle()
+    const card = "diff-comment-card:reply-here"
+    expect(setup.renderer.root.findDescendantById(card)).toBeUndefined()
+    const scroll = scrollBox("diff-body-scroll")
+    scroll.scrollTo(10)
+    await settle()
+    expect(scroll.scrollTop).toBe(10)
+
+    await selectReplyFromPicker()
+    expectVisibleReply(scroll, card)
+
+    scroll.scrollTo(5)
+    await settle()
+    setThreads((threads) => threads.map((thread) => ({ ...thread })))
+    await settle()
+    expect(scroll.scrollTop).toBe(5)
   } finally {
     setup.renderer.destroy()
   }
