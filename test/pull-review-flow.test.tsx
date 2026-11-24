@@ -15,6 +15,7 @@ import type { ComposeDraft } from "../src/compose-drafts"
 import { createReplyDrafts } from "../src/reply-drafts"
 import type { InlineCommentInput, PostedInlineComment, PullReviewSession, ReviewSessionState } from "../src/review-types"
 import { InlineCommentUncertainError } from "../src/inline-comments"
+import { GitHubRequestNotSentError } from "../src/github/errors"
 import { App } from "../src/ui/app"
 import { initializeHunk } from "../src/ui/hunk-host"
 import { parseDiff } from "../src/ui/diff-model"
@@ -583,6 +584,7 @@ async function replyFixture(options: { files?: number; commenting?: boolean; lon
       comments: [{ ...root, id: "another-comment" }],
     },
   ])
+  const [contextLoading, setContextLoading] = createSignal(false)
   const calls: [number, string, string][] = []
   const stored = new Map<string, ComposeDraft>([[`${number}:reply-here`, { title: "", body: "Draft from last time" }]])
   const drafts = createReplyDrafts({
@@ -670,10 +672,12 @@ async function replyFixture(options: { files?: number; commenting?: boolean; lon
             },
           },
           references: { status: "ready", value: [] },
-          context: {
-            status: "ready",
-            value: { ...pullContextFixture, readiness: { ...pullContextFixture.readiness, headSha }, threads: threads() },
-          },
+          context: contextLoading()
+            ? { status: "loading", phase: "load" }
+            : {
+                status: "ready",
+                value: { ...pullContextFixture, readiness: { ...pullContextFixture.readiness, headSha }, threads: threads() },
+              },
         }}
         diffs={{
           pull: {
@@ -741,6 +745,7 @@ async function replyFixture(options: { files?: number; commenting?: boolean; lon
     followup,
     threads,
     setThreads,
+    setContextLoading,
     calls,
     stored,
     drafts,
@@ -981,8 +986,9 @@ test("a reply editor neither takes the keyboard unseen nor moves the page under 
     await settle()
     const reading = page.scrollTop
     expect(reading).toBeGreaterThan(writing)
-    rejectReply(new Error("GitHub is down"))
+    rejectReply(new GitHubRequestNotSentError("Offline"))
     await settle()
+    expect(setup.captureCharFrame()).toContain("No new reply sent: Offline")
     expect(setup.renderer.root.findDescendantById(resume)).toBeDefined()
     expect(page.scrollTop).toBe(reading)
 
@@ -1017,6 +1023,55 @@ test("a reply editor neither takes the keyboard unseen nor moves the page under 
     setup.renderer.destroy()
   }
 })
+
+for (const view of ["conversation", "diff"]) {
+  test(`expanded ${view} reply keeps its draft but cannot post to a removed thread`, async () => {
+    const { setup, settle, threads, setThreads, setContextLoading, selectReplyFromPicker, calls } = await replyFixture()
+    const editor = () => setup.renderer.root.findDescendantById("review-editor-body") as TextareaRenderable | undefined
+    const confirm = () => setup.renderer.root.findDescendantById("inline-comment-confirm")
+    try {
+      await settle()
+      if (view === "diff") {
+        setup.mockInput.pressKey("D")
+        await settle()
+      }
+      await selectReplyFromPicker()
+      setup.mockInput.pressKey("o", { ctrl: true })
+      await settle()
+      const writer = editor()!
+      expect(writer.plainText).toBe("Draft from last time")
+      const listed = threads()
+      setContextLoading(true)
+      await settle()
+      expect(editor()).toBe(writer)
+      expect(setup.captureCharFrame()).not.toContain("This thread is no longer available")
+      setContextLoading(false)
+      await settle()
+      setup.mockInput.pressKey("s", { ctrl: true })
+      await settle()
+      expect(confirm()).toBeDefined()
+      setThreads(listed.filter((thread) => thread.id !== "reply-here"))
+      await settle()
+      expect(editor()).toBe(writer)
+      expect(writer.plainText).toBe("Draft from last time")
+      expect(setup.captureCharFrame()).toContain("This thread is no longer available")
+      expect(confirm()).toBeUndefined()
+      setup.mockInput.pressKey("s", { ctrl: true })
+      await clickControl(setup, "review-editor-save")
+      await settle()
+      expect(confirm()).toBeUndefined()
+      expect(calls).toHaveLength(0)
+      setThreads(listed)
+      await settle()
+      expect(confirm()).toBeUndefined()
+      setup.mockInput.pressKey("s", { ctrl: true })
+      await settle()
+      expect(confirm()).toBeDefined()
+    } finally {
+      setup.renderer.destroy()
+    }
+  })
+}
 
 test("picker reveals a reply far down a different single-file diff", async () => {
   const { setup, settle, scrollBox, setThreads, selectReplyFromPicker, expectVisibleReply } = await replyFixture({

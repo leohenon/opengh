@@ -34,6 +34,7 @@ export function ReviewEditor(
     headSha: string
     showScrollbar: boolean
     saveLabel: string
+    saveDisabledReason?: string
     confirmTitle?: string
     allowEmpty?: boolean
     onChange?(body: string): void
@@ -59,8 +60,12 @@ export function ReviewEditor(
     onError: setError,
   })
   const blocked = () => confirming() || composer.externalEditing()
+  const canSave = () => !props.saveDisabledReason && (props.allowEmpty || !!body().trim())
+  createEffect(() => {
+    if (props.saveDisabledReason) setConfirming(false)
+  })
   const save = () => {
-    if (!blocked() && (props.allowEmpty || body().trim())) setConfirming(true)
+    if (!blocked() && canSave()) setConfirming(true)
   }
   const clear = () => {
     if (blocked()) return
@@ -74,7 +79,7 @@ export function ReviewEditor(
     }
   }
   const confirm = () => {
-    if (!props.allowEmpty && !body().trim()) return
+    if (!canSave()) return
     setConfirming(false)
     setError(undefined)
     try {
@@ -93,7 +98,7 @@ export function ReviewEditor(
       confirming()
         ? keys.hints(["dialog.confirm", "confirm"], ["dialog.close", "back"])
         : keys.hints(
-            ...(props.allowEmpty || body().trim() ? [["dialog.submit", "post"] as const] : []),
+            ...(canSave() ? [["dialog.submit", "post"] as const] : []),
             ["dialog.close", "back"],
             ["dialog.togglePreview", composer.preview() ? "write" : "preview"],
             ["dialog.toggleExpanded", composer.expanded() ? "restore" : "expand"],
@@ -188,13 +193,15 @@ export function ReviewEditor(
               </scrollbox>
             </Show>
           </box>
-          <Show when={error()}>
-            <text height={2} flexShrink={0} wrapMode="word" fg={colors.red}>
-              {error()}
-            </text>
+          <Show when={props.saveDisabledReason ?? error()}>
+            {(message) => (
+              <text height={2} flexShrink={0} wrapMode="word" fg={colors.red}>
+                {message()}
+              </text>
+            )}
           </Show>
           <box height={1} flexShrink={0} marginTop={1}>
-            <Action id="review-editor-save" disabled={blocked() || (!props.allowEmpty && !body().trim())} onActivate={save}>
+            <Action id="review-editor-save" disabled={blocked() || !canSave()} onActivate={save}>
               {props.saveLabel}
             </Action>
           </box>

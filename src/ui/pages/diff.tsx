@@ -536,7 +536,7 @@ export function DiffScreen(props: {
         })
       }
       shownReply = active && replyComposers.get(active.threadId)?.holder.parent ? active : undefined
-      if (active && wasShown && !shownReply) active.comment.onClose()
+      if (active && wasShown && !shownReply && active.comment.open) active.comment.onClose()
     }
   }
   // Like posted cards, the composer lives in Hunk's row. It keeps its editor across React and card

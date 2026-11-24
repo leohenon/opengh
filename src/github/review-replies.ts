@@ -7,7 +7,14 @@ import { configDirectory } from "../paths"
 import { boolean, comment, commentFields, object, optionalText, text } from "./pull-context"
 import type { RepositoryTarget } from "./repository-target"
 import { MAX_AUTOMATIC_PAGES } from "./request-budget"
-import { GitHubApiError, githubTransport, isDefiniteRejection, REQUEST_TIMEOUT_MS, type GitHubTransport } from "./transport"
+import {
+  GitHubApiError,
+  GitHubRequestNotSentError,
+  githubTransport,
+  isDefiniteRejection,
+  REQUEST_TIMEOUT_MS,
+  type GitHubTransport,
+} from "./transport"
 
 export class ReviewReplyUncertainError extends Error {}
 export class ReviewThreadChangedError extends Error {}
@@ -171,12 +178,14 @@ export function createGitHubReviewReplies(
   }
   const settle = async (attempt: Attempt, viewerId: string, read: () => Promise<Thread>) => {
     let failure: unknown
+    const readStartedAt = now()
     let thread = await read().catch((error) => {
       failure = error
       return undefined
     })
-    if ((!thread || reconcile(attempt, thread, viewerId) === "absent") && attempt.settles > now()) {
-      await wait(attempt.settles - now())
+    if (readStartedAt < attempt.settles && (!thread || reconcile(attempt, thread, viewerId) === "absent")) {
+      const remaining = attempt.settles - now()
+      if (remaining > 0) await wait(remaining)
       thread = await read()
     }
     if (!thread) throw failure
@@ -208,7 +217,7 @@ export function createGitHubReviewReplies(
       const prefix = `${JSON.stringify(threadKey)}:`
       let before = await read().catch((error) => {
         if (old || [...attempts.keys()].some((key) => key.startsWith(prefix))) throw unconfirmed(error)
-        throw error
+        throw new GitHubRequestNotSentError(error instanceof Error ? error.message : String(error))
       })
       const viewerId = before.viewerId
       const key = prefix + viewerId

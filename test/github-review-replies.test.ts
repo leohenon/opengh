@@ -9,7 +9,7 @@ import {
   ReviewReplyUncertainError,
   ReviewThreadChangedError,
 } from "../src/github/review-replies"
-import { GitHubApiError } from "../src/github/transport"
+import { GitHubApiError, GitHubRequestNotSentError } from "../src/github/transport"
 
 const repository = { id: 1, nodeId: "repo-id", nameWithOwner: "owner/repo" }
 const body = "Thanks!\n\nI'll update this."
@@ -38,6 +38,7 @@ function harness(
     storage?: ReviewReplyAttemptStorage
     cut?: boolean
     lag?: number
+    readDurationMs?: number
   } = {},
 ) {
   let now = 0
@@ -89,6 +90,7 @@ function harness(
       }
       if (down) throw new Error("Offline")
       const visible = lag > 0 && !variables.before ? (lag--, comments.slice(0, -1)) : comments
+      now += options.readDurationMs ?? 0
       const page = (end: number, size: number) => {
         const start = Math.max(0, end - size)
         return { nodes: visible.slice(start, end), pageInfo: { hasPreviousPage: start > 0, startCursor: String(start) } }
@@ -212,6 +214,12 @@ test("a failed send is not reported until GitHub has settled: posted if the repl
     never.recover()
     expect(await never.post()).toMatchObject({ id: "reply-2" })
   }
+})
+
+test("a stale read that finishes after the settle deadline cannot rule out a posted reply", async () => {
+  const api = harness({ failure: "lost", lag: 1, readDurationMs: 16_000 })
+  expect(await api.post()).toMatchObject({ id: "reply-1" })
+  expect([api.sent().length, api.waited(), api.recorded()]).toEqual([1, 0, 0])
 })
 
 test("an error GitHub answered with is a rejection only if the reply stays off the thread", async () => {
@@ -340,6 +348,17 @@ test("a first preflight failure is not an uncertain mutation", async () => {
   expect(error).not.toBeInstanceOf(ReviewReplyUncertainError)
   expect(error.message).toBe("Offline")
   expect(api.sent()).toEqual([])
+})
+
+test("an offline retry after restart sends nothing and preserves the earlier attempt", async () => {
+  const api = harness({ failure: "lost", cut: true })
+  await expect(api.post()).rejects.toBeInstanceOf(ReviewReplyUncertainError)
+  api.restart()
+  await expect(api.post()).rejects.toBeInstanceOf(GitHubRequestNotSentError)
+  expect([api.sent().length, api.recorded()]).toEqual([1, 1])
+  api.online()
+  expect(await api.post()).toMatchObject({ id: "reply-1" })
+  expect(api.sent()).toEqual([body])
 })
 
 test("read-only storage preserves confirmation and same-session recovery", async () => {

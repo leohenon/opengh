@@ -87,6 +87,7 @@ import { mouseContextMenu, type MousePosition } from "./mouse"
 import { IssueReferencesPicker } from "./components/issue-references-picker"
 import type { InlineCommentInput, PostedInlineComment, PullReviewSession, ReviewAnchor, ReviewEligibility } from "../review-types"
 import { InlineCommentUncertainError } from "../inline-comments"
+import { GitHubRequestNotSentError } from "../github/errors"
 import { ReviewReplyUncertainError } from "../github/review-replies"
 import { createInlineDrafts, inlineDraftKey, type InlineDrafts } from "../inline-drafts"
 import { createComposeDrafts, type ComposeDraft, type ComposeDrafts } from "../compose-drafts"
@@ -890,13 +891,17 @@ function AppContent(props: AppProps) {
     setReplyConfirm()
     setOverlay()
   }
-  createEffect(() => {
+  const removedReplyTarget = createMemo<ReplyTarget | undefined>((previous) => {
     const target = currentReply()
-    const unlisted = target && !target.inDiff && !replyDraftThreads().some((thread) => thread.id === target.thread.id)
-    if (replyTarget() && (!target || unlisted)) {
-      setReplyTarget()
-      if (overlay() === "review-reply" || overlay() === "reply-confirm") closeReplyOverlay()
-    }
+    if (!target) return
+    const detail = props.pullDetail
+    if (detail?.number !== target.number || detail.context.status !== "ready") return previous === target ? target : undefined
+    return detail.context.value.threads.some((thread) => thread.id === target.thread.id) ? undefined : target
+  })
+  createEffect(() => {
+    if (currentReply() && (!removedReplyTarget() || overlay() === "review-reply")) return
+    if (replyTarget()) setReplyTarget()
+    if (overlay() === "review-reply" || overlay() === "reply-confirm") closeReplyOverlay()
   })
   const targetDraft = (target: ReplyTarget): ReplyDraftKey => ({
     repositoryId: target.repositoryId,
@@ -972,7 +977,7 @@ function AppContent(props: AppProps) {
   })
   const submitReply = async (target: ReplyTarget, body: string) => {
     const post = props.onPostReviewReply
-    if (!post || !replyOrigin(target) || !body.trim() || replyDrafts.posting().has(target.key)) return
+    if (!post || currentReply() !== target || removedReplyTarget() || !body.trim() || replyDrafts.posting().has(target.key)) return
     saveReplyDraft(target, body)
     setReplyTarget()
     closeReplyOverlay()
@@ -984,7 +989,12 @@ function AppContent(props: AppProps) {
       if (!disposed && !renderer.isDestroyed && data().repo.id === target.repositoryId)
         setToast({
           id: ++toastId,
-          title: error instanceof ReviewReplyUncertainError ? "Reply not confirmed" : "Reply not posted",
+          title:
+            error instanceof ReviewReplyUncertainError
+              ? "Reply not confirmed"
+              : error instanceof GitHubRequestNotSentError
+                ? "No new reply sent"
+                : "Reply not posted",
           message: `${replyOrigin(target) ? "" : `#${target.number} ${replyLabel(target.thread)}: `}${error instanceof Error ? error.message : String(error)}`,
         })
     }
@@ -3627,6 +3637,9 @@ function AppContent(props: AppProps) {
                             repositoryUrl={data().repo.url}
                             headSha={target.headSha}
                             saveLabel="Post reply"
+                            saveDisabledReason={
+                              removedReplyTarget() ? "This thread is no longer available. You can still copy your draft." : undefined
+                            }
                             confirmTitle="Post reply to review thread?"
                             showScrollbar={config().showScrollbars}
                             expanded
