@@ -7,7 +7,7 @@ import { stopGitHubProcesses } from "./github/process"
 import { githubWrites } from "./github/writes"
 import { stopClipboardProcesses } from "./clipboard"
 import { stopCommandProcesses } from "./command-actions"
-import { saveRepositoryTabs } from "./repository-tabs"
+import { saveRepositoryTabBarHidden, saveRepositoryTabs } from "./repository-tabs"
 import { createResumeWriter, loadResume, saveResume } from "./resume"
 import { defaultConfig, loadConfig, saveConfig } from "./config"
 import { rememberRepository } from "./github/repository"
@@ -146,6 +146,7 @@ try {
         services={{
           saveConfig: (config) => trackSave(saveConfig(config)),
           saveRepositoryTabs: (tabs) => trackSave(saveRepositoryTabs(tabs)),
+          saveRepositoryTabBarHidden: (hidden) => trackSave(saveRepositoryTabBarHidden(hidden)),
           rememberRepository: (repository) => trackSave(rememberRepository(repository)),
         }}
       />

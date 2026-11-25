@@ -98,7 +98,7 @@ for (const parent of ["issue", "pull"] as const) {
                 resolveLocalRepository: async () => undefined,
                 loadRecentRepositories: async () => [],
                 rememberRepository: async () => {},
-                loadRepositoryTabs: async () => ({}),
+                loadRepositoryTabPreferences: async () => ({}),
                 saveRepositoryTabs: async () => {},
                 loadConfig: async () => ({ ...defaultConfig }),
                 saveConfig: async () => {},

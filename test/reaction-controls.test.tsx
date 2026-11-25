@@ -70,7 +70,7 @@ async function setup(overrides: Partial<RepositoryLoaders> = {}, launcher = fals
           loadRecentRepositories: async () => ["anomalyco/opentui", "owner/other"],
           rememberRepository: async () => {},
           // Defaults would restore the developer's saved tabs from disk and ask the real gh for the viewer.
-          loadRepositoryTabs: async () => ({}),
+          loadRepositoryTabPreferences: async () => ({}),
           saveRepositoryTabs: async () => {},
           createPullReviewSession: createTestReviewSession,
           copyToHostClipboard: async (value) => {

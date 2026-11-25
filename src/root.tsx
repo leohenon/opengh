@@ -4,7 +4,14 @@ import { createEffect, createMemo, createSignal, ErrorBoundary, Match, onCleanup
 import type { DetailTarget, InitialNavigation, NavigationState, Page } from "./navigation"
 import type { LaunchDetail } from "./launch-target"
 import { resumeLocation, type ResumeLocation } from "./resume"
-import { loadRepositoryTabs, saveRepositoryTabs, type RepositoryTabs } from "./repository-tabs"
+import {
+  loadRepositoryTabBarHidden,
+  loadRepositoryTabs,
+  saveRepositoryTabBarHidden,
+  saveRepositoryTabs,
+  type RepositoryTabBarHidden,
+  type RepositoryTabs,
+} from "./repository-tabs"
 import { defaultConfig, loadConfig, saveConfig, type Config } from "./config"
 import { copyToHostClipboard } from "./clipboard"
 import {
@@ -52,8 +59,9 @@ export type RootServices = {
   loadIssueKind(repository: string, number: number): Promise<"issue" | "pull">
   loadRecentRepositories(): Promise<string[]>
   rememberRepository(repository: string): Promise<void>
-  loadRepositoryTabs(): Promise<RepositoryTabs>
+  loadRepositoryTabPreferences(): Promise<{ tabs?: RepositoryTabs; tabBarHidden?: RepositoryTabBarHidden }>
   saveRepositoryTabs(tabs: RepositoryTabs): Promise<void>
+  saveRepositoryTabBarHidden(hidden: RepositoryTabBarHidden): Promise<void>
   loadConfig(): Promise<Config>
   saveConfig(config: Config): Promise<void>
   createRepositorySession(): RepositorySession
@@ -80,8 +88,15 @@ const defaultServices: RootServices = {
   loadIssueKind: loadGitHubIssueKind,
   loadRecentRepositories,
   rememberRepository,
-  loadRepositoryTabs,
+  async loadRepositoryTabPreferences() {
+    const [tabs, tabBarHidden] = await Promise.all([
+      loadRepositoryTabs().catch(() => undefined),
+      loadRepositoryTabBarHidden().catch(() => undefined),
+    ])
+    return { tabs, tabBarHidden }
+  },
   saveRepositoryTabs,
+  saveRepositoryTabBarHidden,
   loadConfig,
   saveConfig,
   createRepositorySession,
@@ -100,6 +115,53 @@ const defaultServices: RootServices = {
   readBranchUpstream,
   checkMerge,
   runCommand,
+}
+
+function createSavedRepositoryPreference<T>(save: (updates: Record<string, T>) => Promise<void>) {
+  const [values, setValues] = createSignal<Record<string, T>>({})
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const dirty: Record<string, { value: T }> = {}
+  let pendingSave: Promise<void> | undefined
+
+  const flush = (): Promise<void> | undefined => {
+    clearTimeout(timer)
+    timer = undefined
+    if (pendingSave) return pendingSave.then(() => flush())
+    const snapshot = { ...dirty }
+    if (!Object.keys(snapshot).length) return
+    const updates = Object.fromEntries(Object.entries(snapshot).map(([repository, entry]) => [repository, entry.value]))
+    pendingSave = Promise.resolve()
+      .then(() => save(updates))
+      .then(() => {
+        for (const [repository, entry] of Object.entries(snapshot)) {
+          // A newer navigation, even back to the same tab, must still be saved.
+          if (dirty[repository] === entry) delete dirty[repository]
+        }
+      })
+      .catch(() => {
+        // Keep failed updates dirty for the next navigation or exit flush.
+      })
+      .finally(() => {
+        pendingSave = undefined
+      })
+    return pendingSave
+  }
+
+  return {
+    initialize: setValues,
+    read: (repository: string) => values()[repository.toLowerCase()],
+    remember: (repository: string, value: T) => {
+      const key = repository.toLowerCase()
+      if (values()[key] === value) return
+      setValues((current) => ({ ...current, [key]: value }))
+      dirty[key] = { value }
+      clearTimeout(timer)
+      timer = setTimeout(() => {
+        void flush()
+      }, 250)
+    },
+    flush,
+  }
 }
 
 export function Root(props: {
@@ -140,43 +202,8 @@ export function Root(props: {
   const [pickerError, setPickerError] = createSignal("")
   const [launchError, setLaunchError] = createSignal<LaunchRequest & { message: string }>()
   const [config, setConfig] = createSignal(props.initialConfig ?? defaultConfig)
-  const [repositoryTabs, setRepositoryTabs] = createSignal<RepositoryTabs>({})
-  let tabSaveTimer: ReturnType<typeof setTimeout> | undefined
-  const dirtyTabs: Record<string, { page: Page }> = {}
-  let pendingTabSave: Promise<void> | undefined
-  const flushRepositoryTabs = (): Promise<void> | undefined => {
-    clearTimeout(tabSaveTimer)
-    tabSaveTimer = undefined
-    if (pendingTabSave) return pendingTabSave.then(() => flushRepositoryTabs())
-    const snapshot = { ...dirtyTabs }
-    if (!Object.keys(snapshot).length) return
-    const updates = Object.fromEntries(Object.entries(snapshot).map(([repository, entry]) => [repository, entry.page]))
-    pendingTabSave = Promise.resolve()
-      .then(() => services.saveRepositoryTabs(updates))
-      .then(() => {
-        for (const [repository, entry] of Object.entries(snapshot)) {
-          // A newer navigation, even back to the same tab, must still be saved.
-          if (dirtyTabs[repository] === entry) delete dirtyTabs[repository]
-        }
-      })
-      .catch(() => {
-        // Keep failed updates dirty for the next navigation or exit flush.
-      })
-      .finally(() => {
-        pendingTabSave = undefined
-      })
-    return pendingTabSave
-  }
-  const rememberTab = (repository: string, page: Page) => {
-    const key = repository.toLowerCase()
-    if (repositoryTabs()[key] === page) return
-    setRepositoryTabs((current) => ({ ...current, [key]: page }))
-    dirtyTabs[key] = { page }
-    clearTimeout(tabSaveTimer)
-    tabSaveTimer = setTimeout(() => {
-      void flushRepositoryTabs()
-    }, 250)
-  }
+  const repositoryTabs = createSavedRepositoryPreference(services.saveRepositoryTabs)
+  const tabBarHidden = createSavedRepositoryPreference(services.saveRepositoryTabBarHidden)
   const [configSaving, setConfigSaving] = createSignal(false)
   const [configReloading, setConfigReloading] = createSignal(false)
   const [configReloaded, setConfigReloaded] = createSignal(false)
@@ -201,7 +228,8 @@ export function Root(props: {
   onCleanup(() => {
     props.onShutdownWork?.(
       Promise.allSettled([
-        flushRepositoryTabs(),
+        repositoryTabs.flush(),
+        tabBarHidden.flush(),
         reviews.flush(),
         inlineDrafts.flush(),
         newIssueDrafts.flush(),
@@ -256,7 +284,8 @@ export function Root(props: {
     quitting = true
     setQuitDraftSaveError(false)
     if (!flushDraftsForQuit()) return
-    const tabs = flushRepositoryTabs()
+    const tabs = repositoryTabs.flush()
+    const tabBar = tabBarHidden.flush()
     const flushReview = () =>
       reviews.flush().catch((error) => {
         throw {
@@ -278,7 +307,7 @@ export function Root(props: {
           message: `${error instanceof Error ? error.message : "Could not save the draft"}. The draft is kept in memory; fix local storage and quit again to retry.`,
         }
       })
-    void Promise.all([tabs, flushReview(), flushInline(), flushNewIssue()])
+    void Promise.all([tabs, tabBar, flushReview(), flushInline(), flushNewIssue()])
       .then(waitForWrites)
       .then(() => {
         // Tab saves can outlast the first drain, a review may first open while quitting,
@@ -382,7 +411,7 @@ export function Root(props: {
       ? "full"
       : initial?.detail || initial?.diff || restored?.details?.[restored.page] || restored?.diffs?.[restored.page]
         ? "detail"
-        : (initial?.page ?? restored?.page ?? repositoryTabs()[repository.toLowerCase()] ?? "overview")
+        : (initial?.page ?? restored?.page ?? repositoryTabs.read(repository) ?? "overview")
     void session.load(repository, loadScope)
     setView("repository")
   }
@@ -438,7 +467,7 @@ export function Root(props: {
         },
       ),
       services.loadRecentRepositories().catch(() => []),
-      services.loadRepositoryTabs().catch(() => ({})),
+      services.loadRepositoryTabPreferences().catch(() => undefined),
       props.initialConfig
         ? Promise.resolve(props.initialConfig)
         : services.loadConfig().catch((error) => {
@@ -446,12 +475,13 @@ export function Root(props: {
             setConfigError(configLoadWarning(message))
             return { ...defaultConfig }
           }),
-    ]).then(([resolved, repositories, savedTabs, loadedConfig]) => {
+    ]).then(([resolved, repositories, tabPreferences, loadedConfig]) => {
       if (renderer.isDestroyed) return
       setRecent(repositories)
       setConfig(loadedConfig)
       if (loadedConfig.checkForUpdates) startUpdateCheck()
-      setRepositoryTabs(savedTabs)
+      repositoryTabs.initialize(tabPreferences?.tabs ?? {})
+      tabBarHidden.initialize(tabPreferences?.tabBarHidden ?? {})
       if (savedResume) {
         pendingState = savedResume
         open(savedResume.repository, undefined, true)
@@ -566,7 +596,9 @@ export function Root(props: {
                               <App
                                 data={() => current().data}
                                 operations={() => current().operations}
-                                initialPage={repositoryTabs()[repositoryName.toLowerCase()]}
+                                initialPage={repositoryTabs.read(repositoryName)}
+                                tabBarHidden={tabBarHidden.read(repositoryName)}
+                                onToggleTabBar={() => tabBarHidden.remember(repositoryName, !tabBarHidden.read(repositoryName))}
                                 initialNavigation={initialNavigation}
                                 focus={focus()}
                                 onOpenFullApp={() => setFocus(false)}
@@ -588,7 +620,7 @@ export function Root(props: {
                                 onResolveIssueKind={services.loadIssueKind}
                                 onOpenUrl={services.openUrl}
                                 onPageChange={(page) => {
-                                  if (!focus()) rememberTab(repositoryName, page)
+                                  if (!focus()) repositoryTabs.remember(repositoryName, page)
                                 }}
                                 updateNotice={config().checkForUpdates ? updateNotice() : undefined}
                                 config={config()}

@@ -45,6 +45,7 @@ Source: [`src/keybindings.ts`](../src/keybindings.ts).
 | `global.openFullApp`      | `ctrl+o` |
 | `global.settings`         | `,`      |
 | `global.switchRepository` | `S`      |
+| `global.toggleTabBar`     | `M`      |
 
 ### Navigation and search
 

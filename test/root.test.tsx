@@ -1,5 +1,8 @@
 import { createTestReviewSession } from "./fixtures/reviews"
 import { afterEach, describe, expect, test } from "bun:test"
+import { mkdtemp, rm } from "node:fs/promises"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 import { render, testRender } from "@opentui/solid"
 import { createTestRenderer } from "@opentui/core/testing"
 import { initializeHunk } from "../src/ui/hunk-host"
@@ -15,6 +18,7 @@ import { appColors, resolveTheme } from "../src/theme"
 import type { CommitDetailState, DiffState, IssueDetailState, PullDetailState, RepositoryState } from "../src/repository-state"
 import { parseLaunchArguments } from "../src/launch-target"
 import { Root } from "../src/root"
+import { loadRepositoryTabBarHidden, saveRepositoryTabBarHidden } from "../src/repository-tabs"
 import type { UpdateNotice } from "../src/update-check"
 import { createRepositorySession } from "../src/repository-session"
 import { createPullReviewSession } from "../src/pull-review-session"
@@ -139,7 +143,7 @@ describe("application root", () => {
             resolveLocalRepository: async () => undefined,
             loadRecentRepositories: async () => [],
             rememberRepository: async () => {},
-            loadRepositoryTabs: async () => ({}),
+            loadRepositoryTabPreferences: async () => ({}),
             saveRepositoryTabs: async () => {},
             loadConfig: async () => ({ ...defaultConfig, showStatusBarHints: true }),
             createRepositorySession: readySession,
@@ -179,7 +183,7 @@ describe("application root", () => {
             resolveLocalRepository: async () => undefined,
             loadRecentRepositories: async () => [],
             rememberRepository: async () => {},
-            loadRepositoryTabs: async () => ({}),
+            loadRepositoryTabPreferences: async () => ({}),
             saveRepositoryTabs: async () => {},
             loadConfig: async () => ({ ...defaultConfig, showStatusBarHints: true, checkForUpdates: false }),
             createRepositorySession: readySession,
@@ -211,7 +215,7 @@ describe("application root", () => {
             resolveLocalRepository: async () => undefined,
             loadRecentRepositories: async () => [],
             rememberRepository: async () => {},
-            loadRepositoryTabs: async () => ({}),
+            loadRepositoryTabPreferences: async () => ({}),
             saveRepositoryTabs: async () => {},
             loadConfig: async () => defaultConfig,
             createRepositorySession: readySession,
@@ -281,7 +285,7 @@ describe("application root", () => {
             resolveLocalRepository: async () => undefined,
             loadRecentRepositories: async () => [],
             rememberRepository: async () => {},
-            loadRepositoryTabs: async () => ({}),
+            loadRepositoryTabPreferences: async () => ({}),
             saveRepositoryTabs: async () => {},
             loadConfig: async () => defaultConfig,
             createRepositorySession: () => session,
@@ -327,7 +331,7 @@ describe("application root", () => {
             resolveLocalRepository: async () => undefined,
             loadRecentRepositories: async () => [],
             rememberRepository: async () => {},
-            loadRepositoryTabs: async () => ({}),
+            loadRepositoryTabPreferences: async () => ({}),
             saveRepositoryTabs: async () => {},
             loadConfig: async () => defaultConfig,
             createRepositorySession: () => session,
@@ -402,7 +406,7 @@ describe("application root", () => {
             resolveLocalRepository: async () => undefined,
             loadRecentRepositories: async () => [],
             rememberRepository: async () => {},
-            loadRepositoryTabs: async () => ({ "cli/cli": "actions" }),
+            loadRepositoryTabPreferences: async () => ({ tabs: { "cli/cli": "actions" } }),
             saveRepositoryTabs: async (tabs) => {
               Object.assign(saved, tabs)
             },
@@ -471,7 +475,7 @@ describe("application root", () => {
             resolveLocalRepository: async () => undefined,
             loadRecentRepositories: async () => [],
             rememberRepository: async () => {},
-            loadRepositoryTabs: async () => ({}),
+            loadRepositoryTabPreferences: async () => ({}),
             saveRepositoryTabs: async () => {},
             loadConfig: async () => ({ ...defaultConfig, showStatusBarHints: true, keybindings: { "view.refresh": ["f6"] } }),
             createRepositorySession: () => ({
@@ -540,7 +544,7 @@ describe("application root", () => {
             resolveRepository: () => resolution.promise,
             resolveLocalRepository: async () => undefined,
             loadRecentRepositories: async () => [],
-            loadRepositoryTabs: async () => ({}),
+            loadRepositoryTabPreferences: async () => ({}),
             loadConfig: async () => {
               configLoads++
               return defaultConfig
@@ -595,7 +599,7 @@ describe("application root", () => {
               receivedCwd = cwd
               return resolution.promise
             },
-            loadRepositoryTabs: async () => ({}),
+            loadRepositoryTabPreferences: async () => ({}),
             saveRepositoryTabs: async () => {},
             loadRecentRepositories: async () => ["cli/cli"],
             loadConfig: async () => ({ ...defaultConfig }),
@@ -645,7 +649,7 @@ describe("application root", () => {
               throw error
             },
             resolveLocalRepository: async () => undefined,
-            loadRepositoryTabs: async () => ({}),
+            loadRepositoryTabPreferences: async () => ({}),
             saveRepositoryTabs: async () => {},
             rememberRepository: async () => {},
             loadRecentRepositories: async () => ["cli/cli"],
@@ -679,7 +683,7 @@ describe("application root", () => {
             checkForUpdate: async () => undefined,
             createPullReviewSession: createTestReviewSession,
             resolveRepository: async () => undefined,
-            loadRepositoryTabs: async () => ({}),
+            loadRepositoryTabPreferences: async () => ({}),
             saveRepositoryTabs: async () => {},
             loadRecentRepositories: async () => [],
             loadConfig: async () => {
@@ -729,7 +733,7 @@ describe("application root", () => {
             resolveLocalRepository: async () => undefined,
             loadRecentRepositories: async () => [],
             rememberRepository: async () => {},
-            loadRepositoryTabs: async () => ({}),
+            loadRepositoryTabPreferences: async () => ({}),
             saveRepositoryTabs: async () => {},
             createRepositorySession: readySession,
             loadConfig: async () => config,
@@ -792,7 +796,7 @@ describe("application root", () => {
             checkForUpdate: async () => undefined,
             createPullReviewSession: createTestReviewSession,
             resolveRepository: async () => "cli/cli",
-            loadRepositoryTabs: async () => ({}),
+            loadRepositoryTabPreferences: async () => ({}),
             saveRepositoryTabs: async () => {},
             loadRecentRepositories: async () => [],
             rememberRepository: idle,
@@ -955,7 +959,7 @@ test("always remembers a main tab per repository and restores it on direct open"
           resolveLocalRepository: async () => undefined,
           loadRecentRepositories: async () => [],
           rememberRepository: async () => {},
-          loadRepositoryTabs: async () => ({ ...saved }),
+          loadRepositoryTabPreferences: async () => ({ tabs: { ...saved } }),
           saveRepositoryTabs: async (tabs) => {
             if (++writes === 1) await firstSave.promise
             saved = { ...saved, ...tabs }
@@ -1053,7 +1057,7 @@ test("a teardown without quit, such as SIGTERM, hands pending tab and review sav
           resolveLocalRepository: async () => undefined,
           loadRecentRepositories: async () => [],
           rememberRepository: async () => {},
-          loadRepositoryTabs: async () => ({}),
+          loadRepositoryTabPreferences: async () => ({}),
           saveRepositoryTabs: async (tabs) => {
             await save.promise
             Object.assign(saved, tabs)
@@ -1099,7 +1103,7 @@ test("quit waits for changes being sent to GitHub, and quitting again stops wait
             resolveLocalRepository: async () => undefined,
             loadRecentRepositories: async () => [],
             rememberRepository: async () => {},
-            loadRepositoryTabs: async () => ({}),
+            loadRepositoryTabPreferences: async () => ({}),
             saveRepositoryTabs: async () => {},
             loadConfig: async () => defaultConfig,
             createRepositorySession: () => readySession(),
@@ -1163,7 +1167,7 @@ test("quit retains unsaved issue and PR drafts, then retries and waits for revie
           resolveLocalRepository: async () => undefined,
           loadRecentRepositories: async () => [],
           rememberRepository: async () => {},
-          loadRepositoryTabs: async () => ({}),
+          loadRepositoryTabPreferences: async () => ({}),
           saveRepositoryTabs: async () => {
             tabFlushes++
             await tabs.promise
@@ -1279,7 +1283,7 @@ test.each([false, true])("quit drains late review edits after delayed tab saves 
           resolveLocalRepository: async () => undefined,
           loadRecentRepositories: async () => [],
           rememberRepository: async () => {},
-          loadRepositoryTabs: async () => ({}),
+          loadRepositoryTabPreferences: async () => ({}),
           saveRepositoryTabs: async () => {
             tabFlushes++
             await tabs.promise
@@ -1352,7 +1356,7 @@ test("quit waits for inline comment drafts and a failed save cancels it without 
           resolveLocalRepository: async () => undefined,
           loadRecentRepositories: async () => [],
           rememberRepository: async () => {},
-          loadRepositoryTabs: async () => ({}),
+          loadRepositoryTabPreferences: async () => ({}),
           saveRepositoryTabs: async () => {},
           loadConfig: async () => ({ ...defaultConfig }),
           createRepositorySession: readySession,
@@ -1382,6 +1386,108 @@ test("quit waits for inline comment drafts and a failed save cancels it without 
   expect(view.renderer.isDestroyed).toBe(true)
 })
 
+test.each([false, true])(
+  "the repository header toggle stays per repo across switches and restarts (compact: %s)",
+  async (compactHeader) => {
+    const directory = await mkdtemp(join(tmpdir(), "opengh-tab-bar-test-"))
+    const path = join(directory, "repository-tab-bar.json")
+    const start = async (repositoryArgument: string) => {
+      const [state, setState] = createSignal<RepositoryState>({ status: "loading", repository: repositoryArgument })
+      const view = await testRender(
+        () => (
+          <Root
+            cwd="/work"
+            repositoryArgument={repositoryArgument}
+            services={{
+              createPullReviewSession: createTestReviewSession,
+              resolveRepository: async (repository) => repository,
+              resolveLocalRepository: async () => undefined,
+              loadRecentRepositories: async () => [],
+              rememberRepository: async () => {},
+              loadRepositoryTabPreferences: async () => ({ tabBarHidden: await loadRepositoryTabBarHidden(path) }),
+              saveRepositoryTabs: async () => {},
+              saveRepositoryTabBarHidden: (hidden) => saveRepositoryTabBarHidden(hidden, path),
+              loadConfig: async () => ({ ...defaultConfig, compactHeader, checkForUpdates: false }),
+              createRepositorySession: () => ({
+                ...readySession(),
+                state,
+                load: async (repository) => {
+                  setState({
+                    status: "ready",
+                    repository,
+                    data: { ...githubDataFixture, repo: { ...githubDataFixture.repo, nameWithOwner: repository } },
+                    operations: repositoryOperationsFixture,
+                  })
+                },
+              }),
+            }}
+          />
+        ),
+        { width: 120, height: 40 },
+      )
+      active.push(view)
+      await waitForText(view, "About")
+      return view
+    }
+    try {
+      const view = await start("cli/cli")
+      const frame = () => view.captureCharFrame()
+      const repoName = () => view.renderer.root.findDescendantById("repository-dropdown")
+      const aboutRow = () =>
+        frame()
+          .split("\n")
+          .findIndex((line) => line.includes("About"))
+      const switchTo = async (repository: string) => {
+        view.mockInput.pressKey("S")
+        await waitForText(view, "Switch repository")
+        await view.mockInput.typeText(repository)
+        view.mockInput.pressEnter()
+        await view.flush()
+      }
+
+      expect(frame()).toContain("1 Overview")
+      expect(repoName()).toBeDefined()
+      const originalAboutRow = aboutRow()
+      view.mockInput.pressKey("M")
+      await view.flush()
+      expect(frame()).not.toContain("1 Overview")
+      expect(repoName()).toBeUndefined()
+      expect(aboutRow()).toBeGreaterThanOrEqual(0)
+      expect(originalAboutRow - aboutRow()).toBe(compactHeader ? 1 : 5)
+      view.mockInput.pressKey("3")
+      await waitForText(view, "ScrollBox loses focus")
+      expect(frame()).not.toContain("3 Issues")
+      view.mockInput.pressKey("?")
+      await waitForText(view, "show / hide repository header")
+      view.mockInput.pressKey("?")
+      await view.flush()
+      expect(frame()).not.toContain("show / hide repository header")
+
+      await switchTo("owner/other")
+      await waitForText(view, "1 Overview")
+      expect(repoName()).toBeDefined()
+      await switchTo("CLI/CLI")
+      await waitForText(view, "ScrollBox loses focus")
+      expect(frame()).not.toContain("1 Overview")
+      expect(repoName()).toBeUndefined()
+      view.mockInput.pressKey("q")
+      await view.renderer.closed
+
+      const restarted = await start("cli/cli")
+      expect(restarted.captureCharFrame()).not.toContain("1 Overview")
+      expect(restarted.renderer.root.findDescendantById("repository-dropdown")).toBeUndefined()
+      restarted.mockInput.pressKey("M")
+      await waitForText(restarted, "1 Overview")
+      expect(restarted.renderer.root.findDescendantById("repository-dropdown")).toBeDefined()
+      restarted.mockInput.pressKey("q")
+      await restarted.renderer.closed
+      expect(await loadRepositoryTabBarHidden(path)).toEqual({ "cli/cli": false })
+    } finally {
+      await rm(directory, { recursive: true, force: true })
+    }
+  },
+)
+
 test("failed tab saves remain pending and are retried on exit without writing unchanged history", async () => {
   let attempts = 0
   const updates: unknown[] = []
@@ -1397,7 +1503,7 @@ test("failed tab saves remain pending and are retried on exit without writing un
           resolveLocalRepository: async () => undefined,
           loadRecentRepositories: async () => [],
           rememberRepository: async () => {},
-          loadRepositoryTabs: async () => ({ "cli/cli": "issues", "owner/other": "pulls" }),
+          loadRepositoryTabPreferences: async () => ({ tabs: { "cli/cli": "issues", "owner/other": "pulls" } }),
           saveRepositoryTabs: async (tabs) => {
             updates.push(tabs)
             if (++attempts === 1) throw new Error("Transient write failure")
@@ -1439,7 +1545,7 @@ test.each(["c", "x"])("Ctrl+%s clears and dismisses picker/search inputs, then q
           resolveRepository: async () => "cli/cli",
           loadRecentRepositories: async () => ["cli/cli"],
           rememberRepository: async () => {},
-          loadRepositoryTabs: async () => ({}),
+          loadRepositoryTabPreferences: async () => ({}),
           saveRepositoryTabs: async () => {},
           resolveLocalRepository: async () => undefined,
           createRepositorySession: readySession,
@@ -1519,7 +1625,7 @@ test("Ctrl+C clears a comment draft undoably, dismisses only the active dialog, 
           resolveRepository: async () => "cli/cli",
           loadRecentRepositories: async () => [],
           rememberRepository: async () => {},
-          loadRepositoryTabs: async () => ({}),
+          loadRepositoryTabPreferences: async () => ({}),
           saveRepositoryTabs: async () => {},
           resolveLocalRepository: async () => undefined,
           loadConfig: async () => ({ ...defaultConfig }),
@@ -1586,7 +1692,7 @@ test("reloads bindings in place, keeps the last valid config on failure, and rem
           resolveRepository: async () => undefined,
           loadRecentRepositories: async () => ["cli/cli"],
           rememberRepository: async () => {},
-          loadRepositoryTabs: async () => ({}),
+          loadRepositoryTabPreferences: async () => ({}),
           saveRepositoryTabs: async () => {},
           resolveLocalRepository: async () => undefined,
           createRepositorySession: readySession,
@@ -1659,7 +1765,7 @@ test("references isolate Root quit while preserving remapped list actions and di
           resolveRepository: async () => "cli/cli",
           loadRecentRepositories: async () => [],
           rememberRepository: async () => {},
-          loadRepositoryTabs: async () => ({}),
+          loadRepositoryTabPreferences: async () => ({}),
           saveRepositoryTabs: async () => {},
           resolveLocalRepository: async () => undefined,
           loadConfig: async () => ({ ...defaultConfig, keybindings: { "dialog.close": ["f4"], "item.copy": ["f3"] } }),
@@ -1710,7 +1816,7 @@ test("settings cannot save or dismiss during a deferred config reload", async ()
           resolveRepository: async () => "cli/cli",
           loadRecentRepositories: async () => [],
           rememberRepository: async () => {},
-          loadRepositoryTabs: async () => ({}),
+          loadRepositoryTabPreferences: async () => ({}),
           saveRepositoryTabs: async () => {},
           resolveLocalRepository: async () => undefined,
           loadConfig: () => (++loads === 1 ? Promise.resolve({ ...defaultConfig }) : reload.promise),
@@ -1764,7 +1870,7 @@ test("remapped interrupt cancels commands first, dismisses completed output, the
           resolveRepository: async () => "cli/cli",
           loadRecentRepositories: async () => [],
           rememberRepository: async () => {},
-          loadRepositoryTabs: async () => ({}),
+          loadRepositoryTabPreferences: async () => ({}),
           saveRepositoryTabs: async () => {},
           resolveLocalRepository: async () => undefined,
           loadConfig: async () => ({
@@ -1941,7 +2047,7 @@ test("mouse hyperlinks resolve entities and preserve Back across repositories an
           resolveLocalRepository: async () => undefined,
           loadRecentRepositories: async () => [],
           rememberRepository: async () => {},
-          loadRepositoryTabs: async () => ({}),
+          loadRepositoryTabPreferences: async () => ({}),
           saveRepositoryTabs: async () => {},
           loadConfig: async () => ({ ...defaultConfig }),
           loadIssueKind: async (repository, number) => {
@@ -2057,7 +2163,7 @@ test.each(["issue", "diff"] as const)(
             resolveLocalRepository: async () => undefined,
             loadRecentRepositories: async () => [],
             rememberRepository: async () => {},
-            loadRepositoryTabs: async () => ({ [repository]: "actions" }),
+            loadRepositoryTabPreferences: async () => ({ tabs: { [repository]: "actions" } }),
             saveRepositoryTabs: async () => {},
             loadConfig: async () => ({ ...defaultConfig }),
             createRepositorySession: () => ({
@@ -2149,7 +2255,7 @@ test.each([false, true])(
             resolveLocalRepository: async () => undefined,
             loadRecentRepositories: async () => [],
             rememberRepository: async () => {},
-            loadRepositoryTabs: async () => ({}),
+            loadRepositoryTabPreferences: async () => ({}),
             saveRepositoryTabs: async () => {},
             loadConfig: async () => ({ ...defaultConfig }),
             createRepositorySession: () => ({
@@ -2216,7 +2322,7 @@ test("resume keeps the selected overview document through async discovery and fa
           resolveLocalRepository: async () => undefined,
           loadRecentRepositories: async () => [],
           rememberRepository: async () => {},
-          loadRepositoryTabs: async () => ({}),
+          loadRepositoryTabPreferences: async () => ({}),
           saveRepositoryTabs: async () => {},
           loadConfig: async () => ({ ...defaultConfig }),
           createRepositorySession: () => ({ ...readySession(), state }),

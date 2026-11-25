@@ -117,7 +117,7 @@ test("repository switch popup isolates input, preserves cancelled navigation, an
           checkForUpdate: async () => undefined,
           resolveRepository: async () => "anomalyco/opentui",
           resolveLocalRepository: async () => undefined,
-          loadRepositoryTabs: async () => ({}),
+          loadRepositoryTabPreferences: async () => ({}),
           saveRepositoryTabs: async () => {},
           loadRecentRepositories: async () => {
             recentReads++

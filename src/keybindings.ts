@@ -9,6 +9,7 @@ export const keybindingDefinitions = {
   "global.openFullApp": binding(["ctrl+o"], "Open full app from focus mode"),
   "global.settings": binding([","], "Settings"),
   "global.switchRepository": binding(["S"], "Switch repository"),
+  "global.toggleTabBar": binding(["M"], "Show / hide repository header"),
   "navigation.up": binding(["up", "k"], "Move / scroll up"),
   "navigation.down": binding(["down", "j"], "Move / scroll down"),
   "navigation.halfPageUp": binding(["u"], "Half-page up"),
@@ -261,6 +262,7 @@ const globalActions: KeyAction[] = [
   "global.help",
   "global.settings",
   "global.switchRepository",
+  "global.toggleTabBar",
 ]
 const navigationActions: KeyAction[] = [
   "navigation.up",

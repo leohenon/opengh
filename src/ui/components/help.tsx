@@ -54,6 +54,7 @@ export function Help(props: {
   updateNotice?: UpdateNotice
   onClose: () => void
   focus?: boolean
+  canToggleTabBar?: boolean
   view: Page | "run" | "commit" | "issue" | "pull" | "diff"
   hasDocumentTabs?: boolean
   hasMoreFiles?: boolean
@@ -170,8 +171,12 @@ export function Help(props: {
     const external = pageEntries.filter((item) => item.actions.includes("item.open") || item.actions.includes("item.copy"))
     const options = pageEntries.filter((item) => !primary.includes(item) && !external.includes(item))
     // Stable sections across every page: primary actions, navigation/options,
-    // external actions, then app controls. Numbered tab keys are in the header.
-    const appShortcuts = [...(props.focus ? [entry("global.openFullApp", "open full app")] : []), ...applicationShortcuts]
+    // external actions, then app controls.
+    const appShortcuts = [
+      ...(props.focus ? [entry("global.openFullApp", "open full app")] : []),
+      ...(props.canToggleTabBar ? [entry("global.toggleTabBar", "show / hide repository header")] : []),
+      ...applicationShortcuts,
+    ]
     const entries =
       props.view === "diff"
         ? [

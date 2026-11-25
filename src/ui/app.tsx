@@ -194,6 +194,8 @@ export type AppProps = {
   onResolveIssueKind?: (repository: string, number: number) => Promise<"issue" | "pull">
   onOpenUrl?: (url: string) => Promise<void>
   onPageChange?: (page: Page) => void
+  tabBarHidden?: boolean
+  onToggleTabBar?: () => void
   onQuit?: () => void
   onRefresh?: () => void
   recentRepositories?: readonly string[]
@@ -2649,6 +2651,7 @@ function AppContent(props: AppProps) {
     if (!tab) return false
     selectPage(tab.page)
   }
+  const canToggleTabBar = () => !!props.onToggleTabBar && !focus() && !(config().diffFullscreen && diffTarget())
   // Page/list handlers run before this ambient layer. Every matched key is consumed once.
   useKeyActions(
     {
@@ -2659,6 +2662,10 @@ function AppContent(props: AppProps) {
         setOverlay("settings")
       },
       "global.openFullApp": openFullApp,
+      "global.toggleTabBar": () => {
+        if (!canToggleTabBar()) return false
+        props.onToggleTabBar?.()
+      },
       "global.switchRepository": () => {
         if (!props.onSwitchRepository) return false
         setOverlay("switch-repo")
@@ -2996,7 +3003,7 @@ function AppContent(props: AppProps) {
                         when={config().diffFullscreen ? diffTarget() : undefined}
                         keyed
                         fallback={
-                          <Show when={!focus()}>
+                          <Show when={!focus() && !props.tabBarHidden}>
                             <Header
                               repo={data().repo}
                               page={page()}
@@ -3350,6 +3357,7 @@ function AppContent(props: AppProps) {
                           updateNotice={props.updateNotice}
                           onClose={() => setOverlay()}
                           focus={focus()}
+                          canToggleTabBar={canToggleTabBar()}
                           view={
                             diffTarget()
                               ? "diff"
