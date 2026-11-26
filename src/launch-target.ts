@@ -1,16 +1,27 @@
-import { diffLocation, type DetailTarget, type Page } from "./navigation"
-import { githubDiffTarget } from "./link-target"
+import { diffLocation, type DetailTarget, type InitialNavigation, type Page } from "./navigation"
+import { githubDiffTarget, resolveLinkTarget, unsupportedPageTitle, type LinkTarget } from "./link-target"
 import type { DiffTarget } from "./models"
 import { normalizeRepository } from "./repository-name"
 import { isRepositoryPath } from "./repository-path"
 
 export type LaunchDetail = DetailTarget | { kind: "number"; number: number }
 
-export type LaunchOptions = {
+export type LaunchRef = { name: string; view: "commit" | "commits"; url: string }
+
+export type UnsupportedLaunch = { url: string; title: string; closest: LaunchLocation }
+
+export type LaunchLocation = {
   repositoryArgument?: string
   initialPage?: Page
   initialDetail?: LaunchDetail
   initialDiff?: DiffTarget
+  initialComment?: number
+  initialCreate?: InitialNavigation["create"]
+  initialRef?: LaunchRef
+  unsupported?: UnsupportedLaunch
+}
+
+export type LaunchOptions = LaunchLocation & {
   focus?: boolean
   inline?: boolean
   diff?: boolean
@@ -49,10 +60,17 @@ Supported GitHub.com URLs:
   /owner/repo/pull/123
   /owner/repo/pull/123/files or /changes
   /owner/repo/pull/123/changes/BASE..<commit-sha>
-  /owner/repo/commit/abc1234
+  /owner/repo/commit/<sha, branch, or tag>
+  /owner/repo/commits/<branch>
+  /owner/repo/compare/<base>...<head>
+  /owner/repo/issues/new, /owner/repo/pull/new/<branch>
   /owner/repo/actions/runs/123
 
-Diff file anchors (#diff-…) select a file. Query strings and other anchors are ignored.
+Other GitHub pages offer to open on GitHub or the closest page opengh supports.
+URLs also work without https://github.com/, e.g. owner/repo/pull/123.
+
+Comment anchors (#issuecomment-…) scroll to the comment, and diff file anchors (#diff-…)
+select a file. Query strings and other anchors are ignored.
 Quote URLs containing shell metacharacters and identifiers such as '#123'.
 
 Options:
@@ -96,16 +114,21 @@ function identifier(value: string): LaunchDetail {
   throw new Error(`Invalid target: “${value}”. Expected an issue/PR number or a commit hash.`)
 }
 
+function withGitHubHost(value: string): string {
+  return /^[a-z\d][a-z\d-]*\/[\w.-]+\/[^/?#]/i.test(value) ? `github.com/${value}` : value
+}
+
 function repositoryLocation(value: string): LaunchOptions | undefined {
   if (isRepositoryPath(value)) return { repositoryArgument: value }
-  if (/^[a-z][a-z\d+.-]*:\/\//i.test(value) || /^github\.com(?:[/?#]|$)/i.test(value)) {
+  const link = withGitHubHost(value)
+  if (/^[a-z][a-z\d+.-]*:\/\//i.test(link) || /^github\.com(?:[/?#]|$)/i.test(link)) {
     // Validate before WHATWG parsing can strip controls or change the selected path.
-    const rawPath = value.replace(/^(?:[a-z][a-z\d+.-]*:\/\/)?[^/?#]*/i, "").split(/[?#]/, 1)[0]!
-    if (/[\x00-\x1f\x7f\\]/.test(value) || rawPath.split("/").some((part) => /^(?:\.|%2e){1,2}$/i.test(part)))
+    const rawPath = link.replace(/^(?:[a-z][a-z\d+.-]*:\/\/)?[^/?#]*/i, "").split(/[?#]/, 1)[0]!
+    if (/[\x00-\x1f\x7f\\]/.test(link) || rawPath.split("/").some((part) => /^(?:\.|%2e){1,2}$/i.test(part)))
       throw new Error("GitHub URLs must not contain control characters, backslashes, or dot path segments.")
     let url: URL
     try {
-      url = new URL(/^github\.com/i.test(value) ? `https://${value}` : value)
+      url = new URL(/^github\.com/i.test(link) ? `https://${link}` : link)
     } catch {
       throw new Error(`Invalid GitHub URL: “${value}”.`)
     }
@@ -116,22 +139,111 @@ function repositoryLocation(value: string): LaunchOptions | undefined {
     if (!repository) throw new Error(`Invalid GitHub repository URL: “${value}”.`)
     const location: LaunchOptions = { repositoryArgument: repository }
     if (!path.length) return location
+    return githubLinkLocation(location, path, url) ?? strictLocation(location, path, url)
+  }
+  const repository = normalizeRepository(value)
+  return repository ? { repositoryArgument: repository } : undefined
+}
+
+function selectsTarget(location: LaunchLocation) {
+  return !!(
+    location.initialPage ||
+    location.initialDetail ||
+    location.initialDiff ||
+    location.initialCreate ||
+    location.initialRef ||
+    location.unsupported
+  )
+}
+
+function inlineLocation(launch: LaunchLocation) {
+  const unsupported = (url: string) => {
+    let page = url
+    try {
+      page = new URL(url).pathname
+    } catch {}
+    return new Error(`Unsupported GitHub page: “${page}”. Run opengh --help for supported URLs.`)
+  }
+  if (launch.unsupported) throw unsupported(launch.unsupported.url)
+  if (launch.initialRef) throw unsupported(launch.initialRef.url)
+  if (launch.initialCreate) throw new Error("--inline only reads GitHub; it can't start a new issue or pull request.")
+  if (launch.initialDiff?.kind === "compare")
+    throw new Error(
+      launch.initialDiff.pullNumber === undefined
+        ? "Comparison URLs require the interactive diff viewer; omit --inline."
+        : "PR revision range URLs require the interactive diff viewer; omit --inline.",
+    )
+}
+
+export function parseGitHubLink(value: string): LaunchLocation | undefined {
+  const link = value.trim()
+  if (!/^(?:https?:\/\/)?github\.com(?:[/?#]|$)/i.test(withGitHubHost(link))) return undefined
+  return repositoryLocation(link)
+}
+
+function githubLinkLocation(location: LaunchLocation, path: string[], url: URL): LaunchLocation | undefined {
+  const repository = location.repositoryArgument!
+  const [route, , tab, range] = path
+  if (route === "pull" && (tab === "files" || tab === "changes") && range?.includes("..") && !githubDiffTarget(path, ""))
+    throw new Error(`Invalid PR revision range: “${range}”. Expected BASE..<sha> or <sha>..<sha> with full commit SHAs.`)
+  const hash = /^#(?:diff-[a-f\d]{64}(?:[LR]\d+(?:-[LR]\d+)?)?|issuecomment-\d+)$/i.test(url.hash) ? url.hash : ""
+  const href = `https://github.com/${repository}/${path.join("/")}${hash}`
+  const target = resolveLinkTarget(href)
+  if (!target) return undefined
+  if (target.kind === "external")
+    return {
+      ...location,
+      unsupported: {
+        url: url.href,
+        title: unsupportedPageTitle(href) ?? "This page is not yet supported",
+        closest: closestLocation(location, path),
+      },
+    }
+  if (target.kind === "ref") return { ...location, initialRef: { name: target.name, view: target.view, url: url.href } }
+  return linkLocation(location, target)
+}
+
+function linkLocation(location: LaunchLocation, target: LinkTarget): LaunchLocation | undefined {
+  if (target.kind === "page") return target.page === "overview" ? location : { ...location, initialPage: target.page }
+  if (target.kind === "detail")
+    return { ...location, initialDetail: target.detail, ...(target.comment === undefined ? {} : { initialComment: target.comment }) }
+  if (target.kind === "diff") {
+    const detail = diffLocation(target.target).detail
+    return detail
+      ? { ...location, initialDetail: detail, initialDiff: target.target }
+      : { ...location, initialPage: "commits", initialDiff: target.target }
+  }
+  if (target.kind === "new-issue") return { ...location, initialPage: "issues", initialCreate: { kind: "issue" } }
+  if (target.kind === "new-pull") return { ...location, initialPage: "pulls", initialCreate: { kind: "pull", head: target.head } }
+  return undefined
+}
+
+function closestLocation(location: LaunchLocation, path: readonly string[]): LaunchLocation {
+  for (let length = path.length - 1; length > 0; length--) {
+    const target = resolveLinkTarget(`https://github.com/${location.repositoryArgument}/${path.slice(0, length).join("/")}`)
+    if (target?.kind === "page" || target?.kind === "detail" || target?.kind === "diff") return linkLocation(location, target)!
+  }
+  return location
+}
+
+function strictLocation(location: LaunchOptions, path: string[], url: URL): LaunchOptions {
+  {
     const initialDiff = githubDiffTarget(path, url.hash)
     if (initialDiff) return { ...location, initialDetail: diffLocation(initialDiff).detail, initialDiff }
     const [route, target] = path
     const pages: Record<string, Page> = { issues: "issues", pulls: "pulls", commits: "commits", actions: "actions" }
     if (path.length === 1 && Object.hasOwn(pages, route!)) return { ...location, initialPage: pages[route!] }
     if (path.length === 2) {
-      if (route === "issues") return { ...location, initialDetail: { kind: "number", number: positiveNumber(target!) } }
-      if (route === "pull") return { ...location, initialDetail: { kind: "pull", number: positiveNumber(target!) } }
+      const comment = /^#issuecomment-([1-9]\d*)$/.exec(url.hash)?.[1]
+      const anchor = comment && Number.isSafeInteger(Number(comment)) ? { initialComment: Number(comment) } : {}
+      if (route === "issues") return { ...location, initialDetail: { kind: "number", number: positiveNumber(target!) }, ...anchor }
+      if (route === "pull") return { ...location, initialDetail: { kind: "pull", number: positiveNumber(target!) }, ...anchor }
       if (route === "commit") return { ...location, initialDetail: { kind: "commit", sha: commitHash(target!) } }
     }
     if (path.length === 3 && route === "actions" && target === "runs")
       return { ...location, initialDetail: { kind: "run", id: positiveNumber(path[2]!) } }
     throw new Error(`Unsupported GitHub page: “${url.pathname}”. Run opengh --help for supported URLs.`)
   }
-  const repository = normalizeRepository(value)
-  return repository ? { repositoryArgument: repository } : undefined
 }
 
 export function parseLaunchArguments(args: readonly string[]): LaunchOptions {
@@ -228,8 +340,7 @@ export function parseLaunchArguments(args: readonly string[]): LaunchOptions {
   }
   const finish = (launch: LaunchOptions): LaunchOptions => {
     if (diff && !inlineMode) throw new Error("--diff requires --inline.")
-    if (inlineMode && launch.initialDiff?.kind === "compare")
-      throw new Error("PR revision range URLs require the interactive diff viewer; omit --inline.")
+    if (inlineMode) inlineLocation(launch)
     if (file !== undefined && !diff) throw new Error("--file requires --diff.")
     if (diff && !["pull", "commit", "number"].includes(launch.initialDetail?.kind ?? ""))
       throw new Error("--diff requires a PR or commit target.")
@@ -251,8 +362,7 @@ export function parseLaunchArguments(args: readonly string[]): LaunchOptions {
   if (interactive) {
     if (positional.length > 1) throw new Error("--interactive accepts only a repository, not a target.")
     const location = positional.length ? repositoryLocation(positional[0]!) : { repositoryArgument: "." }
-    if (!location || location.initialPage || location.initialDetail)
-      throw new Error("--interactive accepts only a repository, not a page or detail target.")
+    if (!location || selectsTarget(location)) throw new Error("--interactive accepts only a repository, not a page or detail target.")
     return finish({ ...mode, ...location })
   }
   if (!positional.length) return finish(explicitDetail ? { ...mode, repositoryArgument: ".", initialDetail: explicitDetail } : mode)
@@ -265,7 +375,6 @@ export function parseLaunchArguments(args: readonly string[]): LaunchOptions {
   }
   if (positional[1] !== undefined && explicitDetail) throw new Error("Specify a target either positionally or with an option, not both.")
   const detail = explicitDetail ?? (positional[1] !== undefined ? identifier(positional[1]) : undefined)
-  if (detail && (location.initialPage || location.initialDetail))
-    throw new Error("The URL already selects a page or detail; do not specify another target.")
+  if (detail && selectsTarget(location)) throw new Error("The URL already selects a page or detail; do not specify another target.")
   return finish(detail ? { ...mode, ...location, initialDetail: detail } : { ...mode, ...location })
 }

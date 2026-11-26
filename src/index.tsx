@@ -135,6 +135,10 @@ try {
         initialPage={launch.initialPage}
         initialDetail={launch.initialDetail}
         initialDiff={launch.initialDiff}
+        initialComment={launch.initialComment}
+        initialCreate={launch.initialCreate}
+        initialRef={launch.initialRef}
+        unsupported={launch.unsupported}
         focus={launch.focus}
         resumeLocation={resumeLocation}
         onNavigationChange={resumeWriter.remember}

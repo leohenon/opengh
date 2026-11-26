@@ -5,8 +5,11 @@ import { normalizeRepository } from "./repository-name"
 
 export type LinkTarget =
   | { kind: "page"; repository: string; page: Page }
-  | { kind: "detail"; repository: string; detail: LaunchDetail }
+  | { kind: "detail"; repository: string; detail: LaunchDetail; comment?: number }
   | { kind: "diff"; repository: string; target: DiffTarget }
+  | { kind: "new-issue"; repository: string }
+  | { kind: "new-pull"; repository: string; head: string }
+  | { kind: "ref"; repository: string; name: string; view: "commit" | "commits" }
   | { kind: "external"; url: string }
 
 // Validate before URL parsing strips controls or normalizes paths.
@@ -37,6 +40,76 @@ export function parseSafeUrl(value: string): URL | undefined {
 function positiveNumber(value: string): number | undefined {
   const number = Number(value)
   return /^\d+$/.test(value) && Number.isSafeInteger(number) && number > 0 ? number : undefined
+}
+
+function decodedPath(segments: readonly string[]): string | undefined {
+  try {
+    return segments.map((segment) => decodeURIComponent(segment)).join("/")
+  } catch {
+    return undefined
+  }
+}
+
+function branchName(segments: readonly string[]): string | undefined {
+  const name = decodedPath(segments)
+  return name === undefined ? undefined : validRef(name)
+}
+
+function validRef(name: string): string | undefined {
+  if (
+    !name ||
+    /[\x00-\x20\x7f~^:?*[\\]/.test(name) ||
+    name.includes("..") ||
+    name.includes("@{") ||
+    name.split("/").some((part) => !part || part.startsWith(".") || part.endsWith(".lock")) ||
+    name.endsWith(".")
+  )
+    return undefined
+  return name
+}
+
+const unsupportedSections: Record<string, readonly [label: string, plural: boolean]> = {
+  blame: ["Files", true],
+  blob: ["Files", true],
+  branches: ["Branches", true],
+  compare: ["Comparisons", true],
+  deployments: ["Deployments", true],
+  discussions: ["Discussions", true],
+  forks: ["Forks", true],
+  graphs: ["Insights", true],
+  labels: ["Labels", true],
+  milestone: ["Milestones", true],
+  milestones: ["Milestones", true],
+  network: ["Insights", true],
+  packages: ["Packages", true],
+  projects: ["Projects", true],
+  pulse: ["Insights", true],
+  releases: ["Releases", true],
+  security: ["Security", false],
+  settings: ["Settings", true],
+  stargazers: ["Stargazers", true],
+  tags: ["Tags", true],
+  tree: ["Files", true],
+  watchers: ["Watchers", true],
+  wiki: ["The wiki", false],
+}
+
+export const TAGS_NOT_SUPPORTED = "Tags are not yet supported"
+
+export function unsupportedPageTitle(value: string): string | undefined {
+  const url = parseSafeUrl(value)
+  if (!url || url.protocol === "mailto:" || url.hostname !== "github.com" || url.port) return undefined
+  const [owner, name, section = ""] = url.pathname.replace(/^\/|\/$/g, "").split("/")
+  const key = section.toLowerCase()
+  const [label, plural] = owner && name && Object.hasOwn(unsupportedSections, key) ? unsupportedSections[key]! : ["This page", false]
+  return `${label} ${plural ? "are" : "is"} not yet supported`
+}
+
+export const openingInBrowser = (title: string) => `${title}, opening in browser`
+
+export function unsupportedLinkMessage(value: string): string | undefined {
+  const title = unsupportedPageTitle(value)
+  return title && openingInBrowser(title)
 }
 
 export function githubDiffTarget(path: readonly string[], fragment: string): DiffTarget | undefined {
@@ -95,28 +168,47 @@ export function resolveLinkTarget(value: string): LinkTarget | undefined {
     const target = githubDiffTarget(path, url.hash)
     if (target && (!url.hash || target.fileHash)) return { kind: "diff", repository, target }
   }
-  if (url.search || url.hash) return external
+  if (route === "issues" && target === "new" && (path.length === 2 || (path.length === 3 && path[2] === "choose")))
+    return { kind: "new-issue", repository }
+  if (route === "pull" && target === "new") {
+    const head = path.length > 2 ? branchName(path.slice(2)) : undefined
+    return head ? { kind: "new-pull", repository, head } : external
+  }
+  const conversation = (route === "issues" || route === "pull") && path.length === 2
+  if (url.search || (url.hash && !conversation)) return external
   if (!path.length) return { kind: "page", repository, page: "overview" }
 
   const pages: Record<string, Page> = { issues: "issues", pulls: "pulls", commits: "commits", actions: "actions" }
   if (path.length === 1 && Object.hasOwn(pages, route!)) return { kind: "page", repository, page: pages[route!]! }
-  if (path.length === 2) {
-    if (route === "issues" || route === "pull") {
-      if (route === "pull" && /^[1-9]\d*\.(?:diff|patch)$/.test(target!)) return external
-      const number = positiveNumber(target!)
-      return number === undefined
-        ? undefined
-        : {
-            kind: "detail",
-            repository,
-            detail: { kind: route === "issues" ? "number" : "pull", number },
-          }
+  if (conversation) {
+    if (route === "pull" && /^[1-9]\d*\.(?:diff|patch)$/.test(target!)) return external
+    const number = positiveNumber(target!)
+    if (number === undefined) return undefined
+    const comment = positiveNumber(/^#issuecomment-(\d+)$/.exec(url.hash)?.[1] ?? "")
+    return {
+      kind: "detail",
+      repository,
+      detail: { kind: route === "issues" ? "number" : "pull", number },
+      ...(comment === undefined ? {} : { comment }),
     }
-    if (route === "commit") {
-      if (/^[a-f\d]{4,40}\.(?:diff|patch)$/i.test(target!)) return external
-      if (!/^[a-f\d]{4,40}$/i.test(target!)) return undefined
+  }
+  if (route === "commit" && path.length > 1) {
+    if (path.length === 2 && /^[a-f\d]{4,40}$/i.test(target!))
       return { kind: "detail", repository, detail: { kind: "commit", sha: target!.toLowerCase() } }
-    }
+    if (/\.(?:diff|patch)$/i.test(path.at(-1)!)) return external
+    const ref = branchName(path.slice(1))
+    return ref ? { kind: "ref", repository, name: ref, view: "commit" } : external
+  }
+  if (route === "commits" && path.length > 1) {
+    const ref = branchName(path.slice(1))
+    return ref ? { kind: "ref", repository, name: ref, view: "commits" } : external
+  }
+  if (route === "compare" && path.length > 1) {
+    if (/\.(?:diff|patch)$/i.test(path.at(-1)!)) return external
+    const range = decodedPath(path.slice(1))
+    const [base, head, ...rest] = range?.split("...") ?? []
+    const sides = !rest.length && base && head ? [validRef(base), validRef(head)] : []
+    return sides[0] && sides[1] ? { kind: "diff", repository, target: { kind: "compare", base: sides[0], head: sides[1] } } : external
   }
   if (path.length === 4 && route === "pull" && path[2] === "commits") {
     if (positiveNumber(target!) === undefined || !/^[a-f\d]{4,40}$/i.test(path[3]!)) return undefined

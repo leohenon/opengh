@@ -37,6 +37,12 @@ In a PR diff, click a line's `[+]` to comment on it. To review, press `a` → **
 
 On Commits, press `tab` to choose a branch. Actions lists workflow runs; open one to see its jobs and steps, which update while the run is in progress. CI links on pull requests open the same view. Job logs aren't shown yet.
 
+## Links
+
+GitHub links open in opengh, including links to comments, branches, comparisons, and new issues or pull requests. Pages it doesn't support yet, such as discussions and releases, open in your browser.
+
+You can also paste a GitHub link into the repository switcher (`S`).
+
 ## Search
 
 Press `/` to search loaded content on any page.

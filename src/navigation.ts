@@ -10,6 +10,9 @@ export type InitialNavigation = {
   page?: Page
   detail?: DetailTarget
   diff?: DiffTarget
+  comment?: number
+  branch?: string
+  create?: { kind: "issue" } | { kind: "pull"; head: string }
 }
 
 export type NavigationState = {

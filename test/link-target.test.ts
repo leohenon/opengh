@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { resolveLinkTarget, type LinkTarget } from "../src/link-target"
+import { resolveLinkTarget, unsupportedLinkMessage, type LinkTarget } from "../src/link-target"
 
 describe("link targets", () => {
   test("resolves repository pages and cross-repository details without guessing issue types", () => {
@@ -73,7 +73,6 @@ describe("link targets", () => {
       "https://docs.github.com/en",
       "https://github.com/other/project/commit/abcd.diff",
       "https://github.com/other/project/commit/abcd#diff-123",
-      "https://github.com/other/project/issues/12#issuecomment-99",
       "https://github.com/other/project/pulls?q=is%3Aopen",
       "https://github.com/other/project/pull/34/files#diff-123",
       "https://github.com/other/project/actions/runs/56?unknown=true",
@@ -127,9 +126,83 @@ describe("link targets", () => {
       "https://github.com/other/project/actions/runs/56/job/0",
       "https://github.com/other/project/actions/runs/56/job/nope",
       "https://github.com/other/project/actions/runs/56/job/9007199254740992",
-      "https://github.com/other/project/commit/abc",
-      `https://github.com/other/project/commit/${"a".repeat(41)}`,
     ]
     for (const url of urls) expect(resolveLinkTarget(url)).toBeUndefined()
+  })
+
+  test("opens issue and PR conversations from comment and other anchors", () => {
+    const repository = "other/project"
+    const cases: [string, LinkTarget][] = [
+      [
+        "https://github.com/other/project/issues/12#issuecomment-99",
+        { kind: "detail", repository, detail: { kind: "number", number: 12 }, comment: 99 },
+      ],
+      [
+        "https://github.com/other/project/pull/34#issuecomment-7",
+        { kind: "detail", repository, detail: { kind: "pull", number: 34 }, comment: 7 },
+      ],
+      ["https://github.com/other/project/pull/34#discussion_r5", { kind: "detail", repository, detail: { kind: "pull", number: 34 } }],
+      [
+        "https://github.com/other/project/pull/34#pullrequestreview-8",
+        { kind: "detail", repository, detail: { kind: "pull", number: 34 } },
+      ],
+    ]
+    for (const [url, expected] of cases) expect(resolveLinkTarget(url)).toEqual(expected)
+    expect(resolveLinkTarget("https://github.com/other/project/issues/0#issuecomment-1")).toBeUndefined()
+  })
+
+  test("starts issue and pull request creation, ignoring prefill queries", () => {
+    const repository = "other/project"
+    for (const suffix of ["issues/new", "issues/new/", "issues/new?template=bug.md", "issues/new/choose", "issues/new#top"])
+      expect(resolveLinkTarget(`https://github.com/${repository}/${suffix}`)).toEqual({ kind: "new-issue", repository })
+    expect(resolveLinkTarget("https://github.com/other/project/pull/new/main")).toEqual({ kind: "new-pull", repository, head: "main" })
+    expect(resolveLinkTarget("https://github.com/other/project/pull/new/feature/login?expand=1")).toEqual({
+      kind: "new-pull",
+      repository,
+      head: "feature/login",
+    })
+    for (const url of [
+      "https://github.com/other/project/pull/new/fork:branch",
+      "https://github.com/other/project/issues/new/other",
+      "https://github.com/other/project/pull/new",
+    ])
+      expect(resolveLinkTarget(url)).toEqual({ kind: "external", url })
+  })
+
+  test("resolves branch and tag names in commit and history links", () => {
+    const repository = "other/project"
+    const cases: [string, LinkTarget][] = [
+      ["https://github.com/other/project/commit/main", { kind: "ref", repository, name: "main", view: "commit" }],
+      ["https://github.com/other/project/commit/feature/login", { kind: "ref", repository, name: "feature/login", view: "commit" }],
+      ["https://github.com/other/project/commit/abc", { kind: "ref", repository, name: "abc", view: "commit" }],
+      [`https://github.com/other/project/commit/${"a".repeat(41)}`, { kind: "ref", repository, name: "a".repeat(41), view: "commit" }],
+      ["https://github.com/other/project/commits/next", { kind: "ref", repository, name: "next", view: "commits" }],
+      ["https://github.com/other/project/commits/release%2F1.0", { kind: "ref", repository, name: "release/1.0", view: "commits" }],
+    ]
+    for (const [url, expected] of cases) expect(resolveLinkTarget(url)).toEqual(expected)
+    for (const url of [
+      "https://github.com/other/project/commit/main.patch",
+      "https://github.com/other/project/commit/main#diff-123",
+      "https://github.com/other/project/commits/main?author=max",
+      "https://github.com/other/project/commits/bad..name",
+      "https://github.com/other/project/commits/name.lock",
+    ])
+      expect(resolveLinkTarget(url)).toEqual({ kind: "external", url })
+  })
+
+  test("explains GitHub pages that open in the browser", () => {
+    const cases: [string, string | undefined][] = [
+      ["https://github.com/other/project/discussions/12", "Discussions are not yet supported, opening in browser"],
+      ["https://github.com/other/project/blob/main/src/app.ts", "Files are not yet supported, opening in browser"],
+      ["https://github.com/other/project/wiki", "The wiki is not yet supported, opening in browser"],
+      ["https://github.com/other/project/security", "Security is not yet supported, opening in browser"],
+      ["https://github.com/other/project/constructor", "This page is not yet supported, opening in browser"],
+      ["https://github.com/other/project/commit/v1.0", "This page is not yet supported, opening in browser"],
+      ["https://github.com/person", "This page is not yet supported, opening in browser"],
+      ["https://example.com/docs", undefined],
+      ["https://docs.github.com/en", undefined],
+      ["mailto:person@example.com", undefined],
+    ]
+    for (const [url, message] of cases) expect(unsupportedLinkMessage(url)).toBe(message)
   })
 })

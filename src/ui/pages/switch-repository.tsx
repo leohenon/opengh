@@ -1,6 +1,8 @@
 import { TextAttributes } from "@opentui/core"
 import { createMemo, createSignal, Show } from "solid-js"
 import { normalizeRepository } from "../../repository-name"
+import type { LaunchLocation } from "../../launch-target"
+import { pastedLink } from "../launcher"
 import { StatusBar } from "../components/status-bar"
 import { SearchablePicker } from "../components/searchable-picker"
 import { useKeybindings } from "../keybindings"
@@ -13,6 +15,7 @@ export function SwitchRepositoryScreen(props: {
   showStatusBarHints: boolean
   renderStatusBar?: boolean
   onOpen: (repository: string) => void
+  onOpenLink?: (location: LaunchLocation) => void
   onClose: () => void
 }) {
   const { colors } = useTheme()
@@ -38,8 +41,12 @@ export function SwitchRepositoryScreen(props: {
   })
   const submit = (query: string, selected?: string) => {
     const repository = selected ?? normalizeRepository(query)
-    if (!repository) return setError("Enter owner/repository or a GitHub URL")
-    props.onOpen(repository)
+    if (repository) return props.onOpen(repository)
+    const link = pastedLink(query)
+    if (link && "error" in link) return setError(link.error)
+    if (link && props.onOpenLink) return props.onOpenLink(link.location)
+    if (link?.location.repositoryArgument) return props.onOpen(link.location.repositoryArgument)
+    setError("Enter owner/repository or a GitHub URL")
   }
 
   return (

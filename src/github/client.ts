@@ -43,6 +43,7 @@ import { createGitHubPullContext } from "./pull-context"
 import { createGitHubReactions, parseReactions, parseReactionState, reactionFields } from "./reactions"
 import { parseTextReferences } from "./text-references"
 import { githubTransport, isDefiniteRejection, type GitHubTransport, type RequestOptions } from "./transport"
+import { GitHubApiError } from "./errors"
 import { createRequestBudget, isRequestInterrupted as interrupted, MAX_AUTOMATIC_PAGES, RequestBudgetLimitError } from "./request-budget"
 
 function detailLimit() {
@@ -501,6 +502,55 @@ export function createGitHubClient(transport: GitHubTransport, commentStorage?: 
       items: items.length || page > 1 ? items.map((branch) => branch.name) : [fallbackBranch],
       hasMore: items.length === BRANCH_PAGE_SIZE,
     }
+  }
+
+  const branchHead = async (repository: RepositoryReference, branch: string, options?: RequestOptions): Promise<string | undefined> => {
+    let item: { commit?: { sha?: unknown } }
+    try {
+      item = await transport.json<{ commit?: { sha?: unknown } }>(
+        `${repositoryPath(repository)}/branches/${branch.split("/").map(encodeURIComponent).join("/")}`,
+        options,
+      )
+    } catch (error) {
+      if (error instanceof GitHubApiError && error.status === 404) return undefined
+      throw error
+    }
+    options?.budget?.consumeItems(1)
+    const sha = item.commit?.sha
+    if (typeof sha !== "string" || !/^[a-f\d]{40}$/i.test(sha)) throw new Error(`GitHub returned an invalid commit for ${branch}`)
+    return sha.toLowerCase()
+  }
+
+  const refCommit = async (repository: RepositoryReference, ref: string, options?: RequestOptions): Promise<string | undefined> => {
+    let items: Array<{ sha?: unknown }>
+    try {
+      items = await transport.json<Array<{ sha?: unknown }>>(
+        `${repositoryPath(repository)}/commits?per_page=1&sha=${encodeURIComponent(ref)}`,
+        options,
+      )
+    } catch (error) {
+      if (error instanceof GitHubApiError && (error.status === 404 || error.status === 422)) return undefined
+      throw error
+    }
+    options?.budget?.consumeItems(1)
+    const sha = items[0]?.sha
+    if (sha === undefined) return undefined
+    if (typeof sha !== "string" || !/^[a-f\d]{40}$/i.test(sha)) throw new Error(`GitHub returned an invalid commit for ${ref}`)
+    return sha.toLowerCase()
+  }
+
+  const tagExists = async (repository: RepositoryReference, tag: string, options?: RequestOptions): Promise<boolean> => {
+    try {
+      await transport.json<unknown>(
+        `${repositoryPath(repository)}/git/ref/tags/${tag.split("/").map(encodeURIComponent).join("/")}`,
+        options,
+      )
+    } catch (error) {
+      if (error instanceof GitHubApiError && error.status === 404) return false
+      throw error
+    }
+    options?.budget?.consumeItems(1)
+    return true
   }
 
   const commits = async (
@@ -2004,6 +2054,9 @@ export function createGitHubClient(transport: GitHubTransport, commentStorage?: 
     documents,
     document,
     branches,
+    branchHead,
+    refCommit,
+    tagExists,
     commits,
     commitCount,
     commit,
@@ -2050,6 +2103,9 @@ export const loadGitHubMetadata = client.metadata
 export const loadGitHubDocuments = client.documents
 export const loadGitHubDocument = client.document
 export const loadGitHubBranches = client.branches
+export const loadGitHubBranchHead = client.branchHead
+export const loadGitHubRefCommit = client.refCommit
+export const loadGitHubTagExists = client.tagExists
 export const loadGitHubCommits = client.commits
 export const loadGitHubCommitCount = client.commitCount
 export const loadGitHubCommit = client.commit

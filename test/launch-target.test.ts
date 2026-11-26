@@ -1,5 +1,12 @@
 import { describe, expect, test } from "bun:test"
-import { launchUsage, parseLaunchArguments, updateUsage, type LaunchOptions } from "../src/launch-target"
+import {
+  launchUsage,
+  parseGitHubLink,
+  parseLaunchArguments,
+  updateUsage,
+  type LaunchLocation,
+  type LaunchOptions,
+} from "../src/launch-target"
 
 // Parser-only tests: never import the CLI/updater or perform updates/network requests.
 describe("launch arguments", () => {
@@ -40,7 +47,15 @@ describe("launch arguments", () => {
       [["https://github.com/owner/repo.git/"], { repositoryArgument: "owner/repo" }],
       [
         ["https://github.com/owner/repo/issues/123?foo=bar#issuecomment-456"],
-        { repositoryArgument: "owner/repo", initialDetail: { kind: "number", number: 123 } },
+        { repositoryArgument: "owner/repo", initialDetail: { kind: "number", number: 123 }, initialComment: 456 },
+      ],
+      [
+        ["https://github.com/owner/repo/pull/456#issuecomment-7"],
+        { repositoryArgument: "owner/repo", initialDetail: { kind: "pull", number: 456 }, initialComment: 7 },
+      ],
+      [
+        ["https://github.com/owner/repo/pull/456#discussion_r7"],
+        { repositoryArgument: "owner/repo", initialDetail: { kind: "pull", number: 456 } },
       ],
       [
         ["https://github.com/owner/repo/issues/123?ignored=/../#../"],
@@ -331,19 +346,14 @@ describe("launch arguments", () => {
       ["https://github.com:8443/owner/repo"],
       ["ssh://github.com/owner/repo"],
       ["https://github.com/owner"],
-      ["https://github.com/owner/repo/tree/main"],
       ["https://github.com/good/repo/../../evil/other/issues/7"],
       ["https://github.com/good/repo/%2e%2e/%2e%2e/evil/other/issues/7"],
       ["https://github.com/owner/repo/issues/123/.."],
       ["https://github.com/owner/repo/issues/.%2E/123"],
       ["https://github.com/owner\\repo/issues/123"],
       ["https://git\nhub.com/owner/repo/issues/12\t3"],
-      ["https://github.com/owner/repo/constructor"],
-      ["https://github.com/owner/repo/toString"],
       ["https://github.com/owner/repo/issues/0"],
       ["https://github.com/owner/repo/pull/not-a-number"],
-      ["https://github.com/owner/repo/commit/not-a-hash"],
-      ["https://github.com/owner/repo/pull/123/files/unknown"],
       ["https://github.com/owner/repo/pull/123/changes/BASE..main"],
       [`https://github.com/owner/repo/pull/123/changes/BASE...${"a".repeat(40)}`],
       ["https://github.com/owner/repo/issues/123", "456"],
@@ -351,6 +361,96 @@ describe("launch arguments", () => {
     ]
     for (const args of cases) expect(() => parseLaunchArguments(args)).toThrow()
   })
+})
+
+test("GitHub links open what clicking them inside opengh opens", () => {
+  const repositoryArgument = "owner/repo"
+  const base = `https://github.com/${repositoryArgument}`
+  const cases: [string, LaunchOptions][] = [
+    [`${base}/issues/new?template=bug.md`, { repositoryArgument, initialPage: "issues", initialCreate: { kind: "issue" } }],
+    [
+      `${base}/pull/new/feature/login`,
+      { repositoryArgument, initialPage: "pulls", initialCreate: { kind: "pull", head: "feature/login" } },
+    ],
+    [`${base}/commit/main`, { repositoryArgument, initialRef: { name: "main", view: "commit", url: `${base}/commit/main` } }],
+    [`${base}/commit/v1.0`, { repositoryArgument, initialRef: { name: "v1.0", view: "commit", url: `${base}/commit/v1.0` } }],
+    [`${base}/commits/next`, { repositoryArgument, initialRef: { name: "next", view: "commits", url: `${base}/commits/next` } }],
+    [
+      `${base}/compare/v1.0...v1.1`,
+      { repositoryArgument, initialPage: "commits", initialDiff: { kind: "compare", base: "v1.0", head: "v1.1" } },
+    ],
+    [`${base}/pull/12/commits/${"a".repeat(40)}`, { repositoryArgument, initialDetail: { kind: "commit", sha: "a".repeat(40) } }],
+    [`${base}/actions/runs/56/job/78`, { repositoryArgument, initialDetail: { kind: "run", id: 56 } }],
+  ]
+  for (const [url, expected] of cases) expect(parseLaunchArguments([url])).toEqual(expected)
+})
+
+test("unsupported GitHub pages offer the closest page instead of exiting", () => {
+  const repositoryArgument = "owner/repo"
+  const base = `https://github.com/${repositoryArgument}`
+  const cases: [string, string, LaunchLocation][] = [
+    [`${base}/discussions/12`, "Discussions are not yet supported", { repositoryArgument }],
+    [`${base}/tree/main`, "Files are not yet supported", { repositoryArgument }],
+    [`${base}/releases/tag/v1.0`, "Releases are not yet supported", { repositoryArgument }],
+    [`${base}/constructor`, "This page is not yet supported", { repositoryArgument }],
+    [`${base}/toString`, "This page is not yet supported", { repositoryArgument }],
+    [`${base}/pull/123/checks`, "This page is not yet supported", { repositoryArgument, initialDetail: { kind: "pull", number: 123 } }],
+    [
+      `${base}/pull/123/files/unknown`,
+      "This page is not yet supported",
+      { repositoryArgument, initialDetail: { kind: "pull", number: 123 }, initialDiff: { kind: "pull", number: 123 } },
+    ],
+    [`${base}/issues/12/timeline`, "This page is not yet supported", { repositoryArgument, initialDetail: { kind: "number", number: 12 } }],
+  ]
+  for (const [url, title, closest] of cases)
+    expect(parseLaunchArguments([url])).toEqual({ repositoryArgument, unsupported: { url, title, closest } })
+})
+
+test("GitHub URLs work the same without https://github.com/", () => {
+  const paths = [
+    "pulls",
+    "actions/runs/789",
+    "actions/runs/789/job/12",
+    "pull/12",
+    "pull/12/changes",
+    "issues/12#issuecomment-5",
+    "issues/new?template=bug.md",
+    "pull/new/feature/login",
+    "commit/main",
+    "commits/next",
+    "compare/v1.0...v1.1",
+    "discussions/3",
+    "pull/12/checks",
+  ]
+  for (const path of paths) {
+    const full = parseLaunchArguments([`https://github.com/owner/repo/${path}`])
+    expect(parseLaunchArguments([`owner/repo/${path}`])).toEqual(full)
+    expect(parseLaunchArguments([`github.com/owner/repo/${path}`])).toEqual(full)
+    expect(parseGitHubLink(`owner/repo/${path}`)).toEqual(parseGitHubLink(`https://github.com/owner/repo/${path}`))
+  }
+  for (const path of ["issues/0", "pull/abc", "pull/1/changes/BASE..main"])
+    expect(() => parseLaunchArguments([`owner/repo/${path}`])).toThrow()
+  expect(() => parseLaunchArguments(["owner/repo/discussions", "--inline"])).toThrow("Unsupported GitHub page")
+  expect(parseLaunchArguments(["owner/repo/pull/12", "--inline"])).toEqual({
+    inline: true,
+    repositoryArgument: "owner/repo",
+    initialDetail: { kind: "pull", number: 12 },
+  })
+  expect(parseLaunchArguments(["./owner/repo/pulls"])).toEqual({ repositoryArgument: "./owner/repo/pulls" })
+  expect(parseGitHubLink("owner/repo")).toBeUndefined()
+  expect(parseGitHubLink("not a link")).toBeUndefined()
+})
+
+test("links that need the app stop --inline, interactive pages, and extra targets", () => {
+  const base = "https://github.com/owner/repo"
+  for (const url of [`${base}/discussions/12`, `${base}/commit/main`, `${base}/commits/next`])
+    expect(() => parseLaunchArguments([url, "--inline"])).toThrow("Unsupported GitHub page")
+  expect(() => parseLaunchArguments([`${base}/issues/new`, "--inline"])).toThrow("can't start a new issue")
+  expect(() => parseLaunchArguments([`${base}/compare/a...b`, "--inline"])).toThrow("Comparison URLs")
+  for (const url of [`${base}/issues/new`, `${base}/discussions/12`, `${base}/commits/next`]) {
+    expect(() => parseLaunchArguments([url, "456"])).toThrow("already selects")
+    expect(() => parseLaunchArguments([url, "--interactive"])).toThrow("--interactive accepts only a repository")
+  }
 })
 
 test("GitHub diff URLs open their PR and select the requested comparison and file", () => {

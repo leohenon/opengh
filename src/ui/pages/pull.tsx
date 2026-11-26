@@ -29,6 +29,7 @@ import { iconPrefix } from "../icons"
 import { pullRequestIcon } from "../issue-references"
 import { createReactiveMarkdownStyle } from "../markdown-style"
 import { createScrollbarVisibility } from "../scrollbar-visibility"
+import { createCommentReveal, type CommentReveal } from "../reveal-comment"
 import { useTheme } from "../theme"
 
 function PullMetadata(props: {
@@ -151,6 +152,7 @@ export function PullScreen(props: {
   onOpenReference?: (reference: IssueReference) => void
   detail: PullDetailState
   revealActivity?: number
+  revealComment?: CommentReveal
   timelineCollapsed?: boolean
   checksExpanded?: boolean
   onChecksExpandedChange?: (expanded: boolean) => void
@@ -205,6 +207,13 @@ export function PullScreen(props: {
   let scroll: ScrollBoxRenderable | undefined
   const bindScrollbar = createScrollbarVisibility(() => props.showScrollbar)
   const revealActivity = () => scroll?.scrollTo(scroll.scrollHeight)
+  createCommentReveal({
+    renderer,
+    target: () => props.revealComment,
+    ready: () => !!pull() && props.detail.comments.value !== undefined && props.detail.comments.status !== "loading",
+    elementId: (id) => `message-comment-pull-${props.number}-${id}`,
+    scroll: () => scroll,
+  })
   createEffect(() => {
     if (props.revealActivity === undefined) return
     renderer.once("frame", revealActivity)

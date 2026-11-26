@@ -10,7 +10,8 @@ opengh /path/to/repo
 opengh ../
 ```
 
-Local directories need a GitHub.com remote.
+Local directories need a GitHub.com remote. Local paths must start with `./`, `../`, `/`, or `~/`
+(or be `.` or `..`); anything else is read as a GitHub name or link.
 
 ## Open an issue, PR, or commit
 
@@ -54,12 +55,15 @@ opengh https://github.com/owner/repo/actions
 opengh https://github.com/owner/repo/actions/runs/789
 ```
 
-Only GitHub.com URLs are supported.
+Only GitHub.com URLs are supported.`https://github.com/` can be omitted; `opengh owner/repo/actions/runs/789` works the same.
+
+Links to files and folders, releases, discussions, the wiki, projects, packages, deployments, labels, milestones, security advisories, insights, settings, forks, stargazers, and watchers don't open in opengh yet. Pages outside a repository, such as profiles, aren't supported.
 
 ## Open a diff
 
 ```sh
 opengh https://github.com/owner/repo/pull/456/changes
+opengh https://github.com/owner/repo/compare/v1.0...v1.1
 ```
 
 PR `/changes` and `/files` URLs open the diff. If the URL ends with a `#diff-…` anchor, as file
@@ -68,6 +72,9 @@ URLs that contain `#`.
 
 Links to specific commits in a PR include a range, such as `/changes/BASE..<sha>` (from the
 PR's base to that commit) or `/changes/<sha>..<sha>`. opengh shows only those changes.
+
+Compare URLs open the comparison on the Commits page. Ranges and compare URLs don't work
+with `--inline`.
 
 ## Choose a page interactively
 

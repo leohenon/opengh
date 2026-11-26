@@ -2,7 +2,8 @@ import { TextareaRenderable } from "@opentui/core"
 import { useRenderer } from "@opentui/solid"
 import { createEffect, createMemo, createSignal, ErrorBoundary, Match, onCleanup, onMount, Show, Switch } from "solid-js"
 import type { DetailTarget, InitialNavigation, NavigationState, Page } from "./navigation"
-import type { LaunchDetail } from "./launch-target"
+import type { LaunchDetail, LaunchLocation, LaunchRef, UnsupportedLaunch } from "./launch-target"
+import { TAGS_NOT_SUPPORTED } from "./link-target"
 import { resumeLocation, type ResumeLocation } from "./resume"
 import {
   loadRepositoryTabBarHidden,
@@ -25,7 +26,7 @@ import {
 import { loadRecentRepositories, rememberRepository, resolveRepository } from "./github/repository"
 import { openGitHub } from "./github/browser"
 import { openUrl } from "./open-url"
-import { loadGitHubIssueKind } from "./github/client"
+import { loadGitHubBranchHead, loadGitHubIssueKind, loadGitHubRefCommit, loadGitHubTagExists } from "./github/client"
 import { createInlineComments } from "./inline-comments"
 import { createInlineDrafts, type InlineDrafts } from "./inline-drafts"
 import { createComposeDrafts, createComposeDraftStorage, type ComposeDrafts } from "./compose-drafts"
@@ -46,10 +47,28 @@ import { MouseSurface } from "./ui/components/mouse-surface"
 import { SelectionClipboard } from "./ui/components/selection-clipboard"
 import { Toast } from "./ui/components/toast"
 import { SwitchRepositoryScreen } from "./ui/pages/switch-repository"
-import { LoadingScreen, RepositoryLoadError, RepositoryPicker } from "./ui/launcher"
+import { destinationLabel, LoadingScreen, RepositoryLoadError, RepositoryPicker, UnsupportedPage } from "./ui/launcher"
 
-type View = "resolving" | "picker" | "repository" | "switch" | "launch-error"
-type LaunchRequest = Omit<InitialNavigation, "detail"> & { repository: string; detail?: LaunchDetail }
+type View = "resolving" | "picker" | "repository" | "switch" | "launch-error" | "unsupported"
+type LaunchRequest = Omit<InitialNavigation, "detail"> & {
+  repository: string
+  detail?: LaunchDetail
+  ref?: LaunchRef
+  unsupported?: UnsupportedLaunch
+}
+
+function launchRequest(repository: string, location: LaunchLocation): LaunchRequest {
+  return {
+    repository,
+    ...(location.initialDetail ? { detail: location.initialDetail } : {}),
+    ...(location.initialPage ? { page: location.initialPage } : {}),
+    ...(location.initialDiff ? { diff: location.initialDiff } : {}),
+    ...(location.initialComment !== undefined ? { comment: location.initialComment } : {}),
+    ...(location.initialCreate ? { create: location.initialCreate } : {}),
+    ...(location.initialRef ? { ref: location.initialRef } : {}),
+    ...(location.unsupported ? { unsupported: location.unsupported } : {}),
+  }
+}
 type ReadyState = Extract<RepositoryState, { status: "ready" }>
 type ErrorState = Extract<RepositoryState, { status: "error" }>
 
@@ -57,6 +76,9 @@ export type RootServices = {
   checkForUpdate(): Promise<UpdateNotice | undefined>
   resolveRepository(argument: string | undefined, cwd: string): Promise<string | undefined>
   loadIssueKind(repository: string, number: number): Promise<"issue" | "pull">
+  loadBranchHead(repository: string, branch: string): Promise<string | undefined>
+  loadRefCommit(repository: string, ref: string): Promise<string | undefined>
+  loadTagExists(repository: string, tag: string): Promise<boolean>
   loadRecentRepositories(): Promise<string[]>
   rememberRepository(repository: string): Promise<void>
   loadRepositoryTabPreferences(): Promise<{ tabs?: RepositoryTabs; tabBarHidden?: RepositoryTabBarHidden }>
@@ -86,6 +108,9 @@ const defaultServices: RootServices = {
   checkForUpdate,
   resolveRepository,
   loadIssueKind: loadGitHubIssueKind,
+  loadBranchHead: loadGitHubBranchHead,
+  loadRefCommit: loadGitHubRefCommit,
+  loadTagExists: loadGitHubTagExists,
   loadRecentRepositories,
   rememberRepository,
   async loadRepositoryTabPreferences() {
@@ -169,6 +194,10 @@ export function Root(props: {
   initialPage?: Page
   initialDetail?: LaunchDetail
   initialDiff?: InitialNavigation["diff"]
+  initialComment?: number
+  initialCreate?: InitialNavigation["create"]
+  initialRef?: LaunchRef
+  unsupported?: UnsupportedLaunch
   focus?: boolean
   resumeLocation?: ResumeLocation
   onNavigationChange?: (location: ResumeLocation) => void
@@ -201,7 +230,8 @@ export function Root(props: {
       })
       .catch(() => {})
   const [pickerError, setPickerError] = createSignal("")
-  const [launchError, setLaunchError] = createSignal<LaunchRequest & { message: string }>()
+  const [launchError, setLaunchError] = createSignal<LaunchRequest & { message: string; title?: string }>()
+  const [unsupportedLink, setUnsupportedLink] = createSignal<UnsupportedLaunch & { repository: string }>()
   const [config, setConfig] = createSignal(props.initialConfig ?? defaultConfig)
   const repositoryTabs = createSavedRepositoryPreference(services.saveRepositoryTabs)
   const tabBarHidden = createSavedRepositoryPreference(services.saveRepositoryTabBarHidden)
@@ -413,7 +443,7 @@ export function Root(props: {
       : initial?.detail || initial?.diff || restored?.details?.[restored.page] || restored?.diffs?.[restored.page]
         ? "detail"
         : (initial?.page ?? restored?.page ?? repositoryTabs.read(repository) ?? "overview")
-    void session.load(repository, loadScope)
+    void session.load(repository, loadScope, undefined, initial?.branch)
     setView("repository")
   }
   const followRepository = (repository: string, initial: InitialNavigation, origin: NavigationState, entry?: NavigationState) => {
@@ -438,27 +468,59 @@ export function Root(props: {
     setView("switch")
     void refreshRecent()
   }
+  const showUnsupported = (repository: string, unsupported: UnsupportedLaunch) => {
+    setUnsupportedLink({ repository, ...unsupported })
+    setView("unsupported")
+  }
+  const resolveRef = async (repository: string, ref: LaunchRef): Promise<InitialNavigation | UnsupportedLaunch> => {
+    if (ref.view === "commit") {
+      const sha = await services.loadRefCommit(repository, ref.name)
+      if (!sha) throw new Error(`No branch, tag, or commit named “${ref.name}”`)
+      return { detail: { kind: "commit", sha } }
+    }
+    if (await services.loadBranchHead(repository, ref.name)) return { page: "commits", branch: ref.name }
+    if (await services.loadTagExists(repository, ref.name))
+      return { url: ref.url, title: TAGS_NOT_SUPPORTED, closest: { repositoryArgument: repository, initialPage: "commits" } }
+    throw new Error(`No branch named “${ref.name}”`)
+  }
   const resolveLaunch = async (request: LaunchRequest) => {
     setLaunchError(undefined)
+    if (request.unsupported) return showUnsupported(request.repository, request.unsupported)
     setView("resolving")
     let detail: DetailTarget | undefined
+    let { page, branch } = request
     try {
       detail =
         request.detail?.kind === "number"
           ? { kind: await services.loadIssueKind(request.repository, request.detail.number), number: request.detail.number }
           : request.detail
+      if (request.ref) {
+        const resolved = await resolveRef(request.repository, request.ref)
+        if (renderer.isDestroyed) return
+        if ("closest" in resolved) return showUnsupported(request.repository, resolved)
+        ;({ detail, page, branch } = { detail: resolved.detail, page: resolved.page, branch: resolved.branch })
+      }
     } catch (error) {
       if (renderer.isDestroyed) return
       const target = request.detail?.kind === "number" ? `#${request.detail.number}` : ""
-      const message = error instanceof Error ? error.message : "Could not resolve issue or PR"
-      setLaunchError({ ...request, message: `Could not open ${request.repository}${target}: ${message}` })
+      const message = error instanceof Error ? error.message : "Could not resolve the link"
+      const title = request.ref ? (request.ref.view === "commit" ? "Commit unavailable" : "Branch unavailable") : "Issue/PR unavailable"
+      setLaunchError({ ...request, title, message: `Could not open ${request.repository}${target}: ${message}` })
       setView("launch-error")
       return
     }
     if (!renderer.isDestroyed) {
-      const { repository, page, diff } = request
-      open(repository, detail || page || diff ? { detail, page, diff } : undefined)
+      const { repository, diff, comment, create } = request
+      const intent = {
+        ...(comment !== undefined && detail ? { comment } : {}),
+        ...(create ? { create } : {}),
+        ...(branch ? { branch } : {}),
+      }
+      open(repository, detail || page || diff || create ? { detail, page, diff, ...intent } : undefined)
     }
+  }
+  const openLink = (location: LaunchLocation) => {
+    if (location.repositoryArgument) void resolveLaunch(launchRequest(location.repositoryArgument, location))
   }
 
   onMount(() => {
@@ -492,7 +554,17 @@ export function Root(props: {
         return
       }
       if (resolved)
-        return resolveLaunch({ repository: resolved, detail: props.initialDetail, page: props.initialPage, diff: props.initialDiff })
+        return resolveLaunch(
+          launchRequest(resolved, {
+            initialDetail: props.initialDetail,
+            initialPage: props.initialPage,
+            initialDiff: props.initialDiff,
+            initialComment: props.initialComment,
+            initialCreate: props.initialCreate,
+            initialRef: props.initialRef,
+            unsupported: props.unsupported,
+          }),
+        )
       if (!pickerError()) {
         if (props.repositoryArgument === ".")
           setPickerError(
@@ -534,10 +606,24 @@ export function Root(props: {
                   <Match when={view() === "launch-error" && launchError()}>
                     {(current) => (
                       <RepositoryLoadError
-                        title="Issue/PR unavailable"
+                        title={current().title ?? "Issue/PR unavailable"}
                         repository={current().repository}
                         message={current().message}
                         onRetry={() => void resolveLaunch(current())}
+                        onSwitchRepository={showSwitcher}
+                        showStatusBarHints={config().showStatusBarHints}
+                        onQuit={quit}
+                      />
+                    )}
+                  </Match>
+                  <Match when={view() === "unsupported" && unsupportedLink()}>
+                    {(current) => (
+                      <UnsupportedPage
+                        title={current().title}
+                        url={current().url}
+                        destination={destinationLabel(current().closest)}
+                        onOpenGitHub={() => services.openUrl(current().url)}
+                        onContinue={() => void resolveLaunch(launchRequest(current().repository, current().closest))}
                         onSwitchRepository={showSwitcher}
                         showStatusBarHints={config().showStatusBarHints}
                         onQuit={quit}
@@ -550,11 +636,12 @@ export function Root(props: {
                       showScrollbar={config().showScrollbars}
                       showStatusBarHints={config().showStatusBarHints}
                       onOpen={open}
+                      onOpenLink={openLink}
                       onClose={() => setView(switchReturn)}
                     />
                   </Match>
                   <Match when={view() === "picker"}>
-                    <RepositoryPicker recent={recent()} error={pickerError()} onOpen={open} onQuit={quit} />
+                    <RepositoryPicker recent={recent()} error={pickerError()} onOpen={open} onOpenLink={openLink} onQuit={quit} />
                   </Match>
                 </Switch>
               }
@@ -623,6 +710,10 @@ export function Root(props: {
                                 }
                                 onOpenLocation={followRepository}
                                 onResolveIssueKind={services.loadIssueKind}
+                                onResolveBranch={services.loadBranchHead}
+                                onResolveCommit={services.loadRefCommit}
+                                onResolveTag={services.loadTagExists}
+                                onOpenLink={openLink}
                                 onOpenUrl={services.openUrl}
                                 onPageChange={(page) => {
                                   if (!focus()) repositoryTabs.remember(repositoryName, page)

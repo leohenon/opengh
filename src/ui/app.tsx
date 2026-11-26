@@ -130,7 +130,8 @@ import { MotionProvider } from "./motion"
 import { MarkdownProvider } from "./markdown-preferences"
 import { MentionProvider, type MentionSearch } from "./mentions"
 import { HyperlinkProvider, HyperlinkSurface } from "./hyperlinks"
-import { resolveLinkTarget } from "../link-target"
+import { openingInBrowser, resolveLinkTarget, TAGS_NOT_SUPPORTED, unsupportedPageTitle } from "../link-target"
+import type { LaunchLocation } from "../launch-target"
 import { overviewDocumentLink } from "../overview-document-link"
 import type { MarkdownAnchorRequest } from "./markdown-anchors"
 import { SearchProvider } from "./search-context"
@@ -193,6 +194,10 @@ export type AppProps = {
   onReturnToRepository?: () => void
   onOpenLocation?: (repository: string, initial: InitialNavigation, origin: NavigationState, entry?: NavigationState) => void
   onResolveIssueKind?: (repository: string, number: number) => Promise<"issue" | "pull">
+  onResolveBranch?: (repository: string, branch: string) => Promise<string | undefined>
+  onResolveCommit?: (repository: string, ref: string) => Promise<string | undefined>
+  onResolveTag?: (repository: string, name: string) => Promise<boolean>
+  onOpenLink?: (location: LaunchLocation) => void
   onOpenUrl?: (url: string) => Promise<void>
   onPageChange?: (page: Page) => void
   tabBarHidden?: boolean
@@ -394,6 +399,8 @@ function AppContent(props: AppProps) {
   const [commandHint, setCommandHint] = createSignal<string>()
   const [settingsHint, setSettingsHint] = createSignal<string>()
   const [revealActivity, setRevealActivity] = createSignal<{ number: number; id: number; parent?: IssueActionParent }>()
+  let revealCommentRequest = 0
+  const [revealComment, setRevealComment] = createSignal<{ parent: "issue" | "pull"; number: number; id: number; request: number }>()
   const emptyIssueAction: IssueActionState = { body: "", reason: "completed", operation: { status: "idle" } }
   let revealId = 0
   const canClone = () =>
@@ -2087,7 +2094,7 @@ function AppContent(props: AppProps) {
   const newPullDrafts = props.newPullDrafts ?? createComposeDrafts({ storage: false })
   const [newPullTemplates, setNewPullTemplates] = createSignal<PullRequestTemplate[]>()
   const [newPullTemplate, setNewPullTemplate] = createSignal<string>()
-  const openNewPull = () => {
+  const openNewPull = (requestedHead?: string) => {
     if (overlay() !== undefined || !canOpenNewPull()) return false
     const repo = data().repo
     const current = () => !disposed && canOpenNewPull() && data().repo.id === repo.id
@@ -2097,11 +2104,13 @@ function AppContent(props: AppProps) {
       props.onLoadLocalBranch && matchesLocalRepository(props.localRepository, repo.nameWithOwner)
         ? props.onLoadLocalBranch().catch(() => undefined)
         : Promise.resolve(undefined)
-    void local.then(async (branch) => {
-      const upstream = branch ? await props.onLoadBranchUpstream?.(branch).catch(() => undefined) : undefined
+    void local.then(async (checkedOut) => {
+      const branch = requestedHead ?? checkedOut
+      const pushable = !!checkedOut && checkedOut === branch
+      const upstream = pushable ? await props.onLoadBranchUpstream?.(checkedOut).catch(() => undefined) : undefined
       if (!current() || overlay() !== undefined) return
       setNewPullLocalBranch(branch)
-      setNewPullPushable(!!branch && pushableToOrigin(branch, upstream))
+      setNewPullPushable(pushable && pushableToOrigin(checkedOut, upstream))
       if (!props.onLoadPullTemplates) return setOverlay("new-pull")
       setNewPullTemplates(undefined)
       setOverlay("new-pull-templates")
@@ -2144,7 +2153,7 @@ function AppContent(props: AppProps) {
     canOpenNewIssue()
       ? [{ label: "New issue", run: openNewIssue }]
       : canOpenNewPull()
-        ? [{ label: "New pull request", run: openNewPull }]
+        ? [{ label: "New pull request", run: () => openNewPull() }]
         : []
   const activeWorkFindKind = () => {
     const kind = workFindKind()
@@ -2839,6 +2848,27 @@ function AppContent(props: AppProps) {
     { when: () => page() === "overview" && overlay() === undefined },
   )
 
+  const [pendingBranch, setPendingBranch] = createSignal<string>()
+  createEffect(() => {
+    const branch = pendingBranch()
+    if (!branch) return
+    if (branch === data().currentBranch || !props.onBranchChange) return setPendingBranch(undefined)
+    if (props.canSwitchBranch === false) return
+    setPendingBranch(undefined)
+    props.onBranchChange(branch)
+  })
+  const applyNavigationIntent = (initial: InitialNavigation) => {
+    const detail = initial.detail
+    if (initial.comment !== undefined && (detail?.kind === "issue" || detail?.kind === "pull"))
+      setRevealComment({ parent: detail.kind, number: detail.number, id: initial.comment, request: ++revealCommentRequest })
+    if (initial.branch) setPendingBranch(initial.branch)
+    if (initial.create?.kind === "issue") openNewIssue()
+    if (initial.create?.kind === "pull") openNewPull(initial.create.head)
+  }
+  onMount(() => {
+    if (initialNavigation) applyNavigationIntent(initialNavigation)
+  })
+
   let linkRequest = 0
   const activateLink = async (url: string) => {
     const request = ++linkRequest
@@ -2873,15 +2903,38 @@ function AppContent(props: AppProps) {
         if (!location.hash) overviewScroll?.scrollTo(0)
         return
       }
-      if (target.kind === "external") {
+      const openExternally = async (href: string, title = unsupportedPageTitle(href)) => {
         if (!props.onOpenUrl) throw new Error("Opening external links is unavailable.")
-        await props.onOpenUrl(target.url)
-        return
+        if (title) setToast({ id: ++toastId, title: openingInBrowser(title), message: "", duration: 3000, tone: "info" })
+        await props.onOpenUrl(href)
       }
+      if (target.kind === "external") return await openExternally(target.url)
       let initial: InitialNavigation
       if (target.kind === "page") initial = { page: target.page }
-      else if (target.kind === "diff") initial = diffLocation(target.target)
-      else {
+      else if (target.kind === "diff") {
+        initial = diffLocation(target.target)
+        if (!initial.detail) initial = { ...initial, page: "commits" }
+      } else if (target.kind === "new-issue") {
+        if (!props.onCreateIssue) return await openExternally(url)
+        initial = { page: "issues", create: { kind: "issue" } }
+      } else if (target.kind === "new-pull") {
+        if (!props.onCreatePull || !props.onComparePull) return await openExternally(url)
+        initial = { page: "pulls", create: { kind: "pull", head: target.head } }
+      } else if (target.kind === "ref" && target.view === "commit") {
+        const sha = await props.onResolveCommit?.(target.repository, target.name)
+        if (!current()) return
+        if (!sha) return await openExternally(url)
+        initial = { detail: { kind: "commit", sha } }
+      } else if (target.kind === "ref") {
+        const sha = await props.onResolveBranch?.(target.repository, target.name)
+        if (!current()) return
+        if (!sha) {
+          const tag = await props.onResolveTag?.(target.repository, target.name).catch(() => false)
+          if (!current()) return
+          return await openExternally(url, tag ? TAGS_NOT_SUPPORTED : undefined)
+        }
+        initial = { page: "commits", branch: target.name }
+      } else {
         let detail: DetailTarget
         if (target.detail.kind === "number") {
           const number = target.detail.number
@@ -2893,7 +2946,7 @@ function AppContent(props: AppProps) {
           if (!kind) throw new Error("Could not determine whether this reference is an issue or pull request.")
           detail = { kind, number }
         } else detail = target.detail
-        initial = { detail }
+        initial = target.comment === undefined ? { detail } : { detail, comment: target.comment }
       }
       if (!current()) return
       initialPagePending = false
@@ -2914,6 +2967,7 @@ function AppContent(props: AppProps) {
         if (initial.page) setNavigation((state) => openPage(state, initial.page!))
         if (initial.diff) viewDiff(initial.diff)
       })
+      applyNavigationIntent(initial)
     } catch (error) {
       if (current())
         setToast({ id: ++toastId, title: "Could not open link", message: error instanceof Error ? error.message : String(error) })
@@ -3198,6 +3252,9 @@ function AppContent(props: AppProps) {
                                       ? revealActivity()?.id
                                       : undefined
                                   }
+                                  revealComment={
+                                    revealComment()?.parent === "issue" && revealComment()?.number === number ? revealComment() : undefined
+                                  }
                                   defaultBranch={data().repo.defaultBranch}
                                   interactive={!diffTarget() && page() === "issues" && overlay() === undefined}
                                   showScrollbar={config().showScrollbars}
@@ -3225,6 +3282,9 @@ function AppContent(props: AppProps) {
                                     revealActivity()?.parent === "pull" && revealActivity()?.number === number
                                       ? revealActivity()?.id
                                       : undefined
+                                  }
+                                  revealComment={
+                                    revealComment()?.parent === "pull" && revealComment()?.number === number ? revealComment() : undefined
                                   }
                                   reactionControls={reactionControls()}
                                   defaultBranch={data().repo.defaultBranch}
@@ -3342,6 +3402,14 @@ function AppContent(props: AppProps) {
                             setOverlay()
                             if (repository.toLowerCase() !== data().repo.nameWithOwner.toLowerCase()) props.onSwitchRepository?.(repository)
                           }}
+                          onOpenLink={
+                            props.onOpenLink
+                              ? (location) => {
+                                  setOverlay()
+                                  props.onOpenLink!(location)
+                                }
+                              : undefined
+                          }
                         />
                       </Show>
                       <Show when={overlay() === "command" && commandAction()} keyed>

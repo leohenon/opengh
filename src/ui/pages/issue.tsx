@@ -21,6 +21,7 @@ import { useTheme } from "../theme"
 import { useIcons } from "../icon-style"
 import { iconPrefix } from "../icons"
 import { createScrollbarVisibility } from "../scrollbar-visibility"
+import { createCommentReveal, type CommentReveal } from "../reveal-comment"
 
 function IssueMetadata(props: { issue: IssueDetail; compact: boolean; inline?: boolean }) {
   const { colors } = useTheme()
@@ -207,6 +208,7 @@ export function IssueScreen(props: {
   onOpenReference?: (reference: IssueReference) => void
   detail: IssueDetailState
   revealActivity?: number
+  revealComment?: CommentReveal
   timelineCollapsed?: boolean
   comment?: ActivityComment
   interactive: boolean
@@ -254,6 +256,13 @@ export function IssueScreen(props: {
   let scroll: ScrollBoxRenderable | undefined
   const bindScrollbar = createScrollbarVisibility(() => props.showScrollbar)
   const revealActivity = () => scroll?.scrollTo(scroll.scrollHeight)
+  createCommentReveal({
+    renderer,
+    target: () => props.revealComment,
+    ready: () => !!issue() && props.detail.comments.value !== undefined && props.detail.comments.status !== "loading",
+    elementId: (id) => `message-comment-issue-${props.number}-${id}`,
+    scroll: () => scroll,
+  })
   createEffect(() => {
     if (props.revealActivity === undefined) return
     // Wait for layout before scrolling to the newly posted activity.

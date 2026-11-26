@@ -528,6 +528,182 @@ describe("application root", () => {
     expect(loads).toBe(1)
   })
 
+  describe("GitHub links", () => {
+    const linkServices = (overrides: Record<string, unknown> = {}) => {
+      const record = {
+        opened: [] as string[],
+        loads: 0,
+        branches: [] as Array<string | undefined>,
+        pulls: [] as number[],
+        commits: [] as string[],
+      }
+      return {
+        record,
+        services: {
+          checkForUpdate: async () => undefined,
+          createPullReviewSession: createTestReviewSession,
+          resolveRepository: async () => "cli/cli",
+          resolveLocalRepository: async () => undefined,
+          loadRecentRepositories: async () => [],
+          rememberRepository: async () => {},
+          loadRepositoryTabPreferences: async () => ({}),
+          saveRepositoryTabs: async () => {},
+          loadConfig: async () => ({ ...defaultConfig }),
+          openUrl: async (url: string) => {
+            record.opened.push(url)
+          },
+          createRepositorySession: () => ({
+            ...readySession(),
+            load: async (_repository: string, _scope?: unknown, _expectedId?: number, branch?: string) => {
+              record.loads++
+              record.branches.push(branch)
+            },
+            loadPull: async (number: number) => {
+              record.pulls.push(number)
+            },
+            loadCommit: async (sha: string) => {
+              record.commits.push(sha)
+            },
+          }),
+          ...overrides,
+        },
+      }
+    }
+
+    test("unsupported launch links offer GitHub or the closest page", async () => {
+      const url = "https://github.com/cli/cli/pull/12/checks"
+      const { record, services } = linkServices({ loadConfig: async () => ({ ...defaultConfig, showStatusBarHints: true }) })
+      const view = await testRender(() => <Root {...parseLaunchArguments([url])} cwd="/work" services={services} />, {
+        width: 120,
+        height: 32,
+      })
+      active.push(view)
+      await waitForText(view, "This page is not yet supported")
+      const frame = view.captureCharFrame()
+      expect(frame).toContain("github.com/cli/cli/pull/12/checks")
+      expect(frame).toMatch(/› Open PR #12\s*\n\s+Open on GitHub/)
+      expect(frame).not.toContain("(enter)")
+      expect(frame).toContain("enter select · S switch repository · q quit")
+      expect(record.loads).toBe(0)
+
+      view.mockInput.pressKey("o")
+      await view.flush()
+      expect(record.opened).toEqual([])
+
+      view.mockInput.pressArrow("down")
+      await view.flush()
+      expect(view.captureCharFrame()).toContain("› Open on GitHub")
+      expect(view.captureCharFrame()).toContain("enter select · S switch repository · q quit")
+      view.mockInput.pressEnter()
+      await waitForText(view, "Opened in your browser.")
+      expect(record.opened).toEqual([url])
+      expect(record.loads).toBe(0)
+
+      view.mockInput.pressArrow("up")
+      await view.flush()
+      view.mockInput.pressEnter()
+      await waitForText(view, "Pull request #12")
+      expect(record.loads).toBe(1)
+      expect(record.pulls).toEqual([12])
+    })
+
+    test("clicking a choice in the unsupported page popup runs it", async () => {
+      const url = "https://github.com/cli/cli/discussions/3"
+      const { record, services } = linkServices()
+      const view = await testRender(() => <Root {...parseLaunchArguments([url])} cwd="/work" services={services} />, {
+        width: 120,
+        height: 32,
+      })
+      active.push(view)
+      await waitForText(view, "Discussions are not yet supported")
+      await clickControl(view, "unsupported-github")
+      await waitForText(view, "Opened in your browser.")
+      expect(record.opened).toEqual([url])
+      await clickControl(view, "unsupported-continue")
+      await waitForText(view, "About")
+      expect(record.loads).toBe(1)
+    })
+
+    test("tag history at launch says tags aren't supported and offers Commits", async () => {
+      const { record, services } = linkServices({ loadBranchHead: async () => undefined, loadTagExists: async () => true })
+      const view = await testRender(
+        () => <Root {...parseLaunchArguments(["https://github.com/cli/cli/commits/v1.0"])} cwd="/work" services={services} />,
+        { width: 120, height: 32 },
+      )
+      active.push(view)
+      await waitForText(view, "Tags are not yet supported")
+      expect(view.captureCharFrame()).toContain("Open Commits")
+      expect(record.loads).toBe(0)
+    })
+
+    test("branch history launch links load that branch directly", async () => {
+      const { record, services } = linkServices({ loadBranchHead: async () => "d".repeat(40) })
+      const view = await testRender(
+        () => <Root {...parseLaunchArguments(["https://github.com/cli/cli/commits/example-change"])} cwd="/work" services={services} />,
+        { width: 120, height: 32 },
+      )
+      active.push(view)
+      for (let attempt = 0; attempt < 20 && !record.loads; attempt++) {
+        await Bun.sleep(5)
+        await view.flush()
+      }
+      expect(record.branches).toEqual(["example-change"])
+    })
+
+    test("commit launch links open the commit a branch or tag names", async () => {
+      const sha = "e".repeat(40)
+      const names: string[] = []
+      const { record, services } = linkServices({
+        loadRefCommit: async (_repository: string, ref: string) => {
+          names.push(ref)
+          return sha
+        },
+      })
+      const view = await testRender(
+        () => <Root {...parseLaunchArguments(["https://github.com/cli/cli/commit/v1.0"])} cwd="/work" services={services} />,
+        { width: 120, height: 32 },
+      )
+      active.push(view)
+      for (let attempt = 0; attempt < 20 && !record.commits.length; attempt++) {
+        await Bun.sleep(5)
+        await view.flush()
+      }
+      expect(names).toEqual(["v1.0"])
+      expect(record.commits).toEqual([sha])
+    })
+
+    test("launch links to missing names stay retryable", async () => {
+      const { record, services } = linkServices({ loadRefCommit: async () => undefined })
+      const view = await testRender(
+        () => <Root {...parseLaunchArguments(["https://github.com/cli/cli/commit/nope"])} cwd="/work" services={services} />,
+        { width: 120, height: 32 },
+      )
+      active.push(view)
+      await waitForText(view, "Commit unavailable")
+      expect(view.captureCharFrame().replace(/\s+/g, " ")).toContain("No branch, tag, or commit named “nope”")
+      expect(record.loads).toBe(0)
+    })
+
+    test.each(["https://github.com/cli/cli/pull/7", "cli/cli/pull/7"])(
+      "links pasted into the repository switcher open their page (%s)",
+      async (link) => {
+        const { record, services } = linkServices()
+        const view = await testRender(() => <Root repositoryArgument="cli/cli" cwd="/work" services={services} />, {
+          width: 120,
+          height: 32,
+        })
+        active.push(view)
+        await waitForText(view, githubDataFixture.repo.nameWithOwner)
+        view.mockInput.pressKey("S")
+        await waitForText(view, "Switch repository")
+        await view.mockInput.typeText(link)
+        view.mockInput.pressEnter()
+        await waitForText(view, "Pull request #7")
+        expect(record.pulls).toEqual([7])
+      },
+    )
+  })
+
   test("keeps the saved theme and one loading message from discovery through session loading", async () => {
     const resolution = deferred<string | undefined>()
     const config: Config = { ...defaultConfig, theme: "github", colorMode: "light" }
