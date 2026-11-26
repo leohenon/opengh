@@ -137,7 +137,7 @@ export async function inlinePage(repository: string, launch: LaunchOptions, clie
         for (const event of timeline.events) {
           if (event.kind === "review") append(`## Review: ${event.state} · @${event.actor} · ${event.createdAt}`, event.body)
         }
-        const context = await client.pullContext(repository, number, options)
+        const context = await client.pullContext(repository, number, options, "threads")
         for (const thread of context.threads) {
           append(`## ${thread.path}:${thread.line ?? thread.originalLine ?? ""}${thread.isResolved ? " (resolved)" : ""}`)
           for (const comment of thread.comments) append(`### @${comment.author} · ${comment.createdAt}`, comment.body)

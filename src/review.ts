@@ -100,7 +100,7 @@ export async function loadPullReview(
       client.pull(repository, number, request),
       pages((page) => client.issueComments(repository, number, page, request), MAX_AUTOMATIC_PAGES),
       client.issueTimeline(repository, number, request),
-      client.pullContext(repository, number, request),
+      client.pullContext(repository, number, request, "threads"),
     ])
     const head = context.readiness.headSha
     if (!sameSha(revision(detail.headSha), head)) throw moved()

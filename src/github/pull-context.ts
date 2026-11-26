@@ -185,7 +185,12 @@ export function createGitHubPullContext(transport: GitHubTransport) {
       if (!["MERGEABLE", "CONFLICTING", "UNKNOWN"].includes(mergeable)) throw new Error("Invalid PR mergeability")
       return { headSha, mergeable: mergeable as PullMergeability["mergeable"], mergeStateStatus: text(pull.mergeStateStatus) }
     },
-    async pullContext(repository: RepositoryReference, number: number, options?: RequestOptions): Promise<PullContext> {
+    async pullContext(
+      repository: RepositoryReference,
+      number: number,
+      options?: RequestOptions,
+      include: "all" | "threads" = "all",
+    ): Promise<PullContext> {
       if (!transport.graphql) throw new Error("PR details require GraphQL")
       if (!Number.isSafeInteger(number) || number <= 0) throw new Error("Invalid pull request number")
       const selector = repositorySelector(repository)
@@ -383,60 +388,68 @@ export function createGitHubPullContext(transport: GitHubTransport) {
           return { checks: items, checksComplete: true }
         }
         // Optional API surfaces fail independently; neither can erase threads or readiness.
+        const optional = <T>(load: () => Promise<T>) =>
+          include === "threads" ? Promise.resolve({ value: undefined, warning: undefined }) : load()
         const [threadItems, checkResult, projectsResult, issuesResult] = await workers(
           [
             threads(),
-            checks()
-              .then((value) => ({ value, warning: undefined }))
-              .catch((error: unknown) => {
-                if (error instanceof HeadChangedError || isRequestInterrupted(error, options)) throw error
-                return { value: undefined, warning: `Could not load PR checks; readiness is incomplete: ${message(error)}` }
-              }),
-            collection(
-              "PullProjects",
-              `projectItems(first: 100, after: $cursor) {
+            optional(() =>
+              checks()
+                .then((value) => ({ value, warning: undefined }))
+                .catch((error: unknown) => {
+                  if (error instanceof HeadChangedError || isRequestInterrupted(error, options)) throw error
+                  return { value: undefined, warning: `Could not load PR checks; readiness is incomplete: ${message(error)}` }
+                }),
+            ),
+            optional(() =>
+              collection(
+                "PullProjects",
+                `projectItems(first: 100, after: $cursor) {
           nodes { id project { title url } } ${pageInfo}
         }`,
-              (node) => node.projectItems,
-              (value) => {
-                const node = object(value)
-                const project = object(node.project)
-                return { id: text(node.id), title: text(project.title), url: text(project.url) }
-              },
-              (item) => item.id,
-            )
-              .then((value) => ({ value, warning: undefined }))
-              .catch((error: unknown) => {
-                if (isRequestInterrupted(error, options)) throw error
-                return { value: undefined, warning: `Could not load PR projects (access may be restricted): ${message(error)}` }
-              }),
-            collection(
-              "PullClosingIssues",
-              `closingIssuesReferences(first: 100, after: $cursor) {
+                (node) => node.projectItems,
+                (value) => {
+                  const node = object(value)
+                  const project = object(node.project)
+                  return { id: text(node.id), title: text(project.title), url: text(project.url) }
+                },
+                (item) => item.id,
+              )
+                .then((value) => ({ value, warning: undefined }))
+                .catch((error: unknown) => {
+                  if (isRequestInterrupted(error, options)) throw error
+                  return { value: undefined, warning: `Could not load PR projects (access may be restricted): ${message(error)}` }
+                }),
+            ),
+            optional(() =>
+              collection(
+                "PullClosingIssues",
+                `closingIssuesReferences(first: 100, after: $cursor) {
           nodes { number title state url repository { nameWithOwner } } ${pageInfo}
         }`,
-              (node) => node.closingIssuesReferences,
-              (value) => {
-                const node = object(value)
-                const issueNumber = optionalNumber(node.number)
-                if (issueNumber === undefined || issueNumber <= 0 || !["OPEN", "CLOSED"].includes(text(node.state))) {
-                  throw new Error("Invalid closing issue")
-                }
-                return {
-                  number: issueNumber,
-                  title: text(node.title),
-                  url: text(node.url),
-                  repository: text(object(node.repository).nameWithOwner),
-                  state: node.state === "OPEN" ? ("open" as const) : ("closed" as const),
-                }
-              },
-              (item) => `${item.repository}#${item.number}`,
-            )
-              .then((value) => ({ value, warning: undefined }))
-              .catch((error: unknown) => {
-                if (isRequestInterrupted(error, options)) throw error
-                return { value: undefined, warning: `Could not load closing issues (access may be restricted): ${message(error)}` }
-              }),
+                (node) => node.closingIssuesReferences,
+                (value) => {
+                  const node = object(value)
+                  const issueNumber = optionalNumber(node.number)
+                  if (issueNumber === undefined || issueNumber <= 0 || !["OPEN", "CLOSED"].includes(text(node.state))) {
+                    throw new Error("Invalid closing issue")
+                  }
+                  return {
+                    number: issueNumber,
+                    title: text(node.title),
+                    url: text(node.url),
+                    repository: text(object(node.repository).nameWithOwner),
+                    state: node.state === "OPEN" ? ("open" as const) : ("closed" as const),
+                  }
+                },
+                (item) => `${item.repository}#${item.number}`,
+              )
+                .then((value) => ({ value, warning: undefined }))
+                .catch((error: unknown) => {
+                  if (isRequestInterrupted(error, options)) throw error
+                  return { value: undefined, warning: `Could not load closing issues (access may be restricted): ${message(error)}` }
+                }),
+            ),
           ],
           controller,
         )

@@ -267,6 +267,30 @@ test("PR optional connections reject page limits rather than becoming permission
   expect(pages).toBe(20)
 })
 
+test("PR context for threads only skips checks, projects and closing issues and their warnings", async () => {
+  const calls: string[] = []
+  const client = createGitHubClient(
+    contextTransport(async <T>(query: string) => {
+      const name = query.match(/query\s+(\w+)/)?.[1] ?? ""
+      calls.push(name)
+      if (name === "PullProjects") throw new Error("Your token has not been granted the required scopes")
+      return emptySurface(query) as T
+    }),
+  )
+
+  const threads = await client.pullContext("owner/repo", 42, undefined, "threads")
+  expect(calls).toEqual(["PullThreads"])
+  expect(threads.warnings).toEqual([])
+  expect(threads.projects).toBeUndefined()
+  expect(threads.closingIssues).toBeUndefined()
+  expect(threads.readiness.headSha).toBe("a".repeat(40))
+
+  calls.length = 0
+  const all = await client.pullContext("owner/repo", 42)
+  expect(calls.sort()).toEqual(["PullChecks", "PullClosingIssues", "PullProjects", "PullThreads"])
+  expect(all.warnings).toEqual([expect.stringContaining("Could not load PR projects")])
+})
+
 test("PR budget counts nested initial comments even when thread IDs repeat", async () => {
   const client = createGitHubClient(
     contextTransport(async <T>(query: string) => {
