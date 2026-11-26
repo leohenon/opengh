@@ -10,7 +10,7 @@
   <a href="https://github.com/leohenon/opengh/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/leohenon/opengh/ci.yml?style=flat-square&amp;branch=main&amp;label=CI&amp;labelColor=24292f" alt="CI" /></a>
 </p>
 
-<p align="center">A familiar terminal interface for GitHub.</p>
+<p align="center">Run <code>opengh</code> in your repo, or pass it a GitHub link, and you're there. You'll already know your way around.</p>
 
 <picture>
   <source media="(prefers-reduced-motion: reduce) and (prefers-color-scheme: dark)" srcset="docs/assets/screenshot-dark.png" />
@@ -20,14 +20,9 @@
   <img src="docs/assets/screenshot-light.png" alt="opengh showing a split diff and inline review for OpenTUI PR #209" />
 </picture>
 
-**Browse** repositories, commits, and Actions.
-**Manage** issues and pull requests.
-**Review** split or unified diffs, leave inline comments, and submit reviews.
-**Navigate** by keyboard or mouse, with customizable shortcuts and themes.
-
 ## Install · [Guide](docs/installation.md)
 
-Available for macOS and Linux.
+Available for macOS and Linux. The only requirement is a signed-in [GitHub CLI](docs/installation.md#authenticate).
 
 ```sh
 # Curl
@@ -43,19 +38,20 @@ npm install --global @leohenon/opengh
 nix profile install github:leohenon/opengh#opengh nixpkgs#gh
 ```
 
-Requires [GitHub CLI](https://cli.github.com/) authentication.
-
 ## Get started · [Usage](docs/usage.md)
 
 ```sh
-opengh .                       # Current directory's repository
-opengh owner/repo              # Any repository
-opengh owner/repo --pr 123     # Open a specific pull request
+opengh .                                          # Current directory's repository
+opengh owner/repo                                 # Any repository
+opengh owner/repo --pr 123                        # Open a specific pull request
+opengh https://github.com/owner/repo/pull/123     # A GitHub link
 ```
+
+Press `?` for shortcuts, or right-click anything.
 
 ## For agents · [Agent CLI](docs/agent-cli.md)
 
-Descriptions, diffs, comments, and review threads in one command.
+Gives your agent a whole PR in one command, including the line comments `gh pr view` leaves out.
 
 ```sh
 npx skills add leohenon/opengh --skill opengh --global

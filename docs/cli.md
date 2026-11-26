@@ -59,10 +59,15 @@ Only GitHub.com URLs are supported.
 ## Open a diff
 
 ```sh
-opengh 'https://github.com/owner/repo/pull/456/changes'
+opengh https://github.com/owner/repo/pull/456/changes
 ```
 
-PR `/changes` and `/files` URLs open the diff. A `#diff-…` anchor on a PR diff or commit URL jumps to that file.
+PR `/changes` and `/files` URLs open the diff. If the URL ends with a `#diff-…` anchor, as file
+links copied from a PR or commit do, opengh opens that file; line numbers are ignored. Quote
+URLs that contain `#`.
+
+Links to specific commits in a PR include a range, such as `/changes/BASE..<sha>` (from the
+PR's base to that commit) or `/changes/<sha>..<sha>`. opengh shows only those changes.
 
 ## Choose a page interactively
 

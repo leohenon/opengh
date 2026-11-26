@@ -1,6 +1,6 @@
 # Agent CLI
 
-Unlike gh pr view, opengh `--inline` includes inline review threads alongside the
+Unlike `gh pr view`, opengh `--inline` includes inline review threads, with resolved and outdated ones marked, alongside the
 description, comments, and reviews, so agents don’t miss line-level feedback.
 The skill teaches agents to fetch the full discussion in one read-only command, with `--diff` to include the patch.
 

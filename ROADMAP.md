@@ -9,7 +9,7 @@ opengh aims to make everyday GitHub work fast from the terminal.
 - Review PRs, leave inline comments, and reply to review threads
 - Merge, close, and reopen PRs
 - Open file references and links
-- Agent skill for GitHub context retrieval
+- Agent skill for context retrieval
 
 ## Next
 
@@ -22,16 +22,16 @@ opengh aims to make everyday GitHub work fast from the terminal.
 ### Improve keyboard navigation
 
 - [ ] Open links with the keyboard
-- [ ] Select and copy text with the keyboard
-
-### Connect reviews to coding agents
-
-- [ ] Add private diff notes and review-context handoff to coding agents
+- [ ] Select and copy text / leave inline comments with the keyboard
 
 ## Later
 
 - Browse repository files
-- Browse discussions and releases
+- Manage discussions
+- Track your assigned work across repositories and organizations
+- View your notifications inbox
+- View tags and releases
 - View GitHub Actions runs, jobs, and logs
 - Run, re-run, and cancel workflows
 - Manage milestones, subscriptions, and conversation locking
+- Add private diff notes and review-context handoff to coding agents
