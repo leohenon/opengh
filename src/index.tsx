@@ -134,6 +134,7 @@ try {
         repositoryArgument={launch.repositoryArgument}
         initialPage={launch.initialPage}
         initialDetail={launch.initialDetail}
+        initialDiff={launch.initialDiff}
         focus={launch.focus}
         resumeLocation={resumeLocation}
         onNavigationChange={resumeWriter.remember}

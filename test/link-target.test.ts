@@ -23,6 +23,23 @@ describe("link targets", () => {
     for (const [url, expected] of cases) expect(resolveLinkTarget(url)).toEqual(expected)
   })
 
+  test("opens GitHub changes links and recognizes file anchors with line suffixes", () => {
+    const repository = "other/project"
+    const fileHash = "a".repeat(64)
+    const base = "b".repeat(40)
+    const head = "c".repeat(40)
+    expect(resolveLinkTarget(`https://github.com/${repository}/pull/34/changes/${base}..${head}#diff-${fileHash}R12-R15`)).toEqual({
+      kind: "diff",
+      repository,
+      target: { kind: "compare", base, head, pullNumber: 34, fileHash },
+    })
+    expect(resolveLinkTarget(`https://github.com/${repository}/commit/ABC1234#diff-${fileHash}`)).toEqual({
+      kind: "diff",
+      repository,
+      target: { kind: "commit", sha: "abc1234", fileHash },
+    })
+  })
+
   test("opens Actions job and check-focus links at their parent run", () => {
     for (const suffix of [
       "",

@@ -1,9 +1,54 @@
 import { expect, test } from "bun:test"
+import { createHash } from "node:crypto"
+import { createSignal } from "solid-js"
+import type { DiffContent } from "../src/models"
+import type { ResourceState } from "../src/repository-state"
 import { createTestRenderer } from "@opentui/core/testing"
 import { render } from "@opentui/solid"
 import { DiffScreen } from "../src/ui/pages/diff"
 import { StatusPromptBar, StatusPromptProvider } from "../src/ui/status-prompt"
 import { initializeHunk } from "../src/ui/hunk-host"
+
+test("a GitHub file anchor selects and reveals the file when the patch becomes ready", async () => {
+  const setup = await createTestRenderer({ width: 105, height: 15 })
+  initializeHunk(setup.renderer)
+  const [resource, setResource] = createSignal<ResourceState<DiffContent>>({ status: "loading", phase: "load" })
+  const names = ["alpha.ts", "beta.ts", "review.ts", "settings.ts"]
+  const patch = names
+    .map((name) => {
+      const lines = Array.from({ length: 10 }, (_, index) => `+${name}-line-${index}\n`).join("")
+      return `diff --git a/${name} b/${name}\n--- /dev/null\n+++ b/${name}\n@@ -0,0 +1,10 @@\n${lines}`
+    })
+    .join("")
+  try {
+    await render(
+      () => (
+        <box width="100%" height="100%">
+          <DiffScreen
+            target={{ kind: "pull", number: 8, fileHash: createHash("sha256").update("review.ts").digest("hex") }}
+            resource={resource()}
+            interactive
+            showScrollbar={false}
+            onLoadFiles={() => {}}
+          />
+        </box>
+      ),
+      setup.renderer,
+    )
+    await setup.flush()
+    setResource({ status: "ready", value: { kind: "patch", patch } })
+    await setup.flush()
+    await setup.renderer.idle()
+    await setup.flush()
+    const frame = setup.captureCharFrame()
+    expect(frame.split("\n")[0]).toContain("review.ts")
+    expect(frame).toContain("review.ts-line-0")
+    expect(frame).not.toContain("alpha.ts-line-0")
+  } finally {
+    setup.renderer.destroy()
+    await setup.renderer.closed
+  }
+})
 
 test("comma and period navigate bounded filtered files regardless of sidebar visibility or mouse selection", async () => {
   const setup = await createTestRenderer({ width: 105, height: 18 })

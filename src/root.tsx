@@ -49,7 +49,7 @@ import { SwitchRepositoryScreen } from "./ui/pages/switch-repository"
 import { LoadingScreen, RepositoryLoadError, RepositoryPicker } from "./ui/launcher"
 
 type View = "resolving" | "picker" | "repository" | "switch" | "launch-error"
-type LaunchRequest = { repository: string; detail?: LaunchDetail; page?: Page }
+type LaunchRequest = Omit<InitialNavigation, "detail"> & { repository: string; detail?: LaunchDetail }
 type ReadyState = Extract<RepositoryState, { status: "ready" }>
 type ErrorState = Extract<RepositoryState, { status: "error" }>
 
@@ -168,6 +168,7 @@ export function Root(props: {
   repositoryArgument?: string
   initialPage?: Page
   initialDetail?: LaunchDetail
+  initialDiff?: InitialNavigation["diff"]
   focus?: boolean
   resumeLocation?: ResumeLocation
   onNavigationChange?: (location: ResumeLocation) => void
@@ -454,7 +455,10 @@ export function Root(props: {
       setView("launch-error")
       return
     }
-    if (!renderer.isDestroyed) open(request.repository, detail || request.page ? { detail, page: request.page } : undefined)
+    if (!renderer.isDestroyed) {
+      const { repository, page, diff } = request
+      open(repository, detail || page || diff ? { detail, page, diff } : undefined)
+    }
   }
 
   onMount(() => {
@@ -487,7 +491,8 @@ export function Root(props: {
         open(savedResume.repository, undefined, true)
         return
       }
-      if (resolved) return resolveLaunch({ repository: resolved, detail: props.initialDetail, page: props.initialPage })
+      if (resolved)
+        return resolveLaunch({ repository: resolved, detail: props.initialDetail, page: props.initialPage, diff: props.initialDiff })
       if (!pickerError()) {
         if (props.repositoryArgument === ".")
           setPickerError(

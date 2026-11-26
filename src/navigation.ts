@@ -94,7 +94,20 @@ export function atRepositoryEntry(state: NavigationState, entry: NavigationState
 export function sameDiff(left: DiffTarget, right: DiffTarget): boolean {
   if (left.kind === "commit") return right.kind === "commit" && left.sha === right.sha
   if (left.kind === "pull") return right.kind === "pull" && left.number === right.number
-  return right.kind === "compare" && left.base === right.base && left.head === right.head && left.repository?.id === right.repository?.id
+  return (
+    right.kind === "compare" &&
+    left.base === right.base &&
+    left.head === right.head &&
+    left.pullNumber === right.pullNumber &&
+    left.repository?.id === right.repository?.id
+  )
+}
+
+export function diffLocation(diff: DiffTarget): InitialNavigation {
+  if (diff.kind === "pull") return { detail: { kind: "pull", number: diff.number }, diff }
+  if (diff.kind === "commit") return { detail: { kind: "commit", sha: diff.sha }, diff }
+  if (diff.pullNumber !== undefined) return { detail: { kind: "pull", number: diff.pullNumber }, diff }
+  return { diff }
 }
 
 export function openDiff(state: NavigationState, diff: DiffTarget): NavigationState {

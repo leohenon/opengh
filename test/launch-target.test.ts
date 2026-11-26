@@ -343,12 +343,33 @@ describe("launch arguments", () => {
       ["https://github.com/owner/repo/issues/0"],
       ["https://github.com/owner/repo/pull/not-a-number"],
       ["https://github.com/owner/repo/commit/not-a-hash"],
-      ["https://github.com/owner/repo/pull/123/files"],
+      ["https://github.com/owner/repo/pull/123/files/unknown"],
+      ["https://github.com/owner/repo/pull/123/changes/BASE..main"],
+      [`https://github.com/owner/repo/pull/123/changes/BASE...${"a".repeat(40)}`],
       ["https://github.com/owner/repo/issues/123", "456"],
       ["https://github.com/owner/repo/commits", "--commit", "abcd"],
     ]
     for (const args of cases) expect(() => parseLaunchArguments(args)).toThrow()
   })
+})
+
+test("GitHub diff URLs open their PR and select the requested comparison and file", () => {
+  const head = "aa6d5bba891409ac71dd9352a6cfef32c1534490"
+  const fileHash = "c0cdabc101cfbfa5fc5fafd14b871829fdaa34fb44d1f76a4083573fc025f892"
+  const url = `https://github.com/leohenon/opengh-sandbox/pull/8/changes/BASE..${head}#diff-${fileHash}`
+  expect(parseLaunchArguments([url])).toEqual({
+    repositoryArgument: "leohenon/opengh-sandbox",
+    initialDetail: { kind: "pull", number: 8 },
+    initialDiff: { kind: "compare", base: "BASE", head, pullNumber: 8, fileHash },
+  })
+  for (const tab of ["files", "changes"]) {
+    expect(parseLaunchArguments([`github.com/acme/project/pull/123/${tab}`])).toEqual({
+      repositoryArgument: "acme/project",
+      initialDetail: { kind: "pull", number: 123 },
+      initialDiff: { kind: "pull", number: 123 },
+    })
+  }
+  expect(() => parseLaunchArguments([url, "--inline", "--diff"])).toThrow("revision range")
 })
 
 test("diff flags parse with PR and commit targets", () => {

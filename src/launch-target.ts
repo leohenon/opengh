@@ -1,4 +1,6 @@
-import type { DetailTarget, Page } from "./navigation"
+import { diffLocation, type DetailTarget, type Page } from "./navigation"
+import { githubDiffTarget } from "./link-target"
+import type { DiffTarget } from "./models"
 import { normalizeRepository } from "./repository-name"
 import { isRepositoryPath } from "./repository-path"
 
@@ -8,6 +10,7 @@ export type LaunchOptions = {
   repositoryArgument?: string
   initialPage?: Page
   initialDetail?: LaunchDetail
+  initialDiff?: DiffTarget
   focus?: boolean
   inline?: boolean
   diff?: boolean
@@ -44,10 +47,12 @@ Supported GitHub.com URLs:
   /owner/repo/issues, /pulls, /commits, /actions
   /owner/repo/issues/123
   /owner/repo/pull/123
+  /owner/repo/pull/123/files or /changes
+  /owner/repo/pull/123/changes/BASE..<commit-sha>
   /owner/repo/commit/abc1234
   /owner/repo/actions/runs/123
 
-URL query strings and anchors are ignored (no comment or line jumping).
+Diff file anchors (#diff-…) select a file. Query strings and other anchors are ignored.
 Quote URLs containing shell metacharacters and identifiers such as '#123'.
 
 Options:
@@ -111,6 +116,8 @@ function repositoryLocation(value: string): LaunchOptions | undefined {
     if (!repository) throw new Error(`Invalid GitHub repository URL: “${value}”.`)
     const location: LaunchOptions = { repositoryArgument: repository }
     if (!path.length) return location
+    const initialDiff = githubDiffTarget(path, url.hash)
+    if (initialDiff) return { ...location, initialDetail: diffLocation(initialDiff).detail, initialDiff }
     const [route, target] = path
     const pages: Record<string, Page> = { issues: "issues", pulls: "pulls", commits: "commits", actions: "actions" }
     if (path.length === 1 && Object.hasOwn(pages, route!)) return { ...location, initialPage: pages[route!] }
@@ -221,6 +228,8 @@ export function parseLaunchArguments(args: readonly string[]): LaunchOptions {
   }
   const finish = (launch: LaunchOptions): LaunchOptions => {
     if (diff && !inlineMode) throw new Error("--diff requires --inline.")
+    if (inlineMode && launch.initialDiff?.kind === "compare")
+      throw new Error("PR revision range URLs require the interactive diff viewer; omit --inline.")
     if (file !== undefined && !diff) throw new Error("--file requires --diff.")
     if (diff && !["pull", "commit", "number"].includes(launch.initialDetail?.kind ?? ""))
       throw new Error("--diff requires a PR or commit target.")

@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto"
 import {
   ActivityCommentComposer,
   focusActivityComment,
@@ -6,6 +7,7 @@ import {
 } from "../components/activity-comment-composer"
 import {
   BoxRenderable,
+  CliRenderEvents,
   MouseButton,
   RGBA,
   TextAttributes,
@@ -253,13 +255,17 @@ export function DiffScreen(props: {
     props.target.kind === "commit"
       ? props.target.sha
       : props.target.kind === "compare"
-        ? `${props.target.base}...${props.target.head}`
+        ? props.target.pullNumber === undefined
+          ? `${props.target.base}...${props.target.head}`
+          : `PR #${props.target.pullNumber} ${props.target.base}..${props.target.head}`
         : `PR #${props.target.number}`
   const label = () =>
     props.target.kind === "commit"
       ? props.target.sha.slice(0, 7)
       : props.target.kind === "compare"
-        ? `${props.target.base}...${props.target.head}`
+        ? props.target.pullNumber === undefined
+          ? `${props.target.base}...${props.target.head}`
+          : `PR #${props.target.pullNumber} ${props.target.base.slice(0, 7)}..${props.target.head.slice(0, 7)}`
         : `PR #${props.target.number}`
   const error = () => (props.resource.status === "error" ? props.resource.message : parsed().error)
   const renderFile = () => (selected()?.message ? undefined : selected()?.body)
@@ -384,6 +390,11 @@ export function DiffScreen(props: {
       .catch(() => {
         waiting = false
       })
+  }
+  const revealFile = (file: DiffFile) => {
+    setPath(file.path)
+    pending = { file, index: null }
+    revealPending()
   }
   const measure = () => {
     if (active()) setWidth(Math.max(1, scroll?.viewport.width ?? 1))
@@ -1058,6 +1069,26 @@ export function DiffScreen(props: {
     })
   })
 
+  let appliedFileHash: string | undefined
+  createEffect(
+    on(
+      () => [active(), props.target.fileHash, parsed().files] as const,
+      ([visible, hash, files]) => {
+        if (!visible || !hash || hash === appliedFileHash) return
+        const file = files.find(({ path }) => createHash("sha256").update(path).digest("hex") === hash)
+        if (!file) return
+        const reveal = () => {
+          if (disposed || !active() || parsed().files !== files) return
+          appliedFileHash = hash
+          revealFile(file)
+        }
+        renderer.once(CliRenderEvents.FRAME, reveal)
+        onCleanup(() => renderer.off(CliRenderEvents.FRAME, reveal))
+        renderer.requestRender()
+      },
+    ),
+  )
+
   createEffect(
     on(reviewJump, (anchor) => {
       if (!anchor || !props.review) return
@@ -1549,16 +1580,8 @@ export function DiffScreen(props: {
                 { label: "Toggle files", run: toggleSidebar },
               ])
             }}
-            onSelect={(file) => {
-              setPath(file.path)
-              pending = { file, index: null }
-              revealPending()
-            }}
-            onActivate={(file) => {
-              setPath(file.path)
-              pending = { file, index: null }
-              revealPending()
-            }}
+            onSelect={revealFile}
+            onActivate={revealFile}
           >
             {(file) => <ListLine fg={colors.text}>{(width) => highlightPath(fitDiffPath(file().path, width))}</ListLine>}
           </SelectableList>

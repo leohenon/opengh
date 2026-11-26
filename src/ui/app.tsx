@@ -53,6 +53,7 @@ import type {
 import {
   atRepositoryEntry,
   back,
+  diffLocation,
   navigate,
   openDetail,
   openDiff,
@@ -481,7 +482,7 @@ function AppContent(props: AppProps) {
     const target = diffTarget()
     setNavigation(back)
     if (target) props.onCloseDiff?.(target)
-    if (target?.kind === "compare" && newPullReturn() && overlay() === undefined) setOverlay("new-pull")
+    if (target?.kind === "compare" && target.pullNumber === undefined && newPullReturn() && overlay() === undefined) setOverlay("new-pull")
   }
   const runId = createMemo(() => {
     const detail = navigation().details?.actions
@@ -2169,14 +2170,15 @@ function AppContent(props: AppProps) {
   }
   const quit = () => (props.onQuit ? props.onQuit() : renderer.destroy())
   let openingBrowser = false
-  const openInBrowser = async (target?: string | number, repository?: string, view?: "diff") => {
-    if (openingBrowser || !props.onOpenInBrowser) return
+  const openInBrowser = async (target?: string | number, repository?: string, view?: "diff", directUrl?: string) => {
+    const open = directUrl ? () => props.onOpenUrl?.(directUrl) : () => props.onOpenInBrowser?.(target, repository, view)
+    if (openingBrowser || !(directUrl ? props.onOpenUrl : props.onOpenInBrowser)) return
     openingBrowser = true
     const origin = navigation()
     const label =
       typeof target === "number" ? `${repository ? repository + "#" : "#"}${target}` : (target?.slice(0, 7) ?? data().repo.nameWithOwner)
     try {
-      await props.onOpenInBrowser(target, repository, view)
+      await open()
       if (!renderer.isDestroyed && navigation() === origin)
         setToast({ id: ++toastId, title: "Opened on GitHub", message: label, duration: 2000, tone: "success" })
     } catch (error) {
@@ -2187,12 +2189,18 @@ function AppContent(props: AppProps) {
     }
   }
   const openCurrentDiffGitHub = (target = diffTarget()) => {
-    if (target)
-      void openInBrowser(
-        target.kind === "pull" ? target.number : target.kind === "compare" ? `compare/${target.base}...${target.head}` : target.sha,
-        undefined,
-        "diff",
-      )
+    if (!target) return
+    const id = target.kind === "pull" ? target.number : target.kind === "commit" ? target.sha : target.pullNumber
+    const path =
+      target.kind === "compare" && target.pullNumber !== undefined
+        ? `pull/${target.pullNumber}/changes/${target.base}..${target.head}`
+        : target.fileHash && target.kind === "pull"
+          ? `pull/${target.number}/files`
+          : target.fileHash && target.kind === "commit"
+            ? `commit/${target.sha}`
+            : undefined
+    const url = path ? `${data().repo.url}/${path}${target.fileHash ? `#diff-${target.fileHash}` : ""}` : undefined
+    void openInBrowser(id ?? (target.kind === "compare" ? `compare/${target.base}...${target.head}` : undefined), undefined, "diff", url)
   }
   const openDiffTool = async (target: DiffTarget) => {
     const origin = navigation()
@@ -2872,8 +2880,7 @@ function AppContent(props: AppProps) {
       }
       let initial: InitialNavigation
       if (target.kind === "page") initial = { page: target.page }
-      else if (target.kind === "diff" && target.target.kind !== "compare") initial = { detail: target.target, diff: target.target }
-      else if (target.kind === "diff") initial = { diff: target.target }
+      else if (target.kind === "diff") initial = diffLocation(target.target)
       else {
         let detail: DetailTarget
         if (target.detail.kind === "number") {

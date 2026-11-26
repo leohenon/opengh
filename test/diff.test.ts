@@ -77,6 +77,31 @@ test("comparison diffs load the patch, or a single file list, for encoded branch
   expect(calls[1]![2]).toContain(".files")
 })
 
+test("PR range diffs pin the URL's head instead of fetching the current PR patch", async () => {
+  const base = "b".repeat(40)
+  const head = "c".repeat(40)
+  const calls: string[] = []
+  const load = createGitHubDiff(
+    transport(async (path, accept, options) => {
+      calls.push(path)
+      if (path.endsWith("/pulls/8")) {
+        expect(options?.jq).toBe("{base: .base.sha}")
+        return JSON.stringify({ base, head: "d".repeat(40) })
+      }
+      if (options?.jq?.includes("merge_base_commit")) return JSON.stringify({ mergeBase: "e".repeat(40) })
+      if (accept === "application/vnd.github.diff") return patchFixture
+      return JSON.stringify([{ filename: "example.ts", status: "modified", additions: 1, deletions: 1 }])
+    }),
+  )
+  const signal = new AbortController().signal
+  const target = { kind: "compare" as const, base: "BASE", head, pullNumber: 8 }
+  expect(await load("owner/repo", target, signal)).toEqual({ kind: "patch", patch: patchFixture })
+  expect(await load("owner/repo", target, signal, true)).toMatchObject({ kind: "files", files: [{ path: "example.ts" }] })
+  await expect(load("owner/repo", { ...target, base }, signal)).rejects.toThrow("cannot show this exact commit range")
+  const comparison = `repos/owner/repo/compare/${base}...${head}`
+  expect(calls).toEqual(["repos/owner/repo/pulls/8", comparison, "repos/owner/repo/pulls/8", comparison, `${comparison}?per_page=1`])
+})
+
 test("degraded file listings paginate without pretending absent patches are unchanged", async () => {
   const paths: string[] = []
   let fullPages = false

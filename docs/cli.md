@@ -56,6 +56,14 @@ opengh https://github.com/owner/repo/actions/runs/789
 
 Only GitHub.com URLs are supported.
 
+## Open a diff
+
+```sh
+opengh 'https://github.com/owner/repo/pull/456/changes'
+```
+
+PR `/changes` and `/files` URLs open the diff. A `#diff-…` anchor on a PR diff or commit URL jumps to that file.
+
 ## Choose a page interactively
 
 ```sh

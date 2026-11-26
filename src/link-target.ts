@@ -39,6 +39,28 @@ function positiveNumber(value: string): number | undefined {
   return /^\d+$/.test(value) && Number.isSafeInteger(number) && number > 0 ? number : undefined
 }
 
+export function githubDiffTarget(path: readonly string[], fragment: string): DiffTarget | undefined {
+  const fileHash = /^#diff-([a-f\d]{64})(?:[LR]\d+(?:-[LR]\d+)?)?$/i.exec(fragment)?.[1]?.toLowerCase()
+  const anchor = fileHash ? { fileHash } : {}
+  const [route, target, tab, range] = path
+  if (route === "commit" && path.length === 2 && fileHash && /^[a-f\d]{4,40}$/i.test(target!))
+    return { kind: "commit", sha: target!.toLowerCase(), ...anchor }
+  if (route !== "pull") return
+  const number = positiveNumber(target ?? "")
+  if (number === undefined) return
+  if (path.length === 3 && (tab === "files" || tab === "changes")) return { kind: "pull", number, ...anchor }
+  if (path.length !== 4 || (tab !== "changes" && tab !== "files")) return
+  const commits = /^(BASE|[a-f\d]{40})\.\.([a-f\d]{40})$/i.exec(range!)
+  if (!commits) return
+  return {
+    kind: "compare",
+    base: commits[1]!.toUpperCase() === "BASE" ? "BASE" : commits[1]!.toLowerCase(),
+    head: commits[2]!.toLowerCase(),
+    pullNumber: number,
+    ...anchor,
+  }
+}
+
 export function resolveLinkTarget(value: string): LinkTarget | undefined {
   const url = parseSafeUrl(value)
   if (!url) return undefined
@@ -69,6 +91,10 @@ export function resolveLinkTarget(value: string): LinkTarget | undefined {
     if (id === undefined || (path.length === 5 && positiveNumber(path[4]!) === undefined)) return undefined
     return { kind: "detail", repository, detail: { kind: "run", id } }
   }
+  if (!url.search) {
+    const target = githubDiffTarget(path, url.hash)
+    if (target && (!url.hash || target.fileHash)) return { kind: "diff", repository, target }
+  }
   if (url.search || url.hash) return external
   if (!path.length) return { kind: "page", repository, page: "overview" }
 
@@ -96,9 +122,6 @@ export function resolveLinkTarget(value: string): LinkTarget | undefined {
     if (positiveNumber(target!) === undefined || !/^[a-f\d]{4,40}$/i.test(path[3]!)) return undefined
     return { kind: "detail", repository, detail: { kind: "commit", sha: path[3]!.toLowerCase() } }
   }
-  if (path.length === 3 && route === "pull" && path[2] === "files") {
-    const number = positiveNumber(target!)
-    return number === undefined ? undefined : { kind: "diff", repository, target: { kind: "pull", number } }
-  }
+  if (route === "pull" && (path[2] === "files" || path[2] === "changes") && positiveNumber(target!) === undefined) return undefined
   return external
 }

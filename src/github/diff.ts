@@ -24,7 +24,6 @@ export function createGitHubDiff(transport: GitHubTransport) {
     filesOnly = false,
     shared?: RequestBudget,
   ): Promise<DiffContent> => {
-    const path = diffPath(repository, target)
     signal.throwIfAborted()
     const ownedBudget = shared ? undefined : createRequestBudget(signal)
     const budget = shared ?? ownedBudget!
@@ -34,6 +33,33 @@ export function createGitHubDiff(transport: GitHubTransport) {
         budget,
         maxBytes: MAX_DIFF_BYTES,
         limitMessage: "Diff exceeds the 4 MiB viewing limit. Load the file list or open it on GitHub.",
+      }
+      let path = diffPath(repository, target)
+      if (target.kind === "compare" && target.pullNumber !== undefined) {
+        if (target.base === "BASE") {
+          const pull = JSON.parse(
+            await transport.text(diffPath(repository, { kind: "pull", number: target.pullNumber }), "application/vnd.github+json", {
+              ...options,
+              jq: "{base: .base.sha}",
+            }),
+          )
+          options.signal.throwIfAborted()
+          if (typeof pull?.base !== "string" || !/^[a-f\d]{40}$/i.test(pull.base))
+            throw new Error("GitHub did not identify the PR base commit.")
+          budget.consumeItems(1)
+          path = diffPath(repository, { ...target, base: pull.base.toLowerCase() })
+        } else {
+          const comparison = JSON.parse(
+            await transport.text(`${path}?per_page=1`, "application/vnd.github+json", {
+              ...options,
+              jq: "{mergeBase: .merge_base_commit.sha}",
+            }),
+          )
+          options.signal.throwIfAborted()
+          if (typeof comparison?.mergeBase !== "string" || comparison.mergeBase.toLowerCase() !== target.base)
+            throw new Error("GitHub's API cannot show this exact commit range. Open the diff on GitHub.")
+          budget.consumeItems(1)
+        }
       }
       if (!filesOnly) {
         const revision = async () => {

@@ -32,7 +32,7 @@ export function resumeLocation(repository: string, navigation: NavigationState):
     state: {
       page,
       ...(detail ? { details: { [page]: detail } } : {}),
-      ...(diff ? { diffs: { [page]: diff } } : {}),
+      ...(diff && diff.kind !== "compare" ? { diffs: { [page]: diff } } : {}),
       ...(page === "overview" && navigation.document ? { document: navigation.document } : {}),
     },
   }

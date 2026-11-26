@@ -405,10 +405,17 @@ export type CommitDetail = CommitSummary & {
   filesTruncated: boolean
 }
 
-export type DiffTarget =
+export type DiffTarget = (
   | { kind: "commit"; sha: string }
   | { kind: "pull"; number: number }
-  | { kind: "compare"; base: string; head: string; repository?: Pick<Repo, "id" | "nodeId" | "nameWithOwner"> }
+  | {
+      kind: "compare"
+      base: string
+      head: string
+      repository?: Pick<Repo, "id" | "nodeId" | "nameWithOwner">
+      pullNumber?: number
+    }
+) & { fileHash?: string }
 
 export type DiffContent =
   { kind: "patch"; patch: string; headSha?: string; baseSha?: string } | { kind: "files"; files: CommitFile[]; truncated: boolean }

@@ -63,7 +63,9 @@ export function ReviewHeader(props: {
     props.target.kind === "pull"
       ? `PR #${props.target.number}`
       : props.target.kind === "compare"
-        ? `${props.target.base}...${props.target.head}`
+        ? props.target.pullNumber === undefined
+          ? `${props.target.base}...${props.target.head}`
+          : `PR #${props.target.pullNumber} ${props.target.base.slice(0, 7)}..${props.target.head.slice(0, 7)}`
         : `${dimensions().width < 45 ? "" : "Commit "}${props.target.sha.slice(0, 7)}`
   const totalsWidth = () => (props.totals ? Bun.stringWidth(`+${props.totals.additions} −${props.totals.deletions}`) : 0)
   const sideWidth = () => Math.max(0, Math.floor((dimensions().width - totalsWidth()) / 2))
