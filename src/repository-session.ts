@@ -253,7 +253,7 @@ export type RepositorySession = {
   ): void
   discardIssueDraft(number: number, parent?: IssueActionParent): void
   submitIssueAction(number: number, kind: IssueActionKind, parent?: IssueActionParent): Promise<IssueActionResult>
-  load(repository: string, scope?: RepositoryScope): Promise<void>
+  load(repository: string, scope?: RepositoryScope, expectedId?: number, branch?: string): Promise<void>
   ensure?(scope: RepositoryScope): Promise<void>
   refresh(): Promise<void>
   openDocument(source: RepositoryDocument): string | undefined
@@ -3484,7 +3484,7 @@ export function createRepositorySession(
       throw new Error("GitHub returned an invalid repository identity.")
     return canonical
   }
-  const load = async (repository: string, scope: RepositoryScope = "full", expectedId?: number) => {
+  const load = async (repository: string, scope: RepositoryScope = "full", expectedId?: number, branch?: string) => {
     retainRepository(state(), false)
     resetRepositoryReads()
     resetLinkedReads()
@@ -3496,17 +3496,18 @@ export function createRepositorySession(
     // Overview snapshots are indexed by canonical name and validate their stable ID on revalidation.
     if (cached) {
       // Reopen on the default branch: branch-specific commits/documents are only reusable there.
-      const onDefault = cached.value.currentBranch === cached.value.repo.defaultBranch
-      let data = onDefault
+      const target = branch ?? cached.value.repo.defaultBranch
+      const onTarget = cached.value.currentBranch === target
+      let data = onTarget
         ? cached.value
         : {
             ...cached.value,
-            currentBranch: cached.value.repo.defaultBranch,
+            currentBranch: target,
             commits: loadingResource<Paginated<CommitSummary>>(),
             commitCount: loadingResource<number>(),
             documents: loadingResource<RepositoryDocumentState[]>(),
           }
-      const revalidate = cached.stale || !onDefault
+      const revalidate = cached.stale || !onTarget
       if (revalidate && scope !== "full")
         data = {
           ...data,
@@ -3531,19 +3532,20 @@ export function createRepositorySession(
         if (request !== repositoryGeneration) return
         const canonical = canonicalRepository(repo)
         if (repo.id !== data.repo.id || (expectedId !== undefined && repo.id !== expectedId)) return invalidateRepository(repository)
-        if (canonical.toLowerCase() !== repository.toLowerCase()) return load(canonical, scope, repo.id)
+        if (canonical.toLowerCase() !== repository.toLowerCase()) return load(canonical, scope, repo.id, branch)
         repositoryIds.set(canonical.toLowerCase(), repo.id)
         // Reopen on the fresh default branch before starting branch-guarded requests.
         // Keep stale values only on the same branch; unrequested sections remain deferred.
+        const current = branch ?? repo.defaultBranch
         const branchResources =
-          data.currentBranch === repo.defaultBranch
+          data.currentBranch === current
             ? {}
             : {
                 documents: deferredResource<RepositoryDocumentState[]>(),
                 commits: deferredResource<Paginated<CommitSummary>>(),
                 commitCount: deferredResource<number>(),
               }
-        data = { ...data, repo, currentBranch: repo.defaultBranch, ...branchResources }
+        data = { ...data, repo, currentBranch: current, ...branchResources }
         setState((latest) =>
           latest.status === "ready" && latest.repository === repository
             ? {
@@ -3551,13 +3553,13 @@ export function createRepositorySession(
                 data: {
                   ...latest.data,
                   repo,
-                  currentBranch: repo.defaultBranch,
+                  currentBranch: current,
                   ...branchResources,
                 },
               }
             : latest,
         )
-        await loadResources(repository, repo.defaultBranch, repo, request, data, scope)
+        await loadResources(repository, current, repo, request, data, scope)
         updateReady(setState, request, generation, repository, (latest) => ({
           ...latest,
           operations: { ...latest.operations, refresh: idle() },
@@ -3594,11 +3596,11 @@ export function createRepositorySession(
       setState({
         status: "ready",
         repository: canonical,
-        data: initialData(repo),
+        data: branch ? { ...initialData(repo), currentBranch: branch } : initialData(repo),
         operations: { refresh: idle(), branch: idle() },
       })
       const writeRevision = overviewWriteRevision.get(repo.id) ?? 0
-      await loadResources(canonical, repo.defaultBranch, repo, request, undefined, scope, true)
+      await loadResources(canonical, branch ?? repo.defaultBranch, repo, request, undefined, scope, true)
       if (request === repositoryGeneration) retainRepository(state(), true, writeRevision)
     } catch (error) {
       if (request === repositoryGeneration) {

@@ -88,6 +88,33 @@ function ready(session: ReturnType<typeof createRepositorySession>) {
 }
 
 describe("repository session", () => {
+  test("loads a requested branch directly, both fresh and from the cache", async () => {
+    const requested: string[] = []
+    const record = (branch: string) => {
+      requested.push(branch)
+      return { items: structuredClone(githubDataFixture.commits.value!.items), hasMore: false }
+    }
+    const session = createRepositorySession(
+      loaders({
+        commits: async (_repository, branch) => record(branch),
+        commitCount: async (_repository, branch) => (requested.push(`count:${branch}`), 4),
+      }),
+    )
+    await session.load("owner/repo", "full", undefined, "feature")
+    expect(ready(session).data.currentBranch).toBe("feature")
+    expect(requested).toEqual(expect.arrayContaining(["feature", "count:feature"]))
+    expect(requested).not.toContain("main")
+
+    requested.length = 0
+    await session.load("owner/repo", "full", undefined, "next")
+    expect(ready(session).data.currentBranch).toBe("next")
+    expect(requested).toContain("next")
+    expect(requested).not.toContain("main")
+
+    await session.load("owner/repo")
+    expect(ready(session).data.currentBranch).toBe("main")
+  })
+
   test("on-demand documents append synchronously, reuse source identity, and retry failures", async () => {
     const defaults = loaders()
     let fail = true
