@@ -391,7 +391,6 @@ export function ComposeDialog(props: {
                   backgroundColor={colors.panel}
                   preserveImages
                   codePanels
-                  wide
                   context={{ repositoryUrl: props.repositoryUrl, ref: props.defaultBranch }}
                 />
               </Show>

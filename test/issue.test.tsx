@@ -1,5 +1,7 @@
 import { afterEach, expect, test } from "bun:test"
 import { testRender } from "@opentui/solid"
+import { CodeRenderable, type Renderable } from "@opentui/core"
+import { defaultConfig } from "../src/config"
 import { createSignal } from "solid-js"
 import type { CommitDetailState, IssueDetailState } from "../src/repository-state"
 import type { IssueDetail, IssueReference } from "../src/models"
@@ -607,4 +609,52 @@ test("issue bodies wrap at whitespace after the app has already drawn other text
     .map((row) => row.trim())
   expect(rows).toContain("word ".repeat(17).trim())
   expect(rows).toContain("test/unit/agentic-upgrade-prompts.test.ts end")
+})
+
+test.each([
+  ["centered", 116, 113],
+  ["wide", 158, 155],
+] as const)("%s page width sets how far issue descriptions and comments extend", async (pageWidth, description, comment) => {
+  const [detail, setDetail] = createSignal<IssueDetailState>()
+  const view = await testRender(
+    () => (
+      <App
+        data={githubDataFixture}
+        operations={repositoryOperationsFixture}
+        config={{ ...defaultConfig, pageWidth }}
+        issueDetail={detail()}
+        onLoadIssue={async (number) => {
+          setDetail({
+            number,
+            resource: { status: "ready", value: { ...issueDetailFixture, number, body: "description ".repeat(40), commentCount: 1 } },
+            comments: {
+              status: "ready",
+              value: { items: [{ ...issueCommentsFixture[0]!, body: "reply ".repeat(60) }], page: 1, hasMore: false },
+            },
+            references: { status: "ready", value: [] },
+          })
+        }}
+        onCloseIssue={() => setDetail(undefined)}
+      />
+    ),
+    { width: 200, height: 40 },
+  )
+  active.push(view)
+  await settle(view)
+  view.mockInput.pressKey("3")
+  await settle(view)
+  view.mockInput.pressEnter()
+  await settle(view)
+  await settle(view)
+  const prose = (text: string) => {
+    const find = (node: Renderable): CodeRenderable | undefined =>
+      node instanceof CodeRenderable && node.content.includes(text) ? node : node.getChildren().map(find).find(Boolean)
+    return find(view.renderer.root)!
+  }
+  expect(prose("description").width).toBe(description)
+  expect(prose("reply").width).toBe(comment)
+  const rows = view.captureCharFrame().split("\n")
+  const longest = (word: string) => Math.max(...rows.map((row) => row.split(word).length - 1))
+  expect(longest("description")).toBe(Math.floor((description + 1) / "description ".length))
+  expect(longest("reply")).toBe(Math.floor((comment + 1) / "reply ".length))
 })

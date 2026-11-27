@@ -205,7 +205,7 @@ First paragraph.
 
 Second paragraph.
 
-${"A readable prose line should not span the entire terminal. ".repeat(4)}
+${"A prose line fills the width it is given. ".repeat(6)}
 
 - Official:
   - [Python client](https://example.com/python)
@@ -234,10 +234,10 @@ fn main() { println!("qdrant"); }
       expect(frame).toContain("• Official:")
       expect(frame).toContain("• Python client")
       const codes = codeBlocks(view.renderer.root)
-      const prose = codes.find((block) => block.content.includes("A readable prose"))!
-      expect(prose.width).toBe(Math.min(width, 120))
+      const prose = codes.find((block) => block.content.includes("A prose line"))!
+      expect(prose.width).toBe(width)
       const python = codes.find((block) => block.filetype === "python")!
-      expect(python.parent!.width).toBe(Math.min(width, 120))
+      expect(python.parent!.width).toBe(width)
       const spans = view.captureSpans().lines.flatMap((line) => line.spans)
       const keyword = spans.find((span) => span.text.trim() === "from")!
       const string = spans.find((span) => span.text.includes("localhost"))!

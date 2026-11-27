@@ -365,7 +365,6 @@ export function OverviewScreen(props: {
                     syntaxStyle={markdownStyle()}
                     context={markdownContext()}
                     plainText={plainDocument()}
-                    wide={!centered()}
                   />
                 )}
               </Show>

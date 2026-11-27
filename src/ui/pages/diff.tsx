@@ -447,7 +447,6 @@ export function DiffScreen(props: {
           backgroundColor="transparent"
           preserveImages
           codePanels
-          wide
           context={commentMarkdownContext(comment.url)}
         />
       ))

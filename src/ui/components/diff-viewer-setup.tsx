@@ -55,7 +55,7 @@ export function DiffViewerSetupDialog(props: { showScrollbar: boolean; onClose()
           focusable={false}
           scrollbarOptions={{ visible: props.showScrollbar }}
         >
-          <GitHubMarkdown content={`Add to \`${configPath()}\`:`} syntaxStyle={markdownStyle()} backgroundColor={colors.panel} wide />
+          <GitHubMarkdown content={`Add to \`${configPath()}\`:`} syntaxStyle={markdownStyle()} backgroundColor={colors.panel} />
           <box
             flexDirection="column"
             flexShrink={0}
@@ -70,10 +70,9 @@ export function DiffViewerSetupDialog(props: { showScrollbar: boolean; onClose()
               syntaxStyle={markdownStyle()}
               backgroundColor={colors.canvas}
               codePanels={false}
-              wide
             />
           </box>
-          <GitHubMarkdown content={body()} syntaxStyle={markdownStyle()} backgroundColor={colors.panel} wide />
+          <GitHubMarkdown content={body()} syntaxStyle={markdownStyle()} backgroundColor={colors.panel} />
         </scrollbox>
       </box>
     </Popup>

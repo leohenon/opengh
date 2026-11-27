@@ -186,7 +186,6 @@ export function ReviewEditor(
                     backgroundColor={colors.panel}
                     preserveImages
                     codePanels
-                    wide
                     context={{ repositoryUrl: props.repositoryUrl, ref: props.headSha }}
                   />
                 </Show>
@@ -595,7 +594,6 @@ export function PullReviewDialog(props: PullReviewDialogProps) {
                       backgroundColor={colors.panel}
                       preserveImages
                       codePanels
-                      wide
                       context={{ repositoryUrl: props.repositoryUrl, ref: draft()?.headSha }}
                     />
                   </Show>

@@ -18,7 +18,6 @@ import { compactLinkChunks, compactMarkdownLinks } from "../markdown-links"
 import { fitImageFilename } from "../markdown-images"
 import "../markdown-parsers"
 import { useTheme } from "../theme"
-import { READING_WIDTH } from "../detail-layout"
 import { useMarkdownPreference } from "../markdown-preferences"
 import { useHyperlinkMouse } from "../hyperlinks"
 import { wrapAtWhitespace } from "../whitespace-wrap"
@@ -44,7 +43,6 @@ export function GitHubMarkdown(props: {
   backgroundColor?: string
   context?: GitHubMarkdownContext
   plainText?: boolean
-  wide?: boolean
   anchorRef?: (resolver: MarkdownAnchorResolver | undefined) => void
 }) {
   const renderer = useRenderer()
@@ -178,7 +176,6 @@ export function GitHubMarkdown(props: {
     const anchorTargets = targets
     const proseNodes = prose
     const simple = minimal()
-    const contentWidth = props.wide ? "100%" : READING_WIDTH
     const background = colors.panel
     const canvas = props.backgroundColor ?? colors.canvas
     const muted = colors.muted
@@ -435,7 +432,6 @@ export function GitHubMarkdown(props: {
       }
       // Do not interpret markdown-language fence contents as prose.
       if (token.type !== "code") decorateProse(block, token.type === "list")
-      const readable = token.type !== "table" && token.type !== "hr"
       const section = token.type === "heading" && token.depth === 1
       const wrapper = new BoxRenderable(renderer, {
         width: "100%",
@@ -443,7 +439,6 @@ export function GitHubMarkdown(props: {
         flexShrink: 0,
         flexDirection: "column",
         marginTop: 0,
-        ...(readable ? { maxWidth: contentWidth, alignSelf: "flex-start" } : {}),
         ...(section && !simple ? { border: ["bottom"], borderColor: border } : {}),
       })
       if (token.type === "heading") headings.add(wrapper)
@@ -484,7 +479,6 @@ export function GitHubMarkdown(props: {
           bg={props.backgroundColor ?? colors.canvas}
           wrapMode="word"
           width="100%"
-          maxWidth={props.wide ? "100%" : READING_WIDTH}
           minWidth={0}
           flexShrink={0}
         >

@@ -582,7 +582,6 @@ export function IssueActionDialog(props: {
                         backgroundColor={colors.panel}
                         preserveImages
                         codePanels
-                        wide
                         context={{
                           repositoryUrl: props.repositoryUrl,
                           ref: props.defaultBranch,
