@@ -201,6 +201,7 @@ export function Root(props: {
   focus?: boolean
   resumeLocation?: ResumeLocation
   onNavigationChange?: (location: ResumeLocation) => void
+  onShortcutTipShown?: () => void
   cwd: string
   initialConfig?: Config
   initialConfigError?: string
@@ -217,6 +218,7 @@ export function Root(props: {
   const [focus, setFocus] = createSignal(props.focus ?? false)
   const [view, setView] = createSignal<View>("resolving")
   const [recent, setRecent] = createSignal<string[]>([])
+  let shortcutTipAvailable = false
   const [updateNotice, setUpdateNotice] = createSignal<UpdateNotice>()
   let disposed = false
   onCleanup(() => {
@@ -544,6 +546,12 @@ export function Root(props: {
     ]).then(([resolved, repositories, tabPreferences, loadedConfig]) => {
       if (renderer.isDestroyed) return
       setRecent(repositories)
+      shortcutTipAvailable =
+        !!props.onShortcutTipShown &&
+        !savedResume &&
+        !repositories.length &&
+        !Object.keys(tabPreferences?.tabs ?? {}).length &&
+        !loadedConfig.showStatusBarHints
       setConfig(loadedConfig)
       if (loadedConfig.checkForUpdates) startUpdateCheck()
       repositoryTabs.initialize(tabPreferences?.tabs ?? {})
@@ -684,6 +692,12 @@ export function Root(props: {
                             const restored =
                               pendingState?.repository.toLowerCase() === repositoryName.toLowerCase() ? pendingState : undefined
                             if (restored) pendingState = undefined
+                            const onShortcutTipShown = shortcutTipAvailable
+                              ? () => {
+                                  shortcutTipAvailable = false
+                                  props.onShortcutTipShown?.()
+                                }
+                              : undefined
                             return (
                               <App
                                 data={() => current().data}
@@ -700,6 +714,7 @@ export function Root(props: {
                                 initialState={restored?.state}
                                 resume={!!restored && restored === savedResume}
                                 onNavigationChange={(state) => props.onNavigationChange?.(resumeLocation(repositoryName, state))}
+                                onShortcutTipShown={onShortcutTipShown}
                                 repositoryEntry={restored?.entry}
                                 onReturnToRepository={
                                   repositoryReturns().length

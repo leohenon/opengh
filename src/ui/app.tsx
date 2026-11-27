@@ -191,6 +191,7 @@ export type AppProps = {
   initialState?: NavigationState
   resume?: boolean
   onNavigationChange?: (state: NavigationState) => void
+  onShortcutTipShown?: () => void
   repositoryEntry?: NavigationState
   onReturnToRepository?: () => void
   onOpenLocation?: (repository: string, initial: InitialNavigation, origin: NavigationState, entry?: NavigationState) => void
@@ -2454,6 +2455,35 @@ function AppContent(props: AppProps) {
     overlay()
     pageMouse.onMouseDrag()
   })
+  const [shortcutTipDismissed, setShortcutTipDismissed] = createSignal(false)
+  let shortcutTipTimer: ReturnType<typeof setTimeout> | undefined
+  const dismissShortcutTip = () => {
+    clearTimeout(shortcutTipTimer)
+    setShortcutTipDismissed(true)
+  }
+  onCleanup(() => clearTimeout(shortcutTipTimer))
+  const shortcutTip = () => {
+    if (
+      !props.onShortcutTipShown ||
+      shortcutTipDismissed() ||
+      config().showStatusBarHints ||
+      overlay() !== undefined ||
+      initialPagePending() ||
+      activeResource()?.status !== "ready"
+    )
+      return undefined
+    const settings = keys.key("global.settings")
+    return settings ? `Tip: Turn on Shortcut hints in Settings (${settings})` : "Tip: Turn on Shortcut hints in Settings"
+  }
+  const shortcutTipShown = () => {
+    if (shortcutTipTimer !== undefined || shortcutTipDismissed()) return
+    shortcutTipTimer = setTimeout(dismissShortcutTip, 45_000)
+    props.onShortcutTipShown?.()
+  }
+  const openSettings = () => {
+    if (shortcutTipTimer !== undefined) dismissShortcutTip()
+    setOverlay("settings")
+  }
   const shortcutHint = () => {
     if (!config().showStatusBarHints) return undefined
     const hint = (...entries: HintEntry[]) => keys.hints(...entries)
@@ -2685,7 +2715,7 @@ function AppContent(props: AppProps) {
       "global.help": () => setOverlay("help"),
       "global.settings": () => {
         if (diffTarget()) return false
-        setOverlay("settings")
+        openSettings()
       },
       "global.openFullApp": openFullApp,
       "global.toggleTabBar": () => {
@@ -3045,6 +3075,8 @@ function AppContent(props: AppProps) {
                               error={statusError()}
                               context={activeWorkFind()}
                               hint={statusError() ? keys.hint("view.refresh", "retry") : shortcutHint()}
+                              tip={shortcutTip()}
+                              onTipShown={shortcutTipShown}
                               zIndex={
                                 overlay() && (config().showStatusBarHints || ((status() || statusError()) && !fullscreenEditorOpen()))
                                   ? 350
@@ -3344,7 +3376,7 @@ function AppContent(props: AppProps) {
                                     onContextMenu={(position, items) =>
                                       openContextMenu(
                                         position,
-                                        [...items, { label: "Settings", run: () => setOverlay("settings") }, ...backContextItems()],
+                                        [...items, { label: "Settings", run: openSettings }, ...backContextItems()],
                                         () => page() === owner && navigation().diffs?.[owner] === target,
                                       )
                                     }

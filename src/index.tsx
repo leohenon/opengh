@@ -10,6 +10,7 @@ import { stopCommandProcesses } from "./command-actions"
 import { saveRepositoryTabBarHidden, saveRepositoryTabs } from "./repository-tabs"
 import { createResumeWriter, loadResume, saveResume } from "./resume"
 import { defaultConfig, loadConfig, saveConfig } from "./config"
+import { saveShortcutTipShown, shouldOfferShortcutTip } from "./shortcut-tip"
 import { rememberRepository } from "./github/repository"
 import { launchUsage, parseLaunchArguments, updateUsage, type LaunchOptions } from "./launch-target"
 import { version } from "../package.json"
@@ -84,6 +85,7 @@ if (launch.interactive) {
 
 const resumeLocation = launch.resume ? await loadResume() : undefined
 const resumeWriter = createResumeWriter(saveResume)
+const offerShortcutTip = !resumeLocation && (await shouldOfferShortcutTip())
 
 // Resolve preferences before mounting the first loading frame.
 let initialConfig = defaultConfig
@@ -142,6 +144,7 @@ try {
         focus={launch.focus}
         resumeLocation={resumeLocation}
         onNavigationChange={resumeWriter.remember}
+        onShortcutTipShown={offerShortcutTip ? () => void trackSave(saveShortcutTipShown().catch(() => {})) : undefined}
         cwd={cwd}
         initialConfig={initialConfig}
         initialConfigError={initialConfigError}

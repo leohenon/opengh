@@ -7,6 +7,7 @@ import { render, testRender } from "@opentui/solid"
 import { createTestRenderer } from "@opentui/core/testing"
 import { initializeHunk } from "../src/ui/hunk-host"
 import { resumeLocation, type ResumeLocation } from "../src/resume"
+import { saveShortcutTipShown, shouldOfferShortcutTip } from "../src/shortcut-tip"
 import type { DiffTarget, RepositoryDocument } from "../src/models"
 import { waitForText } from "./fixtures/wait"
 import { clickControl } from "./fixtures/mouse"
@@ -1101,6 +1102,54 @@ describe("application root", () => {
     expect(view.captureCharFrame()).toContain("› Scrollbars")
     expect(view.captureCharFrame()).toContain("‹ on ›")
   })
+})
+
+test("a first-use shortcut tip survives restart as seen and skips returning profiles", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "opengh-shortcut-tip-"))
+  const marker = join(directory, "shortcut-tip.json")
+  const tip = "Tip: Turn on Shortcut hints"
+  const start = async (recent: string[], hintsEnabled = false) => {
+    const offer = await shouldOfferShortcutTip(marker)
+    let saved: Promise<void> | undefined
+    const view = await testRender(
+      () => (
+        <Root
+          cwd="/work"
+          repositoryArgument="cli/cli"
+          initialConfig={{ ...defaultConfig, checkForUpdates: false, showStatusBarHints: hintsEnabled }}
+          onShortcutTipShown={offer ? () => (saved = saveShortcutTipShown(marker)) : undefined}
+          services={{
+            createRepositorySession: readySession,
+            createPullReviewSession: createTestReviewSession,
+            resolveRepository: async (argument) => argument,
+            resolveLocalRepository: async () => undefined,
+            loadRecentRepositories: async () => recent,
+            loadRepositoryTabPreferences: async () => ({}),
+            rememberRepository: async () => {},
+          }}
+        />
+      ),
+      { width: 110, height: 28 },
+    )
+    active.push(view)
+    await waitForText(view, "Overview")
+    await view.flush()
+    await saved
+    const frame = view.captureCharFrame()
+    view.renderer.destroy()
+    return frame
+  }
+
+  try {
+    expect(await start(["cli/cli"])).not.toContain(tip)
+    expect(await start([], true)).not.toContain(tip)
+    expect(await shouldOfferShortcutTip(marker)).toBe(true)
+    expect(await start([])).toContain(tip)
+    expect(await shouldOfferShortcutTip(marker)).toBe(false)
+    expect(await start([])).not.toContain(tip)
+  } finally {
+    await rm(directory, { recursive: true, force: true })
+  }
 })
 
 test("always remembers a main tab per repository and restores it on direct open", async () => {

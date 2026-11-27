@@ -1,6 +1,6 @@
 import { TextAttributes } from "@opentui/core"
 import { useTerminalDimensions } from "@opentui/solid"
-import { Show } from "solid-js"
+import { onMount, Show } from "solid-js"
 import type { UpdateNotice } from "../../update-check"
 import { useTheme } from "../theme"
 import { LoadingText } from "./loading-text"
@@ -50,12 +50,24 @@ export function fitStatusHints(hint: string | undefined, available: number) {
   return visible.join(" · ")
 }
 
+function StatusTip(props: { label: string; onShown?: () => void }) {
+  const { colors } = useTheme()
+  onMount(() => props.onShown?.())
+  return (
+    <text id="status-tip" height={1} wrapMode="none" fg={colors.muted}>
+      {props.label}
+    </text>
+  )
+}
+
 export function StatusBar(props: {
   kind?: StatusKind
   detail?: string
   error?: string
   context?: string
   hint?: string
+  tip?: string
+  onTipShown?: () => void
   zIndex?: number
   updateNotice?: UpdateNotice
 }) {
@@ -74,11 +86,16 @@ export function StatusBar(props: {
     return loadingMessages[props.kind]
   }
 
+  const visibleTip = () => {
+    const tip = props.tip
+    if (tip && !props.error && !loadingMessage() && !context() && Bun.stringWidth(tip) <= dimensions().width - 4) return tip
+    return undefined
+  }
   const updateLabel = () => (props.updateNotice ? `↑ v${props.updateNotice.latestVersion} available` : "")
   const showUpdate = () => {
     if (!props.updateNotice || props.error || loadingMessage()) return false
-    // Measure only after choosing the normal hints: updates must never displace them.
-    const used = Bun.stringWidth(context() ?? "") + Bun.stringWidth(hint()) + (context() && hint() ? 3 : 0)
+    const used =
+      Bun.stringWidth(visibleTip() ?? "") || Bun.stringWidth(context() ?? "") + Bun.stringWidth(hint()) + (context() && hint() ? 3 : 0)
     return used + (used ? 2 : 0) + Bun.stringWidth(updateLabel()) <= dimensions().width - 4
   }
 
@@ -121,10 +138,17 @@ export function StatusBar(props: {
           </text>
         )}
       </Show>
-      <text height={1} wrapMode="none" fg={colors.muted}>
-        {(props.error || loadingMessage() || context()) && hint() ? " · " : ""}
-        {hint()}
-      </text>
+      <Show
+        when={visibleTip()}
+        fallback={
+          <text height={1} wrapMode="none" fg={colors.muted}>
+            {(props.error || loadingMessage() || context()) && hint() ? " · " : ""}
+            {hint()}
+          </text>
+        }
+      >
+        {(label) => <StatusTip label={label()} onShown={props.onTipShown} />}
+      </Show>
       <Show when={showUpdate()}>
         <box flexGrow={1} minWidth={0} />
         <text
