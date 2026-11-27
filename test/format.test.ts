@@ -49,3 +49,10 @@ test("wrapped row counts never undercount what word wrapping needs", () => {
   expect(wrappedRows("界界界 界界", 6)).toBe(2)
   expect(wrappedRows("anything", 0)).toBe(0)
 })
+
+test("wrapped row counts can break long words after separators and keep non-breaking spaces together", () => {
+  expect(wrappedRows("a/very/long/path/name/that/wraps", 12, "/")).toBe(3)
+  expect(wrappedRows("a/very/long/path/name/that/wraps", 12)).toBe(3)
+  expect(wrappedRows("main\u00a0← branch", 6)).toBe(2)
+  expect(wrappedRows("one-two-three-four", 8, "-")).toBe(3)
+})

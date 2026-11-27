@@ -1,4 +1,4 @@
-import { TextAttributes, type InputRenderable, type ScrollBoxRenderable, type TextareaRenderable } from "@opentui/core"
+import { TextAttributes, type InputRenderable, type ScrollBoxRenderable, type TextareaRenderable, type TextRenderable } from "@opentui/core"
 import { useRenderer, useTerminalDimensions } from "@opentui/solid"
 import { createEffect, createSignal, For, on, onCleanup, onMount, Show, type JSX } from "solid-js"
 import type { ComposeDraft } from "../../compose-drafts"
@@ -13,6 +13,7 @@ import { GitHubMarkdown } from "./github-markdown"
 import { MarkdownTextarea } from "./markdown-textarea"
 import { insetPopupSize, Popup } from "./popup"
 import { wrappedRows } from "../format"
+import { wrapAtWhitespace } from "../whitespace-wrap"
 
 const titleLabel = "<!-- opengh: title -->"
 const descriptionLabel = "<!-- opengh: description -->"
@@ -82,7 +83,7 @@ export function ComposeDialog(props: {
   const renderer = useRenderer()
   const dimensions = useTerminalDimensions()
   const confirmWidth = () => Math.max(1, Math.min(Math.max(56, Bun.stringWidth(props.confirmation) + 4), dimensions().width - 2))
-  const confirmHeight = () => 4 + wrappedRows(props.confirmation, Math.max(1, confirmWidth() - 4))
+  const confirmHeight = () => 4 + wrappedRows(props.confirmation, Math.max(1, confirmWidth() - 4), "/-")
   const markdownStyle = createReactiveMarkdownStyle(colors, theme)
   const bindScrollbar = createScrollbarVisibility(() => props.showScrollbar)
   let titleInput: InputRenderable | undefined
@@ -439,7 +440,12 @@ export function ComposeDialog(props: {
       <Show when={confirming()}>
         <Popup width={confirmWidth()} height={confirmHeight()} placement="center" zIndex={300} onClose={() => setConfirming(false)}>
           <box flexGrow={1} minHeight={0} paddingX={2} paddingBottom={1} flexDirection="column">
-            <text fg={colors.text} attributes={TextAttributes.BOLD} wrapMode="word">
+            <text
+              ref={(node: TextRenderable) => wrapAtWhitespace(renderer, node, "/-")}
+              fg={colors.text}
+              attributes={TextAttributes.BOLD}
+              wrapMode="word"
+            >
               {props.confirmation}
             </text>
             <box flexGrow={1} minHeight={0} />

@@ -421,7 +421,7 @@ export function NewPullDialog(props: {
       <ComposeDialog
         idPrefix="new-pull"
         heading="New pull request"
-        confirmation={`Create pull request in ${baseRepository().nameWithOwner}: ${base()} ← ${headRef() ?? ""}?`}
+        confirmation={`Create pull request in ${baseRepository().nameWithOwner}: ${base()}\u00a0← ${headRef() ?? ""}?`}
         choices={createChoices}
         repositoryUrl={props.repositoryUrl}
         defaultBranch={props.defaultBranch}

@@ -1,9 +1,10 @@
 import { TextAttributes, type ScrollBoxRenderable } from "@opentui/core"
-import { createEffect, createMemo, createSignal, For, Show } from "solid-js"
+import { createEffect, createMemo, createSignal, For, onCleanup, Show } from "solid-js"
 import { defaultTheme, themeNames, type ThemeName } from "../../theme"
 import { mouseClick, mouseHover } from "../mouse"
 import { useTheme } from "../theme"
 import { KeyInput, useKeyActions } from "../keybindings"
+import { scrollRowIntoView } from "../scroll-selection"
 
 function fuzzyScore(value: string, query: string) {
   const target = value.toLowerCase()
@@ -63,7 +64,17 @@ export function ThemePicker(props: {
     }
     if (active.theme !== selected()) setSelected(active.theme)
     props.onPreview(active.theme)
-    list?.scrollChildIntoView(`theme-${active.theme}`)
+    reveal()
+  })
+  const reveal = () =>
+    scrollRowIntoView(
+      list,
+      themes().findIndex((entry) => entry.theme === selected()),
+      1,
+    )
+  onCleanup(() => {
+    list?.viewport.off("resize", reveal)
+    list?.content.off("resize", reveal)
   })
 
   const choose = async (name: string = selected()) => {
@@ -124,7 +135,11 @@ export function ThemePicker(props: {
       </box>
       <box height={1} flexShrink={0} />
       <scrollbox
-        ref={(value) => (list = value)}
+        ref={(value) => {
+          list = value
+          value.viewport.on("resize", reveal)
+          value.content.on("resize", reveal)
+        }}
         focusable={false}
         flexGrow={1}
         minHeight={0}

@@ -10,6 +10,11 @@ import { Settings } from "../src/ui/components/settings"
 import { KeybindingsProvider } from "../src/ui/keybindings"
 import { RepositoryLoadError } from "../src/ui/launcher"
 import { ThemeProvider } from "../src/ui/theme"
+import { ThemePicker } from "../src/ui/components/theme-picker"
+import { Toast } from "../src/ui/components/toast"
+import { IssueReferencesPicker } from "../src/ui/components/issue-references-picker"
+import { PullMergeDialog } from "../src/ui/components/pull-merge-dialog"
+import { issuePullReferenceFixture } from "./fixtures/github-data"
 
 const active: Array<{ destroy(): void; isDestroyed: boolean }> = []
 afterEach(() => {
@@ -162,4 +167,53 @@ test("wrapped reactions do not leave a blank row between rows", async () => {
   const filled = frame.map((row, index) => (row ? index : -1)).filter((index) => index >= 0)
   expect(filled.length).toBeGreaterThan(1)
   expect(filled.at(-1)! - filled[0]!).toBe(filled.length - 1)
+})
+
+test("the theme picker scrolls to the current theme in a short terminal", async () => {
+  const frame = await rows(60, 10, () => (
+    <box width="100%" height="100%" flexDirection="column">
+      <ThemePicker current="tokyonight" onPreview={noop} onCancel={noop} onSelect={async () => {}} />
+    </box>
+  ))
+  expect(frame.find((row) => row.includes("tokyonight"))).toContain("✓ current")
+})
+
+test("toasts widen for long words and break URLs after a slash", async () => {
+  const url = "https://api.github.com/repos/a-very-long-organization-name/a-very-long-repository-name/issues"
+  const frame = await rows(120, 12, () => <Toast title="Request failed" message={url} onDismiss={noop} />)
+  const lines = frame.filter((row) => row.includes("api.github") || row.includes("/issues") || row.includes("repos/"))
+  expect(lines.length).toBeGreaterThan(0)
+  for (const line of lines) expect(line).toMatch(/(\/|Request failed:|issues)$/)
+  expect(frame.join("").replace(/\s+/g, "")).toContain(url)
+})
+
+test("reference rows keep the state when the repository name is long", async () => {
+  const frame = await rows(56, 20, () => (
+    <IssueReferencesPicker
+      references={[{ ...issuePullReferenceFixture, repository: "a-very-long-organization-name/a-very-long-repository-name-for-testing" }]}
+      showScrollbar={false}
+      onOpen={noop}
+      onCopy={noop}
+      onClose={noop}
+    />
+  ))
+  expect(frame.find((row) => row.includes("a-very-long"))).toMatch(/\.\.\. · Merged$/)
+})
+
+test("merge dialogs show the whole blocked reason", async () => {
+  const reason =
+    "Merging is blocked: 2 of 3 required status checks are failing, a requested reviewer has not approved yet, the branch has unresolved conversations that must be resolved first, and the branch is out of date with the base branch."
+  const frame = await rows(56, 24, () => (
+    <PullMergeDialog
+      number={412}
+      headSha="7ca91d2000000000"
+      methods={["merge", "squash"]}
+      reason={reason}
+      onLoadMessage={async () => ({ headline: "", body: "", headSha: "7ca91d2000000000" })}
+      onSubmit={noop}
+      onHintChange={noop}
+      onClose={noop}
+    />
+  ))
+  expect(frame.join(" ").replace(/\s+/g, " ")).toContain("out of date with the base branch.")
 })

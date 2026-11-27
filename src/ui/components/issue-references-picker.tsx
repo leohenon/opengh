@@ -107,7 +107,10 @@ export function IssueReferencesPicker(props: {
                       </ListLine>
                       <ListLine fg={colors.muted}>
                         {(width) => (
-                          <a href={reference().url}>{fitText(`${reference().repository} · ${referenceState(reference())}`, width)}</a>
+                          <a href={reference().url}>
+                            {fitText(reference().repository, width - Bun.stringWidth(` · ${referenceState(reference())}`))} ·{" "}
+                            {referenceState(reference())}
+                          </a>
                         )}
                       </ListLine>
                     </box>

@@ -12,6 +12,7 @@ import { fitReviewAnchorLabel, reviewAnchorLabel } from "../review-lines"
 import { Action } from "./action"
 import { GitHubMarkdown } from "./github-markdown"
 import { insetPopupSize, Popup } from "./popup"
+import { wrappedRows } from "../format"
 import { useTerminalDimensions } from "@opentui/solid"
 
 export type ReviewCommentDialogProps = ComposerPresentation & {
@@ -269,6 +270,7 @@ const eventLabels: Record<ReviewEvent, string> = { COMMENT: "Comment", APPROVE: 
 
 export function PullReviewDialog(props: PullReviewDialogProps) {
   const { colors, theme } = useTheme()
+  const dimensions = useTerminalDimensions()
   const markdownStyle = createReactiveMarkdownStyle(colors, theme)
   const keys = useKeybindings()
   const bindScrollbar = createScrollbarVisibility(() => props.showScrollbar)
@@ -469,10 +471,17 @@ export function PullReviewDialog(props: PullReviewDialogProps) {
         ].filter(Boolean),
       ),
     ].join("\n")
+  const warningRows = (width: number) => (warning() ? Math.min(8, wrappedRows(warning(), width)) : 0)
   return (
     <>
       <Show when={stage() === "choose"}>
-        <Popup width={52} height={8 + (warning() ? 4 : 0)} placement="center" zIndex={250} onClose={close}>
+        <Popup
+          width={52}
+          height={8 + (warning() ? 1 + warningRows(insetPopupSize(dimensions().width, 52) - 4) : 0)}
+          placement="center"
+          zIndex={250}
+          onClose={close}
+        >
           <box id="review-type-menu" flexGrow={1} minHeight={0} paddingX={2} paddingBottom={1} flexDirection="column">
             <text height={1} flexShrink={0} fg={colors.text} attributes={TextAttributes.BOLD}>
               Review PR #{props.number ?? draft()?.number ?? eligibility()?.number ?? "…"}
@@ -510,7 +519,7 @@ export function PullReviewDialog(props: PullReviewDialogProps) {
               }}
             </For>
             <Show when={warning()}>
-              <text maxHeight={3} flexShrink={0} marginTop={1} fg={colors.yellow} wrapMode="word">
+              <text flexShrink={0} marginTop={1} fg={colors.yellow} wrapMode="word">
                 {warning()}
               </text>
             </Show>
@@ -537,11 +546,16 @@ export function PullReviewDialog(props: PullReviewDialogProps) {
               <text fg={colors.muted}>{composer.preview() ? "Preview" : ""}</text>
             </box>
             <Show when={warning()}>
-              <text maxHeight={3} flexShrink={0} wrapMode="word" fg={colors.yellow}>
+              <text
+                height={warningRows(insetPopupSize(dimensions().width, 86, composer.expanded()) - 4)}
+                flexShrink={0}
+                wrapMode="word"
+                fg={colors.yellow}
+              >
                 {warning()}
               </text>
             </Show>
-            <box flexGrow={1} minHeight={0} flexDirection="column" marginTop={1} overflow="hidden">
+            <box flexGrow={1} minHeight={1} flexDirection="column" marginTop={1} overflow="hidden">
               <MarkdownTextarea
                 id="review-body"
                 ref={(value) => {

@@ -405,3 +405,53 @@ test("a growing composer keeps its end in view", async () => {
     setup.renderer.destroy()
   }
 })
+
+test("a long comment preview scrolls inside the composer and keeps Post and Cancel visible", async () => {
+  const setup = await createTestRenderer({ width: 56, height: 20 })
+  initializeHunk(setup.renderer)
+  const body = Array.from({ length: 20 }, (_, index) => `- point ${index} about the change`).join("\n")
+  await render(
+    () => (
+      <DiffScreen
+        target={{ kind: "pull", number: 1 }}
+        resource={{ status: "ready", value: { kind: "patch", patch } }}
+        interactive
+        showScrollbar={false}
+        onLoadFiles={() => {}}
+        draft={{ anchor: { path: "review.txt", line: 21, side: "RIGHT" }, body }}
+        review={{
+          headSha: "head",
+          comments: [],
+          onOpenReview: () => {},
+          onComment: () => {},
+          onDraftSave: () => {},
+          onDraftCancel: () => {},
+          onDraftExpand: () => {},
+        }}
+      />
+    ),
+    setup.renderer,
+  )
+  const settle = async () => {
+    for (let pass = 0; pass < 6; pass++) {
+      await Bun.sleep(30)
+      await setup.flush()
+      await setup.renderer.idle()
+    }
+  }
+  try {
+    await settle()
+    setup.mockInput.pressKey("p", { ctrl: true })
+    await settle()
+    expect(setup.captureCharFrame()).toContain("Comment (preview)")
+    expect(setup.captureCharFrame()).toContain("Post · Cancel")
+    expect(setup.captureCharFrame()).toContain("point 0 about")
+    for (let index = 0; index < 5; index++) setup.mockInput.pressKey("j")
+    await settle()
+    expect(setup.captureCharFrame()).not.toContain("point 0 about")
+    expect(setup.captureCharFrame()).toContain("point 16 about")
+    expect(setup.captureCharFrame()).toContain("Post · Cancel")
+  } finally {
+    setup.renderer.destroy()
+  }
+})

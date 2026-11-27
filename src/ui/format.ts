@@ -53,24 +53,30 @@ export function fitMiddle(value: string, width: number) {
   return `${head.join("")}...${tail.join("")}`
 }
 
-export function wrappedRows(value: string, width: number) {
+export function wrappedRows(value: string, width: number, breakAfter = "") {
   if (width <= 0) return 0
   let rows = 0
   for (const line of value.split("\n")) {
     let used = 0
     rows++
-    for (const word of line.split(/\s+/).filter(Boolean)) {
-      let size = Bun.stringWidth(word)
-      if (used && used + 1 + size <= width) {
-        used += 1 + size
-        continue
+    for (const word of line.split(/[^\S\u00a0]+/).filter(Boolean)) {
+      const pieces = breakAfter ? word.split(new RegExp(`(?<=[${breakAfter.replace(/[\]\\^-]/g, "\\$&")}])`)) : [word]
+      let gap = used ? 1 : 0
+      for (const piece of pieces) {
+        let size = Bun.stringWidth(piece)
+        if (used + gap + size <= width) {
+          used += gap + size
+          gap = 0
+          continue
+        }
+        if (used) rows++
+        while (size > width) {
+          size -= width
+          rows++
+        }
+        used = size
+        gap = 0
       }
-      if (used) rows++
-      while (size > width) {
-        size -= width
-        rows++
-      }
-      used = size
     }
   }
   return rows

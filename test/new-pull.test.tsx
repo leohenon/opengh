@@ -589,6 +589,29 @@ describe("new pull request", () => {
     expect(await drafts.load({ repositoryId: githubDataFixture.repo.id, head: "next" })).toEqual({ title: "", body: "" })
   })
 
+  test("the confirmation keeps the base and arrow together and breaks long branches at separators", async () => {
+    const branch = "some-user/fix/turbopack-sourcemap-names-for-scope-hoisted-modules-102474"
+    const { view } = await render({
+      localBranch: branch,
+      width: 52,
+      branchesOf: () => ["main", branch],
+      create: async () => ({ number: 77 }) as PullRequestDetail,
+    })
+    await open(view)
+    view.mockInput.pressKey("s", { ctrl: true })
+    await settle(view)
+    const rows = lines(view).map((line) => line.trim())
+    const start = rows.findIndex((line) => line.startsWith("Create pull request in"))
+    const end = rows.findIndex((line, index) => index >= start && line.endsWith("102474?"))
+    expect(end).toBeGreaterThan(start)
+    const confirmation = rows.slice(start, end + 1)
+    for (const line of confirmation) expect(line).not.toMatch(/^←/)
+    expect(confirmation.some((line) => line.includes("main ←"))).toBe(true)
+    const joined = confirmation.join("\n")
+    expect(joined).not.toMatch(/[a-z0-9]\n[a-z0-9]/)
+    expect(confirmation.join("").replace(/\s+/g, "")).toContain(branch)
+  })
+
   test("the confirm step offers Create and Create as draft, starting on Create each time", async () => {
     const created: NewPull[] = []
     const { view } = await render({

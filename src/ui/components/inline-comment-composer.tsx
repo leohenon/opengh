@@ -1,4 +1,4 @@
-import type { ScrollBoxRenderable, TextareaRenderable } from "@opentui/core"
+import type { BoxRenderable, ScrollBoxRenderable, TextareaRenderable } from "@opentui/core"
 import { createEffect, createSignal, on, onMount, Show } from "solid-js"
 import { replaceEditorText, useKeyActions, useKeybindings } from "../keybindings"
 import { createMarkdownComposer } from "../markdown-composer"
@@ -42,12 +42,27 @@ export function InlineCommentComposer(props: {
   const markdownStyle = createReactiveMarkdownStyle(colors, theme)
   const [body, setBody] = createSignal(props.body)
   const [rows, setRows] = createSignal(MIN_EDITOR_ROWS)
+  const [previewRows, setPreviewRows] = createSignal(MIN_EDITOR_ROWS)
   const [error, setError] = createSignal<string>()
   let editor: TextareaRenderable | undefined
+  let preview: ScrollBoxRenderable | undefined
+  let previewContent: BoxRenderable | undefined
   const composer = createMarkdownComposer(
     {},
-    { editor: () => editor, scroll: props.scroll, blocked: () => !!props.disabled, onError: setError },
+    {
+      editor: () => editor,
+      scroll: () => (preview && !preview.isDestroyed ? preview : props.scroll()),
+      blocked: () => !!props.disabled,
+      onError: setError,
+    },
   )
+  const measurePreview = () => {
+    if (!previewContent || previewContent.isDestroyed) return
+    const next = Math.max(MIN_EDITOR_ROWS, Math.min(MAX_EDITOR_ROWS, previewContent.height))
+    if (next === previewRows()) return
+    setPreviewRows(next)
+    props.onGrow?.()
+  }
   const measure = () => {
     if (!editor || editor.isDestroyed) return
     const next = Math.max(MIN_EDITOR_ROWS, Math.min(MAX_EDITOR_ROWS, editor.editorView.getTotalVirtualLineCount()))
@@ -159,20 +174,40 @@ export function InlineCommentComposer(props: {
           }}
         />
         <Show when={composer.preview()}>
-          <box minHeight={MIN_EDITOR_ROWS} flexShrink={0} flexDirection="column">
-            <Show when={body().trim()}>
-              <GitHubMarkdown
-                content={body()}
-                syntaxStyle={markdownStyle()}
-                backgroundColor="transparent"
-                preserveImages
-                codePanels
-                context={
-                  props.repositoryUrl ? { repositoryUrl: props.repositoryUrl, ref: props.headSha, sourceUrl: props.sourceUrl } : undefined
-                }
-              />
-            </Show>
-          </box>
+          <scrollbox
+            ref={(value) => {
+              preview = value
+            }}
+            height={previewRows()}
+            flexShrink={0}
+            focusable={false}
+            scrollX={false}
+            scrollY
+            scrollbarOptions={{ visible: false }}
+          >
+            <box
+              ref={(value) => {
+                previewContent = value
+              }}
+              onSizeChange={measurePreview}
+              width="100%"
+              flexShrink={0}
+              flexDirection="column"
+            >
+              <Show when={body().trim()}>
+                <GitHubMarkdown
+                  content={body()}
+                  syntaxStyle={markdownStyle()}
+                  backgroundColor="transparent"
+                  preserveImages
+                  codePanels
+                  context={
+                    props.repositoryUrl ? { repositoryUrl: props.repositoryUrl, ref: props.headSha, sourceUrl: props.sourceUrl } : undefined
+                  }
+                />
+              </Show>
+            </box>
+          </scrollbox>
         </Show>
         <Show when={error()}>
           <text flexShrink={0} wrapMode="word" fg={colors.red}>

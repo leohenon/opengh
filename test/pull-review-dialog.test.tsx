@@ -684,3 +684,39 @@ test("review and inline editors share remapped preview, expansion and undoable e
     else process.env.VISUAL = previousVisual
   }
 }, 10_000)
+
+test("the review menu shows every warning instead of cutting after the first", async () => {
+  const fixture = sessionFixture()
+  fixture.setState((s) => ({
+    ...s,
+    uncertain: true,
+    message: "GitHub rejected the review: the pull request head changed while the review was being written. Reload before retrying.",
+    eligibility: { ...s.eligibility!, canApprove: false, reason: "You cannot approve your own pull request on this repository." },
+  }))
+  const view = await testRender(
+    () => (
+      <KeybindingsProvider>
+        <PullReviewDialog
+          session={fixture.session}
+          repositoryUrl="https://github.com/a/b"
+          showScrollbar={false}
+          onSubmit={() => {}}
+          onClose={() => {}}
+          onOpenGitHub={() => {}}
+          onJump={() => {}}
+          onHintChange={() => {}}
+        />
+      </KeybindingsProvider>
+    ),
+    { width: 80, height: 30 },
+  )
+  try {
+    await view.flush()
+    const text = view.captureCharFrame().replace(/\s+/g, " ")
+    expect(text).toContain("Reload before retrying.")
+    expect(text).toContain("own pull request on this repository.")
+    expect(text).toContain("check GitHub before retrying.")
+  } finally {
+    view.renderer.destroy()
+  }
+})

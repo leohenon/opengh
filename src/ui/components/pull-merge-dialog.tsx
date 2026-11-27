@@ -6,7 +6,9 @@ import { mouseClick, mouseHover } from "../mouse"
 import { useTheme } from "../theme"
 import { Action } from "./action"
 import { LoadingText } from "./loading-text"
-import { Popup } from "./popup"
+import { insetPopupSize, Popup } from "./popup"
+import { wrappedRows } from "../format"
+import { useTerminalDimensions } from "@opentui/solid"
 import { createScrollbarVisibility } from "../scrollbar-visibility"
 
 const labels: Record<PullMergeMethod, string> = {
@@ -29,6 +31,7 @@ export function PullMergeDialog(props: {
 }) {
   const { colors } = useTheme()
   const keys = useKeybindings()
+  const dimensions = useTerminalDimensions()
   const [selected, setSelected] = createSignal(0)
   const [method, setMethod] = createSignal<PullMergeMethod>()
   const [stage, setStage] = createSignal<"methods" | "edit" | "confirm">("methods")
@@ -141,7 +144,7 @@ export function PullMergeDialog(props: {
       width={64}
       height={
         (stage() === "edit" ? 22 : stage() === "confirm" ? (method() === "squash" ? 18 : 10) : props.methods.length + 6) +
-        (props.reason && !props.checking ? 4 : 0)
+        (props.reason && !props.checking ? 1 + Math.min(8, wrappedRows(props.reason, insetPopupSize(dimensions().width, 64) - 4)) : 0)
       }
       placement="center"
       zIndex={250}
