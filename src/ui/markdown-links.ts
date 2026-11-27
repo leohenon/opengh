@@ -4,6 +4,7 @@ import remarkParse from "remark-parse"
 import { unified } from "unified"
 import { visit } from "unist-util-visit"
 import { anchorMarkers, type MarkdownAnchorPosition } from "./markdown-anchors"
+import { joinedSpace } from "./whitespace-wrap"
 
 const parser = unified().use(remarkParse).use(remarkGfm)
 
@@ -162,7 +163,7 @@ export function compactMarkdownLinks(
     const output = result.flatMap((chunk) => {
       const pad = padding.get(chunk)
       if (!pad) return [chunk]
-      const space: TextChunk = { ...chunk, text: " " }
+      const space = joinedSpace(chunk)
       const sourceIndex = sourceIndices.get(chunk)
       if (sourceIndex !== undefined) sourceIndices.set(space, sourceIndex)
       return [...(pad.before ? [space] : []), chunk, ...(pad.after ? [space] : [])]

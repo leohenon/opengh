@@ -284,6 +284,54 @@ other/repo@abc1234 @hidden
     expect(markdown).toContain("```text\n> [!NOTE]\n```")
   })
 
+  test("single newlines break lines in discussions and stay soft in documents", () => {
+    const source = [
+      "Fixes #12",
+      "Closes #13",
+      "",
+      "- item line",
+      "  continued line",
+      "",
+      "> [!NOTE]",
+      "> quote one",
+      "> quote two",
+      "",
+      "Inline `code",
+      "span` and **bold",
+      "text**.",
+      "",
+      "```text",
+      "one",
+      "two",
+      "```",
+    ].join("\n")
+    const discussion = normalizeGitHubMarkdown(source, { preserveImages: true })
+    expect(discussion).toContain("Fixes #12\\\nCloses #13")
+    expect(discussion).toContain("- item line\\\n  continued line")
+    expect(discussion).toContain("> **Note**\n>\n> quote one\\\n> quote two")
+    expect(discussion).toContain("Inline `code span` and **bold\\\ntext**.")
+    expect(discussion).toContain("```text\none\ntwo\n```")
+    const document = normalizeGitHubMarkdown(source)
+    expect(document).toContain("Fixes #12 Closes #13")
+    expect(document).toContain("- item line continued line")
+    expect(document).toContain("> quote one quote two")
+    expect(document).not.toContain("\\\n")
+    expect(normalizeGitHubMarkdown("one\r\ntwo\rthree", { preserveImages: true })).toBe("one\\\ntwo\\\nthree")
+  })
+
+  test("lists keep the spacing they were written with", () => {
+    expect(normalizeGitHubMarkdown("- a\n- b\n  - nested\n  - nested two\n- c")).toBe("- a\n- b\n  - nested\n  - nested two\n- c")
+    expect(normalizeGitHubMarkdown("1. one\n   ```sh\n   ls\n   ```\n   - k\n   - l\n2. two")).toBe(
+      "1. one\n   ```sh\n   ls\n   ```\n   - k\n   - l\n2. two",
+    )
+    expect(normalizeGitHubMarkdown("<ul><li>a</li><li>b<ul><li>x</li><li>y</li></ul></li></ul>")).toBe("- a\n- b\n  - x\n  - y")
+    expect(normalizeGitHubMarkdown("- a\n\n- b\n  - nested\n  - nested two")).toBe("- a\n\n- b\n\n  - nested\n  - nested two")
+    expect(normalizeGitHubMarkdown("- one\n\n  two\n- three")).toBe("- one\n\n  two\n\n- three")
+    expect(normalizeGitHubMarkdown("- [x] done\n  - [ ] sub one\n  - [ ] sub two\n- [ ] todo")).toBe(
+      "- [x] done\n  - [ ] sub one\n  - [ ] sub two\n- [ ] todo",
+    )
+  })
+
   test("standalone images retain image identity while inline images and badges stay compact", () => {
     expect(normalizeGitHubMarkdown("![Screenshot](ui.png)")).toBe("![Screenshot](ui.png)")
     expect(normalizeGitHubMarkdown("[![Screenshot](ui.png)](https://example.com/view)")).toBe("![Screenshot](https://example.com/view)")

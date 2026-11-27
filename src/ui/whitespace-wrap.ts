@@ -1,10 +1,16 @@
 import { CliRenderEvents, OptimizedBuffer, RGBA, type CliRenderer, type TextBufferRenderable, type TextChunk } from "@opentui/core"
 
 const BREAKS = ".,:;!?-/\\()[]{}"
+const ENCODED = `${BREAKS} `
 const FIRST_PLACEHOLDER = 0xfdd0
-const PLACEHOLDERS = Array.from(BREAKS, (_, index) => String.fromCharCode(FIRST_PLACEHOLDER + index))
+const PLACEHOLDERS = Array.from(ENCODED, (_, index) => String.fromCharCode(FIRST_PLACEHOLDER + index))
+const JOINED_SPACE = PLACEHOLDERS[BREAKS.length]!
 const breakable = /[.,:;!?\-/\\()[\]{}]/g
-const reserved = /[\ufdd0-\ufdde]/g
+const reserved = /[\ufdd0-\ufddf]/g
+const joinedSpaces = /\ufddf/g
+const joined = Symbol("joined")
+
+type JoinedChunk = TextChunk & { [joined]?: boolean }
 const unattached = /^(?:$|[\s\p{M}\u200d\ufe00-\ufe0f])/u
 
 const decoders = new WeakMap<CliRenderer, boolean>()
@@ -19,9 +25,10 @@ function encode(text: string, following: string) {
   )
 }
 
-function encodeChunks(chunks: TextChunk[]) {
+function encodeChunks(chunks: JoinedChunk[]) {
   return chunks.map((chunk, index) => {
-    const text = encode(chunk.text, chunks[index + 1]?.text ?? "")
+    const next = chunks[index + 1]
+    const text = chunk[joined] ? JOINED_SPACE : encode(chunk.text, next?.[joined] ? JOINED_SPACE : (next?.text ?? ""))
     return text === chunk.text ? chunk : { ...chunk, text }
   })
 }
@@ -31,12 +38,12 @@ function installDecoder(renderer: CliRenderer) {
   if (installed !== undefined) return installed
   let ready = false
   try {
-    const scratch = OptimizedBuffer.create(BREAKS.length, 1, renderer.widthMethod, { owner: renderer.nativeScene })
+    const scratch = OptimizedBuffer.create(ENCODED.length, 1, renderer.widthMethod, { owner: renderer.nativeScene })
     scratch.drawText(PLACEHOLDERS.join(""), 0, 0, RGBA.fromValues(1, 1, 1, 1), RGBA.fromValues(0, 0, 0, 1))
-    const cells = scratch.withBuffers((planes) => Array.from(planes.char.subarray(0, BREAKS.length)))
+    const cells = scratch.withBuffers((planes) => Array.from(planes.char.subarray(0, ENCODED.length)))
     const pooled = cells.every((cell) => cell > 0x7f && cell >>> 16 === cells[0]! >>> 16)
-    if (pooled && new Set(cells).size === BREAKS.length) {
-      const codes = new Map(cells.map((cell, index) => [cell, BREAKS.charCodeAt(index)]))
+    if (pooled && new Set(cells).size === ENCODED.length) {
+      const codes = new Map(cells.map((cell, index) => [cell, ENCODED.charCodeAt(index)]))
       const decode = (buffer: OptimizedBuffer) => {
         const chars = buffer.buffers.char
         for (let index = 0; index < chars.length; index++) {
@@ -65,7 +72,7 @@ export function wrapAtWhitespace(renderer: CliRenderer, node: TextBufferRenderab
   if (wrapped.has(node) || !installDecoder(renderer)) return
   wrapped.add(node)
   const selectedText = node.getSelectedText.bind(node)
-  node.getSelectedText = () => decodeWrappedText(selectedText())
+  node.getSelectedText = () => decodeWrappedText(selectedText().replace(joinedSpaces, ""))
   let owner: object | null = node
   let plainText: PropertyDescriptor | undefined
   while (owner && !plainText) {
@@ -81,5 +88,10 @@ export function wrapAtWhitespace(renderer: CliRenderer, node: TextBufferRenderab
 }
 
 function decodeWrappedText(text: string) {
-  return text.replace(reserved, (char) => BREAKS[char.charCodeAt(0) - FIRST_PLACEHOLDER]!)
+  return text.replace(reserved, (char) => ENCODED[char.charCodeAt(0) - FIRST_PLACEHOLDER]!)
+}
+
+export function joinedSpace(chunk: TextChunk): TextChunk {
+  const space: JoinedChunk = { ...chunk, text: " ", [joined]: true }
+  return space
 }

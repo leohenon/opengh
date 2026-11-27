@@ -1037,9 +1037,9 @@ ${"x".repeat(100)}/tail`
     expect(frame).not.toMatch(/[\ufdd0-\ufdef\ufffd]/)
     expect(rows).toContain("• New test fails without the fix ( .env.production  value reaches the handoff)")
     expect(rows).toContain("•  test/unit/security-upgrade-nudge.test.ts ,")
-    expect(rows).toContain("  test/unit/agentic-upgrade-prompts.test.ts ,")
-    expect(rows).toContain("  PATH  that recorded its environment; before the fix it received")
-    expect(rows).toContain("  .env.production  values and  __NEXT_PROCESSED_ENV=true .")
+    expect(rows).toContain("   test/unit/agentic-upgrade-prompts.test.ts ,")
+    expect(rows).toContain("   PATH  that recorded its environment; before the fix it received")
+    expect(rows).toContain("   .env.production  values and  __NEXT_PROCESSED_ENV=true .")
     expect(rows).toContain("  const result = await session.refresh({ force: true, generation:")
     expect(rows).toContain(`${"x".repeat(80)}`)
     expect(rows).toContain(`${"x".repeat(20)}/tail`)
@@ -1055,7 +1055,7 @@ ${"x".repeat(100)}/tail`
     const first = codeBlocks(view.renderer.root).find((block) => block.content.includes("New test fails"))!
     await view.mockMouse.pressDown(first.screenX, first.screenY)
     await view.mockMouse.emitMouseEvent("drag", first.screenX + 60, first.screenY)
-    expect(view.renderer.getSelection()!.getSelectedText()).toContain("the fix ( .env.production  value")
+    expect(view.renderer.getSelection()!.getSelectedText()).toContain("the fix (.env.production value")
     await view.mockMouse.release(first.screenX + 60, first.screenY)
     view.renderer.clearSelection()
 
@@ -1075,6 +1075,48 @@ ${"x".repeat(100)}/tail`
     search.dispose()
     await settle(view)
     expect(view.captureCharFrame()).toContain("( .env.production  value")
+  } finally {
+    view.renderer.destroy()
+  }
+})
+
+test("inline code padding wraps with its code and stays out of copied text", async () => {
+  const content =
+    "The router (`resolve-routes.ts`) matches against the pathname as received (`/en/`), so it decides the proxy should run and invokes the render server. `handleCatchallMiddlewareRequest` then re-checks the matcher, but only against `removeTrailingSlash(parsed.pathname)` and its decoded form, i.e. `/en`."
+  const view = await testRender(
+    () => (
+      <ThemeProvider name="github">
+        <MarkdownSample content={content} />
+      </ThemeProvider>
+    ),
+    { width: 62, height: 12 },
+  )
+  try {
+    await settle(view)
+    const rows = view
+      .captureCharFrame()
+      .split("\n")
+      .map((row) => row.trimEnd())
+    expect(rows).toContain("as received ( /en/ ), so it decides the proxy should run and")
+    expect(rows).toContain("invokes the render server.  handleCatchallMiddlewareRequest")
+    expect(rows).toContain(" removeTrailingSlash(parsed.pathname)  and its decoded form,")
+    const padded = view.captureSpans().lines.map((line) => line.spans)
+    for (const spans of padded) {
+      const last = spans.findLast((span) => span.text.trim())
+      const trailing = spans.slice(spans.indexOf(last!) + 1)
+      const background = spans.at(-1)!.bg
+      expect(trailing.every((span) => span.bg.equals(background))).toBe(true)
+    }
+    const prose = codeBlocks(view.renderer.root).find((block) => block.content.includes("The router"))!
+    const row = rows.indexOf("as received ( /en/ ), so it decides the proxy should run and")
+    await view.mockMouse.doubleClick(prose.screenX + rows[row]!.indexOf("en"), prose.screenY + row)
+    await view.flush()
+    expect(view.renderer.getSelection()!.getSelectedText()).toBe("(/en/)")
+    view.renderer.clearSelection()
+    await view.mockMouse.pressDown(prose.screenX, prose.screenY)
+    await view.mockMouse.emitMouseEvent("drag", prose.screenX + 40, prose.screenY)
+    expect(view.renderer.getSelection()!.getSelectedText()).toBe("The router (resolve-routes.ts) matches ")
+    await view.mockMouse.release(prose.screenX + 40, prose.screenY)
   } finally {
     view.renderer.destroy()
   }

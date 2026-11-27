@@ -672,6 +672,53 @@ function githubAlerts() {
     })
 }
 
+function softLineBreaks(options: { enabled?: boolean } = {}) {
+  return (tree: MarkdownRoot) => {
+    if (!options.enabled) return
+    visit(tree, "text", (node, index, parent) => {
+      if (!parent || index === undefined) return
+      const lines = node.value.split(/\r\n|[\r\n]/)
+      if (lines.length < 2) return
+      const children: PhrasingContent[] = lines.flatMap((value, line) => [
+        ...(line ? [{ type: "break" as const }] : []),
+        { type: "text" as const, value },
+      ])
+      parent.children.splice(index, 1, ...children)
+      return index + children.length
+    })
+  }
+}
+
+function recordListSpread() {
+  return (tree: Root, file: { data: Record<string, unknown> }) => {
+    const spread = new Map<number, boolean>()
+    visit(tree, "element", (node) => {
+      const offset = node.position?.start.offset
+      if (node.tagName !== "li" || offset === undefined) return
+      spread.set(
+        offset,
+        node.children.some((child) => child.type === "element" && child.tagName === "p"),
+      )
+    })
+    file.data.listSpread = spread
+  }
+}
+
+function restoreListSpread() {
+  return (tree: MarkdownRoot, file: { data: Record<string, unknown> }) => {
+    const spread = file.data.listSpread as Map<number, boolean> | undefined
+    if (!spread) return
+    visit(tree, "list", (list) => {
+      const items = list.children.map((item) => spread.get(item.position?.start.offset ?? -1))
+      if (items.some((item) => item === undefined)) return
+      list.children.forEach((item, index) => {
+        item.spread = items[index]
+      })
+      list.spread = items.some(Boolean)
+    })
+  }
+}
+
 function resolveTarget(value: string, context: GitHubMarkdownContext) {
   const target = safeTarget(value)
   if (!target || /^[a-z][a-z\d+.-]*:/i.test(target)) return target
@@ -764,6 +811,7 @@ const processor = unified()
   .use(boundedMarkdown)
   .use(sourcePositions)
   .use(githubAlerts)
+  .use(softLineBreaks)
   .use(() => boundedOutput()) // A distinct plugin: unified deduplicates attachers.
   .use(remarkRehype, { allowDangerousHtml: true })
   .use(boundedHtml)
@@ -772,7 +820,9 @@ const processor = unified()
   .use(terminalMedia)
   .use(documentAnchors)
   .use(boundedHtmlTables)
+  .use(recordListSpread)
   .use(rehypeRemark)
+  .use(restoreListSpread)
   .use(boundedOutput)
   .use(remarkGfm, { tablePipeAlign: false })
   .use(remarkStringify, {
@@ -782,7 +832,7 @@ const processor = unified()
   })
 
 // Issue attachments are evidence, even when their labels look like README branding.
-const discussionProcessor = processor().use(terminalMedia, { preserveImages: true })
+const discussionProcessor = processor().use(terminalMedia, { preserveImages: true }).use(softLineBreaks, { enabled: true })
 function plainCodeFences() {
   return (tree: MarkdownRoot) =>
     visit(tree, "code", (node) => {
