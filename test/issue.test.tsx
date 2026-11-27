@@ -670,14 +670,14 @@ test("issue titles wrap at spaces and slashes, never after a lone parenthesis", 
           data={githubDataFixture}
           operations={repositoryOperationsFixture}
           issueDetail={detail()}
-          onLoadIssue={async (number) =>
+          onLoadIssue={async (number) => {
             setDetail({
               number,
               resource: { status: "ready", value: { ...issueDetailFixture, number, title, commentCount: 0 } },
               comments: { status: "ready", value: { items: [], page: 1, hasMore: false } },
               references: { status: "ready", value: [] },
             })
-          }
+          }}
         />
       ),
       { width, height: 20 },
