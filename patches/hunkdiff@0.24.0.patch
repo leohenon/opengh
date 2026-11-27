@@ -24,7 +24,7 @@ index f8d2de24b583ec07e18a23c03a826de1d0d65f19..f93f750ed8be7f38d431cb82fbef625f
          }
          throw new TypeError("unrecognized object token shape");
 diff --git a/dist/npm/opentui/index.d.ts b/dist/npm/opentui/index.d.ts
-index 9386c3054441f6de21bf4de75e67f31ee639761f..36f0aa7a2ac9fce0b3a3db7aa9bcefbf75da6387 100644
+index 9386c3054441f6de21bf4de75e67f31ee639761f..295c81f86effd983e4a872bf7c6e29df611bdff2 100644
 --- a/dist/npm/opentui/index.d.ts
 +++ b/dist/npm/opentui/index.d.ts
 @@ -7,3 +7,10 @@ export { HunkFileNav } from "./HunkFileNav.js";
@@ -35,11 +35,11 @@ index 9386c3054441f6de21bf4de75e67f31ee639761f..36f0aa7a2ac9fce0b3a3db7aa9bcefbf
 +/** Configure the missing npm worker entry before mounting any highlighted diffs. */
 +export declare function configureHunkHighlightWorker(url: URL): void;
 +
-+export type { HunkDiffNoteTarget, HunkDiffSearchCell, HunkDiffSourceHighlight } from "./types.js";
++export type { HunkDiffCustomTheme, HunkDiffCustomThemeColorKey, HunkDiffNoteTarget, HunkDiffSearchCell, HunkDiffSourceHighlight } from "./types.js";
 +/** Computes geometry using Hunk's own sanitization, tab expansion and wrap planner. */
 +export declare function getHunkDiffSearchCells(props: import("./types.js").HunkDiffBodyProps): import("./types.js").HunkDiffSearchCell[];
 diff --git a/dist/npm/opentui/index.js b/dist/npm/opentui/index.js
-index c7a61edb43329abf69be1813b88a154cb231dc63..cb6052b1989de23cb7743ca8c03a3a7ff7a84673 100644
+index c7a61edb43329abf69be1813b88a154cb231dc63..a49b99b9aacc84502cbcd272db8956faedc67e84 100644
 --- a/dist/npm/opentui/index.js
 +++ b/dist/npm/opentui/index.js
 @@ -1614,8 +1614,12 @@ function resolveTheme(requested, themeMode, customThemes = []) {
@@ -56,7 +56,7 @@ index c7a61edb43329abf69be1813b88a154cb231dc63..cb6052b1989de23cb7743ca8c03a3a7f
  }
  function supportsHighlightWorkerOffload({
    execPath = process.execPath,
-@@ -7726,6 +7730,92 @@ function toInternalDiffFiles(files) {
+@@ -7726,6 +7730,96 @@ function toInternalDiffFiles(files) {
  
  // packages/hunk/src/opentui/HunkDiffBody.tsx
  import { jsxDEV as jsxDEV5 } from "@opentui/react/jsx-dev-runtime";
@@ -143,13 +143,17 @@ index c7a61edb43329abf69be1813b88a154cb231dc63..cb6052b1989de23cb7743ca8c03a3a7f
 +  return row === entry.row ? entry : { ...entry, row };
 +}
 +
++function resolveHunkDiffTheme(theme = "github-dark-default", customTheme) {
++  return customTheme ? buildCustomTheme({ ...customTheme, base: customTheme.base ?? theme }) : resolveTheme(theme, null);
++}
++
 +// Public inline review affordance: Hunk DiffSectionBody's hover [+] row button.
 +var HUNK_ADD_NOTE_IDLE_HIDE_DELAY_MS = 2000;
 +
  function HunkDiffBody({
    file,
    layout = "split",
-@@ -7739,7 +7829,10 @@ function HunkDiffBody({
+@@ -7739,10 +7833,14 @@ function HunkDiffBody({
    wrapLines = false,
    horizontalOffset = 0,
    highlight = true,
@@ -157,11 +161,16 @@ index c7a61edb43329abf69be1813b88a154cb231dc63..cb6052b1989de23cb7743ca8c03a3a7f
 +  selectedHunkIndex = 0,
 +  sourceHighlights,
 +  onAddNote,
-+  addNoteActive = true
++  addNoteActive = true,
++  customTheme
  }) {
    const resolvedLayout = canonicalLayout ?? normalizeHunkDiffLayout(layout);
-   const resolvedTheme = resolveTheme(theme, null);
-@@ -7757,6 +7850,62 @@ function HunkDiffBody({
+-  const resolvedTheme = resolveTheme(theme, null);
++  const resolvedTheme = useMemo(() => resolveHunkDiffTheme(theme, customTheme), [theme, customTheme]);
+   const internalFile = useMemo(() => file ? toInternalDiffFile(file) : undefined, [file]);
+   const resolvedHighlighted = useHighlightedDiff({
+     file: internalFile,
+@@ -7757,6 +7855,62 @@ function HunkDiffBody({
      hunkGap
    }) : [], [hunkGap, internalFile, rows, showHunkHeaders]);
    const lineNumberDigits = useMemo(() => String(internalFile ? findMaxLineNumber(internalFile) : 1).length, [internalFile]);
@@ -224,7 +233,7 @@ index c7a61edb43329abf69be1813b88a154cb231dc63..cb6052b1989de23cb7743ca8c03a3a7f
    if (!internalFile) {
      return /* @__PURE__ */ jsxDEV5("box", {
        style: { width: "100%", paddingLeft: 1, paddingRight: 1 },
-@@ -7792,7 +7941,8 @@ function HunkDiffBody({
+@@ -7792,7 +7946,8 @@ function HunkDiffBody({
              width: "100%",
              height: plannedRow.height,
              backgroundColor: resolvedTheme.panel
@@ -234,7 +243,7 @@ index c7a61edb43329abf69be1813b88a154cb231dc63..cb6052b1989de23cb7743ca8c03a3a7f
          }, plannedRow.key, false, undefined, this);
        }
        if (plannedRow.kind !== "diff-row") {
-@@ -7802,7 +7952,7 @@ function HunkDiffBody({
+@@ -7802,7 +7957,7 @@ function HunkDiffBody({
          id: reviewRowId(plannedRow.key),
          style: { width: "100%", flexDirection: "column" },
          children: /* @__PURE__ */ jsxDEV5(DiffRowView, {
@@ -243,7 +252,7 @@ index c7a61edb43329abf69be1813b88a154cb231dc63..cb6052b1989de23cb7743ca8c03a3a7f
            width,
            lineNumberDigits,
            showLineNumbers,
-@@ -7810,7 +7960,10 @@ function HunkDiffBody({
+@@ -7810,7 +7965,10 @@ function HunkDiffBody({
            wrapLines,
            codeHorizontalOffset: horizontalOffset,
            theme: resolvedTheme,
@@ -255,7 +264,7 @@ index c7a61edb43329abf69be1813b88a154cb231dc63..cb6052b1989de23cb7743ca8c03a3a7f
          }, undefined, false, undefined, this)
        }, plannedRow.key, false, undefined, this);
      })
-@@ -8310,6 +8463,8 @@ function HunkReviewStream({
+@@ -8310,6 +8468,8 @@ function HunkReviewStream({
    }, undefined, false, undefined, this);
  }
  export {
@@ -265,10 +274,10 @@ index c7a61edb43329abf69be1813b88a154cb231dc63..cb6052b1989de23cb7743ca8c03a3a7f
    HunkDiffBody,
    HunkDiffFileHeader,
 diff --git a/dist/npm/opentui/types.d.ts b/dist/npm/opentui/types.d.ts
-index 1e5261ed1b4765decf0aa5841489393945a09337..af6ff02fd570bcf2113b3be14de2467eb37276b9 100644
+index 1e5261ed1b4765decf0aa5841489393945a09337..6b93ca52b58757f43ff7f1e30bb4b4a5f3ecd2c1 100644
 --- a/dist/npm/opentui/types.d.ts
 +++ b/dist/npm/opentui/types.d.ts
-@@ -49,7 +49,13 @@ export interface HunkDiffBodyProps {
+@@ -49,7 +49,24 @@ export interface HunkDiffBodyProps {
      horizontalOffset?: number;
      highlight?: boolean;
      selectedHunkIndex?: number;
@@ -279,10 +288,21 @@ index 1e5261ed1b4765decf0aa5841489393945a09337..af6ff02fd570bcf2113b3be14de2467e
 +    onAddNote?: (target: HunkDiffNoteTarget) => void;
 +    /** False hides and disables the [+] while keeping its column. Defaults to true. */
 +    addNoteActive?: boolean;
++    /** Color overrides layered on `theme` (or `customTheme.base`) with Hunk's custom-theme builder. */
++    customTheme?: HunkDiffCustomTheme;
++}
++/** Color slots a custom theme may set; the same keys as Hunk's `[themes.*]` config tables. */
++export type HunkDiffCustomThemeColorKey = "background" | "panel" | "panelAlt" | "border" | "accent" | "accentMuted" | "text" | "muted" | "addedBg" | "removedBg" | "movedAddedBg" | "movedRemovedBg" | "contextBg" | "addedContentBg" | "removedContentBg" | "contextContentBg" | "addedSignColor" | "removedSignColor" | "lineNumberBg" | "lineNumberFg" | "selectedHunk" | "badgeAdded" | "badgeRemoved" | "badgeNeutral" | "fileNew" | "fileDeleted" | "fileRenamed" | "fileModified" | "fileUntracked" | "noteBorder" | "noteBackground" | "noteTitleBackground" | "noteTitleText";
++/** Colors must be `#rrggbb`. Omitted slots inherit the base theme. The id keys Hunk's render caches. */
++export interface HunkDiffCustomTheme extends Partial<Record<HunkDiffCustomThemeColorKey, string>> {
++    id: string;
++    label?: string;
++    base?: HunkDiffThemeName;
++    syntaxScopes?: Record<string, string>;
  }
  /** Public props for the reusable OpenTUI diff convenience component. */
  export interface HunkDiffViewProps extends Omit<HunkDiffBodyProps, "file"> {
-@@ -90,3 +96,30 @@ export interface HunkFileNavProps {
+@@ -90,3 +107,30 @@ export interface HunkFileNavProps {
      theme?: HunkDiffThemeName;
      onSelectFile?: (fileId: string) => void;
  }

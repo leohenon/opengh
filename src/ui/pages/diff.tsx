@@ -58,6 +58,7 @@ import { mouseClick, mouseContextMenu, mouseHover, type MousePosition } from "..
 import type { ContextMenuItem } from "../components/context-menu"
 import { parseDiff, streamWithinBudget, type DiffFile } from "../diff-model"
 import { mountHunk } from "../hunk-host"
+import { hunkThemeColors } from "../hunk-theme"
 import { createScrollbarVisibility } from "../scrollbar-visibility"
 import { useStatusPrompt } from "../status-prompt"
 import { useTheme } from "../theme"
@@ -329,6 +330,7 @@ export function DiffScreen(props: {
     if (mode() === "light") return lightThemeAliases[selectedTheme()] ?? "github-light-default"
     return HUNK_DIFF_THEME_NAMES.find((name) => name === selectedTheme()) ?? themeAliases[selectedTheme()] ?? "github-dark-default"
   })
+  const customTheme = createMemo(() => hunkThemeColors(markdownTheme, theme()))
   const bindScrollbar = createScrollbarVisibility(() => props.showScrollbar)
   let scroll: ScrollBoxRenderable | undefined
   let wrapper: BoxRenderable | undefined
@@ -637,6 +639,7 @@ export function DiffScreen(props: {
     file: file.body,
     width: width(),
     theme: theme(),
+    customTheme: customTheme(),
     canonicalLayout: currentLayout(),
     tabWidth: TAB_WIDTH,
     wrapLines: wrap(),
