@@ -226,7 +226,7 @@ test("new pull request branches give way to the comparison summary", async () =>
   }
 })
 
-test("diff file headers keep their stats and the sidebar keeps its ellipsis", async () => {
+test("below 100 columns the diff opens without its file list, and the list and headers keep ellipses and stats", async () => {
   const file = (path: string) => `diff --git a/${path} b/${path}\n--- a/${path}\n+++ b/${path}\n@@ -1 +1 @@\n-old\n+new\n`
   const patch = [file(`d4/${"q".repeat(42)}.ts`), file(`${"x".repeat(25)}29.ts`)].join("")
   const setup = await createTestRenderer({ width: 80, height: 16 })
@@ -246,11 +246,19 @@ test("diff file headers keep their stats and the sidebar keeps its ellipsis", as
     ),
     setup.renderer,
   )
-  for (let pass = 0; pass < 4; pass++) {
-    await setup.flush()
-    await setup.renderer.idle()
+  const settle = async () => {
+    for (let pass = 0; pass < 4; pass++) {
+      await setup.flush()
+      await setup.renderer.idle()
+    }
   }
+  await settle()
+  expect(setup.captureCharFrame()).not.toContain("Files (2)")
+  expect(setup.captureCharFrame()).toContain(`d4/${"q".repeat(42)}.ts`)
+  setup.mockInput.pressKey("s")
+  await settle()
   const frame = setup.captureCharFrame().split("\n")
+  expect(frame.join("\n")).toContain("Files (2)")
   expect(frame.find((row) => /│.*q\.\.\.q+\.ts/.test(row))!.trimEnd()).toEndWith("+1 −1")
   expect(frame.some((row) => /^ {2}x+\.\.\.x*29\.ts *│/.test(row))).toBe(true)
 })

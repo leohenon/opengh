@@ -253,7 +253,8 @@ export function DiffScreen(props: {
   const [width, setWidth] = createSignal(1)
   const [host, setHost] = createSignal<BoxRenderable>()
   const narrow = () => dimensions().width < 80
-  const showFiles = () => !sidebarHidden() && (!narrow() || narrowSidebarShown())
+  const filesByDefault = () => dimensions().width >= 100
+  const showFiles = () => !sidebarHidden() && (filesByDefault() || narrowSidebarShown())
   const loadingFiles = () => props.resource.status === "loading"
   const fileLoadingDots = useLoadingDots(() => active() && showFiles() && loadingFiles())
   const currentLayout = () => layout() ?? props.defaultLayout ?? (narrow() ? "unified" : "split")
@@ -1236,11 +1237,11 @@ export function DiffScreen(props: {
     const hide = showFiles()
     setFilterOpen(false)
     setSidebarHidden(hide)
-    if (narrow() && !hide) setNarrowSidebarShown(true)
+    if (!filesByDefault() && !hide) setNarrowSidebarShown(true)
   }
   const showFileSidebar = () => {
     setSidebarHidden(false)
-    if (narrow()) setNarrowSidebarShown(true)
+    if (!filesByDefault()) setNarrowSidebarShown(true)
   }
   const navigateFile = (delta: number) => {
     const files = filteredFiles()
