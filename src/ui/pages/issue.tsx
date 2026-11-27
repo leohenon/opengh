@@ -22,6 +22,7 @@ import { useIcons } from "../icon-style"
 import { iconPrefix } from "../icons"
 import { createScrollbarVisibility } from "../scrollbar-visibility"
 import { createCommentReveal, type CommentReveal } from "../reveal-comment"
+import { wrapAtWhitespace } from "../whitespace-wrap"
 
 function IssueMetadata(props: { issue: IssueDetail; compact: boolean; inline?: boolean }) {
   const { colors } = useTheme()
@@ -306,7 +307,13 @@ export function IssueScreen(props: {
         contentOptions={{ paddingTop: 0, paddingBottom: 1, alignItems: centered() ? "center" : "stretch" }}
       >
         <box width="100%" maxWidth={contentWidth()} minWidth={0} flexShrink={0} flexDirection="column" paddingTop={1} paddingBottom={1}>
-          <text width="100%" flexShrink={0} fg={colors.text} attributes={TextAttributes.BOLD}>
+          <text
+            ref={(node) => wrapAtWhitespace(renderer, node, "/")}
+            width="100%"
+            flexShrink={0}
+            fg={colors.text}
+            attributes={TextAttributes.BOLD}
+          >
             {header()?.title ?? "Issue"}{" "}
             <span style={{ fg: colors.muted }}>
               <Show when={issue()?.url} fallback={`#${props.number}`}>

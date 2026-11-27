@@ -31,6 +31,7 @@ import { createReactiveMarkdownStyle } from "../markdown-style"
 import { createScrollbarVisibility } from "../scrollbar-visibility"
 import { createCommentReveal, type CommentReveal } from "../reveal-comment"
 import { useTheme } from "../theme"
+import { wrapAtWhitespace } from "../whitespace-wrap"
 
 function PullMetadata(props: {
   pull: PullRequestDetail
@@ -263,7 +264,13 @@ export function PullScreen(props: {
         contentOptions={{ paddingTop: 0, paddingBottom: 1, alignItems: centered() ? "center" : "stretch" }}
       >
         <box width="100%" maxWidth={contentWidth()} minWidth={0} flexShrink={0} flexDirection="column" paddingTop={1} paddingBottom={1}>
-          <text width="100%" flexShrink={0} fg={colors.text} attributes={TextAttributes.BOLD}>
+          <text
+            ref={(node) => wrapAtWhitespace(renderer, node, "/")}
+            width="100%"
+            flexShrink={0}
+            fg={colors.text}
+            attributes={TextAttributes.BOLD}
+          >
             {header()?.title ?? "Pull request"}{" "}
             <span style={{ fg: colors.muted }}>
               <Show when={pull()?.url} fallback={`#${props.number}`}>

@@ -658,3 +658,46 @@ test.each([
   expect(longest("description")).toBe(Math.floor((description + 1) / "description ".length))
   expect(longest("reply")).toBe(Math.floor((comment + 1) / "reply ".length))
 })
+
+test("issue titles wrap at spaces and slashes, never after a lone parenthesis", async () => {
+  const title =
+    "fix(turbopack): preserve sourcemap names for scope-hoisted modules when packages/next/src/server/lib/router-utils/setup-dev-bundler.ts re-exports (regression in 15.3.0-canary.42)"
+  for (const width of [164, 80, 56]) {
+    const [detail, setDetail] = createSignal<IssueDetailState>()
+    const view = await testRender(
+      () => (
+        <App
+          data={githubDataFixture}
+          operations={repositoryOperationsFixture}
+          issueDetail={detail()}
+          onLoadIssue={async (number) =>
+            setDetail({
+              number,
+              resource: { status: "ready", value: { ...issueDetailFixture, number, title, commentCount: 0 } },
+              comments: { status: "ready", value: { items: [], page: 1, hasMore: false } },
+              references: { status: "ready", value: [] },
+            })
+          }
+        />
+      ),
+      { width, height: 20 },
+    )
+    active.push(view)
+    await settle(view)
+    view.mockInput.pressKey("3")
+    await settle(view)
+    view.mockInput.pressEnter()
+    await settle(view)
+    await settle(view)
+    const rows = view
+      .captureCharFrame()
+      .split("\n")
+      .map((row) => row.trim())
+    const start = rows.findIndex((row) => row.startsWith("fix(turbopack)"))
+    const end = rows.findIndex((row) => row.endsWith("#412"))
+    const lines = rows.slice(start, end + 1)
+    expect(lines.join(" ")).toContain("(regression in 15.3.0-canary.42) #412")
+    for (const line of lines) expect(line).not.toMatch(/[(-]$/)
+    expect(lines.some((line) => line.startsWith("(regression"))).toBe(true)
+  }
+})

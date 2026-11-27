@@ -145,7 +145,7 @@ export function RunScreen(props: {
         contentOptions={{ paddingTop: 0, paddingBottom: 1, alignItems: centered() ? "center" : "stretch" }}
       >
         <box width="100%" maxWidth={contentWidth()} minWidth={0} flexShrink={0} flexDirection="column" paddingTop={1} paddingBottom={1}>
-          <text width="100%" flexShrink={0} fg={colors.text} attributes={TextAttributes.BOLD}>
+          <text ref={wrapPath} width="100%" flexShrink={0} fg={colors.text} attributes={TextAttributes.BOLD}>
             {props.detail.resource.value?.title || props.summary?.title || `Workflow run ${props.id}`}
           </text>
         </box>
