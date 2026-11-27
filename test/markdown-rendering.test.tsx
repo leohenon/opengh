@@ -1199,3 +1199,39 @@ test("table cells wrap at spaces and slashes, and search and copy see the real t
     view.renderer.destroy()
   }
 })
+
+test("code blocks in list items leave a blank line before the next item, but not at the end of the list", async () => {
+  const content =
+    "1. Run:\n   ```sh\n   pnpm install\n   ```\n2. Observe `x`:\n   ```text\n   a\n   ```\n   After.\n3. Done\n   ```\n   b\n   ```\n\nNext"
+  const view = await testRender(
+    () => (
+      <ThemeProvider name="github">
+        <MarkdownSample content={content} />
+      </ThemeProvider>
+    ),
+    { width: 40, height: 20 },
+  )
+  try {
+    await settle(view)
+    const rows = view
+      .captureCharFrame()
+      .split("\n")
+      .map((row) => row.trimEnd())
+    expect(rows.slice(0, 12)).toEqual([
+      "1. Run:",
+      "    pnpm install",
+      "",
+      "2. Observe  x :",
+      "    a",
+      "",
+      "   After.",
+      "3. Done",
+      "    b",
+      "",
+      "Next",
+      "",
+    ])
+  } finally {
+    view.renderer.destroy()
+  }
+})

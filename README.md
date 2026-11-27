@@ -20,6 +20,8 @@
   <img src="docs/assets/screenshot-light.png" alt="opengh showing a split diff and inline review for OpenTUI PR #209" />
 </picture>
 
+> **Public beta:** Commands and config may change before v1.0. Please [report bugs](https://github.com/leohenon/opengh/issues).
+
 ## Install · [Guide](docs/installation.md)
 
 Available for macOS and Linux. The only requirement is a signed-in [GitHub CLI](docs/installation.md#authenticate).
@@ -65,7 +67,7 @@ npx skills add leohenon/opengh --skill opengh --global
 
 ## Demo · [Demos](docs/demos.md)
 
-![Clicking links to a commit, its diff, an issue, and another repository](docs/assets/demos/click-links-and-mouse-navigation.gif)
+![Browsing a pull request, opening a linked issue, and viewing a side-by-side commit diff in opengh](docs/assets/demos/readme.gif)
 
 ## Documentation
 

@@ -36,6 +36,8 @@ import {
   type MarkdownAnchorResolver,
 } from "../markdown-anchors"
 
+const spacedBlocks = new Set(["code", "table", "blockquote"])
+
 // One prose renderer for repository documents, issue descriptions, and comments.
 export function GitHubMarkdown(props: {
   content: string
@@ -414,7 +416,7 @@ export function GitHubMarkdown(props: {
       if (!block) return undefined
       if (token.type === "list") {
         // Core 0.6.6 skips checkbox tokens and always draws a normal list marker.
-        const decorateTasks = (list: Extract<typeof token, { type: "list" }>, node: Renderable): void => {
+        const decorateTasks = (list: Extract<typeof token, { type: "list" }>, node: Renderable, followed = false): void => {
           list.items.forEach((item, index) => {
             const row = node.getChildren()[index]
             if (!row) return
@@ -429,7 +431,9 @@ export function GitHubMarkdown(props: {
             const children = item.tokens.filter((child) => child.type !== "checkbox" && child.type !== "space")
             children.forEach((child, childIndex) => {
               const nested = content?.getChildren()[childIndex]
-              if (child.type === "list" && nested) decorateTasks(child as Extract<typeof child, { type: "list" }>, nested)
+              const more = followed || index < list.items.length - 1 || childIndex < children.length - 1
+              if (child.type === "list" && nested) decorateTasks(child as Extract<typeof child, { type: "list" }>, nested, more)
+              if (spacedBlocks.has(child.type) && nested && more) nested.marginBottom = 1
             })
           })
         }

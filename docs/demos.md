@@ -27,3 +27,7 @@
 ## Mention people
 
 ![Typing @ in a comment to mention someone](assets/demos/tagging-users.gif)
+
+## Inspect GitHub Actions runs
+
+![Browsing workflow runs and opening a run to see its jobs and steps](assets/demos/workflows.gif)
