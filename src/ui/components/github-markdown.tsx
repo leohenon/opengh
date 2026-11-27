@@ -39,6 +39,7 @@ export function GitHubMarkdown(props: {
   content: string
   syntaxStyle: SyntaxStyle
   preserveImages?: boolean
+  lineBreaks?: "all" | "unwrapped"
   codePanels?: boolean
   backgroundColor?: string
   context?: GitHubMarkdownContext
@@ -64,6 +65,7 @@ export function GitHubMarkdown(props: {
           ? props.content
           : normalizeGitHubMarkdown(props.content, {
               preserveImages: props.preserveImages,
+              lineBreaks: props.lineBreaks,
               codePanels: props.codePanels,
               context: props.context,
               anchors: !!props.anchorRef,

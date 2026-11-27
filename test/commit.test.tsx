@@ -411,3 +411,88 @@ test("changed files stack long renames and break long paths only after a slash",
   view.resize(50, 24)
   expect(await rows()).toEqual(expect.arrayContaining(["R test/keys.test.ts  +6  −2", "→ test/input.test.ts"]))
 })
+
+test("commit messages written in Markdown render and reflow, and plain messages stay as written", async () => {
+  const markdown = [
+    "docs: clarify Suspense placement",
+    "",
+    "### What?",
+    "",
+    "Clarify when a shared session promise needs Suspense in the",
+    "Authentication with Cache Components guide. A layout can call",
+    "`getCurrentUser()` and forward the promise without awaiting it. The",
+    "boundary goes around the UI that waits for the user. See #95802.",
+    "",
+    "- Confirmed that every code block, heading, and link target matches",
+    "  canary. Prettier and MDX ESLint pass.",
+    "",
+    "Fixes #12",
+    "Closes #13",
+    "",
+    "Co-authored-by: Some Name <some.name@example.com>",
+    "Signed-off-by: Other Person <other@example.com>",
+  ].join("\n")
+  const plain = [
+    "fix: avoid duplicate key events",
+    "",
+    "Keep one owner for keyboard input so a single key press fires once,",
+    "even when Array<string> handlers and __init__ hooks are registered.",
+    "",
+    "Signed-off-by: Other Person <other@example.com>",
+  ].join("\n")
+  const [message, setMessage] = createSignal(markdown)
+  const view = await testRender(
+    () => (
+      <ThemeProvider name="github">
+        <CommitScreen
+          sha={commitDetailFixture.sha}
+          repositoryUrl="https://github.com/anomalyco/opentui"
+          resource={{ status: "ready", value: { ...commitDetailFixture, message: message().split("\n")[0]!, fullMessage: message() } }}
+          interactive={false}
+          showScrollbar={false}
+        />
+      </ThemeProvider>
+    ),
+    { width: 164, height: 36 },
+  )
+  active.push(view)
+  const rows = async () => {
+    for (let pass = 0; pass < 3; pass++) {
+      await view.renderOnce()
+      await Bun.sleep(40)
+      await view.flush()
+    }
+    return view
+      .captureCharFrame()
+      .split("\n")
+      .map((row) => row.trim())
+  }
+  const rendered = await rows()
+  expect(rendered).toContain("What?")
+  expect(rendered).not.toContain("### What?")
+  expect(rendered).toContain(
+    "Clarify when a shared session promise needs Suspense in the Authentication with Cache Components guide. A layout can",
+  )
+  expect(rendered).toContain(
+    "call  getCurrentUser()  and forward the promise without awaiting it. The boundary goes around the UI that waits for",
+  )
+  expect(rendered).toContain("the user. See #95802.")
+  expect(rendered).toContain("• Confirmed that every code block, heading, and link target matches canary. Prettier and MDX ESLint pass.")
+  expect(rendered).toContain("Fixes #12")
+  expect(rendered).toContain("Closes #13")
+  expect(rendered).toContain("Co-authored-by: Some Name <some.name@example.com>")
+  expect(rendered).toContain("Signed-off-by: Other Person <other@example.com>")
+  const reference = view
+    .captureCharFrame()
+    .split("\n")
+    .findIndex((row) => row.includes("See #95802."))
+  expect(view.renderer.getLinkAt(view.captureCharFrame().split("\n")[reference]!.indexOf("#95802") + 1, reference)).toBe(
+    "https://github.com/anomalyco/opentui/issues/95802",
+  )
+
+  setMessage(plain)
+  const unchanged = await rows()
+  expect(unchanged).toContain("Keep one owner for keyboard input so a single key press fires once,")
+  expect(unchanged).toContain("even when Array<string> handlers and __init__ hooks are registered.")
+  expect(unchanged).toContain("Signed-off-by: Other Person <other@example.com>")
+})

@@ -3,7 +3,7 @@ import { spawnSync } from "node:child_process"
 import { unified } from "unified"
 import remarkParse from "remark-parse"
 import { visit } from "unist-util-visit"
-import { GitHubMarkdownError, gitHubMarkdownFallback, normalizeGitHubMarkdown } from "../src/ui/github-markdown"
+import { GitHubMarkdownError, gitHubMarkdownFallback, hasMarkdownSyntax, normalizeGitHubMarkdown } from "../src/ui/github-markdown"
 
 describe("GitHub Markdown normalization", () => {
   test("rejects container-prefix attacks before parsing, under a parent-enforced deadline", () => {
@@ -328,6 +328,80 @@ other/repo@abc1234 @hidden
     expect(joined.endsWith("line 8998 line 8999")).toBe(true)
     expect(() => normalizeGitHubMarkdown(lines(10_001), { preserveImages: true })).toThrow("too many lines")
     expect(() => normalizeGitHubMarkdown("<span>".repeat(25_000) + "x", { preserveImages: true })).toThrow(GitHubMarkdownError)
+  })
+
+  test("unwrapped line breaks rejoin hard-wrapped prose and keep the breaks an author chose", () => {
+    const unwrap = (value: string) => normalizeGitHubMarkdown(value, { lineBreaks: "unwrapped" })
+    expect(
+      unwrap(
+        [
+          "Clarify when a shared session promise needs Suspense in the",
+          "Authentication with Cache Components guide. A layout can call",
+          "`getCurrentUser()` and forward the promise without awaiting it. The",
+          "boundary goes around the UI that waits for the user.",
+        ].join("\n"),
+      ),
+    ).toBe(
+      "Clarify when a shared session promise needs Suspense in the Authentication with Cache Components guide. A layout can call `getCurrentUser()` and forward the promise without awaiting it. The boundary goes around the UI that waits for the user.",
+    )
+    expect(
+      unwrap(
+        [
+          "- Tested a layout that forwards the session promise in the iron-session",
+          "  example on 16.4.6 and 16.5.0-canary.68. With Cache Components and",
+          "  Partial Prefetching enabled.",
+          "- Second item",
+          "  kept apart",
+        ].join("\n"),
+      ),
+    ).toBe(
+      "- Tested a layout that forwards the session promise in the iron-session example on 16.4.6 and 16.5.0-canary.68. With Cache Components and Partial Prefetching enabled.\n- Second item\\\n  kept apart",
+    )
+    const mixed = unwrap(
+      [
+        "This paragraph was wrapped by hand at seventy-two columns so its lines",
+        "continue onto the next one and should be joined back together when shown.",
+        "",
+        "Fixes #12",
+        "Closes #13",
+        "",
+        "```text",
+        "one line of preformatted output that is long enough to look wrapped here",
+        "two",
+        "```",
+        "",
+        "Co-authored-by: Some Very Long Contributor Name <some.very.long.name@example-company.com>",
+        "Signed-off-by: Other Person <other@example.com>",
+      ].join("\n"),
+    )
+    expect(mixed).toContain("so its lines continue onto the next one and should be joined")
+    expect(mixed).toContain("Fixes #12\\\nCloses #13")
+    expect(mixed).toContain("long enough to look wrapped here\ntwo\n```")
+    expect(mixed).toContain("example-company.com>\\\nSigned-off-by:")
+    expect(unwrap("Fixes the login flow for everyone\nUpdates the signup flow for teams")).toBe(
+      "Fixes the login flow for everyone\\\nUpdates the signup flow for teams",
+    )
+    expect(normalizeGitHubMarkdown("one\ntwo")).toBe("one two")
+  })
+
+  test("Markdown syntax is recognized without treating plain commit text as Markdown", () => {
+    for (const value of [
+      "### What?\n\nText",
+      "Use `getCurrentUser()` here",
+      "```sh\nls\n```",
+      "See [the guide](https://example.com/guide)",
+      "This is **important**",
+      "- [x] done",
+      "<!-- template -->\nText",
+    ])
+      expect(hasMarkdownSyntax(value)).toBe(true)
+    for (const value of [
+      "Keep one owner for keyboard input so a single key press fires once.",
+      "- first change\n- second change",
+      "Handle Array<string> and __init__ for #1234\n\nSigned-off-by: A <a@example.com>",
+      "#1234 follow-up: globs like *.ts and *.tsx",
+    ])
+      expect(hasMarkdownSyntax(value)).toBe(false)
   })
 
   test("lists keep the spacing they were written with", () => {

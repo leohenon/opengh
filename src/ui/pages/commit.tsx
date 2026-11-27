@@ -12,7 +12,10 @@ import { useTheme } from "../theme"
 import { useIcons } from "../icon-style"
 import { iconPrefix } from "../icons"
 import { createScrollbarVisibility } from "../scrollbar-visibility"
+import { GitHubMarkdown } from "../components/github-markdown"
 import { LinkedText } from "../components/linked-text"
+import { hasMarkdownSyntax, type GitHubMarkdownContext } from "../github-markdown"
+import { createReactiveMarkdownStyle } from "../markdown-style"
 import { normalizeRepositoryUrl } from "../reference-links"
 import { wrapAtWhitespace } from "../whitespace-wrap"
 
@@ -35,11 +38,13 @@ export function CommitScreen(props: {
   pageWidth?: PageWidth
   repositoryUrl?: string
 }) {
-  const { colors } = useTheme()
+  const { colors, theme } = useTheme()
   const icons = useIcons()
   const renderer = useRenderer()
+  const markdownStyle = createReactiveMarkdownStyle(colors, theme)
   const dimensions = useTerminalDimensions()
   const compact = () => dimensions().width < 60
+  const wrapText = (node: TextRenderable) => wrapAtWhitespace(renderer, node)
   const wrapPath = (node: TextRenderable) => wrapAtWhitespace(renderer, node, "/")
   const centered = () => (props.pageWidth ?? defaultConfig.pageWidth) === "centered"
   const contentWidth = () => detailContentWidth(props.pageWidth)
@@ -63,7 +68,15 @@ export function CommitScreen(props: {
     const newline = message.indexOf("\n")
     return newline < 0 ? "" : message.slice(newline + 1).trim()
   })
+  const markdownBody = createMemo(() => {
+    const paragraphs = body().split(/\n{2,}/)
+    const trailers = paragraphs.at(-1)!
+    if (!trailers.split("\n").every((line) => /^[A-Za-z][A-Za-z0-9-]*: \S/.test(line))) return body()
+    return [...paragraphs.slice(0, -1), trailers.replaceAll("<", "\\<")].join("\n\n")
+  })
   const repositoryUrl = createMemo(() => normalizeRepositoryUrl(props.repositoryUrl))
+  const markdownContext = (): GitHubMarkdownContext | undefined =>
+    repositoryUrl() ? { repositoryUrl: repositoryUrl()!, ref: props.sha, sourceUrl: `${repositoryUrl()}/commit/${props.sha}` } : undefined
   const fileTarget = (path: string) =>
     repositoryUrl()
       ? `${repositoryUrl()}/blob/${encodeURIComponent(props.sha)}/${path.split("/").map(encodeURIComponent).join("/")}`
@@ -153,9 +166,24 @@ export function CommitScreen(props: {
             <box width="100%" maxWidth={contentWidth()} minWidth={0} flexShrink={0} flexDirection="column">
               <Show when={body()}>
                 <box width="100%" minWidth={0} flexShrink={0} backgroundColor={surface()} paddingX={2} paddingY={1}>
-                  <text width="100%" flexShrink={0} fg={colors.text}>
-                    <LinkedText text={body()} repositoryUrl={props.repositoryUrl} />
-                  </text>
+                  <Show
+                    when={hasMarkdownSyntax(body())}
+                    fallback={
+                      <text ref={wrapText} width="100%" flexShrink={0} fg={colors.text}>
+                        <LinkedText text={body()} repositoryUrl={props.repositoryUrl} />
+                      </text>
+                    }
+                  >
+                    <GitHubMarkdown
+                      content={markdownBody()}
+                      syntaxStyle={markdownStyle()}
+                      backgroundColor={surface()}
+                      context={markdownContext()}
+                      lineBreaks="unwrapped"
+                      preserveImages
+                      codePanels
+                    />
+                  </Show>
                 </box>
               </Show>
               <text width="100%" flexShrink={0} marginTop={body() ? 1 : 0} fg={colors.muted}>

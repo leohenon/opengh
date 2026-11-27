@@ -672,17 +672,53 @@ function githubAlerts() {
     })
 }
 
-function softLineBreaks(options: { enabled?: boolean } = {}) {
-  return (tree: MarkdownRoot) => {
-    if (!options.enabled) return
+const WRAP_COLUMN_MINIMUM = 60
+const trailerLine = /^[A-Za-z][A-Za-z0-9-]*: \S/
+
+function hardWrappedLines(tree: MarkdownRoot, source: string) {
+  const lines = source.split(/\r\n|[\r\n]/)
+  const code = new Set<number>()
+  visit(tree, "code", (node) => {
+    if (!node.position) return
+    for (let line = node.position.start.line; line <= node.position.end.line; line++) code.add(line)
+  })
+  const prose = lines.map((line) =>
+    line
+      .replace(/^[\s>]+/, "")
+      .replace(/^(?:[-*+]|\d+[.)])\s+/, "")
+      .trimEnd(),
+  )
+  let column = 0
+  prose.forEach((text, index) => {
+    if (code.has(index + 1) || trailerLine.test(text) || text.split(/\s+/).length < 3) return
+    column = Math.max(column, text.length)
+  })
+  const wrapped = new Set<number>()
+  if (column < WRAP_COLUMN_MINIMUM) return wrapped
+  for (let index = 0; index + 1 < prose.length; index++) {
+    const next = prose[index + 1]!
+    if (!next || trailerLine.test(next)) continue
+    if (prose[index]!.length + 1 + next.split(/\s/)[0]!.length > column) wrapped.add(index + 1)
+  }
+  return wrapped
+}
+
+function softLineBreaks(options: { breaks?: "all" | "unwrapped" | "none" } = {}) {
+  return (tree: MarkdownRoot, file: { value: unknown }) => {
+    if (!options.breaks || options.breaks === "none") return
+    const wrapped = options.breaks === "unwrapped" ? hardWrappedLines(tree, String(file.value)) : undefined
     visit(tree, "text", (node, index, parent) => {
       if (!parent || index === undefined) return
       const lines = node.value.split(/\r\n|[\r\n]/)
       if (lines.length < 2) return
-      const children: PhrasingContent[] = lines.flatMap((value, line) => [
-        ...(line ? [{ type: "break" as const }] : []),
-        { type: "text" as const, value },
-      ])
+      const last = node.position?.end.line
+      const children: PhrasingContent[] = [{ type: "text", value: lines[0]! }]
+      lines.slice(1).forEach((value, offset) => {
+        const previous = children.at(-1)!
+        const ending = last === undefined ? undefined : last - (lines.length - 1) + offset
+        if (ending !== undefined && wrapped?.has(ending) && previous.type === "text") previous.value += ` ${value}`
+        else children.push({ type: "break" }, { type: "text", value })
+      })
       parent.children.splice(index, 1, ...children)
       return index + children.length
     })
@@ -832,7 +868,7 @@ const processor = unified()
   })
 
 // Issue attachments are evidence, even when their labels look like README branding.
-const discussionProcessor = processor().use(terminalMedia, { preserveImages: true }).use(softLineBreaks, { enabled: true })
+const discussionProcessor = processor().use(terminalMedia, { preserveImages: true }).use(softLineBreaks, { breaks: "all" })
 function plainCodeFences() {
   return (tree: MarkdownRoot) =>
     visit(tree, "code", (node) => {
@@ -866,6 +902,7 @@ export function normalizeGitHubMarkdown(
   value: string,
   options: {
     preserveImages?: boolean
+    lineBreaks?: "all" | "unwrapped"
     codePanels?: boolean
     context?: GitHubMarkdownContext
     anchors?: boolean
@@ -883,8 +920,10 @@ export function normalizeGitHubMarkdown(
       : options.preserveImages
         ? discussionProcessor
         : processor
-  const convert = (lineBreaks: boolean) => {
-    const base = lineBreaks ? selected : selected().use(softLineBreaks, { enabled: false })
+  const defaultBreaks = options.preserveImages ? "all" : "none"
+  const lineBreaks = options.lineBreaks ?? defaultBreaks
+  const convert = (breaks: "all" | "unwrapped" | "none") => {
+    const base = breaks === defaultBreaks ? selected : selected().use(softLineBreaks, { breaks })
     const contextual = options.context?.repositoryUrl ? base().use(githubLinks, options.context) : base
     const file = { value, data: { documentAnchors: options.anchors, sourceMap: options.sourceMap } }
     const tree = contextual.runSync(contextual.parse(file), file)
@@ -895,9 +934,13 @@ export function normalizeGitHubMarkdown(
     return markdown.trim()
   }
   try {
-    return convert(true)
+    return convert(lineBreaks)
   } catch (error) {
-    if (!options.preserveImages || !(error instanceof GitHubMarkdownError)) throw error
-    return convert(false)
+    if (lineBreaks === "none" || !(error instanceof GitHubMarkdownError)) throw error
+    return convert("none")
   }
+}
+
+export function hasMarkdownSyntax(value: string) {
+  return /^ {0,3}(?:#{1,6} \S|```|~~~|[-*+] \[[ xX]\] )|`[^`\n]+`|\*\*[^*\n]+\*\*|\[[^\]\n]+\]\([^)\s]+\)|<!--|<details\b/im.test(value)
 }
