@@ -9,6 +9,8 @@ import { GitHubMarkdown } from "./github-markdown"
 import { type ReactionControls, Reactions, messageReactionMouse } from "./reactions"
 import { TimelineEntry, TimelineHeader } from "./timeline-entry"
 import { reviewSnippet } from "../review-snippet"
+import { fitDiffPath } from "../diff-path"
+import { ListLine } from "./list-line"
 
 export const reviewThreadHeaderId = (id: string) => `review-thread-header:${id}`
 
@@ -112,19 +114,26 @@ export function ReviewThread(props: {
           flexDirection="row"
           backgroundColor={colors.header}
         >
-          <text flexGrow={1} flexBasis={0} minWidth={0} height={1} wrapMode="none" truncate fg={colors.text}>
-            <Show when={props.collapsed}>
-              <span style={{ fg: colors.muted }}>Review thread · </span>
-            </Show>
-            <b>{props.thread.path}</b>
-            {props.collapsed && line() !== undefined ? `:${line()}` : ""}
-            <Show when={props.collapsed}>
-              <span style={{ fg: colors.muted }}>
-                {" "}
-                · {props.thread.comments.length} {props.thread.comments.length === 1 ? "comment" : "comments"}
-              </span>
-            </Show>
-          </text>
+          <box height={1} flexGrow={1} flexBasis={0} flexShrink={1} minWidth={0}>
+            <ListLine fg={colors.text}>
+              {(width) => {
+                const lineSuffix = props.collapsed && line() !== undefined ? `:${line()}` : ""
+                const count = props.collapsed
+                  ? ` · ${props.thread.comments.length} ${props.thread.comments.length === 1 ? "comment" : "comments"}`
+                  : ""
+                const room = width - Bun.stringWidth(lineSuffix + count)
+                const label = props.collapsed && room - 16 >= Math.min(24, Bun.stringWidth(props.thread.path)) ? "Review thread · " : ""
+                return (
+                  <>
+                    <span style={{ fg: colors.muted }}>{label}</span>
+                    <b>{fitDiffPath(props.thread.path, Math.max(1, room - Bun.stringWidth(label)))}</b>
+                    {lineSuffix}
+                    <span style={{ fg: colors.muted }}>{count}</span>
+                  </>
+                )
+              }}
+            </ListLine>
+          </box>
           <Show when={props.thread.isResolved}>
             <text flexShrink={0} fg={colors.muted}>
               {" "}

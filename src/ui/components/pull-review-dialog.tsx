@@ -8,10 +8,11 @@ import { createReactiveMarkdownStyle } from "../markdown-style"
 import { mouseClick, mouseHover } from "../mouse"
 import { createScrollbarVisibility } from "../scrollbar-visibility"
 import { useTheme } from "../theme"
-import { reviewAnchorLabel } from "../review-lines"
+import { fitReviewAnchorLabel, reviewAnchorLabel } from "../review-lines"
 import { Action } from "./action"
 import { GitHubMarkdown } from "./github-markdown"
-import { Popup } from "./popup"
+import { insetPopupSize, Popup } from "./popup"
+import { useTerminalDimensions } from "@opentui/solid"
 
 export type ReviewCommentDialogProps = ComposerPresentation & {
   anchor: ReviewAnchor
@@ -29,6 +30,7 @@ export type ReviewCommentDialogProps = ComposerPresentation & {
 export function ReviewEditor(
   props: ComposerPresentation & {
     title: string
+    fitTitle?(width: number): string
     body: string
     repositoryUrl: string
     headSha: string
@@ -45,8 +47,10 @@ export function ReviewEditor(
 ) {
   const { colors, theme } = useTheme()
   const keys = useKeybindings()
+  const dimensions = useTerminalDimensions()
   const markdownStyle = createReactiveMarkdownStyle(colors, theme)
   const bindScrollbar = createScrollbarVisibility(() => props.showScrollbar)
+  const titleFor = (width: number) => (props.fitTitle ? props.fitTitle(width) : props.title)
   const [body, setBody] = createSignal(props.body)
   const [error, setError] = createSignal<string>()
   const [confirming, setConfirming] = createSignal(false)
@@ -132,7 +136,7 @@ export function ReviewEditor(
         <box width="100%" alignSelf="center" flexGrow={1} minHeight={0} paddingX={2} paddingBottom={1} flexDirection="column">
           <box height={1} flexShrink={0} flexDirection="row" justifyContent="space-between">
             <text flexGrow={1} minWidth={0} wrapMode="none" fg={colors.text} attributes={TextAttributes.BOLD}>
-              {props.title}
+              {titleFor(insetPopupSize(dimensions().width, 86, composer.expanded()) - 4 - (composer.preview() ? 8 : 0))}
             </text>
             <text fg={colors.muted}>{composer.preview() ? "Preview" : ""}</text>
           </box>
@@ -213,7 +217,7 @@ export function ReviewEditor(
               {props.confirmTitle ?? "Post inline comment?"}
             </text>
             <text maxHeight={3} flexShrink={0} wrapMode="word" fg={colors.text}>
-              {props.title}
+              {titleFor(insetPopupSize(dimensions().width, 64) - 4)}
             </text>
             <box flexGrow={1} minHeight={0} />
             <Action id="inline-comment-confirm" onActivate={confirm}>
@@ -230,6 +234,7 @@ export function ReviewCommentDialog(props: ReviewCommentDialogProps) {
   return (
     <ReviewEditor
       title={reviewAnchorLabel(props.anchor)}
+      fitTitle={(width) => fitReviewAnchorLabel(props.anchor, width)}
       body={props.body ?? ""}
       repositoryUrl={props.repositoryUrl}
       headSha={props.headSha}

@@ -251,6 +251,6 @@ test("diff file headers keep their stats and the sidebar keeps its ellipsis", as
     await setup.renderer.idle()
   }
   const frame = setup.captureCharFrame().split("\n")
-  expect(frame.find((row) => row.includes("│d4/"))!.trimEnd()).toEndWith("+1 −1")
-  expect(frame.some((row) => /^ {2}x+\.\.\. *│/.test(row))).toBe(true)
+  expect(frame.find((row) => /│.*q\.\.\.q+\.ts/.test(row))!.trimEnd()).toEndWith("+1 −1")
+  expect(frame.some((row) => /^ {2}x+\.\.\.x*29\.ts *│/.test(row))).toBe(true)
 })

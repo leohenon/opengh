@@ -27,6 +27,32 @@ export function fitText(value: string, width: number) {
   return `${result}...`
 }
 
+export function fitMiddle(value: string, width: number) {
+  if (width <= 0) return ""
+  if (Bun.stringWidth(value) <= width) return value
+  if (width <= 3) return ".".repeat(width)
+  const parts = [...graphemes.segment(value)].map((part) => part.segment)
+  const room = width - 3
+  const take = (source: string[], limit: number) => {
+    const kept: string[] = []
+    let used = 0
+    for (const part of source) {
+      const size = Bun.stringWidth(part)
+      if (used + size > limit) break
+      kept.push(part)
+      used += size
+    }
+    return kept
+  }
+  let tail = take([...parts].reverse(), Math.ceil(room / 2)).reverse()
+  let head = take(parts, room - Bun.stringWidth(tail.join("")))
+  if (tail[0] === "." && head.length > 1) {
+    head = head.slice(0, -1)
+    tail = take([...parts].reverse(), room - Bun.stringWidth(head.join(""))).reverse()
+  }
+  return `${head.join("")}...${tail.join("")}`
+}
+
 export function wrappedRows(value: string, width: number) {
   if (width <= 0) return 0
   let rows = 0

@@ -2,7 +2,8 @@ import { iconPrefix } from "./icons"
 import { BoxRenderable, TextAttributes, TextRenderable, type Renderable, type RenderContext, type TextOptions } from "@opentui/core"
 import type { PullReviewThread, ReviewThreadComment } from "../models"
 import type { ReviewAnchor } from "../review-types"
-import { relativeTime } from "./format"
+import { fitText, relativeTime } from "./format"
+import { fitDiffPath } from "./diff-path"
 import { reviewSplitBoundary, type ReviewRow } from "./review-lines"
 
 const prefix = "diff-comment-card:"
@@ -89,14 +90,20 @@ export function createDiffCommentCards(
         const anchor = row && host.findDescendantById(row.id)
         const line = thread.line ?? thread.originalLine
         // Cards away from their line say where they belong.
-        const location = anchor ? "" : `${thread.isOutdated ? "Outdated" : "Unplaced"} · ${thread.path}${line ? `:${line}` : ""}`
+        const box = noteBox(width, layout, anchor ? thread.diffSide : undefined)
         const replying = reply?.active === thread.id
         const fold = collapsed && !replying
         const count = `${thread.comments.length} ${thread.comments.length === 1 ? "comment" : "comments"}`
-        const title = [location, fold ? count : "", thread.isResolved ? "resolved" : ""].filter(Boolean).join(" · ")
+        const details = [fold ? count : "", thread.isResolved ? "resolved" : ""].filter(Boolean)
+        const label = `${thread.isOutdated ? "Outdated" : "Unplaced"} · `
+        const lineSuffix = line ? `:${line}` : ""
+        const pathRoom =
+          box.width - 6 - Bun.stringWidth(label + lineSuffix) - details.reduce((used, detail) => used + 3 + Bun.stringWidth(detail), 0)
+        const location = anchor ? "" : `${label}${fitDiffPath(thread.path, Math.max(8, pathRoom))}${lineSuffix}`
+        const title = fitText([location, ...details].filter(Boolean).join(" · "), box.width - 6)
         const card = new BoxRenderable(renderer, {
           id: `${prefix}${thread.id}`,
-          ...noteBox(width, layout, anchor ? thread.diffSide : undefined),
+          ...box,
           flexDirection: "column",
           flexShrink: 0,
           border: true,

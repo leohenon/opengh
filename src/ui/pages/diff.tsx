@@ -53,7 +53,7 @@ import {
 import type { ResourceState } from "../../repository-state"
 import { SelectableList } from "../components/selectable-list"
 import { ListLine } from "../components/list-line"
-import { fitDiffPath } from "../diff-path"
+import { fitDiffPath, fitRename } from "../diff-path"
 import { mouseClick, mouseContextMenu, mouseHover, type MousePosition } from "../mouse"
 import type { ContextMenuItem } from "../components/context-menu"
 import { parseDiff, streamWithinBudget, type DiffFile } from "../diff-model"
@@ -113,6 +113,12 @@ const lightThemeAliases: Partial<Record<string, HunkDiffThemeName>> = {
 }
 const TAB_WIDTH = 4
 const COMPOSER_ID = "diff-comment-composer"
+
+function fileStatusLabel(file: { status: string }) {
+  return file.status === "new" || file.status === "deleted" || file.status.startsWith("rename")
+    ? `  ${file.status.startsWith("rename") ? "renamed" : file.status}`
+    : ""
+}
 
 export function DiffScreen(props: {
   target: DiffTarget
@@ -1023,6 +1029,10 @@ export function DiffScreen(props: {
           const status = new TextRenderable(renderer, { content: "", height: 1, flexShrink: 0, fg: colors.muted })
           const additions = new TextRenderable(renderer, { content: ` +${file.additions}`, height: 1, flexShrink: 0, fg: colors.green })
           const deletions = new TextRenderable(renderer, { content: ` −${file.deletions}`, height: 1, flexShrink: 0, fg: colors.red })
+          header.onSizeChange = () => {
+            const room = header.width - Bun.stringWidth(`${fileStatusLabel(file)} +${file.additions} −${file.deletions}`)
+            title.content = file.previousPath ? fitRename(file.previousPath, file.path, room) : fitDiffPath(file.path, room)
+          }
           header.add(title)
           header.add(status)
           header.add(additions)
@@ -1044,10 +1054,7 @@ export function DiffScreen(props: {
         entry.box.borderColor = colors.border
         entry.header.backgroundColor = colors.header
         entry.title.fg = colors.text
-        entry.status.content =
-          file.status === "new" || file.status === "deleted" || file.status.startsWith("rename")
-            ? `  ${file.status.startsWith("rename") ? "renamed" : file.status}`
-            : ""
+        entry.status.content = fileStatusLabel(file)
         entry.status.fg = colors.muted
         entry.additions.fg = colors.green
         entry.deletions.fg = colors.red
@@ -1508,9 +1515,15 @@ export function DiffScreen(props: {
           <text flexShrink={0} maxWidth="50%" height={1} wrapMode="none" truncate fg={colors.blue}>
             {label()}{" "}
           </text>
-          <text flexGrow={1} flexBasis={0} flexShrink={1} minWidth={0} height={1} wrapMode="none" truncate fg={colors.text}>
-            {selected()?.previousPath ? `${selected()!.previousPath} → ${selected()!.path}` : (selected()?.path ?? "Diff")}
-          </text>
+          <box height={1} flexGrow={1} flexBasis={0} flexShrink={1} minWidth={0}>
+            <ListLine fg={colors.text}>
+              {(width) => {
+                const file = selected()
+                if (!file) return "Diff"
+                return file.previousPath ? fitRename(file.previousPath, file.path, width) : fitDiffPath(file.path, width)
+              }}
+            </ListLine>
+          </box>
           <Show when={selected()}>
             <text flexShrink={0} fg={colors.green}>
               {" "}

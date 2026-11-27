@@ -1,5 +1,6 @@
 import type { HunkDiffFile } from "hunkdiff/opentui"
 import type { ReviewAnchor } from "../review-types"
+import { fitDiffPath } from "./diff-path"
 
 export type ReviewRow = { id: string; hunk: number; left?: ReviewAnchor; right?: ReviewAnchor }
 export type ReviewLocation = { anchor: ReviewAnchor; hunk: number }
@@ -87,3 +88,8 @@ export function extendReviewRange(start: ReviewLocation | undefined, end: Review
 
 export const reviewAnchorLabel = (anchor: ReviewAnchor) =>
   `${anchor.path}:${anchor.startLine ? `${anchor.startLine}–` : ""}${anchor.line} (${anchor.side})`
+
+export function fitReviewAnchorLabel(anchor: ReviewAnchor, width: number) {
+  const suffix = `:${anchor.startLine ? `${anchor.startLine}–` : ""}${anchor.line} (${anchor.side})`
+  return `${fitDiffPath(anchor.path, Math.max(1, width - Bun.stringWidth(suffix)))}${suffix}`
+}
