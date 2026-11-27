@@ -7,7 +7,7 @@ signed-in GitHub CLI; see [Installation](installation.md#authenticate).
 
 ## Navigation
 
-Use the keyboard or mouse. Arrow keys move between tabs and items, and `1`–`5` jump to a tab; `enter` opens an item and `esc` goes back. Press `S` to switch repositories. Except for running Actions, pages don't update on their own. Press `r` to refresh, or to retry after an error.
+Use the keyboard or mouse. Arrow keys move between tabs and items, and `1`–`5` jump to a tab; `enter` opens an item and `esc` goes back. opengh shows one repository at a time. Press `S` to switch, and `esc` to go back after a link opens another repository. Except for running Actions, pages don't update on their own. Press `r` to refresh, or to retry after an error.
 
 Press `?` for shortcuts or right-click for actions. For anything opengh doesn't do yet, press `o` to open it on GitHub, or `y` to copy its link (a SHA for commits). See [Keybindings](keybindings.md) for defaults and customization. Press `,` to open [settings](configuration.md).
 

@@ -49,6 +49,12 @@ opengh https://github.com/owner/repo/pull/123     # A GitHub link
 
 Press `?` for shortcuts, or right-click anything.
 
+## Update
+
+```sh
+opengh update
+```
+
 ## For agents · [Agent CLI](docs/agent-cli.md)
 
 Gives your agent a whole PR in one command, including the line comments `gh pr view` leaves out.
@@ -57,11 +63,9 @@ Gives your agent a whole PR in one command, including the line comments `gh pr v
 npx skills add leohenon/opengh --skill opengh --global
 ```
 
-## Update
+## Demo · [Demos](docs/demos.md)
 
-```sh
-opengh update
-```
+![Clicking links to a commit, its diff, an issue, and another repository](docs/assets/demos/click-links-and-mouse-navigation.gif)
 
 ## Documentation
 

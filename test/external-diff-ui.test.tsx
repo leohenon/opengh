@@ -81,15 +81,14 @@ test("diff viewer and GitHub keys work in both context menus without review; e i
     await settle()
     expect(menu.some((item) => item.label.includes("review comment"))).toBe(false)
     expect(menu.some((item) => item.label.includes("editor"))).toBe(false)
-    menu.find((item) => item.label === "Open diff in external viewer")!.run()
-    expect(calls).toEqual([[], []])
+    expect(menu.some((item) => item.label === "Open diff in external viewer")).toBe(false)
     menu.find((item) => item.label === "Open diff on GitHub")!.run()
     expect(github).toBe(2)
     const sidebar = setup.renderer.root.findDescendantById("diff-files-pane")!
     await setup.mockMouse.click(sidebar.x + 5, sidebar.y + 2, 2)
     await settle()
-    menu.find((item) => item.label === "Open diff in external viewer")!.run()
-    expect(calls).toEqual([[], [], []])
+    expect(menu.some((item) => item.label === "Open diff in external viewer")).toBe(false)
+    expect(calls).toEqual([[]])
     const before = calls.length
     setup.mockInput.pressKey("F")
     await settle()

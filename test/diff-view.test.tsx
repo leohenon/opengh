@@ -812,17 +812,17 @@ test("numbered tabs retain independent diff viewers, geometry and scroll until E
     }
     await diffMenu()
     expect(setup.captureCharFrame()).toContain("Settings")
-    await clickControl(setup, "context-menu-row-2") // Change layout follows the two external actions.
+    await clickControl(setup, "context-menu-row-1")
     await settle()
     expect(sharedRow()).toBe(false)
     expect(setup.renderer.root.findDescendantById("context-menu")).toBeUndefined()
     setup.mockInput.pressKey("w")
     await diffMenu()
-    await clickControl(setup, "context-menu-row-3") // Toggle files uses the same transition as b.
+    await clickControl(setup, "context-menu-row-2")
     await settle()
     expect(setup.renderer.root.findDescendantById("diff-files-pane")!.visible).toBe(false)
     await diffMenu()
-    await clickControl(setup, "context-menu-row-3")
+    await clickControl(setup, "context-menu-row-2")
     await settle()
     expect(setup.renderer.root.findDescendantById("diff-files-pane")!.visible).toBe(true)
     setup.mockInput.pressKey(",")
@@ -833,7 +833,7 @@ test("numbered tabs retain independent diff viewers, geometry and scroll until E
     await setup.mockMouse.click(filesPane.x + 4, filesPane.y + 1, 2)
     await settle()
     expect(setup.captureCharFrame()).toContain("Settings")
-    await clickControl(setup, "context-menu-row-4")
+    await clickControl(setup, "context-menu-row-3")
     await settle()
     expect(setup.captureCharFrame()).toContain("Appearance")
     setup.mockInput.pressEscape()
@@ -843,7 +843,7 @@ test("numbered tabs retain independent diff viewers, geometry and scroll until E
     setup.mockInput.pressKey(".") // Return to the long second file after the sidebar menu selected the first.
     await settle()
     await diffMenu()
-    await clickControl(setup, "context-menu-row-3")
+    await clickControl(setup, "context-menu-row-2")
     await settle()
     expect(setup.renderer.root.findDescendantById("diff-files-pane")!.visible).toBe(false)
     setup.mockInput.pressKey("]")

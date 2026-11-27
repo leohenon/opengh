@@ -1286,10 +1286,7 @@ export function DiffScreen(props: {
     setLocation(hit)
     startDraft(hit.anchor)
   }
-  const externalItems = (): ContextMenuItem[] => [
-    { label: "Open diff on GitHub", run: () => props.onOpenGitHub?.() },
-    { label: "Open diff in external viewer", run: () => props.onOpenExternal?.() },
-  ]
+  const externalItems = (): ContextMenuItem[] => [{ label: "Open diff on GitHub", run: () => props.onOpenGitHub?.() }]
   const contextMouse = mouseContextMenu(
     (position) => {
       const reply = contextReply

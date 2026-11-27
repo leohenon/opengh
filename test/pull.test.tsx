@@ -291,3 +291,74 @@ test("pull request permission failures explain why actions are unavailable", asy
     view.renderer.destroy()
   }
 })
+
+test("the PR's file count opens its diff without reloading the PR", async () => {
+  const number = issueDetailFixture.number
+  const href = `https://github.com/anomalyco/opentui/pull/${number}/files`
+  const loads: number[] = []
+  const diffs: unknown[] = []
+  const view = await testRender(
+    () => (
+      <App
+        data={githubDataFixture}
+        operations={repositoryOperationsFixture}
+        initialNavigation={{ detail: { kind: "pull", number } }}
+        onLoadPull={async (pull) => {
+          loads.push(pull)
+        }}
+        onLoadDiff={async (target) => {
+          diffs.push(target)
+        }}
+        pullDetail={{
+          number,
+          resource: {
+            status: "ready",
+            value: {
+              ...issueDetailFixture,
+              url: `https://github.com/anomalyco/opentui/pull/${number}`,
+              merged: false,
+              draft: false,
+              baseBranch: "main",
+              headBranch: "feature",
+              additions: 27,
+              deletions: 11,
+              changedFiles: 5,
+              commitCount: 3,
+              reviewers: [],
+              mergeable: true,
+            },
+          },
+          comments: { status: "ready", value: { items: [], page: 1, hasMore: false } },
+          references: { status: "ready", value: [] },
+          commits: { status: "ready", value: [] },
+          context: { status: "ready", value: pullContextFixture },
+        }}
+      />
+    ),
+    { width: 120, height: 40 },
+  )
+  try {
+    const find = () => {
+      for (let y = 0; y < view.renderer.height; y++)
+        for (let x = 0; x < view.renderer.width; x++) if (view.renderer.getLinkAt(x, y) === href) return { x, y }
+    }
+    let position = find()
+    for (let attempt = 0; attempt < 20 && !position; attempt++) {
+      await Bun.sleep(10)
+      await view.flush()
+      position = find()
+    }
+    if (!position) throw new Error(`No painted hyperlink for ${href}`)
+    expect(view.captureCharFrame()).toContain("5 files")
+    const loadsBefore = loads.length
+    await view.mockMouse.click(position.x, position.y)
+    for (let frame = 0; frame < 4; frame++) {
+      await Bun.sleep(5)
+      await view.flush()
+    }
+    expect(diffs).toContainEqual(expect.objectContaining({ kind: "pull", number }))
+    expect(loads.length).toBe(loadsBefore)
+  } finally {
+    view.renderer.destroy()
+  }
+})

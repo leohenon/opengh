@@ -233,7 +233,7 @@ test("detail and diff menus retain their actions with Back at the bottom", async
     expect(view.renderer.root.findDescendantById("context-menu")).toBeDefined()
     expect(view.captureCharFrame()).toContain("Back")
     const actions = diff
-      ? ["Open diff on GitHub", "Open diff in external viewer", "Change layout", "Toggle files", "Settings", "Back"]
+      ? ["Open diff on GitHub", "Change layout", "Toggle files", "Settings", "Back"]
       : id === "commit-detail-scroll"
         ? ["View diff", "Open on GitHub", "Copy SHA", "Back"]
         : id === "pull-detail-scroll"

@@ -118,7 +118,13 @@ function PullMetadata(props: {
       <MetadataField label="Changes" compact={props.compact}>
         {props.pull.commitCount} {props.pull.commitCount === 1 ? "commit" : "commits"}
         {" · "}
-        {props.pull.changedFiles} {props.pull.changedFiles === 1 ? "file" : "files"}
+        <Show when={props.pull.changedFiles > 0} fallback="0 files">
+          <span style={{ fg: colors.blue }}>
+            <a href={`https://github.com/${props.pull.url.split("/").slice(3, 5).join("/")}/pull/${props.pull.number}/files`}>
+              {`${props.pull.changedFiles} ${props.pull.changedFiles === 1 ? "file" : "files"}`}
+            </a>
+          </span>
+        </Show>
         <Show when={props.compact} fallback={<br />}>
           {" · "}
         </Show>

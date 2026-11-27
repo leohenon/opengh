@@ -2962,7 +2962,7 @@ function AppContent(props: AppProps) {
         const detail = initial.detail
         if (detail?.kind === "commit") openCommit(detail.sha)
         if (detail?.kind === "issue") openIssue(detail.number)
-        if (detail?.kind === "pull") openPull(detail.number)
+        if (detail?.kind === "pull" && !(initial.diff && activePullNumber() === detail.number)) openPull(detail.number)
         if (detail?.kind === "run") openRun(detail.id)
         if (initial.page) setNavigation((state) => openPage(state, initial.page!))
         if (initial.diff) viewDiff(initial.diff)
