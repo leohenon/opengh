@@ -354,9 +354,7 @@ export function IssueScreen(props: {
                   <Show when={!wide()}>
                     <box width="100%" minWidth={0} flexShrink={0} paddingBottom={1}>
                       <IssueMetadata issue={current()} compact inline={props.inlineMetadata} />
-                      <Show when={props.inlineMetadata}>
-                        <IssueDates issue={current()} compact />
-                      </Show>
+                      <IssueDates issue={current()} compact />
                     </box>
                   </Show>
                   <box
@@ -418,11 +416,6 @@ export function IssueScreen(props: {
                       backgroundColor={surface()}
                       context={markdownContext()}
                     />
-                    <Show when={!props.inlineMetadata && !wide() && (current().closedAt || current().milestone?.dueAt)}>
-                      <box width="100%" minWidth={0} flexShrink={0} marginTop={1}>
-                        <IssueDates issue={current()} compact />
-                      </box>
-                    </Show>
                     <Show when={props.comment}>
                       {(comment) => (
                         <ActivityCommentComposer

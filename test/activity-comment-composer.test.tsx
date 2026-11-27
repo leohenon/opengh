@@ -354,12 +354,16 @@ for (const parent of ["issue", "pull"] as const) {
       if (parent === "issue") {
         scroll().scrollTo(scroll().scrollHeight)
         await settle()
+        expect(view.renderer.root.findDescendantById("issue-comment-area")).toBeDefined()
+        expect(view.captureCharFrame()).not.toContain("Due ")
+        scroll().scrollTo(0)
+        await settle()
         const dueRow = view
           .captureCharFrame()
           .split("\n")
           .findIndex((row) => row.trim().startsWith("Due "))
         expect(dueRow).toBeGreaterThanOrEqual(0)
-        expect(view.renderer.root.findDescendantById("issue-comment-area")!.y).toBeGreaterThan(dueRow)
+        expect(view.renderer.root.findDescendantById("issue-detail-description")!.y).toBeGreaterThan(dueRow)
       }
       expect(editor()?.plainText).toBe(action().body)
       view.resize(120, 30)
