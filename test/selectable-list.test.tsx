@@ -2,6 +2,8 @@ import { afterEach, describe, expect, test } from "bun:test"
 import { testRender } from "@opentui/solid"
 import { ScrollBoxRenderable } from "@opentui/core"
 import { createSignal } from "solid-js"
+import { App } from "../src/ui/app"
+import { githubDataFixture, repositoryOperationsFixture } from "./fixtures/github-data"
 import { SelectableList } from "../src/ui/components/selectable-list"
 
 const active: Array<{ renderer: { destroy(): void; isDestroyed: boolean } }> = []
@@ -182,6 +184,83 @@ describe("SelectableList", () => {
     await view.mockMouse.scroll(10, 7, "down")
     await view.flush()
     expect(endCalls).toBeGreaterThan(beforeUnderfilledWheel)
+  })
+
+  test("a refresh keeps the browsed row and line offset through prepends and reorders", async () => {
+    const rows = Array.from({ length: 30 }, (_, id) => ({ id }))
+    const [items, setItems] = createSignal(rows)
+    const [filter, setFilter] = createSignal("all")
+    let selected = -1
+    let endCalls = 0
+    const view = await testRender(
+      () => (
+        <SelectableList
+          items={items()}
+          itemKey={(item) => item.id}
+          resetKey={filter()}
+          active
+          empty="empty"
+          onSelect={(item) => {
+            selected = item.id
+          }}
+          onEndReached={() => endCalls++}
+        >
+          {(item) => <text>{`row ${item().id}`}</text>}
+        </SelectableList>
+      ),
+      { width: 50, height: 15 },
+    )
+    active.push(view)
+    await view.flush()
+    const list = view.renderer.root.getChildren()[0]!.getChildren()[0] as ScrollBoxRenderable
+    list.scrollTo(13)
+    await view.flush()
+    const frame = view.captureCharFrame()
+    setItems([{ id: 31 }, { id: 30 }, ...rows])
+    await view.flush()
+    expect(list.scrollTop).toBe(19)
+    expect(view.captureCharFrame()).toBe(frame)
+    setItems([...rows.slice(10), { id: 31 }, { id: 30 }, ...rows.slice(0, 10)])
+    await view.flush()
+    expect(list.scrollTop).toBe(79)
+    expect(view.captureCharFrame()).toBe(frame)
+    expect(selected).toBe(0)
+    const calls = endCalls
+    setItems([...Array.from({ length: 10 }, (_, i) => ({ id: 40 + i })), ...items()])
+    await view.flush()
+    expect(list.scrollTop).toBe(109)
+    expect(view.captureCharFrame()).toBe(frame)
+    expect(endCalls).toBe(calls)
+    setItems(items().map((item) => (item.id === 0 ? { id: 99 } : item)))
+    await view.flush()
+    expect(selected).toBe(99)
+    expect(view.captureCharFrame()).toBe(frame)
+    view.mockInput.pressKey("j")
+    await view.flush()
+    expect(selected).toBe(1)
+    expect(visibleRows(view.captureCharFrame()).find((line) => line.includes("row 1"))).toContain("▌")
+    list.scrollTo(13)
+    setFilter("open")
+    await view.flush()
+    expect(list.scrollTop).toBe(0)
+    expect(selected).toBe(items()[0]!.id)
+  })
+
+  test("shows ready rows on the first frame when a hidden list becomes visible", async () => {
+    const view = await testRender(() => <App data={githubDataFixture} operations={repositoryOperationsFixture} />, {
+      width: 100,
+      height: 24,
+    })
+    active.push(view)
+    await view.flush()
+    expect(view.captureCharFrame()).not.toContain("avoid duplicate key events")
+    let first = ""
+    view.renderer.once("frame", () => {
+      first = view.captureCharFrame()
+    })
+    view.mockInput.pressKey("2")
+    await view.flush()
+    expect(first).toContain("avoid duplicate key events")
   })
 
   test("renders only complete rows for its measured viewport", async () => {

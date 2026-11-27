@@ -6,6 +6,53 @@ import { App } from "../src/ui/app"
 import { githubDataFixture, repositoryOperationsFixture } from "./fixtures/github-data"
 import type { CommandResult } from "../src/command-actions"
 import { clickControl } from "./fixtures/mouse"
+import { CommandDialog } from "../src/ui/components/command-dialog"
+
+test("streaming output follows the bottom, holds a manual scroll, and follows again after G", async () => {
+  let append!: (chunk: string) => void
+  const view = await testRender(
+    () => (
+      <CommandDialog
+        action={{ title: "Test output", command: () => ({ cwd: ".", args: [] }) }}
+        onClose={() => {}}
+        onRun={async (_spec, output) => {
+          append = output
+          return { cancel() {}, result: new Promise(() => {}) }
+        }}
+      />
+    ),
+    { width: 90, height: 26 },
+  )
+  try {
+    await view.flush()
+    view.mockInput.pressEnter()
+    await view.flush()
+    append(Array.from({ length: 40 }, (_, i) => `output ${i}\n`).join(""))
+    await view.flush()
+    expect(view.captureCharFrame()).toContain("output 39")
+    append("following tail\n")
+    await view.flush()
+    expect(view.captureCharFrame()).toContain("following tail")
+    const cancel = view.renderer.root.findDescendantById("command-cancel")!
+    await view.mockMouse.scroll(cancel.x + 1, cancel.y - 3, "up")
+    await view.flush()
+    view.mockInput.pressKey("u")
+    await view.flush()
+    const browsed = view.captureCharFrame()
+    expect(browsed).not.toContain("following tail")
+    append("while browsing\n")
+    await view.flush()
+    expect(view.captureCharFrame()).toBe(browsed)
+    view.mockInput.pressKey("g", { shift: true })
+    await view.flush()
+    expect(view.captureCharFrame()).toContain("while browsing")
+    append("following again\n")
+    await view.flush()
+    expect(view.captureCharFrame()).toContain("following again")
+  } finally {
+    view.renderer.destroy()
+  }
+})
 
 test("command overlay isolates destination input and retains logs; Ctrl+C cancels rather than quits", async () => {
   const [hints, setHints] = createSignal(false)

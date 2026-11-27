@@ -55,7 +55,7 @@ export function ActionsScreen(props: {
         </box>
       }
     >
-      <ResourceStateView resource={props.runs}>
+      <ResourceStateView resource={props.runs} loadingLabel="Loading workflow runs…">
         {(runs) => (
           <SelectableList
             items={runs().items}

@@ -879,7 +879,7 @@ describe("opengh TUI", () => {
 
     setOperations((value) => ({ ...value, refresh: { status: "loading" } }))
     await view.flush()
-    expect(statusLine()).toBe("")
+    expect(statusLine()).toContain("/ search · ? help")
     await Bun.sleep(230)
     await view.flush()
     expect(statusLine()).toContain("Refreshing")
@@ -1228,6 +1228,21 @@ describe("opengh TUI", () => {
       expect(view.captureCharFrame()).toContain("in progress")
     },
   )
+
+  test("a retained background tab starts its loading delay when it becomes visible", async () => {
+    const [data, setData] = createSignal<RepositoryData>({ ...githubDataFixture, commits: { status: "loading", phase: "load" } })
+    const view = await testRender(() => <App data={data} operations={repositoryOperationsFixture} />, { width: 100, height: 24 })
+    active.push(view)
+    await view.flush()
+    await Bun.sleep(230)
+    view.mockInput.pressKey("2")
+    await view.renderOnce()
+    expect(view.captureCharFrame()).toContain("main")
+    expect(view.captureCharFrame()).not.toContain("Loading")
+    setData(githubDataFixture)
+    await view.flush()
+    expect(view.captureCharFrame()).toContain("avoid duplicate key events")
+  })
 
   test("keeps work tabs visible while loading and when empty, and hides unavailable Actions", async () => {
     const empty = { status: "ready" as const, value: { items: [], page: 1, hasMore: false } }

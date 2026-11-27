@@ -74,7 +74,7 @@ export function WorkScreen(props: {
         </box>
       }
     >
-      <ResourceStateView resource={props.resource}>
+      <ResourceStateView resource={props.resource} loadingLabel={`Loading ${props.kind === "pull" ? "pull requests" : "issues"}…`}>
         {(page) => (
           <SelectableList
             items={page().items}

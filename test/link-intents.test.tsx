@@ -1,11 +1,20 @@
 import { afterEach, describe, expect, test } from "bun:test"
-import { testRender } from "@opentui/solid"
+import type { ScrollBoxRenderable } from "@opentui/core"
+import { testRender, useRenderer } from "@opentui/solid"
 import { createSignal, type ComponentProps } from "solid-js"
 import { App } from "../src/ui/app"
+import { createCommentReveal, type CommentReveal } from "../src/ui/reveal-comment"
 import { defaultConfig } from "../src/config"
 import type { IssueComment } from "../src/models"
 import type { InitialNavigation } from "../src/navigation"
-import { githubDataFixture, issueDetailFixture, repositoryOperationsFixture } from "./fixtures/github-data"
+import {
+  githubDataFixture,
+  issueDetailFixture,
+  issuePullReferenceFixture,
+  pullContextFixture,
+  repositoryOperationsFixture,
+} from "./fixtures/github-data"
+import { waitForText } from "./fixtures/wait"
 
 const active: Array<{ renderer: { destroy(): void; isDestroyed: boolean } }> = []
 afterEach(() => {
@@ -53,6 +62,16 @@ async function clickLink(href: string, props: AppProps = {}) {
   await settle(view)
   return { view, locations, external }
 }
+
+const comments: IssueComment[] = Array.from({ length: 30 }, (_, index) => ({
+  id: 1000 + index,
+  author: index === 25 ? "target-author" : "max",
+  authorAssociation: "MEMBER",
+  body: `Comment body ${index}`,
+  createdAt: "2026-04-13T10:00:00Z",
+  updatedAt: "2026-04-13T10:00:00Z",
+}))
+const issue = { ...issueDetailFixture, body: Array.from({ length: 50 }, (_, i) => `Discussion line ${i}`).join("\n\n") }
 
 const creation = {
   onCreateIssue: async () => ({ number: 1 }) as never,
@@ -196,41 +215,196 @@ describe("link intents when a repository opens", () => {
     expect(view.captureCharFrame()).toContain("New issue")
   })
 
-  test("a comment link scrolls the conversation to that comment", async () => {
-    const comments: IssueComment[] = Array.from({ length: 30 }, (_, index) => ({
-      id: 1000 + index,
-      author: "max",
-      authorAssociation: "MEMBER",
-      body: `Comment body ${index}`,
-      createdAt: "2026-04-13T10:00:00Z",
-      updatedAt: "2026-04-13T10:00:00Z",
-    }))
+  test.each(["resize", "shrink", "wheel", "drag"])("pending comment on a scrolled viewport: %s", async (action) => {
+    const [target, setTarget] = createSignal<CommentReveal>()
+    const [ready, setReady] = createSignal(false)
+    const [tail, setTail] = createSignal(69)
+    let scroll!: ScrollBoxRenderable
+    const view = await testRender(
+      () => {
+        createCommentReveal({ renderer: useRenderer(), target, ready, sources: () => [], scroll: () => scroll, elementId: () => "anchor" })
+        return (
+          <scrollbox height="100%" ref={(value) => (scroll = value)}>
+            <box height={30} flexShrink={0} />
+            <box id="anchor" height={1} flexShrink={0} />
+            <box height={tail()} flexShrink={0} />
+          </scrollbox>
+        )
+      },
+      { width: 40, height: 10 },
+    )
+    active.push(view)
+    await view.flush()
+    scroll.scrollTo(90)
+    expect(scroll.scrollTop).toBe(90)
+    setTarget({ id: 1, request: 1 })
+    if (action === "shrink") setTail(59)
+    else view.resize(40, 20)
+    await view.flush()
+    expect(scroll.scrollTop).toBe(80)
+    if (action === "wheel") await view.mockMouse.scroll(2, 5, "up")
+    if (action === "drag") {
+      const slider = scroll.verticalScrollBar.slider
+      await view.mockMouse.drag(slider.x, slider.y + slider.height - 1, slider.x, slider.y + 4)
+    }
+    const manual = action === "wheel" || action === "drag"
+    const before = scroll.scrollTop
+    if (manual) expect(before).toBeLessThan(80)
+    setReady(true)
+    await view.flush()
+    expect(scroll.scrollTop).toBe(manual ? before : 30)
+  })
+
+  test.each(["cached", "delayed", "manual", "hidden"])(
+    "a comment link respects the viewport from the first ready frame: %s",
+    async (mode) => {
+      const [ready, setReady] = createSignal(mode === "cached")
+      const view = await testRender(
+        () => (
+          <App
+            data={githubDataFixture}
+            config={defaultConfig}
+            operations={repositoryOperationsFixture}
+            initialNavigation={{ detail: { kind: "issue", number: issueDetailFixture.number }, comment: 1025 }}
+            issueDetail={{
+              number: issueDetailFixture.number,
+              resource: { status: "ready", value: issue },
+              comments: ready()
+                ? { status: "ready", value: { items: comments, page: 1, hasMore: false } }
+                : { status: "loading", phase: "load" },
+              references: { status: "ready", value: [] },
+            }}
+          />
+        ),
+        { width: 120, height: 32 },
+      )
+      active.push(view)
+      if (mode !== "cached") await view.flush()
+      const scroll = view.renderer.root.findDescendantById("issue-detail-scroll") as ScrollBoxRenderable
+      if (mode === "manual") {
+        view.mockInput.pressKey("G")
+        await view.flush()
+        expect(scroll.scrollTop).toBeGreaterThan(0)
+      }
+      const before = scroll.scrollTop
+      if (mode === "hidden") {
+        view.mockInput.pressKey("1")
+        await settle(view)
+        expect(view.captureCharFrame()).toContain("Code of conduct")
+      }
+      setReady(true)
+      if (mode === "hidden") {
+        for (let frame = 0; frame < 125; frame++) await view.renderOnce()
+        expect(scroll.scrollTop).toBe(before)
+        view.mockInput.pressKey("3")
+      }
+      for (let pass = 0; pass < 4; pass++) {
+        await view.renderOnce()
+        if (mode === "manual") expect(scroll.scrollTop).toBe(before)
+        else {
+          const row = view
+            .captureCharFrame()
+            .split("\n")
+            .findIndex((line) => line.includes("target-author"))
+          expect(row).toBeGreaterThanOrEqual(0)
+          expect(row).toBeLessThan(10)
+        }
+      }
+      if (mode !== "manual") await waitForText(view, "Comment body 25")
+    },
+  )
+
+  test.each(["issue", "manual", "pull"] as const)("older timeline entries arrive after the comment is stable: %s", async (mode) => {
+    const [stage, setStage] = createSignal(0)
+    const kind = mode === "pull" ? "pull" : "issue"
+    const summary = githubDataFixture.pulls.open.value!.items[0]!
+    const number = kind === "issue" ? issue.number : summary.number
+    const older = "2026-04-01T10:00:00Z"
+    const loading = { status: "loading", phase: "load" } as const
+    const ready = <T,>(value: T) => ({ status: "ready" as const, value })
+    const page = ready({ items: comments, page: 1, hasMore: false })
+    const refs = Array.from({ length: 15 }, (_, i) => ({ ...issuePullReferenceFixture, id: String(i), number: i + 1, createdAt: older }))
+    const references = () => (stage() >= 1 ? ready(refs) : loading)
+    const pull = {
+      ...issue,
+      ...summary,
+      url: `${githubDataFixture.repo.url}/pull/${number}`,
+      baseBranch: "main",
+      headBranch: "next",
+      additions: 1,
+      deletions: 0,
+      changedFiles: 1,
+      commitCount: 4,
+      reviewers: [],
+      mergeable: null,
+    }
+    const commits = githubDataFixture.commits.value!.items.map((commit) => ({ ...commit, committedAt: older }))
+    const threads = [
+      {
+        kind: "review-thread" as const,
+        id: "review-thread-1",
+        path: "file.ts",
+        createdAt: older,
+        isResolved: false,
+        isOutdated: false,
+        comments: [{ ...comments[0]!, id: "inline-1", url: pull.url, body: "A review thread" }],
+      },
+    ]
     const view = await testRender(
       () => (
         <App
           data={githubDataFixture}
           config={defaultConfig}
           operations={repositoryOperationsFixture}
-          initialNavigation={{ detail: { kind: "issue", number: issueDetailFixture.number }, comment: 1025 }}
-          issueDetail={{
-            number: issueDetailFixture.number,
-            resource: { status: "ready", value: issueDetailFixture },
-            comments: { status: "ready", value: { items: comments, page: 1, hasMore: false } },
-            references: { status: "ready", value: [] },
-          }}
+          initialNavigation={{ detail: { kind, number }, comment: 1025 }}
+          issueDetail={kind === "issue" ? { number, resource: ready(issue), comments: page, references: references() } : undefined}
+          pullDetail={
+            kind === "pull"
+              ? {
+                  number,
+                  resource: ready(pull),
+                  comments: page,
+                  references: references(),
+                  commits: stage() >= 2 ? ready(commits) : loading,
+                  context: stage() >= 3 ? ready({ ...pullContextFixture, threads }) : loading,
+                }
+              : undefined
+          }
         />
       ),
       { width: 120, height: 32 },
     )
     active.push(view)
-    for (let attempt = 0; attempt < 20 && !view.captureCharFrame().includes("Comment body 25"); attempt++) await settle(view)
-    await settle(view)
-    const frame = view.captureCharFrame()
-    expect(frame).toContain("Comment body 25")
-    expect(frame).not.toContain("The viewport loses focus after a resize.")
-    const lines = frame.split("\n")
-    const author = lines.findIndex((line, index) => line.includes("max ·") && lines[index + 2]?.includes("Comment body 25"))
-    expect(author).toBeGreaterThan(-1)
-    expect(author).toBeLessThan(10)
+    const scroll = view.renderer.root.findDescendantById(`${kind}-detail-scroll`) as ScrollBoxRenderable
+    const targetRow = () =>
+      view
+        .captureCharFrame()
+        .split("\n")
+        .findIndex((line) => line.includes("target-author"))
+    await waitForText(view, "Comment body 25")
+    for (let next = 1; next <= (kind === "pull" ? 3 : 1); next++) {
+      for (let frame = 0; frame < 8; frame++) await view.renderOnce()
+      const row = targetRow()
+      expect(row).toBeGreaterThanOrEqual(0)
+      if (mode === "manual") {
+        view.mockInput.pressKey("g")
+        await view.flush()
+        expect(scroll.scrollTop).toBe(0)
+      }
+      const before = scroll.scrollTop
+      setStage(next)
+      for (let frame = 0; frame < 4; frame++) {
+        await view.renderOnce()
+        expect(targetRow()).toBe(mode === "manual" ? -1 : row)
+      }
+      await view.flush()
+      if (mode === "manual") {
+        expect(scroll.scrollTop).toBe(before)
+        expect(targetRow()).toBe(-1)
+      } else {
+        expect(scroll.scrollTop).toBeGreaterThan(before)
+        expect(targetRow()).toBe(row)
+      }
+    }
   })
 })

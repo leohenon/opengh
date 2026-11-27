@@ -1,9 +1,9 @@
 import { TextAttributes } from "@opentui/core"
 import { useTerminalDimensions } from "@opentui/solid"
-import { onMount, Show } from "solid-js"
+import { createMemo, onMount, Show } from "solid-js"
 import type { UpdateNotice } from "../../update-check"
 import { useTheme } from "../theme"
-import { LoadingText } from "./loading-text"
+import { createLoadingVisibility, LoadingLabel } from "./loading-text"
 import { fitText } from "../format"
 
 export type StatusKind =
@@ -74,6 +74,7 @@ export function StatusBar(props: {
 }) {
   const { colors } = useTheme()
   const dimensions = useTerminalDimensions()
+  const showLoading = createLoadingVisibility(() => !!props.kind && !props.error)
   const hint = () => {
     if (!props.error && loadingMessage()) return ""
     const message = props.error ? `× ${props.error}` : context()
@@ -82,16 +83,16 @@ export function StatusBar(props: {
   }
   const context = () => (props.error || loadingMessage() ? undefined : props.context)
   const loadingMessage = () => {
-    if (!props.kind) return undefined
+    if (!showLoading() || !props.kind) return undefined
     if (props.kind === "loading-resource" && props.detail) return `Loading ${props.detail}…`
     return loadingMessages[props.kind]
   }
 
-  const visibleTip = () => {
+  const visibleTip = createMemo<string | undefined>((previous) => {
     const tip = props.tip
-    if (tip && !props.error && !loadingMessage() && !context() && Bun.stringWidth(tip) <= dimensions().width - 4) return tip
-    return undefined
-  }
+    if (!tip || props.error || loadingMessage() || context() || Bun.stringWidth(tip) > dimensions().width - 4) return undefined
+    return !props.kind || previous === tip ? tip : undefined
+  })
   const updateLabel = () => (props.updateNotice ? `↑ v${props.updateNotice.latestVersion} available` : "")
   const showUpdate = () => {
     if (!props.updateNotice || props.error || loadingMessage()) return false
@@ -128,7 +129,7 @@ export function StatusBar(props: {
             flexShrink={0}
             overflow="hidden"
           >
-            <LoadingText text={message()} />
+            <LoadingLabel text={message()} />
           </box>
         )}
       </Show>

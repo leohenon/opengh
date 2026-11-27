@@ -138,6 +138,7 @@ import { overviewDocumentLink } from "../overview-document-link"
 import type { MarkdownAnchorRequest } from "./markdown-anchors"
 import { SearchProvider } from "./search-context"
 import { StatusPromptBar, StatusPromptProvider } from "./status-prompt"
+import { RetainedPane } from "./components/retained-pane"
 import { SearchSurface } from "./components/search-surface"
 
 type Overlay =
@@ -3177,7 +3178,7 @@ function AppContent(props: AppProps) {
                         </Show>
                         <SearchSurface active={!diffTarget() && !initialPagePending()}>
                           <Show when={!initialPagePending() && mountList("overview")}>
-                            <box visible={page() === "overview"} flexGrow={1} minHeight={0}>
+                            <RetainedPane visible={page() === "overview"}>
                               <OverviewScreen
                                 repo={data().repo}
                                 documents={data().documents}
@@ -3195,10 +3196,10 @@ function AppContent(props: AppProps) {
                                 detailsPlacement={config().detailsPlacement}
                                 scrollRef={(value) => (overviewScroll = value)}
                               />
-                            </box>
+                            </RetainedPane>
                           </Show>
                           <Show when={mountList("commits")}>
-                            <box visible={page() === "commits" && !commitSha()} flexGrow={1} minHeight={0}>
+                            <RetainedPane visible={page() === "commits" && !commitSha()}>
                               <CommitsScreen
                                 commits={data().commits}
                                 commitCount={data().commitCount}
@@ -3221,10 +3222,10 @@ function AppContent(props: AppProps) {
                                   if (commits.status === "ready" && commits.value.hasMore) void props.onLoadMoreCommits?.()
                                 }}
                               />
-                            </box>
+                            </RetainedPane>
                           </Show>
                           <Show when={mountList("issues")}>
-                            <box visible={page() === "issues" && !issueNumber()} flexGrow={1} minHeight={0}>
+                            <RetainedPane visible={page() === "issues" && !issueNumber()}>
                               <WorkScreen
                                 kind="issue"
                                 state={issueState()}
@@ -3244,10 +3245,10 @@ function AppContent(props: AppProps) {
                                   if (resource.status === "ready" && resource.value.hasMore) void props.onLoadMoreIssues?.(issueState())
                                 }}
                               />
-                            </box>
+                            </RetainedPane>
                           </Show>
                           <Show when={mountList("pulls")}>
-                            <box visible={page() === "pulls" && !pullNumber()} flexGrow={1} minHeight={0}>
+                            <RetainedPane visible={page() === "pulls" && !pullNumber()}>
                               <WorkScreen
                                 kind="pull"
                                 state={pullState()}
@@ -3268,10 +3269,10 @@ function AppContent(props: AppProps) {
                                   if (resource.status === "ready" && resource.value.hasMore) void props.onLoadMorePulls?.(pullState())
                                 }}
                               />
-                            </box>
+                            </RetainedPane>
                           </Show>
                           <Show when={mountList("actions") && visibleTabs().some((tab) => tab.page === "actions")}>
-                            <box visible={page() === "actions" && !runId()} flexGrow={1} minHeight={0}>
+                            <RetainedPane visible={page() === "actions" && !runId()}>
                               <ActionsScreen
                                 runs={data().runs}
                                 onOpenRun={(run) => openRun(run.id)}
@@ -3286,11 +3287,11 @@ function AppContent(props: AppProps) {
                                   if (runs.status === "ready" && runs.value.hasMore) void props.onLoadMoreRuns?.()
                                 }}
                               />
-                            </box>
+                            </RetainedPane>
                           </Show>
                           <Show when={mountDetail("actions") && runId()} keyed>
                             {(id) => (
-                              <box visible={page() === "actions"} flexGrow={1} minHeight={0}>
+                              <RetainedPane visible={page() === "actions"}>
                                 <RunScreen
                                   id={id}
                                   summary={runSummary()}
@@ -3301,12 +3302,12 @@ function AppContent(props: AppProps) {
                                   showScrollbar={config().showScrollbars}
                                   pageWidth={config().pageWidth}
                                 />
-                              </box>
+                              </RetainedPane>
                             )}
                           </Show>
                           <Show when={mountDetail("commits") && commitSha()} keyed>
                             {(sha) => (
-                              <box visible={page() === "commits"} flexGrow={1} minHeight={0}>
+                              <RetainedPane visible={page() === "commits"}>
                                 <CommitScreen
                                   sha={sha}
                                   summary={commitSummary()}
@@ -3316,12 +3317,12 @@ function AppContent(props: AppProps) {
                                   showScrollbar={config().showScrollbars}
                                   pageWidth={config().pageWidth}
                                 />
-                              </box>
+                              </RetainedPane>
                             )}
                           </Show>
                           <Show when={mountDetail("issues") && issueNumber()} keyed>
                             {(number) => (
-                              <box visible={page() === "issues"} flexGrow={1} minHeight={0}>
+                              <RetainedPane visible={page() === "issues"}>
                                 <IssueScreen
                                   inlineMetadata={config().detailsPlacement === "inline"}
                                   number={number}
@@ -3344,12 +3345,12 @@ function AppContent(props: AppProps) {
                                   showScrollbar={config().showScrollbars}
                                   pageWidth={config().pageWidth}
                                 />
-                              </box>
+                              </RetainedPane>
                             )}
                           </Show>
                           <Show when={mountDetail("pulls") && pullNumber()} keyed>
                             {(number) => (
-                              <box visible={page() === "pulls"} flexGrow={1} minHeight={0}>
+                              <RetainedPane visible={page() === "pulls"}>
                                 <PullScreen
                                   inlineMetadata={config().detailsPlacement === "inline"}
                                   number={number}
@@ -3376,7 +3377,7 @@ function AppContent(props: AppProps) {
                                   showScrollbar={config().showScrollbars}
                                   pageWidth={config().pageWidth}
                                 />
-                              </box>
+                              </RetainedPane>
                             )}
                           </Show>
                         </SearchSurface>

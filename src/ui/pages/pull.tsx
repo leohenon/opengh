@@ -180,6 +180,12 @@ export function PullScreen(props: {
   const centered = () => (props.pageWidth ?? defaultConfig.pageWidth) === "centered"
   const contentWidth = () => detailContentWidth(props.pageWidth, wide() ? 32 : 0)
   const pull = () => props.detail.resource.value
+  const readableContext = createMemo(() => {
+    const { status, value } = props.detail.context
+    if (status === "ready") return value
+    const head = pull()?.headSha
+    if (status === "loading" && head && value?.readiness.headSha === head) return value
+  })
   // The list row seeds the header so it fills in rather than swapping a placeholder title.
   const header = () => pull() ?? props.summary
   const state = () => (header()?.merged ? "Merged" : header()?.state === "closed" ? "Closed" : header()?.draft ? "Draft" : "Open")
@@ -217,7 +223,8 @@ export function PullScreen(props: {
   createCommentReveal({
     renderer,
     target: () => props.revealComment,
-    ready: () => !!pull() && props.detail.comments.value !== undefined && props.detail.comments.status !== "loading",
+    ready: () => !!pull() && props.detail.comments.value !== undefined,
+    sources: () => [props.detail.resource, props.detail.comments, props.detail.references, props.detail.commits, props.detail.context],
     elementId: (id) => `message-comment-pull-${props.number}-${id}`,
     scroll: () => scroll,
   })
@@ -409,7 +416,7 @@ export function PullScreen(props: {
                 >
                   <Show when={current().state === "open" && props.detail.context.status !== "error"}>
                     <Show
-                      when={props.detail.context.value && props.detail.context.status === "ready"}
+                      when={readableContext()}
                       fallback={
                         <TimelineEntry
                           icon={props.detail.context.status === "loading" ? icons().workflow.clock : icons().workflow.attention}
@@ -438,16 +445,19 @@ export function PullScreen(props: {
                         </TimelineEntry>
                       }
                     >
-                      <PullReadinessPanel
-                        expanded={props.checksExpanded}
-                        onExpandedChange={props.onChecksExpandedChange}
-                        identity={current().url}
-                        interactive={props.interactive}
-                        context={props.detail.context.value!}
-                        expectedHeadSha={current().headSha}
-                        backgroundColor={surface()}
-                        collapsed={props.timelineCollapsed}
-                      />
+                      {(context) => (
+                        <PullReadinessPanel
+                          refreshing={props.detail.context.status === "loading"}
+                          expanded={props.checksExpanded}
+                          onExpandedChange={props.onChecksExpandedChange}
+                          identity={current().url}
+                          interactive={props.interactive}
+                          context={context()}
+                          expectedHeadSha={current().headSha}
+                          backgroundColor={surface()}
+                          collapsed={props.timelineCollapsed}
+                        />
+                      )}
                     </Show>
                   </Show>
                 </DetailActivity>

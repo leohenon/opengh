@@ -53,6 +53,7 @@ import {
 import type { ResourceState } from "../../repository-state"
 import { SelectableList } from "../components/selectable-list"
 import { ListLine } from "../components/list-line"
+import { LoadingText } from "../components/loading-text"
 import { fitDiffPath, fitRename } from "../diff-path"
 import { mouseClick, mouseContextMenu, mouseHover, type MousePosition } from "../mouse"
 import type { ContextMenuItem } from "../components/context-menu"
@@ -349,61 +350,84 @@ export function DiffScreen(props: {
   >()
   let disposed = false
   let rememberedScroll = 0
+  let appliedFileHash: string | undefined
   let pending:
-    | { file: DiffFile | undefined; index: number | null; scrollTop?: number; anchor?: ReviewAnchor }
+    | {
+        file: DiffFile | undefined
+        index: number | null
+        scrollTop?: number
+        anchor?: ReviewAnchor
+        fileHash?: string
+        previousPath?: string
+      }
     | { reply: ThreadReplyEditor }
     | undefined
-  let waiting = false
 
-  // Only navigation schedules a layout wait. Layout/commit callbacks never feed a reactive effect.
-  const revealPending = () => {
-    if (!pending || waiting || disposed || !active()) return
-    waiting = true
-    void renderer
-      .idle()
-      .then(() => {
-        waiting = false
-        if (disposed || !pending || !scroll || !active()) return
-        const navigation = pending
-        pending = undefined
-        if ("reply" in navigation) {
-          const { reply } = navigation
-          if (interactive() && props.reply === reply && reply.comment.focused) scroll.scrollChildIntoView(`${replyEditorId(reply)}-area`)
-        } else if (navigation.index === null && navigation.file && streaming()) {
-          const header = host()?.findDescendantById(`diff-file:${navigation.file.path}`)
-          if (header) {
-            navigatingToFile = true
-            scroll.scrollTo(header.y - scroll.content.y)
-            navigatedScrollTop = scroll.scrollTop
-            navigatingToFile = false
-          }
-        } else if (navigation.index === null) scroll.scrollTo(navigation.scrollTop ?? 0)
-        else {
-          const body = navigation.file?.body
-          const row =
-            navigation.anchor &&
-            rows().find((row) => {
-              if (row.left?.path !== navigation.anchor!.path && row.right?.path !== navigation.anchor!.path) return false
-              const value = navigation.anchor!.side === "LEFT" ? row.left : row.right
-              return value?.line === navigation.anchor!.line
-            })
-          const anchor = host()?.findDescendantById(row?.id ?? `diff-hunk:${body?.id}:${navigation.index}`)
-          if (anchor) {
-            navigatingToFile = true
-            scroll.scrollTo(anchor.y - scroll.content.y)
-            navigatedScrollTop = scroll.scrollTop
-            navigatingToFile = false
-          }
-        }
-      })
-      .catch(() => {
-        waiting = false
-      })
+  const pendingLink = () => (pending && "file" in pending && pending.fileHash ? pending : undefined)
+
+  let searchGeneration = 0
+  const cancelScroll = () => {
+    ++searchGeneration
+    appliedFileHash = pendingLink()?.fileHash ?? appliedFileHash
+    pending = undefined
+    return searchGeneration
   }
-  const revealFile = (file: DiffFile) => {
+
+  createEffect(
+    on(visibleFiles, (files) => {
+      if (!pending || !("file" in pending) || !pending.file || files.includes(pending.file)) return
+      const { file: old, index } = pending
+      const file = files.find((file) => file.path === old.path)
+      const hunk = index === null ? undefined : file?.body?.metadata.hunks[index]
+      if (file && (index === null || (!file.message && hunk && hunk.hunkSpecs === old.body?.metadata.hunks[index]?.hunkSpecs))) {
+        pending = { ...pending, file }
+      } else {
+        const fallback = pending.fileHash ? pending.previousPath : selected()?.path
+        cancelScroll()
+        if (path() === old.path) setPath(fallback)
+      }
+    }),
+  )
+
+  let painting: typeof pending
+  const finishReveal = () => {
+    if (pending && pending === painting && active()) {
+      appliedFileHash = pendingLink()?.fileHash ?? appliedFileHash
+      pending = undefined
+    }
+    painting = undefined
+  }
+  const revealPending = () => {
+    if (!pending || "reply" in pending || !scroll || disposed || !active()) return
+    const navigation = pending
+    const { file, index, anchor } = navigation
+    if (index === null && !(file && (streaming() || navigation.fileHash))) {
+      scroll.scrollTo(navigation.scrollTop ?? 0)
+    } else {
+      const row =
+        anchor &&
+        rows().find((row) => {
+          const side = anchor.side === "LEFT" ? row.left : row.right
+          return side?.path === anchor.path && side.line === anchor.line
+        })
+      const id = index === null ? `diff-file:${file!.path}` : (row?.id ?? `diff-hunk:${file?.body?.id}:${index}`)
+      const target = host()?.findDescendantById(id)
+      if (!target) return
+      let top = 0
+      for (let node: Renderable | null = target; node && node !== scroll.content; node = node.parent) top += node.getComputedLayout().top
+      navigatingToFile = true
+      scroll.scrollTo(top)
+      navigatedScrollTop = scroll.scrollTop
+      navigatingToFile = false
+    }
+    if (!painting) renderer.once(CliRenderEvents.FRAME, finishReveal)
+    painting = navigation
+  }
+  const revealFile = (file: DiffFile, fileHash?: string) => {
+    cancelScroll()
+    pending = { file, index: null, fileHash, previousPath: path() }
     setPath(file.path)
-    pending = { file, index: null }
-    revealPending()
+    renderer.requestRender()
   }
   const measure = () => {
     if (active()) setWidth(Math.max(1, scroll?.viewport.width ?? 1))
@@ -626,7 +650,6 @@ export function DiffScreen(props: {
   const committed = () => {
     refreshCards()
     placeComposer()
-    revealPending()
     refreshMarkers()
   }
 
@@ -725,7 +748,6 @@ export function DiffScreen(props: {
   let paintedMatches: typeof sourceMatches | undefined
   let paintedActive: string | undefined
   let paintedColors = ""
-  let searchGeneration = 0
   let lastSearchQuery = ""
   const searchLayoutKey = () => JSON.stringify([width(), currentLayout(), wrap(), theme()])
   const bodySearchVisible = () => active()
@@ -734,7 +756,7 @@ export function DiffScreen(props: {
   // Invalidate deferred work even if a view leaves and re-enters before idle.
   createEffect(
     on(
-      () => [bodySearchId(), searchLayoutKey(), active()] as const,
+      () => [bodySearchId(), searchLayoutKey(), active(), parsed()] as const,
       () => {
         ++searchGeneration
       },
@@ -823,8 +845,7 @@ export function DiffScreen(props: {
                 geometry !== searchLayoutKey()
               )
                 return
-              const generation = ++searchGeneration
-              pending = undefined
+              const generation = cancelScroll()
               setHunk(cell.hunkIndex)
               if (!wrap()) {
                 // Only the active result needs horizontal geometry. Reveal the
@@ -866,8 +887,7 @@ export function DiffScreen(props: {
             position: result.position,
             reveal() {
               if (disposed || node.isDestroyed || !bodySearchVisible() || identity !== bodySearchId() || query !== lastSearchQuery) return
-              ++searchGeneration
-              pending = undefined
+              cancelScroll()
               result.reveal()
             },
           })
@@ -921,8 +941,7 @@ export function DiffScreen(props: {
       const selectedHunk = hunk()
       return () => {
         if (disposed || identity !== bodySearchId()) return
-        const generation = ++searchGeneration
-        pending = undefined
+        const generation = cancelScroll()
         for (const restore of restoreComments) restore()
         setOffset(pan)
         setHunk(selectedHunk)
@@ -940,7 +959,7 @@ export function DiffScreen(props: {
     on(selected, (file) => {
       setHunk(0)
       setOffset(0)
-      if (!streaming() && active()) {
+      if (!streaming() && active() && (!file || pendingLink()?.file?.path !== file.path)) {
         rememberedScroll = 0
         scroll?.scrollTo(0)
         pending = { file, index: null }
@@ -950,14 +969,10 @@ export function DiffScreen(props: {
 
   createEffect(
     on(active, (visible) => {
-      if (!visible) {
-        rememberedScroll = scroll?.scrollTop ?? rememberedScroll
-        pending = undefined
-        return
-      }
-      measure()
-      pending = { file: undefined, index: null, scrollTop: rememberedScroll }
-      revealPending()
+      if (visible) measure()
+      else rememberedScroll = scroll?.scrollTop ?? rememberedScroll
+      if (!pendingLink()) pending = visible ? { file: undefined, index: null, scrollTop: rememberedScroll } : undefined
+      if (visible) renderer.requestRender()
     }),
   )
 
@@ -1081,22 +1096,22 @@ export function DiffScreen(props: {
     })
   })
 
-  let appliedFileHash: string | undefined
   createEffect(
     on(
-      () => [active(), props.target.fileHash, parsed().files] as const,
-      ([visible, hash, files]) => {
+      () => [props.target.fileHash, parsed().files, active()] as const,
+      ([hash, files, visible], previous) => {
+        const link = pendingLink()
+        if (link) {
+          pending = undefined
+          setPath(link.previousPath)
+        }
+        if (hash !== previous?.[0]) appliedFileHash = undefined
         if (!visible || !hash || hash === appliedFileHash) return
         const file = files.find(({ path }) => createHash("sha256").update(path).digest("hex") === hash)
-        if (!file) return
-        const reveal = () => {
-          if (disposed || !active() || parsed().files !== files) return
-          appliedFileHash = hash
-          revealFile(file)
+        if (file) {
+          if (!filteredFiles().includes(file)) setFileFilter("")
+          revealFile(file, hash)
         }
-        renderer.once(CliRenderEvents.FRAME, reveal)
-        onCleanup(() => renderer.off(CliRenderEvents.FRAME, reveal))
-        renderer.requestRender()
       },
     ),
   )
@@ -1111,6 +1126,7 @@ export function DiffScreen(props: {
         (row) => (anchor.side === "LEFT" ? row.left : row.right)?.line === anchor.line,
       )
       if (!row) return
+      cancelScroll()
       setPath(file.path)
       // Let the selected-file reset run before restoring the requested line.
       queueMicrotask(() => {
@@ -1118,7 +1134,7 @@ export function DiffScreen(props: {
         setLocation({ anchor, hunk: row.hunk })
         pending = { file, index: row.hunk, anchor }
         setHunk(row.hunk)
-        revealPending()
+        renderer.requestRender()
       })
     }),
   )
@@ -1132,12 +1148,21 @@ export function DiffScreen(props: {
         if (!file) return
         if (!filteredFiles().includes(file)) setFileFilter("")
         if (selected() === file) return
+        cancelScroll()
         setPath(file.path)
         if (streaming()) return
         queueMicrotask(() => {
           if (disposed || props.reply !== reply || selected() !== file) return
-          pending = { reply }
-          revealPending()
+          const navigation = (pending = { reply })
+          void renderer
+            .idle()
+            .then(() => {
+              if (pending !== navigation) return
+              pending = undefined
+              if (!disposed && interactive() && props.reply === reply && reply.comment.focused)
+                scroll?.scrollChildIntoView(`${replyEditorId(reply)}-area`)
+            })
+            .catch(() => {})
         })
       },
     ),
@@ -1166,13 +1191,20 @@ export function DiffScreen(props: {
   onMount(() => {
     scroll?.verticalScrollBar.on("change", followScroll)
     if (!wrapper) return
-    const container = new BoxRenderable(renderer, { id: "embedded-diff-host", width: "100%", flexDirection: "column", flexShrink: 0 })
+    class DiffHost extends BoxRenderable {
+      protected override onUpdate() {
+        revealPending()
+      }
+    }
+    const container = new DiffHost(renderer, { id: "embedded-diff-host", width: "100%", flexDirection: "column", flexShrink: 0 })
+    container.onSizeChange = revealPending
     wrapper.add(container)
     setHost(container)
     measure()
   })
   onCleanup(() => {
     disposed = true
+    renderer.off(CliRenderEvents.FRAME, finishReveal)
     ++searchGeneration
     for (const adapter of commentSearch.values()) adapter.dispose()
     commentSearch.clear()
@@ -1210,14 +1242,15 @@ export function DiffScreen(props: {
       index = 0
     } else index = Math.max(0, Math.min(count - 1, index))
     const file = files[next]!
+    cancelScroll()
     setPath(file.path)
     setHunk(index)
     pending = { file, index }
-    revealPending()
+    renderer.requestRender()
   }
   const scrollBody = (callback: (body: ScrollBoxRenderable) => void) => {
     if (!scroll) return false
-    pending = undefined
+    cancelScroll()
     bodyMouse.onMouseDrag()
     callback(scroll)
   }
@@ -1257,11 +1290,7 @@ export function DiffScreen(props: {
           ? (files.find((file) => parsed().files.indexOf(file) > originalIndex) ?? files.at(-1))
           : (files.findLast((file) => parsed().files.indexOf(file) < originalIndex) ?? files[0])
         : files[Math.max(0, Math.min(files.length - 1, index + delta))]
-    if (next) {
-      setPath(next.path)
-      pending = { file: next, index: null }
-      revealPending()
-    }
+    if (next) revealFile(next)
   }
   const toggleLayout = () => setLayout(currentLayout() === "split" ? "unified" : "split")
   const toggleWrap = () => setWrapOverride(!wrap())
@@ -1330,7 +1359,7 @@ export function DiffScreen(props: {
   )
   const pan = (delta: number) => {
     if (wrap() || !renderFile()) return
-    pending = undefined
+    cancelScroll()
     setOffset((value) => Math.max(0, Math.min(maxOffset(), value + delta)))
   }
   const fileAtNode = (target: Renderable | null) => {
@@ -1406,7 +1435,7 @@ export function DiffScreen(props: {
   }
   const focusBody = (event: MouseEvent) => {
     if (event.button !== MouseButton.LEFT || !interactive()) return
-    pending = undefined
+    cancelScroll()
     setFilterOpen(false)
   }
   const bodyWheel = (event: MouseEvent) => {
@@ -1416,7 +1445,7 @@ export function DiffScreen(props: {
       event.stopPropagation()
       return
     }
-    pending = undefined
+    cancelScroll()
     const direction = event.scroll?.direction
     if (direction === "left" || direction === "right" || event.modifiers.shift) {
       event.stopPropagation()
@@ -1632,7 +1661,7 @@ export function DiffScreen(props: {
             focusable={false}
             onMouseScroll={(event) => {
               contextMouse.onMouseScroll()
-              pending = undefined
+              cancelScroll()
               event.stopPropagation()
             }}
             viewportOptions={{ onMouseScroll: bodyWheel }}
@@ -1657,6 +1686,9 @@ export function DiffScreen(props: {
             scrollY
             scrollX={false}
           >
+            <Show when={active() && !showFiles() && loadingFiles() && props.resource.value === undefined}>
+              <LoadingText text="Loading diff…" />
+            </Show>
             <Show when={!filteredFiles().length && props.resource.status === "ready" && !error() && !filterQuery()}>
               <text fg={colors.muted}>No changed files.</text>
             </Show>

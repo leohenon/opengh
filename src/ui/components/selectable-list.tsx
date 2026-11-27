@@ -48,6 +48,9 @@ export function SelectableList<T>(props: {
   const mouseActive = () => props.mouseActive ?? props.active
   let followSelection = true
   let previousResetKey = props.resetKey
+  let previousItems = props.items
+  let pendingTop: number | undefined
+  let restoringTop = false
   let container: BoxRenderable | undefined
   let list: ScrollBoxRenderable | undefined
   const bindScrollbar = createScrollbarVisibility(() => props.showScrollbar === true)
@@ -78,10 +81,27 @@ export function SelectableList<T>(props: {
     }
   }
 
-  const selectIndex = (index: number, fromSearch = false) => {
+  const restoreTop = () => {
+    if (!list || pendingTop === undefined) return
+    restoringTop = true
+    try {
+      list.scrollTo(pendingTop)
+      if (list.scrollTop === pendingTop) pendingTop = undefined
+    } finally {
+      restoringTop = false
+    }
+  }
+
+  const onContentResize = () => {
+    restoreTop()
+    revealSelection()
+  }
+
+  const selectIndex = (index: number, fromSearch = false, follow = true) => {
     setSearchSelection(fromSearch)
     mousePress = undefined
-    followSelection = true
+    followSelection = follow
+    if (follow) pendingTop = undefined
     if (!props.items.length) {
       selectedIndex = 0
       setSelectedKey(undefined)
@@ -171,17 +191,39 @@ export function SelectableList<T>(props: {
   createEffect(() => {
     const items = props.items
     const resetKey = props.resetKey
+    const oldItems = previousItems
+    previousItems = items
     if (resetKey !== previousResetKey) {
       previousResetKey = resetKey
+      pendingTop = undefined
+      followSelection = true
       if (props.selectedItemKey === undefined) {
         selectIndex(0)
         return
+      }
+      revealSelection()
+    } else if (oldItems !== items && list) {
+      const top = pendingTop ?? list.scrollTop
+      pendingTop = undefined
+      const height = rowHeight()
+      const index = Math.floor(top / height)
+      const anchor = oldItems[index]
+      if (top > 0 && anchor !== undefined) {
+        const key = props.itemKey(anchor)
+        const next = items.findIndex((item) => props.itemKey(item) === key)
+        if (next >= 0) {
+          const maxTop = Math.max(0, items.length * height - list.viewport.height)
+          pendingTop = Math.min(next * height + (top % height), maxTop)
+          restoreTop()
+          revealSelection()
+        }
       }
     }
 
     const current = indexOfSelection()
     if (current >= 0) selectedIndex = current
-    else if (props.selectedItemKey === undefined) selectIndex(Math.min(selectedIndex, Math.max(0, items.length - 1)))
+    else if (props.selectedItemKey === undefined)
+      selectIndex(Math.min(selectedIndex, Math.max(0, items.length - 1)), false, followSelection)
   })
 
   createEffect(revealSelection)
@@ -192,6 +234,7 @@ export function SelectableList<T>(props: {
       () => props.selectedItemKey,
       (key) => {
         if (key === undefined) return
+        pendingTop = undefined
         followSelection = true
         revealSelection()
       },
@@ -200,12 +243,15 @@ export function SelectableList<T>(props: {
 
   const onScrollChange = () => {
     // Native wheel/scrollbar browsing may intentionally leave the selected row offscreen.
+    if (restoringTop) return
+    pendingTop = undefined
     followSelection = false
     if (searchSelection() || !props.active || !list || list.viewport.height <= 0 || !props.items.length) return
     const lastVisibleIndex = Math.ceil((list.scrollTop + list.viewport.height) / rowHeight()) - 1
     if (lastVisibleIndex >= props.items.length - (props.endThreshold ?? 3)) props.onEndReached?.()
   }
   onCleanup(() => {
+    list?.content.off("resize", onContentResize)
     list?.viewport.off("resize", revealSelection)
     list?.verticalScrollBar.off("change", onScrollChange)
   })
@@ -234,6 +280,7 @@ export function SelectableList<T>(props: {
           list = value
           bindScrollbar(value)
           // Resize events run after ScrollBox updates its viewport and scrollbar bounds.
+          list.content.on("resize", onContentResize)
           list.viewport.on("resize", revealSelection)
           list.verticalScrollBar.on("change", onScrollChange)
         }}

@@ -85,7 +85,7 @@ export function CommitsScreen(props: {
         </box>
       }
     >
-      <ResourceStateView resource={props.commits}>
+      <ResourceStateView resource={props.commits} loadingLabel="Loading commits…">
         {(commits) => (
           <SelectableList
             items={commits().items}

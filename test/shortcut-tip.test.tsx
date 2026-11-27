@@ -52,6 +52,34 @@ test("the shortcut tip starts its 45-second timer only when it can be displayed"
   }
 })
 
+test("a resize during refresh doesn't spend the shortcut tip during the indicator delay", async () => {
+  const [operations, setOperations] = createSignal(repositoryOperationsFixture)
+  let shown = 0
+  const view = await testRender(() => <App data={githubDataFixture} operations={operations} onShortcutTipShown={() => shown++} />, {
+    width: 30,
+    height: 24,
+  })
+  try {
+    await view.flush()
+    expect(shown).toBe(0)
+    setOperations({ ...repositoryOperationsFixture, refresh: { status: "loading" } })
+    view.resize(100, 24)
+    await view.renderOnce()
+    expect(shown).toBe(0)
+    expect(view.captureCharFrame()).not.toContain("Tip: ")
+    setOperations(repositoryOperationsFixture)
+    await view.flush()
+    expect(shown).toBe(1)
+    expect(view.captureCharFrame()).toContain("Tip: ")
+    setOperations({ ...repositoryOperationsFixture, refresh: { status: "loading" } })
+    await view.renderOnce()
+    expect(view.captureCharFrame()).toContain("Tip: ")
+    expect(shown).toBe(1)
+  } finally {
+    view.renderer.destroy()
+  }
+})
+
 test("opening Settings dismisses the shortcut tip for the rest of the session", async () => {
   let shown = 0
   const view = await testRender(

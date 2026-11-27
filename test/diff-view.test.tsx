@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test"
-import { createTestRenderer } from "@opentui/core/testing"
+import { createTestRenderer, TestRecorder } from "@opentui/core/testing"
 import { RGBA, type BoxRenderable, type InputRenderable, type ScrollBoxRenderable } from "@opentui/core"
 import { render } from "@opentui/solid"
 import { createSignal } from "solid-js"
@@ -869,8 +869,13 @@ test("numbered tabs retain independent diff viewers, geometry and scroll until E
     await settle()
     expect(setup.captureCharFrame()).toContain("pull.ts")
     const pullView = setup.renderer.root.findDescendantById("diff-view-pulls")
+    const recorder = new TestRecorder(setup.renderer)
+    recorder.rec()
     setup.mockInput.pressKey("2")
     await settle()
+    recorder.stop()
+    expect(recorder.recordedFrames.length).toBeGreaterThan(0)
+    for (const captured of recorder.recordedFrames) expect(captured.frame).toBe(frame)
     expect(scroll("commits")).toBe(commitScroll)
     expect(commitScroll.scrollTop).toBe(position)
     expect(commitScroll.viewport.width).toBe(width)
@@ -1126,6 +1131,13 @@ test.each([false, true])("diff loading shows Files dots without footer loading (
     await settle()
     expect(footer()).toBe("")
     expect(setup.captureCharFrame()).not.toContain("Loading diff")
+    setup.resize(60, 24)
+    await settle()
+    await Bun.sleep(230)
+    await settle()
+    expect(setup.captureCharFrame()).toContain("Loading diff...")
+    expect(footer()).toBe("")
+    setup.resize(100, 24)
     setResource({ status: "ready", value })
     await settle()
     expect(setup.captureCharFrame()).toContain("Files (1)")

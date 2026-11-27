@@ -260,7 +260,8 @@ export function IssueScreen(props: {
   createCommentReveal({
     renderer,
     target: () => props.revealComment,
-    ready: () => !!issue() && props.detail.comments.value !== undefined && props.detail.comments.status !== "loading",
+    ready: () => !!issue() && props.detail.comments.value !== undefined,
+    sources: () => [props.detail.resource, props.detail.comments, props.detail.references],
     elementId: (id) => `message-comment-issue-${props.number}-${id}`,
     scroll: () => scroll,
   })

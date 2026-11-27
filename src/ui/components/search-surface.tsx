@@ -2,6 +2,7 @@ import { RGBA, type BoxRenderable } from "@opentui/core"
 import { onCleanup, type JSX } from "solid-js"
 import { createRenderedSearch } from "../rendered-search"
 import { useSearchTarget } from "../search-context"
+import { PaneVisible } from "./retained-pane"
 import { useTheme } from "../theme"
 
 // The page subtree is the source of truth: collapsed content, hidden retained
@@ -21,29 +22,31 @@ export function SearchSurface(props: { active: boolean; children: JSX.Element })
   })
   onCleanup(() => adapter?.dispose())
   return (
-    <box
-      ref={(root: BoxRenderable) => {
-        adapter = createRenderedSearch(root, {
-          get matchBackground() {
-            return RGBA.fromHex(colors.searchMatchBg)
-          },
-          get matchForeground() {
-            return RGBA.fromHex(colors.searchMatchFg)
-          },
-          get activeBackground() {
-            return RGBA.fromHex(colors.searchCurrentMatchBg)
-          },
-          get activeForeground() {
-            return RGBA.fromHex(colors.searchCurrentMatchFg)
-          },
-        })
-      }}
-      visible={props.active}
-      flexGrow={1}
-      minHeight={0}
-      flexDirection="column"
-    >
-      {props.children}
-    </box>
+    <PaneVisible.Provider value={() => props.active}>
+      <box
+        ref={(root: BoxRenderable) => {
+          adapter = createRenderedSearch(root, {
+            get matchBackground() {
+              return RGBA.fromHex(colors.searchMatchBg)
+            },
+            get matchForeground() {
+              return RGBA.fromHex(colors.searchMatchFg)
+            },
+            get activeBackground() {
+              return RGBA.fromHex(colors.searchCurrentMatchBg)
+            },
+            get activeForeground() {
+              return RGBA.fromHex(colors.searchCurrentMatchFg)
+            },
+          })
+        }}
+        visible={props.active}
+        flexGrow={1}
+        minHeight={0}
+        flexDirection="column"
+      >
+        {props.children}
+      </box>
+    </PaneVisible.Provider>
   )
 }

@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test"
 import { testRender } from "@opentui/solid"
 import { createSignal } from "solid-js"
-import type { PullCheck, PullContext } from "../src/models"
+import type { PullCheck, PullContext, PullRequestDetail } from "../src/models"
 import { PullReadinessPanel } from "../src/ui/components/pull-context-panel"
 import type { PullDetailState } from "../src/repository-state"
 import { App } from "../src/ui/app"
@@ -158,9 +158,9 @@ test("required blockers stay visible ahead of optional failures and cancellation
   }
 })
 
-test("read-only PR actions toggle checks in sync with mouse disclosure and reset on head changes", async () => {
+function pullDetail(): PullDetailState {
   const summary = githubDataFixture.pulls.open.value!.items[0]!
-  const [detail, setDetail] = createSignal<PullDetailState>({
+  return {
     number: summary.number,
     resource: {
       status: "ready",
@@ -188,7 +188,12 @@ test("read-only PR actions toggle checks in sync with mouse disclosure and reset
     comments: { status: "ready", value: { items: [], page: 1, hasMore: false } },
     references: { status: "ready", value: [] },
     commits: { status: "ready", value: [] },
-  })
+  }
+}
+
+test("read-only PR actions toggle checks in sync with mouse disclosure and reset on head changes", async () => {
+  const summary = githubDataFixture.pulls.open.value!.items[0]!
+  const [detail, setDetail] = createSignal(pullDetail())
   const view = await testRender(
     () => (
       <App
@@ -254,6 +259,94 @@ test("read-only PR actions toggle checks in sync with mouse disclosure and reset
       await selectChecks()
       expect(view.captureCharFrame()).toContain("▾ Fewer checks")
     }
+  } finally {
+    view.renderer.destroy()
+  }
+})
+
+test("refresh keeps same-head results readable without presenting them as current or enabling merge", async () => {
+  const initial = pullDetail()
+  const headSha = "a".repeat(40)
+  const pull: PullRequestDetail = {
+    ...initial.resource.value!,
+    headSha,
+    draft: false,
+    permissions: { comment: false, merge: true },
+    merge: { methods: ["squash"], queueRequired: false },
+  }
+  const passed = context(
+    checks.map((check, index) => ({ ...check, name: `Job ${index + 1}`, required: true, state: "success" })),
+    headSha,
+  )
+  const [detail, setDetail] = createSignal<PullDetailState>({
+    ...initial,
+    resource: { status: "ready", value: pull },
+    context: { status: "ready", value: passed },
+  })
+  const view = await testRender(
+    () => (
+      <App
+        data={githubDataFixture}
+        operations={repositoryOperationsFixture}
+        pullDetail={detail()}
+        initialNavigation={{ detail: { kind: "pull", number: initial.number } }}
+        onMergePull={async () => {
+          throw new Error("unexpected fixture merge")
+        }}
+      />
+    ),
+    { width: 120, height: 60 },
+  )
+  const panel = () => view.renderer.root.findDescendantById("pull-merge-readiness")
+  const frame = async () => {
+    await view.flush()
+    return view.captureCharFrame()
+  }
+  const setContext = (context: PullDetailState["context"]) => setDetail((d) => ({ ...d, context }))
+  try {
+    expect(await frame()).toContain("Ready to merge")
+    await clickControl(view, "pull-checks-disclosure")
+    const original = panel()
+    expect(original).toBeDefined()
+    const loading = { status: "loading", phase: "load", value: passed } as const
+    setDetail((d) => ({ ...d, resource: { status: "loading", phase: "load", value: pull }, context: loading }))
+    const checking = await frame()
+    expect(panel()).toBe(original)
+    expect(checking).toContain("Checking merge readiness… · Last known results")
+    expect(checking).toContain("Fewer checks")
+    expect(checking).toContain("Job 8")
+    expect(checking).not.toContain("Current status")
+    expect(checking).not.toContain("Ready to merge")
+    setDetail((d) => ({ ...d, resource: { status: "ready", value: pull } }))
+    view.mockInput.pressKey("a")
+    await clickControl(view, "issue-menu-merge")
+    expect(view.renderer.root.findDescendantById("merge-method-squash")).toBeUndefined()
+    expect(view.renderer.root.findDescendantById("issue-menu-merge")).toBeDefined()
+    view.mockInput.pressEscape()
+    setContext({ status: "ready", value: context(checks, headSha) })
+    const refreshed = await frame()
+    expect(panel()).toBe(original)
+    expect(refreshed).toContain("Merge blocked · Current status")
+    expect(refreshed).toContain("Fewer checks")
+    expect(refreshed).not.toContain("Last known results")
+
+    setDetail((d) => ({ ...d, resource: { status: "ready", value: { ...pull, headSha: "b".repeat(40) } }, context: loading }))
+    expect(await frame()).toContain("Loading merge readiness…")
+    expect(panel()).toBeUndefined()
+    setContext({ status: "ready", value: passed })
+    expect(await frame()).toContain("Head changed; refresh readiness.")
+    setContext({ status: "loading", phase: "load" })
+    expect(await frame()).toContain("Loading merge readiness…")
+    setContext({ status: "error", phase: "load", message: "offline", value: passed })
+    expect(await frame()).not.toContain("Loading merge readiness…")
+    expect(panel()).toBeUndefined()
+    setDetail((d) => ({
+      ...d,
+      resource: { status: "ready", value: { ...pull, state: "closed" } },
+      context: { status: "ready", value: passed },
+    }))
+    expect(await frame()).toContain("Closed")
+    expect(panel()).toBeUndefined()
   } finally {
     view.renderer.destroy()
   }

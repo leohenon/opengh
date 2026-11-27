@@ -1,6 +1,7 @@
 import { expect, test } from "bun:test"
 import { testRender } from "@opentui/solid"
 import { createSignal } from "solid-js"
+import { waitForText } from "./fixtures/wait"
 import type { UpdateNotice } from "../src/update-check"
 import { Help } from "../src/ui/components/help"
 import { StatusBar, type StatusKind } from "../src/ui/components/status-bar"
@@ -50,6 +51,8 @@ test("footer adds a right-aligned update only in spare space and reacts to resiz
     expect(view.captureCharFrame()).toContain("↑ v2.0.0 available")
     setKind("refreshing")
     await view.flush()
+    expect(view.captureCharFrame()).toContain("↑ v2.0.0 available")
+    await waitForText(view, "Refreshing")
     expect(view.captureCharFrame()).not.toContain("available")
     setKind(undefined)
     setError("Offline")

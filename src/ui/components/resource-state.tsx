@@ -6,6 +6,7 @@ import { LoadingText } from "./loading-text"
 export function ResourceStateView<T>(props: {
   resource: ResourceState<T>
   hideError?: boolean
+  loadingLabel?: string
   children: (value: Accessor<T>) => JSX.Element
 }) {
   const { colors } = useTheme()
@@ -16,7 +17,7 @@ export function ResourceStateView<T>(props: {
       when={value()}
       fallback={
         <box flexGrow={1} minHeight={0} alignItems="center" justifyContent="center">
-          <Show when={props.resource.status === "error"} fallback={<LoadingText text="Loading…" />}>
+          <Show when={props.resource.status === "error"} fallback={<LoadingText text={props.loadingLabel ?? "Loading…"} />}>
             <Show when={!props.hideError}>
               <text fg={colors.red}>× {props.resource.status === "error" ? props.resource.message : "Load failed"}</text>
             </Show>

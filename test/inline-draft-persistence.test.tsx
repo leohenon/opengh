@@ -16,6 +16,7 @@ import { initializeHunk } from "../src/ui/hunk-host"
 import { parseDiff } from "../src/ui/diff-model"
 import { reviewRows } from "../src/ui/review-lines"
 import { clickControl } from "./fixtures/mouse"
+import { waitForText } from "./fixtures/wait"
 import { githubDataFixture, repositoryOperationsFixture, pullContextFixture } from "./fixtures/github-data"
 import { patchFixture } from "./fixtures/diff"
 
@@ -360,7 +361,7 @@ test.each([false, true])(
       await openComposer()
       expect(composer()).toBeUndefined()
       expect(submissions).toBe(1)
-      expect(setup.captureCharFrame()).toContain("Posting comment")
+      await waitForText(setup, "Posting comment")
 
       if (success)
         pending.resolve({

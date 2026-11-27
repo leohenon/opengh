@@ -68,7 +68,7 @@ test("refresh indicators hide hints in a fixed footer and respect reduced motion
   try {
     await view.flush()
     expect(footer()).not.toContain("Refreshing")
-    expect(footer()).not.toContain("q quit")
+    expect(footer()).toContain("q quit")
     await Bun.sleep(230)
     await view.flush()
     expect(footer()).toContain("Refreshing")
@@ -100,6 +100,38 @@ test("refresh indicators hide hints in a fixed footer and respect reduced motion
     expect(footer()).toContain("q quit")
     expect(view.captureCharFrame().split("\n")[0]).toContain("Content")
   } finally {
+    view.renderer.destroy()
+  }
+})
+
+test("fast reads never replace a populated footer and failures appear immediately", async () => {
+  const [pending, setPending] = createSignal(false)
+  const [error, setError] = createSignal<string>()
+  const view = await testRender(
+    () => <StatusBar context="Results" hint="? help" kind={pending() ? "refreshing" : undefined} error={error()} />,
+    {
+      width: 50,
+      height: 1,
+    },
+  )
+  const frames: string[] = []
+  const capture = () => frames.push(view.captureCharFrame().trim())
+  try {
+    await view.flush()
+    view.renderer.on("frame", capture)
+    setPending(true)
+    await view.renderOnce()
+    setPending(false)
+    await Bun.sleep(230)
+    await view.renderOnce()
+    expect(frames.length).toBeGreaterThan(0)
+    expect(frames.every((frame) => frame === "Results · ? help")).toBe(true)
+    setPending(true)
+    setError("Offline")
+    await view.renderOnce()
+    expect(frames.at(-1)).toBe("× Offline · ? help")
+  } finally {
+    view.renderer.off("frame", capture)
     view.renderer.destroy()
   }
 })
@@ -138,7 +170,7 @@ test("loading and mutation statuses hide hints until idle without enabling disab
     expect(footer()).toBe("q quit · ? help")
     setKind("loading-resource")
     await view.flush()
-    expect(footer()).toBe("")
+    expect(footer()).toBe("q quit · ? help")
     await Bun.sleep(230)
     for (const [status, message] of statuses) {
       setKind(status)

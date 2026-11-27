@@ -106,6 +106,7 @@ const checkOrder: Record<PullCheck["state"], number> = {
 
 export function PullReadinessPanel(props: {
   context: PullContext
+  refreshing?: boolean
   expectedHeadSha?: string
   identity?: string
   interactive?: boolean
@@ -118,15 +119,18 @@ export function PullReadinessPanel(props: {
   const icons = useIcons()
   const readiness = () => props.context.readiness
   const status = createMemo(() => mergeReadinessStatus(readiness(), props.expectedHeadSha))
-  const statusColor = () => (status().status === "ready" ? colors.green : status().status === "blocked" ? colors.red : colors.yellow)
-  const statusIcon = () =>
-    status().status === "ready"
+  const statusColor = () => {
+    if (props.refreshing) return colors.muted
+    return status().status === "ready" ? colors.green : status().status === "blocked" ? colors.red : colors.yellow
+  }
+  const statusIcon = () => {
+    if (props.refreshing || status().status === "waiting") return icons().workflow.clock
+    return status().status === "ready"
       ? icons().workflow.success
       : status().status === "blocked"
         ? icons().workflow.failure
-        : status().status === "waiting"
-          ? icons().workflow.clock
-          : icons().workflow.attention
+        : icons().workflow.attention
+  }
   const checks = createMemo(() =>
     [...readiness().checks].sort((a, b) => {
       const priority = (check: PullCheck) => (check.required === true && checkOrder[check.state] <= checkOrder.unknown ? 0 : 1)
@@ -204,8 +208,8 @@ export function PullReadinessPanel(props: {
           wrapMode={props.collapsed ? "none" : "word"}
           truncate={props.collapsed}
         >
-          <b>{readinessLabels[status().status]}</b>
-          <span style={{ fg: colors.muted }}> · Current status</span>
+          <b>{props.refreshing ? "Checking merge readiness…" : readinessLabels[status().status]}</b>
+          <span style={{ fg: colors.muted }}>{props.refreshing ? " · Last known results" : " · Current status"}</span>
         </text>
         <Show when={!props.collapsed}>
           <For each={status().reasons}>
