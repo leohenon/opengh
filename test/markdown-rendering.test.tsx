@@ -1164,3 +1164,38 @@ test("inline images follow the icon style, and their marker is muted while the l
     view.renderer.destroy()
   }
 })
+
+test("table cells wrap at spaces and slashes, and search and copy see the real text", async () => {
+  const content =
+    "| File | Notes |\n| --- | --- |\n| packages/next/src/server/lib/router-utils/setup-dev-bundler.ts | uses `.env.production` and node_modules/next/dist |\n| a.ts | e.g. foo.bar.baz(x, y) |"
+  const view = await testRender(
+    () => (
+      <ThemeProvider name="github">
+        <MarkdownSample content={content} />
+      </ThemeProvider>
+    ),
+    { width: 60, height: 20 },
+  )
+  try {
+    await settle(view)
+    const rows = view
+      .captureCharFrame()
+      .split("\n")
+      .map((row) => row.trimEnd())
+    expect(rows).toContain("│ packages/next/src/server/   │ uses .env.production and   │")
+    expect(rows).toContain("│ lib/router-utils/           │ node_modules/next/dist     │")
+    expect(rows).toContain("│ setup-dev-bundler.ts        │                            │")
+    expect(rows.join("\n")).not.toMatch(/[\ufdd0-\ufdef]/)
+    const search = createRenderedSearch(view.renderer.root)
+    expect(search.search(".env.production")).toHaveLength(1)
+    search.dispose()
+    const y = rows.findIndex((row) => row.includes("uses"))
+    const x = rows[y]!.indexOf("uses")
+    await view.mockMouse.pressDown(x, y)
+    await view.mockMouse.emitMouseEvent("drag", x + 25, y)
+    expect(view.renderer.getSelection()!.getSelectedText()).toBe("uses .env.production and ")
+    await view.mockMouse.release(x + 25, y)
+  } finally {
+    view.renderer.destroy()
+  }
+})

@@ -1,4 +1,13 @@
-import { CliRenderEvents, OptimizedBuffer, RGBA, type CliRenderer, type TextBufferRenderable, type TextChunk } from "@opentui/core"
+import {
+  CliRenderEvents,
+  OptimizedBuffer,
+  RGBA,
+  type CliRenderer,
+  type TextBufferRenderable,
+  type TextChunk,
+  type TextTableContent,
+  type TextTableRenderable,
+} from "@opentui/core"
 
 const BREAKS = ".,:;!?-/\\()[]{}"
 const ENCODED = `${BREAKS}  `
@@ -8,14 +17,15 @@ const JOINED_SPACE = PLACEHOLDERS[BREAKS.length]!
 const UNBROKEN_SPACE = PLACEHOLDERS[BREAKS.length + 1]!
 const breakable = /[.,:;!?\-/\\()[\]{}]/g
 const reserved = /[\ufdd0-\ufde0]/g
+const encoded = /[\ufdd0-\ufde0]/
 const joinedSpaces = /\ufddf/g
 const joined = Symbol("joined")
 
 type JoinedChunk = TextChunk & { [joined]?: boolean }
-const unattached = /^(?:$|[\s\p{M}\u200d\ufe00-\ufe0f])/u
+const unattached = /^(?:$|[^\S\u00a0]|[\p{M}\u200d\ufe00-\ufe0f])/u
 
 const decoders = new WeakMap<CliRenderer, boolean>()
-const wrapped = new WeakSet<TextBufferRenderable>()
+const wrapped = new WeakSet<TextBufferRenderable | TextTableRenderable>()
 
 function encode(text: string, following: string, breakAfter: string) {
   const source = text.replace(reserved, "\ufffd").replaceAll("\u00a0", UNBROKEN_SPACE)
@@ -89,7 +99,17 @@ export function wrapAtWhitespace(renderer: CliRenderer, node: TextBufferRenderab
   node.textDecorator = (chunks) => encodeChunks(previous ? previous(chunks) : chunks, breakAfter)
 }
 
-function decodeWrappedText(text: string) {
+export function wrapTableAtWhitespace(renderer: CliRenderer, table: TextTableRenderable, content: TextTableContent): TextTableContent {
+  if (!installDecoder(renderer)) return content
+  if (!wrapped.has(table)) {
+    wrapped.add(table)
+    const selectedText = table.getSelectedText.bind(table)
+    table.getSelectedText = () => decodeWrappedText(selectedText().replace(joinedSpaces, ""))
+  }
+  return content.map((row) => row.map((cell) => (cell && !cell.some((chunk) => encoded.test(chunk.text)) ? encodeChunks(cell, "/") : cell)))
+}
+
+export function decodeWrappedText(text: string) {
   return text.replace(reserved, (char) => ENCODED[char.charCodeAt(0) - FIRST_PLACEHOLDER]!)
 }
 

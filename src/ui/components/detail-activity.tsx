@@ -1,4 +1,5 @@
-import { TextAttributes, type SyntaxStyle } from "@opentui/core"
+import { TextAttributes, type SyntaxStyle, type TextRenderable } from "@opentui/core"
+import { useRenderer } from "@opentui/solid"
 import { createMemo, For, Match, Show, Switch, type JSX } from "solid-js"
 import type {
   CommitSummary,
@@ -19,6 +20,7 @@ import type { ResourceState } from "../../repository-state"
 import type { GitHubMarkdownContext } from "../github-markdown"
 import { fitText, relativeTime } from "../format"
 import { ListLine } from "./list-line"
+import { wrapAtWhitespace } from "../whitespace-wrap"
 import { mouseClick } from "../mouse"
 import { buildActivity, type ActivityEntry } from "../activity"
 import { useIcons } from "../icon-style"
@@ -32,8 +34,13 @@ import { TimelineEntry, TimelineHeader, TimelineItem } from "./timeline-entry"
 import { TimelineCommits } from "./pull-commits"
 import { LinkedText } from "./linked-text"
 
+function timeSuffix(iso: string) {
+  return `\u00a0·\u00a0${relativeTime(iso).replaceAll(" ", "\u00a0")}`
+}
+
 function CollapsibleHeader(props: { collapsed?: boolean; login: string; details: JSX.Element; detailsText: string }) {
   const { colors } = useTheme()
+  const renderer = useRenderer()
   const login = (text: string) => (
     <b>
       <span style={{ fg: colors.text }}>
@@ -45,22 +52,24 @@ function CollapsibleHeader(props: { collapsed?: boolean; login: string; details:
     <Show
       when={props.collapsed}
       fallback={
-        <text width="100%" flexShrink={0} fg={colors.muted} wrapMode="word">
-          {login(props.login)} {props.details}
+        <text ref={(node: TextRenderable) => wrapAtWhitespace(renderer, node, "/-")} width="100%" flexShrink={0} fg={colors.muted}>
+          {login(props.login)}
+          {props.details}
         </text>
       }
     >
       <ListLine fg={colors.muted}>
         {(width) => {
+          const detailsWidth = Bun.stringWidth(props.detailsText)
           const loginWidth = Math.min(
             Bun.stringWidth(props.login),
-            Math.max(Math.min(Bun.stringWidth(props.login), 8), width - Bun.stringWidth(props.detailsText) - 1),
+            Math.max(Math.min(Bun.stringWidth(props.login), 8), width - detailsWidth),
           )
-          const room = width - loginWidth - 1
+          const room = width - loginWidth
           return (
             <>
-              {login(fitText(props.login, loginWidth))}{" "}
-              {room >= Bun.stringWidth(props.detailsText) ? props.details : fitText(props.detailsText, room)}
+              {login(fitText(props.login, loginWidth))}
+              {room >= detailsWidth ? props.details : ` ${fitText(props.detailsText.slice(1), room - 1)}`}
             </>
           )
         }}
@@ -98,6 +107,8 @@ function Comment(props: {
       : props.number && props.context.repositoryUrl
         ? `${props.context.repositoryUrl}/issues/${props.number}#issuecomment-${props.comment.id}`
         : undefined
+  const time = () =>
+    props.collapsed ? relativeTime(props.comment.createdAt) : relativeTime(props.comment.createdAt).replaceAll(" ", "\u00a0")
   const association = () =>
     props.comment.authorAssociation === "NONE" ? "" : props.comment.authorAssociation.toLowerCase().replaceAll("_", " ")
   return (
@@ -116,15 +127,15 @@ function Comment(props: {
         <CollapsibleHeader
           collapsed={props.collapsed}
           login={props.comment.author}
-          detailsText={`commented · ${relativeTime(props.comment.createdAt)}`}
+          detailsText={` commented · ${relativeTime(props.comment.createdAt)}`}
           details={
             <>
-              {props.collapsed ? "commented " : ""}·{" "}
-              <Show when={permalink()} fallback={relativeTime(props.comment.createdAt)}>
-                {(url) => <a href={url()}>{relativeTime(props.comment.createdAt)}</a>}
+              {props.collapsed ? " commented · " : "\u00a0·\u00a0"}
+              <Show when={permalink()} fallback={time()}>
+                {(url) => <a href={url()}>{time()}</a>}
               </Show>
-              {!props.collapsed && association() ? ` · ${association()}` : ""}
-              {!props.collapsed && props.comment.updatedAt !== props.comment.createdAt ? " · edited" : ""}
+              {!props.collapsed && association() ? `\u00a0· ${association()}` : ""}
+              {!props.collapsed && props.comment.updatedAt !== props.comment.createdAt ? "\u00a0· edited" : ""}
             </>
           }
         />
@@ -202,7 +213,7 @@ function ReferenceMention(props: {
             </span>
           </Show>
           <Show when={props.reference.kind !== "commit"}>
-            {" · "}
+            {"\u00a0·\u00a0"}
             <span style={{ fg: referenceColor(colors, props.reference) }}>{referenceState(props.reference)}</span>
           </Show>
         </TimelineHeader>
@@ -295,8 +306,7 @@ function StateChange(props: { event: IssueStateEvent; subject: "issue" | "pull";
               </>
             )}
           </Show>
-          {" · "}
-          {relativeTime(props.event.createdAt)}
+          {timeSuffix(props.event.createdAt)}
         </TimelineHeader>
         <Show when={closer()} keyed>
           {(source) => (
@@ -323,8 +333,7 @@ function ForcePush(props: { event: PullForcePushEvent }) {
             </span>
           </b>{" "}
           force-pushed this branch
-          {" · "}
-          {relativeTime(props.event.createdAt)}
+          {timeSuffix(props.event.createdAt)}
         </TimelineHeader>
         <Show when={props.event.beforeCommit || props.event.afterCommit}>
           <text width="100%" flexShrink={0} fg={colors.muted}>
@@ -398,12 +407,15 @@ function Review(props: {
         <CollapsibleHeader
           collapsed={props.collapsed}
           login={props.review.actor}
-          detailsText={`${action()} · ${relativeTime(props.review.createdAt)}`}
+          detailsText={` ${action()} · ${relativeTime(props.review.createdAt)}`}
           details={
             <>
+              {" "}
               <span style={{ fg: reviewColor(colors, props.review.state) }}>{action()}</span>
-              {" · "}
-              <a href={props.review.url}>{relativeTime(props.review.createdAt)}</a>
+              {props.collapsed ? " · " : "\u00a0·\u00a0"}
+              <a href={props.review.url}>
+                {props.collapsed ? relativeTime(props.review.createdAt) : relativeTime(props.review.createdAt).replaceAll(" ", "\u00a0")}
+              </a>
             </>
           }
         />
@@ -426,6 +438,8 @@ function Review(props: {
 
 function ReviewDismissal(props: { event: PullReviewDismissedEvent; repositoryUrl?: string }) {
   const { colors } = useTheme()
+  const renderer = useRenderer()
+  const wrapLinks = (node: TextRenderable) => wrapAtWhitespace(renderer, node, "/")
   const icons = useIcons()
   const target = () =>
     props.event.reviewer === props.event.actor ? "their review" : props.event.reviewer ? `${props.event.reviewer}'s review` : "a review"
@@ -439,11 +453,10 @@ function ReviewDismissal(props: { event: PullReviewDismissedEvent; repositoryUrl
             </span>
           </b>{" "}
           dismissed {target()}
-          {" · "}
-          {relativeTime(props.event.createdAt)}
+          {timeSuffix(props.event.createdAt)}
         </TimelineHeader>
         <Show when={props.event.body.trim()}>
-          <text width="100%" flexShrink={0} fg={colors.muted}>
+          <text ref={wrapLinks} width="100%" flexShrink={0} fg={colors.muted}>
             <LinkedText text={props.event.body} repositoryUrl={props.repositoryUrl} />
           </text>
         </Show>
@@ -466,8 +479,7 @@ function DraftTransition(props: { event: PullDraftEvent }) {
             </span>
           </b>{" "}
           marked this pull request {ready() ? "ready for review" : "as draft"}
-          {" · "}
-          {relativeTime(props.event.createdAt)}
+          {timeSuffix(props.event.createdAt)}
         </TimelineHeader>
       </box>
     </TimelineEntry>
@@ -499,8 +511,7 @@ function ReviewRequest(props: { event: PullReviewRequestEvent }) {
               <a href={`https://github.com/${props.event.target.kind === "user" ? props.event.target.login : ""}`}>{name()}</a>
             </Show>
           </span>
-          {" · "}
-          {relativeTime(props.event.createdAt)}
+          {timeSuffix(props.event.createdAt)}
         </TimelineHeader>
       </box>
     </TimelineEntry>

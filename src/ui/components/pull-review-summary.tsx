@@ -22,7 +22,7 @@ export function PullReviewSummary(props: { events: readonly IssueTimelineEvent[]
             <>
               <Show when={index() > 0}>
                 <Show when={props.compact} fallback={<br />}>
-                  {" · "}
+                  {"\u00a0· "}
                 </Show>
               </Show>
               <Show when={review.actor} fallback="ghost">

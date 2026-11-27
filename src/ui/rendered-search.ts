@@ -12,6 +12,7 @@ import {
   type TextTableContent,
 } from "@opentui/core"
 import { searchRanges, type SearchRange } from "./search"
+import { decodeWrappedText } from "./whitespace-wrap"
 
 export type RenderedSearchMatch = { id: string; position: number; reveal(): void }
 export type RenderedSearchOptions = {
@@ -62,7 +63,7 @@ function ranges(chunks: TextChunk[], query: string) {
     offset += chunk.text.length
   }
   let index = 0
-  return searchRanges(chunks.map((chunk) => chunk.text).join(""), query).filter((range) => {
+  return searchRanges(decodeWrappedText(chunks.map((chunk) => chunk.text).join("")), query).filter((range) => {
     while (hidden[index] && hidden[index]!.end <= range.start) index++
     return !hidden[index] || hidden[index]!.start >= range.end
   })

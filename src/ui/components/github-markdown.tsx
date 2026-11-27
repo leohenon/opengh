@@ -22,7 +22,7 @@ import { useMarkdownPreference } from "../markdown-preferences"
 import { useHyperlinkMouse } from "../hyperlinks"
 import { useIcons } from "../icon-style"
 import { imageMarker } from "../icons"
-import { wrapAtWhitespace } from "../whitespace-wrap"
+import { wrapAtWhitespace, wrapTableAtWhitespace } from "../whitespace-wrap"
 import { LinkedText } from "./linked-text"
 import {
   anchorMarkers,
@@ -324,15 +324,19 @@ export function GitHubMarkdown(props: {
         }
       }
       if (node instanceof TextTableRenderable)
-        node.content = node.content.map((row, rowIndex) =>
-          row.map((cell, column) =>
-            cell
-              ? compactLinkChunks(cell, {
-                  imageMarker: marker,
-                  linkColor: syntaxStyle.mergeStyles("markup.link").fg,
-                  onAnchor: (id, position) => anchorTargets.set(id, { node, position, cell: { row: rowIndex, column } }),
-                })
-              : cell,
+        node.content = wrapTableAtWhitespace(
+          renderer,
+          node,
+          node.content.map((row, rowIndex) =>
+            row.map((cell, column) =>
+              cell
+                ? compactLinkChunks(cell, {
+                    imageMarker: marker,
+                    linkColor: syntaxStyle.mergeStyles("markup.link").fg,
+                    onAnchor: (id, position) => anchorTargets.set(id, { node, position, cell: { row: rowIndex, column } }),
+                  })
+                : cell,
+            ),
           ),
         )
       if (list && node instanceof TextRenderable && node.chunks.length === 1) {

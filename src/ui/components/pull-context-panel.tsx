@@ -1,3 +1,5 @@
+import type { TextRenderable } from "@opentui/core"
+import { useRenderer } from "@opentui/solid"
 import { createEffect, createMemo, createSignal, For, on, Show } from "solid-js"
 import type { PullCheck, PullContext } from "../../models"
 import { relativeTime } from "../format"
@@ -8,6 +10,7 @@ import { useTheme } from "../theme"
 import { MetadataField } from "./detail-metadata"
 import { TimelineEntry } from "./timeline-entry"
 import { Action } from "./action"
+import { wrapAtWhitespace } from "../whitespace-wrap"
 
 export function PullContextMetadata(props: { context: PullContext; compact: boolean; repository?: string; omitEmpty?: boolean }) {
   const { colors } = useTheme()
@@ -21,7 +24,9 @@ export function PullContextMetadata(props: { context: PullContext; compact: bool
                 <span style={{ fg: colors.blue }}>
                   <a href={milestone().url}>{milestone().title}</a>
                 </span>
-                <Show when={milestone().dueAt}>{` · due ${relativeTime(milestone().dueAt!)}`}</Show>
+                <Show
+                  when={milestone().dueAt}
+                >{`\u00a0·\u00a0due\u00a0${relativeTime(milestone().dueAt!).replaceAll(" ", "\u00a0")}`}</Show>
               </>
             )}
           </Show>
@@ -35,7 +40,7 @@ export function PullContextMetadata(props: { context: PullContext; compact: bool
                 <>
                   <Show when={index() > 0}>
                     <Show when={props.compact} fallback={<br />}>
-                      {" · "}
+                      {"\u00a0· "}
                     </Show>
                   </Show>
                   <span style={{ fg: colors.blue }}>
@@ -55,7 +60,7 @@ export function PullContextMetadata(props: { context: PullContext; compact: bool
                 <>
                   <Show when={index() > 0}>
                     <Show when={props.compact} fallback={<br />}>
-                      {" · "}
+                      {"; "}
                     </Show>
                   </Show>
                   <span style={{ fg: colors.blue }}>
@@ -64,7 +69,7 @@ export function PullContextMetadata(props: { context: PullContext; compact: bool
                     </Show>
                     <a href={issue.url}>#{issue.number}</a>
                   </span>
-                  {` · ${issue.state === "closed" ? "Closed" : "Open"} · `}
+                  {`\u00a0·\u00a0${issue.state === "closed" ? "Closed" : "Open"}\u00a0· `}
                   <a href={issue.url}>{issue.title}</a>
                 </>
               )}
@@ -116,6 +121,8 @@ export function PullReadinessPanel(props: {
   collapsed?: boolean
 }) {
   const { colors } = useTheme()
+  const renderer = useRenderer()
+  const wrapCheck = (node: TextRenderable) => wrapAtWhitespace(renderer, node, "/")
   const icons = useIcons()
   const readiness = () => props.context.readiness
   const status = createMemo(() => mergeReadinessStatus(readiness(), props.expectedHeadSha))
@@ -235,11 +242,11 @@ export function PullReadinessPanel(props: {
             </span>
           </text>
           <Show when={requiredSummary().length}>
-            <text width="100%" flexShrink={0} fg={colors.muted}>
+            <text ref={wrapCheck} width="100%" flexShrink={0} fg={colors.muted}>
               Required checks:{" "}
               {requiredSummary()
-                .map((item) => `${item.count} ${checkLabels[item.state].toLowerCase()}`)
-                .join(" · ")}
+                .map((item) => `${item.count}\u00a0${checkLabels[item.state].toLowerCase()}`)
+                .join("\u00a0· ")}
             </text>
           </Show>
           <For
@@ -256,7 +263,7 @@ export function PullReadinessPanel(props: {
                   {iconPrefix(checkIcon(check))}
                   {checkLabels[check.state]}
                 </text>
-                <text flexGrow={1} flexBasis={0} minWidth={0} flexShrink={0} fg={colors.muted}>
+                <text ref={wrapCheck} flexGrow={1} flexBasis={0} minWidth={0} flexShrink={0} fg={colors.muted}>
                   <Show when={check.url} fallback={check.name}>
                     {(url) => (
                       <span style={{ fg: colors.blue }}>
@@ -264,7 +271,11 @@ export function PullReadinessPanel(props: {
                       </span>
                     )}
                   </Show>
-                  {check.required === true ? " · Required" : check.required === false ? " · Optional" : " · Unknown"}
+                  {check.required === true
+                    ? "\u00a0·\u00a0Required"
+                    : check.required === false
+                      ? "\u00a0·\u00a0Optional"
+                      : "\u00a0·\u00a0Unknown"}
                 </text>
               </box>
             )}

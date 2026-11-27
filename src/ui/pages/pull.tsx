@@ -63,7 +63,7 @@ function PullMetadata(props: {
               <For each={props.pull.labels} fallback="none">
                 {(label, index) => (
                   <>
-                    {index() > 0 ? " · " : ""}
+                    {index() > 0 ? "\u00a0· " : ""}
                     <a href={`${repositoryUrl()}/pulls?q=${encodeURIComponent(`is:pr label:"${label}"`)}`}>{label}</a>
                   </>
                 )}
@@ -105,7 +105,7 @@ function PullMetadata(props: {
         <span style={{ fg: colors.blue }}>
           <a href={`${repositoryUrl()}/tree/${encodeURIComponent(props.pull.baseBranch)}`}>{props.pull.baseBranch}</a>
         </span>
-        {" ← "}
+        {"\u00a0← "}
         <Show when={props.pull.headRepository} fallback={headLabel()}>
           {(repository) => (
             <a
@@ -117,8 +117,10 @@ function PullMetadata(props: {
         </Show>
       </MetadataField>
       <MetadataField label="Changes" compact={props.compact}>
-        {props.pull.commitCount} {props.pull.commitCount === 1 ? "commit" : "commits"}
-        {" · "}
+        {props.pull.commitCount}
+        {"\u00a0"}
+        {props.pull.commitCount === 1 ? "commit" : "commits"}
+        {"\u00a0· "}
         <Show when={props.pull.changedFiles > 0} fallback="0 files">
           <span style={{ fg: colors.blue }}>
             <a href={`https://github.com/${props.pull.url.split("/").slice(3, 5).join("/")}/pull/${props.pull.number}/files`}>
@@ -127,7 +129,7 @@ function PullMetadata(props: {
           </span>
         </Show>
         <Show when={props.compact} fallback={<br />}>
-          {" · "}
+          {"\u00a0· "}
         </Show>
         <span style={{ fg: colors.green }}>+{props.pull.additions}</span> <span style={{ fg: colors.red }}>−{props.pull.deletions}</span>
       </MetadataField>

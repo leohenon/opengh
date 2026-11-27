@@ -41,7 +41,7 @@ function IssueMetadata(props: { issue: IssueDetail; compact: boolean; inline?: b
               <For each={props.issue.labels} fallback="none">
                 {(label, index) => (
                   <>
-                    {index() > 0 ? " · " : ""}
+                    {index() > 0 ? "\u00a0· " : ""}
                     <a
                       href={`${props.issue.url.replace(/\/issues\/\d+$/, "")}/issues?q=${encodeURIComponent(`is:issue label:"${label}"`)}`}
                     >

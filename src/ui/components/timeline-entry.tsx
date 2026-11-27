@@ -1,5 +1,8 @@
+import type { TextRenderable } from "@opentui/core"
+import { useRenderer } from "@opentui/solid"
 import { createContext, Show, useContext, type Accessor, type JSX } from "solid-js"
 import { useTheme } from "../theme"
+import { wrapAtWhitespace } from "../whitespace-wrap"
 
 const LastTimelineItem = createContext<Accessor<boolean>>(() => false)
 
@@ -52,8 +55,9 @@ export function TimelineEntry(props: { icon: string; color?: string; nodeOffset?
 
 export function TimelineHeader(props: { children: JSX.Element }) {
   const { colors } = useTheme()
+  const renderer = useRenderer()
   return (
-    <text width="100%" flexShrink={0} fg={colors.muted}>
+    <text ref={(node: TextRenderable) => wrapAtWhitespace(renderer, node, "/-")} width="100%" flexShrink={0} fg={colors.muted}>
       {props.children}
     </text>
   )
