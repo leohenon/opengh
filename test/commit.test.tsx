@@ -4,6 +4,8 @@ import { createSignal } from "solid-js"
 import type { CommitDetailState } from "../src/repository-state"
 import { defaultConfig } from "../src/config"
 import { App } from "../src/ui/app"
+import { CommitScreen } from "../src/ui/pages/commit"
+import { ThemeProvider } from "../src/ui/theme"
 import { commitDetailFixture, githubDataFixture, repositoryOperationsFixture } from "./fixtures/github-data"
 
 const active: Array<{ renderer: { destroy(): void; isDestroyed: boolean } }> = []
@@ -336,4 +338,76 @@ test("overview, commit, and PR shortcuts open GitHub and copy the active URL or 
   view.mockInput.pressKey("y")
   await view.flush()
   expect(view.captureCharFrame()).toContain("Could not copy SHA")
+})
+
+test("changed files stack long renames and break long paths only after a slash", async () => {
+  const files = [
+    { path: "test/input.test.ts", previousPath: "test/keys.test.ts", status: "renamed", additions: 6, deletions: 2 },
+    {
+      path: "test/e2e/externals-transitive/externals-transitive-dep-a/index.js",
+      previousPath: "test/e2e/externals-transitive/dep-a/index.js",
+      status: "renamed",
+      additions: 0,
+      deletions: 0,
+    },
+    {
+      path: "packages/next/src/server/route-modules/app-page/vendored/contexts/a-very-long-directory-name/another-long-directory/entrypoints-with-long-name.production.min.js",
+      status: "added",
+      additions: 120,
+      deletions: 0,
+    },
+  ]
+  const view = await testRender(
+    () => (
+      <ThemeProvider name="github">
+        <CommitScreen
+          sha={commitDetailFixture.sha}
+          repositoryUrl="https://github.com/anomalyco/opentui"
+          resource={{ status: "ready", value: { ...commitDetailFixture, files: { items: files, page: 1, hasMore: false } } }}
+          interactive={false}
+          showScrollbar={false}
+        />
+      </ThemeProvider>
+    ),
+    { width: 164, height: 24 },
+  )
+  active.push(view)
+  const rows = async () => {
+    await view.renderOnce()
+    await view.flush()
+    return view
+      .captureCharFrame()
+      .split("\n")
+      .map((row) => row.trim().replace(/\s{2,}/g, "  "))
+  }
+  expect(await rows()).toEqual(
+    expect.arrayContaining([
+      "renamed  test/keys.test.ts → test/input.test.ts  +6  −2",
+      "renamed  test/e2e/externals-transitive/dep-a/index.js",
+      "→ test/e2e/externals-transitive/externals-transitive-dep-a/index.js",
+      "added  packages/next/src/server/route-modules/app-page/vendored/contexts/a-very-long-directory-name/  +120",
+      "another-long-directory/entrypoints-with-long-name.production.min.js",
+    ]),
+  )
+  expect(view.captureCharFrame()).not.toMatch(/[\ufdd0-\ufdef\ufffd]/)
+  const arrow = view
+    .captureCharFrame()
+    .split("\n")
+    .find((row) => row.includes("→ test/e2e"))!
+  expect(view.renderer.getLinkAt(arrow.indexOf("externals-transitive-dep-a"), view.captureCharFrame().split("\n").indexOf(arrow))).toBe(
+    `https://github.com/anomalyco/opentui/blob/${commitDetailFixture.sha}/test/e2e/externals-transitive/externals-transitive-dep-a/index.js`,
+  )
+  view.resize(70, 24)
+  expect(await rows()).toEqual(
+    expect.arrayContaining([
+      "renamed  test/keys.test.ts → test/input.test.ts  +6  −2",
+      "renamed  test/e2e/externals-transitive/dep-a/index.js",
+      "→ test/e2e/externals-transitive/",
+      "externals-transitive-dep-a/index.js",
+      "added  packages/next/src/server/route-modules/  +120",
+      "entrypoints-with-long-name.production.min.js",
+    ]),
+  )
+  view.resize(50, 24)
+  expect(await rows()).toEqual(expect.arrayContaining(["R test/keys.test.ts  +6  −2", "→ test/input.test.ts"]))
 })

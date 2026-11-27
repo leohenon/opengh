@@ -1,5 +1,5 @@
-import { RGBA, rgbToHex, TextAttributes, type ScrollBoxRenderable } from "@opentui/core"
-import { useTerminalDimensions } from "@opentui/solid"
+import { RGBA, rgbToHex, TextAttributes, type ScrollBoxRenderable, type TextRenderable } from "@opentui/core"
+import { useRenderer, useTerminalDimensions } from "@opentui/solid"
 import { useKeyActions } from "../keybindings"
 import { createMemo, For, Show } from "solid-js"
 import { defaultConfig, type PageWidth } from "../../config"
@@ -14,6 +14,7 @@ import { iconPrefix } from "../icons"
 import { createScrollbarVisibility } from "../scrollbar-visibility"
 import { LinkedText } from "../components/linked-text"
 import { normalizeRepositoryUrl } from "../reference-links"
+import { wrapAtWhitespace } from "../whitespace-wrap"
 
 const fileLabels: Record<string, string> = {
   added: "added",
@@ -36,8 +37,10 @@ export function CommitScreen(props: {
 }) {
   const { colors } = useTheme()
   const icons = useIcons()
+  const renderer = useRenderer()
   const dimensions = useTerminalDimensions()
   const compact = () => dimensions().width < 60
+  const wrapPath = (node: TextRenderable) => wrapAtWhitespace(renderer, node, "/")
   const centered = () => (props.pageWidth ?? defaultConfig.pageWidth) === "centered"
   const contentWidth = () => detailContentWidth(props.pageWidth)
   // The list row seeds the header so it fills in rather than swapping a placeholder title.
@@ -174,24 +177,18 @@ export function CommitScreen(props: {
                           ? (fileLabels[file.status] ?? file.status).slice(0, 1).toUpperCase()
                           : (fileLabels[file.status] ?? file.status)}
                       </text>
-                      <box flexGrow={1} flexBasis={0} minWidth={0} paddingRight={1} flexDirection="column">
-                        <Show when={compact() && file.previousPath}>
-                          <text width="100%" flexShrink={0} wrapMode="char" fg={colors.muted}>
+                      <box flexGrow={1} flexBasis={0} minWidth={0} paddingRight={1} flexDirection="row" flexWrap="wrap" columnGap={1}>
+                        <Show when={file.previousPath}>
+                          <text ref={wrapPath} maxWidth="100%" wrapMode="word" fg={colors.muted}>
                             {file.previousPath}
                           </text>
                         </Show>
-                        <text width="100%" flexShrink={0} wrapMode="char" fg={colors.text}>
+                        <text ref={wrapPath} maxWidth="100%" wrapMode="word" fg={colors.text}>
                           <Show
                             when={file.status !== "removed" && fileTarget(file.path)}
-                            fallback={
-                              file.previousPath ? (compact() ? `→ ${file.path}` : `${file.previousPath} → ${file.path}`) : file.path
-                            }
+                            fallback={file.previousPath ? `→ ${file.path}` : file.path}
                           >
-                            {(href) => (
-                              <a href={href()}>
-                                {file.previousPath ? (compact() ? `→ ${file.path}` : `${file.previousPath} → ${file.path}`) : file.path}
-                              </a>
-                            )}
+                            {(href) => <a href={href()}>{file.previousPath ? `→ ${file.path}` : file.path}</a>}
                           </Show>
                         </text>
                       </box>

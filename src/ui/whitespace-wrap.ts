@@ -16,19 +16,20 @@ const unattached = /^(?:$|[\s\p{M}\u200d\ufe00-\ufe0f])/u
 const decoders = new WeakMap<CliRenderer, boolean>()
 const wrapped = new WeakSet<TextBufferRenderable>()
 
-function encode(text: string, following: string) {
+function encode(text: string, following: string, breakAfter: string) {
   const source = text.replace(reserved, "\ufffd")
   return source.replace(breakable, (char, offset: number) =>
-    unattached.test(offset + 1 < source.length ? source.slice(offset + 1, offset + 3) : following)
+    breakAfter.includes(char) || unattached.test(offset + 1 < source.length ? source.slice(offset + 1, offset + 3) : following)
       ? char
       : PLACEHOLDERS[BREAKS.indexOf(char)]!,
   )
 }
 
-function encodeChunks(chunks: JoinedChunk[]) {
+function encodeChunks(chunks: JoinedChunk[], breakAfter: string) {
   return chunks.map((chunk, index) => {
     const next = chunks[index + 1]
-    const text = chunk[joined] ? JOINED_SPACE : encode(chunk.text, next?.[joined] ? JOINED_SPACE : (next?.text ?? ""))
+    const following = next?.[joined] ? JOINED_SPACE : (next?.text ?? "")
+    const text = chunk[joined] ? JOINED_SPACE : encode(chunk.text, following, breakAfter)
     return text === chunk.text ? chunk : { ...chunk, text }
   })
 }
@@ -68,7 +69,7 @@ function installDecoder(renderer: CliRenderer) {
   return ready
 }
 
-export function wrapAtWhitespace(renderer: CliRenderer, node: TextBufferRenderable) {
+export function wrapAtWhitespace(renderer: CliRenderer, node: TextBufferRenderable, breakAfter = "") {
   if (wrapped.has(node) || !installDecoder(renderer)) return
   wrapped.add(node)
   const selectedText = node.getSelectedText.bind(node)
@@ -84,7 +85,7 @@ export function wrapAtWhitespace(renderer: CliRenderer, node: TextBufferRenderab
     Object.defineProperty(node, "plainText", { configurable: true, get: () => decodeWrappedText(read.call(node)) })
   }
   const previous = node.textDecorator
-  node.textDecorator = previous ? (chunks) => encodeChunks(previous(chunks)) : encodeChunks
+  node.textDecorator = (chunks) => encodeChunks(previous ? previous(chunks) : chunks, breakAfter)
 }
 
 function decodeWrappedText(text: string) {
