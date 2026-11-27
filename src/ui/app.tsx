@@ -1,5 +1,5 @@
 import type { ScrollBoxRenderable } from "@opentui/core"
-import type { RepositoryScope } from "../repository-session"
+import type { ConversationLoadOptions, RepositoryScope } from "../repository-session"
 import { useRenderer, useTerminalDimensions } from "@opentui/solid"
 import { batch, createEffect, createMemo, createSignal, For, on, onCleanup, onMount, Show, untrack } from "solid-js"
 import { DiffViewerSetupRequiredError, openExternalDiff } from "../external-actions"
@@ -232,8 +232,8 @@ export type AppProps = {
   onAddReaction?: (target: ReactionTarget, kind: ReactionKind) => Promise<ReactionState>
   onRemoveReaction?: (target: ReactionTarget, kind: ReactionKind) => Promise<ReactionState>
   issueDetail?: IssueDetailState
-  onLoadIssue?: (number: number, options?: { force?: boolean }) => Promise<void>
-  onLoadMoreIssueComments?: () => Promise<void>
+  onLoadIssue?: (number: number, options?: ConversationLoadOptions) => Promise<void>
+  onLoadMoreIssueComments?: (options?: Pick<ConversationLoadOptions, "reconcileComments">) => Promise<void>
   onRetryIssueReferences?: () => Promise<void>
   onCloseIssue?: () => void
   getCommentDraft?: (number: number, parent?: IssueActionParent) => string
@@ -270,8 +270,8 @@ export type AppProps = {
   onLoadBranchUpstream?: (branch: string) => Promise<BranchUpstream | undefined>
   onCheckMerge?: (base: MergeSide, head: MergeSide) => Promise<MergeCheck>
   pullDetail?: PullDetailState
-  onLoadPull?: (number: number, options?: { force?: boolean }) => Promise<PullContext | void>
-  onLoadMorePullComments?: () => Promise<void>
+  onLoadPull?: (number: number, options?: ConversationLoadOptions) => Promise<PullContext | void>
+  onLoadMorePullComments?: (options?: Pick<ConversationLoadOptions, "reconcileComments">) => Promise<void>
   onRetryPullReferences?: () => Promise<void>
   onRetryPullCommits?: () => Promise<void>
   onRetryPullContext?: () => Promise<PullContext | void>
@@ -651,9 +651,10 @@ function AppContent(props: AppProps) {
     const request = { number }
     setIssueRefresh(request)
     try {
-      if (detail.resource.status === "ready" && detail.comments.status === "error") await props.onLoadMoreIssueComments?.()
+      if (detail.resource.status === "ready" && detail.comments.status === "error")
+        await props.onLoadMoreIssueComments?.({ reconcileComments: true })
       else if (detail.resource.status === "ready" && detail.references.status === "error") await props.onRetryIssueReferences?.()
-      else await props.onLoadIssue?.(number, { force: true })
+      else await props.onLoadIssue?.(number, { force: true, reconcileComments: true })
     } finally {
       setIssueRefresh((current) => (current === request ? undefined : current))
     }
@@ -1603,9 +1604,10 @@ function AppContent(props: AppProps) {
       if (detail.resource.status === "ready" && detail.commits.status === "error") await props.onRetryPullCommits?.()
       else if (detail.resource.status === "ready" && detail.context.status === "error")
         await refreshPullThreads(number, () => props.onRetryPullContext?.())
-      else if (detail.resource.status === "ready" && detail.comments.status === "error") await props.onLoadMorePullComments?.()
+      else if (detail.resource.status === "ready" && detail.comments.status === "error")
+        await props.onLoadMorePullComments?.({ reconcileComments: true })
       else if (detail.resource.status === "ready" && detail.references.status === "error") await props.onRetryPullReferences?.()
-      else await refreshPullThreads(number, () => props.onLoadPull?.(number, { force: true }))
+      else await refreshPullThreads(number, () => props.onLoadPull?.(number, { force: true, reconcileComments: true }))
     } finally {
       setPullRefresh((current) => (current === request ? undefined : current))
     }
@@ -2821,7 +2823,8 @@ function AppContent(props: AppProps) {
         if (diff) {
           if (diffResource().status !== "loading") {
             void props.onLoadDiff?.(diff, false, { force: true })
-            if (diff.kind === "pull") void refreshPullThreads(diff.number, () => props.onLoadPull?.(diff.number, { force: true }))
+            if (diff.kind === "pull")
+              void refreshPullThreads(diff.number, () => props.onLoadPull?.(diff.number, { force: true, reconcileComments: true }))
           }
           return
         }

@@ -119,6 +119,8 @@ import type {
 
 type Page<T> = { items: T[]; hasMore: boolean; total?: number }
 
+export type ConversationLoadOptions = { force?: boolean; reconcileComments?: boolean }
+
 export type RepositoryLoaders = {
   addReaction?(repository: Repo, target: ReactionTarget, kind: ReactionKind): Promise<ReactionState>
   removeReaction?(repository: Repo, target: ReactionTarget, kind: ReactionKind): Promise<ReactionState>
@@ -214,7 +216,7 @@ export type RepositorySession = {
   loadMoreCommitFiles(): Promise<void>
   clearCommit(): void
   pullDetail: Accessor<PullDetailState | undefined>
-  loadPull(number: number, options?: { force?: boolean }): Promise<PullContext | void>
+  loadPull(number: number, options?: ConversationLoadOptions): Promise<PullContext | void>
   updatePullDraft(number: number, draft: boolean): Promise<PullRequestDetail>
   createIssue(title: string, body: string): Promise<IssueDetail>
   loadIssueTemplates(): Promise<IssueTemplate[]>
@@ -225,7 +227,7 @@ export type RepositorySession = {
   loadPullBranches(repository: PullRepository, page: number): Promise<Page<string>>
   loadPullMergeMessage(number: number, expectedHeadSha: string): Promise<PullMergeDraft>
   mergePull(number: number, method: PullMergeMethod, expectedHeadSha: string, message?: PullMergeMessage): Promise<PullRequestDetail>
-  loadMorePullComments(): Promise<void>
+  loadMorePullComments(options?: Pick<ConversationLoadOptions, "reconcileComments">): Promise<void>
   retryPullReferences(): Promise<void>
   retryPullCommits(): Promise<void>
   retryPullContext(): Promise<PullContext | void>
@@ -235,8 +237,8 @@ export type RepositorySession = {
   // Optional so hand-built test sessions need not stub it.
   invalidatePull?(repository: string, number: number): void
   issueDetail: Accessor<IssueDetailState | undefined>
-  loadIssue(number: number, options?: { force?: boolean }): Promise<void>
-  loadMoreIssueComments(): Promise<void>
+  loadIssue(number: number, options?: ConversationLoadOptions): Promise<void>
+  loadMoreIssueComments(options?: Pick<ConversationLoadOptions, "reconcileComments">): Promise<void>
   retryIssueReferences(): Promise<void>
   clearIssue(): void
   assignableUsers?: Accessor<ResourceState<Paginated<AssignableUser>> | undefined>
@@ -1627,8 +1629,10 @@ export function createRepositorySession(
     pageCount: number,
     previous?: Paginated<IssueComment>,
     options: RequestOptions = { signal: pullAbort.signal },
+    reconcileComments = false,
   ) => {
     const revision = reactionRevision
+    const postedBeforeRead = reconcileComments ? new Set(postedComments.get(issueKey(repository, number, "pull"))) : undefined
     try {
       const target = repositorySnapshot(repository)
       const loaded = await withRequestBudget(options, (options) =>
@@ -1640,7 +1644,12 @@ export function createRepositorySession(
         ),
       )
       if (request !== pullGeneration) return
-      const value = withCommentReactions("pull", number, withPostedComments(repository, number, loaded, loaded.items, "pull"), revision)
+      const value = withCommentReactions(
+        "pull",
+        number,
+        withPostedComments(repository, number, loaded, loaded.items, "pull", loaded.hasMore ? undefined : postedBeforeRead),
+        revision,
+      )
       setPullDetail((current) => (current?.number === number ? { ...current, comments: { status: "ready", value } } : current))
     } catch (error) {
       if (request !== pullGeneration) return
@@ -1890,7 +1899,7 @@ export function createRepositorySession(
     return fetchPullReferences(current.repository, detail.number, pullGeneration, detail.references.value)
   }
 
-  const loadPull = async (number: number, options: { force?: boolean } = {}) => {
+  const loadPull = async (number: number, options: ConversationLoadOptions = {}) => {
     const current = state()
     let previous = pullDetail()
     if (current.status !== "ready" || (previous?.number === number && previous.resource.status === "loading")) return
@@ -1975,7 +1984,9 @@ export function createRepositorySession(
           context: loadingResource(context),
         })
         const [, , , refreshedContext] = await Promise.all([
-          hasComments ? fetchPullComments(repository, number, request, comments?.page ?? 1, comments, requestOptions) : Promise.resolve(),
+          hasComments
+            ? fetchPullComments(repository, number, request, comments?.page ?? 1, comments, requestOptions, options.reconcileComments)
+            : Promise.resolve(),
           fetchPullReferences(repository, number, request, references, requestOptions),
           pull.commitCount > 0 ? fetchPullCommits(repository, number, request, commits, requestOptions) : Promise.resolve(),
           fetchPullContext(repository, number, request, initialContext, requestOptions),
@@ -2007,7 +2018,7 @@ export function createRepositorySession(
     }
   }
 
-  const loadMorePullComments = async () => {
+  const loadMorePullComments = async (options: Pick<ConversationLoadOptions, "reconcileComments"> = {}) => {
     const current = state()
     const detail = pullDetail()
     if (
@@ -2024,7 +2035,7 @@ export function createRepositorySession(
     const reload = value === undefined || (detail.comments.status === "error" && detail.comments.phase === "load")
     if (!reload && !value?.hasMore) return
     setPullDetail({ ...detail, comments: loadingResource(value, reload ? "load" : "pagination") })
-    if (reload) return fetchPullComments(current.repository, number, request, value?.page ?? 1, value)
+    if (reload) return fetchPullComments(current.repository, number, request, value?.page ?? 1, value, undefined, options.reconcileComments)
     try {
       const next = await withRequestBudget({ signal: pullAbort.signal }, (options) =>
         loaders.issueComments(current.data.repo, number, value!.page + 1, options),
@@ -2103,10 +2114,11 @@ export function createRepositorySession(
     value: Paginated<IssueComment>,
     returned: readonly IssueComment[] = value.items,
     parent: IssueActionParent = "issue",
+    discardMissing?: ReadonlySet<IssueComment>,
   ): Paginated<IssueComment> => {
     const key = issueKey(repository, number, parent)
     const ids = new Set(returned.map((comment) => comment.id))
-    const missing = (postedComments.get(key) ?? []).filter((comment) => !ids.has(comment.id))
+    const missing = (postedComments.get(key) ?? []).filter((comment) => !ids.has(comment.id) && !discardMissing?.has(comment))
     if (missing.length) postedComments.set(key, missing)
     else postedComments.delete(key)
     const merged = new Map(value.items.map((comment) => [comment.id, comment]))
@@ -2121,8 +2133,10 @@ export function createRepositorySession(
     pageCount: number,
     previous?: Paginated<IssueComment>,
     options: RequestOptions = { signal: issueAbort.signal },
+    reconcileComments = false,
   ) => {
     const revision = reactionRevision
+    const postedBeforeRead = reconcileComments ? new Set(postedComments.get(issueKey(repository, number))) : undefined
     try {
       const target = repositorySnapshot(repository)
       const loaded = await withRequestBudget(options, (options) =>
@@ -2134,7 +2148,12 @@ export function createRepositorySession(
         ),
       )
       if (request !== issueGeneration) return
-      const value = withCommentReactions("issue", number, withPostedComments(repository, number, loaded), revision)
+      const value = withCommentReactions(
+        "issue",
+        number,
+        withPostedComments(repository, number, loaded, loaded.items, "issue", loaded.hasMore ? undefined : postedBeforeRead),
+        revision,
+      )
       setIssueDetail((current) => (current?.number === number ? { ...current, comments: { status: "ready", value } } : current))
     } catch (error) {
       if (request !== issueGeneration) return
@@ -2193,7 +2212,7 @@ export function createRepositorySession(
     return fetchIssueReferences(current.repository, detail.number, issueGeneration, detail.references.value)
   }
 
-  const loadIssue = async (number: number, options: { force?: boolean } = {}) => {
+  const loadIssue = async (number: number, options: ConversationLoadOptions = {}) => {
     const current = state()
     let previous = issueDetail()
     if (current.status !== "ready" || (previous?.number === number && previous.resource.status === "loading")) return
@@ -2284,7 +2303,9 @@ export function createRepositorySession(
           })
         }
         await Promise.all([
-          hasComments ? fetchIssueComments(repository, number, request, comments?.page ?? 1, comments, requestOptions) : Promise.resolve(),
+          hasComments
+            ? fetchIssueComments(repository, number, request, comments?.page ?? 1, comments, requestOptions, options.reconcileComments)
+            : Promise.resolve(),
           fetchIssueReferences(repository, number, request, references, requestOptions),
         ])
         if (request === issueGeneration)
@@ -2307,7 +2328,7 @@ export function createRepositorySession(
     }
   }
 
-  const loadMoreIssueComments = async () => {
+  const loadMoreIssueComments = async (options: Pick<ConversationLoadOptions, "reconcileComments"> = {}) => {
     const current = state()
     const detail = issueDetail()
     if (
@@ -2324,7 +2345,8 @@ export function createRepositorySession(
     const reload = value === undefined || (detail.comments.status === "error" && detail.comments.phase === "load")
     if (!reload && !value?.hasMore) return
     setIssueDetail({ ...detail, comments: loadingResource(value, reload ? "load" : "pagination") })
-    if (reload) return fetchIssueComments(current.repository, number, request, value?.page ?? 1, value)
+    if (reload)
+      return fetchIssueComments(current.repository, number, request, value?.page ?? 1, value, undefined, options.reconcileComments)
     try {
       const next = await withRequestBudget({ signal: issueAbort.signal }, (options) =>
         loaders.issueComments(current.data.repo, number, value!.page + 1, options),

@@ -76,6 +76,66 @@ async function setup(overrides: Partial<RepositoryLoaders> = {}) {
   return session
 }
 
+test.each(["issue", "pull"] as const)("%s refresh drops unseen local comments only after a complete successful read", async (parent) => {
+  const number = parent === "pull" ? 421 : issueDetailFixture.number
+  const first = issueCommentsFixture[0]!
+  const concurrent = { ...comment, id: comment.id + 1, body: "A comment confirmed during refresh" }
+  const reading = deferred<void>()
+  const response = deferred<{ items: IssueComment[]; hasMore: boolean }>()
+  let mode: "initial" | "partial" | "failed" | "reading" | "complete" = "initial"
+  let nextPost = comment
+  const session = createRepositorySession(
+    loaders({
+      issueComments: async () => {
+        if (mode === "failed") throw new Error("Offline")
+        if (mode === "reading") {
+          reading.resolve()
+          return response.promise
+        }
+        return { items: mode === "complete" ? [first, concurrent] : [first], hasMore: mode === "partial" }
+      },
+      createIssueComment: async () => nextPost,
+    }),
+  )
+  const load = parent === "pull" ? session.loadPull : session.loadIssue
+  const detail = parent === "pull" ? session.pullDetail : session.issueDetail
+  const refresh = () => load(number, { force: true, reconcileComments: true })
+  const retry = parent === "pull" ? session.loadMorePullComments : session.loadMoreIssueComments
+  const ids = () => detail()?.comments.value?.items.map((item) => item.id)
+  const post = async (item: IssueComment) => {
+    nextPost = item
+    session.updateIssueDraft(number, { body: item.body }, parent)
+    await session.submitIssueAction(number, "comment", parent)
+  }
+
+  await session.load("owner/repo")
+  await load(number)
+  await post(comment)
+  expect(ids()).toEqual([first.id, comment.id])
+
+  mode = "partial"
+  await refresh()
+  expect(ids()).toEqual([first.id, comment.id])
+  expect(detail()?.comments.value?.hasMore).toBe(true)
+
+  mode = "failed"
+  await refresh()
+  expect(detail()?.comments.status).toBe("error")
+  expect(ids()).toEqual([first.id, comment.id])
+
+  mode = "reading"
+  const refreshing = retry({ reconcileComments: true })
+  await reading.promise
+  await post(concurrent)
+  response.resolve({ items: [first], hasMore: false })
+  await refreshing
+  expect(ids()).toEqual([first.id, concurrent.id])
+
+  mode = "complete"
+  await load(number)
+  expect(ids()).toEqual([first.id, concurrent.id])
+})
+
 describe("pull request conversation comments", () => {
   test("close/reopen retries only the state write after a confirmed comment", async () => {
     let current = { ...pull(), permissions: { comment: true, close: true, reopen: true, assignees: true } }
