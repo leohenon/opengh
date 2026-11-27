@@ -174,7 +174,7 @@ export function Help(props: {
     // external actions, then app controls.
     const appShortcuts = [
       ...(props.focus ? [entry("global.openFullApp", "open full app")] : []),
-      ...(props.canToggleTabBar ? [entry("global.toggleTabBar", "show / hide repository header")] : []),
+      ...(props.canToggleTabBar ? [entry("global.toggleTabBar", "show / hide tab bar")] : []),
       ...applicationShortcuts,
     ]
     const entries =

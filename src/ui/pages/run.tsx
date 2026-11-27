@@ -1,4 +1,5 @@
-import { TextAttributes, type ScrollBoxRenderable } from "@opentui/core"
+import { TextAttributes, type ScrollBoxRenderable, type TextRenderable } from "@opentui/core"
+import { useRenderer } from "@opentui/solid"
 import { useKeyActions } from "../keybindings"
 import { createEffect, createMemo, createSignal, For, on, onCleanup, Show } from "solid-js"
 import { defaultConfig, type PageWidth } from "../../config"
@@ -11,6 +12,7 @@ import { useIcons } from "../icon-style"
 import { iconPrefix } from "../icons"
 import { createScrollbarVisibility } from "../scrollbar-visibility"
 import { useTheme } from "../theme"
+import { wrapAtWhitespace } from "../whitespace-wrap"
 import { runColor, runIcon, runState } from "../workflow-status"
 
 const MAX_FAILED_POLLS = 6
@@ -27,6 +29,20 @@ function duration(start: string | null, end: string | null, running: boolean) {
   return `${Math.floor(minutes / 60)}h ${minutes % 60}m`
 }
 
+function Marker(props: { icon: string; fg: string }) {
+  return (
+    <Show when={props.icon}>
+      <text flexShrink={0} fg={props.fg}>
+        {iconPrefix(props.icon)}
+      </text>
+    </Show>
+  )
+}
+
+function outcome(state: string, elapsed: string) {
+  return ` ${`· ${state} · ${elapsed}`.replaceAll(" ", "\u00a0")}`
+}
+
 export function RunScreen(props: {
   id: number
   summary?: WorkflowRunSummary
@@ -39,6 +55,10 @@ export function RunScreen(props: {
 }) {
   const { colors } = useTheme()
   const icons = useIcons()
+  const renderer = useRenderer()
+  const wrapText = (node: TextRenderable) => wrapAtWhitespace(renderer, node)
+  const wrapPath = (node: TextRenderable) => wrapAtWhitespace(renderer, node, "/")
+  const wrapBranch = (node: TextRenderable) => wrapAtWhitespace(renderer, node, "/-")
   const repositoryUrl = () => props.detail.resource.value?.url.replace(/\/actions\/runs\/\d+.*$/, "")
   const centered = () => (props.pageWidth ?? defaultConfig.pageWidth) === "centered"
   const contentWidth = () => detailContentWidth(props.pageWidth)
@@ -152,16 +172,18 @@ export function RunScreen(props: {
                   {(login) => <a href={`https://github.com/${login()}`}>{login()}</a>}
                 </Show>
               </text>
-              <text width="100%" flexShrink={0} wrapMode="char" fg={colors.muted}>
-                {iconPrefix(icons().branch)}
-                <Show when={run().branch} fallback="Unknown branch">
-                  {(branch) => <a href={`${repositoryUrl()}/tree/${encodeURIComponent(branch())}`}>{branch()}</a>}
-                </Show>{" "}
-                ·{" "}
-                <Show when={run().sha} fallback="Unknown commit">
-                  {(sha) => <a href={`${repositoryUrl()}/commit/${sha()}`}>{sha().slice(0, 7)}</a>}
-                </Show>
-              </text>
+              <box width="100%" minWidth={0} flexShrink={0} flexDirection="row">
+                <Marker icon={icons().branch} fg={colors.muted} />
+                <text ref={wrapBranch} flexGrow={1} flexBasis={0} minWidth={0} wrapMode="word" fg={colors.muted}>
+                  <Show when={run().branch} fallback="Unknown branch">
+                    {(branch) => <a href={`${repositoryUrl()}/tree/${encodeURIComponent(branch())}`}>{branch()}</a>}
+                  </Show>
+                  {" ·\u00a0"}
+                  <Show when={run().sha} fallback={"Unknown\u00a0commit"}>
+                    {(sha) => <a href={`${repositoryUrl()}/commit/${sha()}`}>{sha().slice(0, 7)}</a>}
+                  </Show>
+                </text>
+              </box>
               <text width="100%" flexShrink={0} fg={colors.muted}>
                 Created {exactDate(run().createdAt)} · {ago(run().createdAt)}
               </text>
@@ -176,7 +198,7 @@ export function RunScreen(props: {
                 Updated {exactDate(run().updatedAt)}
               </text>
               <Show when={run().workflowPath}>
-                <text width="100%" flexShrink={0} wrapMode="char" fg={colors.muted}>
+                <text ref={wrapPath} width="100%" flexShrink={0} wrapMode="word" fg={colors.muted}>
                   <a
                     href={`${repositoryUrl()}/blob/${encodeURIComponent(run().sha)}/${run().workflowPath.split("/").map(encodeURIComponent).join("/")}`}
                   >
@@ -204,20 +226,22 @@ export function RunScreen(props: {
                       >
                         {(job) => (
                           <box width="100%" minWidth={0} flexShrink={0} flexDirection="column" marginTop={1}>
-                            <text width="100%" flexShrink={0} fg={runColor(job, colors)}>
-                              {iconPrefix(runIcon(job, icons().workflow))}
-                              <b>
-                                <span style={{ fg: colors.text }}>
-                                  <a href={`${run().url}/job/${job.id}`}>{job.name}</a>
-                                </span>
-                              </b>
-                              {" · "}
-                              {runState(job)} · {duration(job.startedAt, job.completedAt, job.status === "in_progress")}
-                            </text>
-                            <text width="100%" flexShrink={0} fg={colors.muted}>
-                              {" "}
-                              Runner: {job.runner || "Not assigned"}
-                            </text>
+                            <box width="100%" minWidth={0} flexShrink={0} flexDirection="row">
+                              <Marker icon={runIcon(job, icons().workflow)} fg={runColor(job, colors)} />
+                              <box flexGrow={1} flexBasis={0} minWidth={0} flexDirection="column">
+                                <text ref={wrapText} width="100%" flexShrink={0} fg={runColor(job, colors)}>
+                                  <b>
+                                    <span style={{ fg: colors.text }}>
+                                      <a href={`${run().url}/job/${job.id}`}>{job.name}</a>
+                                    </span>
+                                  </b>
+                                  {outcome(runState(job), duration(job.startedAt, job.completedAt, job.status === "in_progress"))}
+                                </text>
+                                <text ref={wrapText} width="100%" flexShrink={0} fg={colors.muted}>
+                                  Runner: {job.runner || "Not assigned"}
+                                </text>
+                              </box>
+                            </box>
                             <box width="100%" minWidth={0} flexShrink={0} flexDirection="column" paddingLeft={2}>
                               <For
                                 each={job.steps}
@@ -228,12 +252,13 @@ export function RunScreen(props: {
                                 }
                               >
                                 {(step) => (
-                                  <text width="100%" flexShrink={0} fg={runColor(step, colors)}>
-                                    {iconPrefix(runIcon(step, icons().workflow))}
-                                    <span style={{ fg: colors.text }}>{step.name}</span>
-                                    {" · "}
-                                    {runState(step)} · {duration(step.startedAt, step.completedAt, step.status === "in_progress")}
-                                  </text>
+                                  <box width="100%" minWidth={0} flexShrink={0} flexDirection="row">
+                                    <Marker icon={runIcon(step, icons().workflow)} fg={runColor(step, colors)} />
+                                    <text ref={wrapText} flexGrow={1} flexBasis={0} minWidth={0} fg={runColor(step, colors)}>
+                                      <span style={{ fg: colors.text }}>{step.name}</span>
+                                      {outcome(runState(step), duration(step.startedAt, step.completedAt, step.status === "in_progress"))}
+                                    </text>
+                                  </box>
                                 )}
                               </For>
                             </box>

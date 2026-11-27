@@ -4,6 +4,9 @@ import { createSignal } from "solid-js"
 import type { RunDetailState } from "../src/repository-state"
 import { defaultConfig } from "../src/config"
 import { App } from "../src/ui/app"
+import { KeybindingsProvider } from "../src/ui/keybindings"
+import { RunScreen } from "../src/ui/pages/run"
+import { ThemeProvider } from "../src/ui/theme"
 import { githubDataFixture, repositoryOperationsFixture } from "./fixtures/github-data"
 import { workflowJobFixture, workflowRunFixture } from "./fixtures/workflow-run"
 
@@ -435,5 +438,87 @@ test("retained run errors stay in the status bar without toasts across automatic
   } finally {
     view.renderer.destroy()
     start.mockRestore()
+  }
+})
+
+test("run details wrap names at whitespace, paths after separators, and keep outcomes whole under their text", async () => {
+  const run = {
+    ...workflowRunFixture,
+    branch: "octocat/fix/turbopack-sourcemap-names-for-scope-hoisted-modules-102474",
+    workflowPath: ".github/workflows/build_and_test_with_a_long_name/reusable-build-and-test-workflow.yml",
+  }
+  const job = {
+    ...workflowJobFixture,
+    name: "test integration (3/7, linux, node 22) / build-and-test / run-tests-with-retries.sh",
+    runner: "ubuntu-latest-16-core-self-hosted.runner-group/pool-7",
+    steps: [
+      {
+        ...workflowJobFixture.steps[0]!,
+        name: "Run actions/checkout@v4 with fetch-depth 25 and sparse checkout of packages/next/src/server and test/e2e directories",
+      },
+      {
+        ...workflowJobFixture.steps[0]!,
+        number: 2,
+        name: "node run-tests.js --timings -g 3/7 -c ${TEST_CONCURRENCY} --type integration test/integration/app-dir/index.test.ts",
+      },
+    ],
+  }
+  const view = await testRender(
+    () => (
+      <ThemeProvider name="github">
+        <KeybindingsProvider>
+          <RunScreen
+            id={run.id}
+            detail={{
+              id: run.id,
+              resource: { status: "ready", value: run },
+              jobs: { status: "ready", value: { items: [job], page: 1, hasMore: false } },
+            }}
+            active={false}
+            interactive={false}
+            showScrollbar={false}
+          />
+        </KeybindingsProvider>
+      </ThemeProvider>
+    ),
+    { width: 100, height: 30 },
+  )
+  try {
+    const rows = async () => {
+      await view.renderOnce()
+      await view.flush()
+      return view
+        .captureCharFrame()
+        .split("\n")
+        .map((row) => row.trimEnd())
+    }
+    expect(await rows()).toEqual(
+      expect.arrayContaining([
+        "  ✓ test integration (3/7, linux, node 22) / build-and-test / run-tests-with-retries.sh",
+        "    · success · 1m 0s",
+        "    Runner: ubuntu-latest-16-core-self-hosted.runner-group/pool-7",
+        "    ✓ Run actions/checkout@v4 with fetch-depth 25 and sparse checkout of packages/next/src/server",
+        "      and test/e2e directories · success · 1m 0s",
+        "    ✓ node run-tests.js --timings -g 3/7 -c ${TEST_CONCURRENCY} --type integration",
+        "      test/integration/app-dir/index.test.ts · success · 1m 0s",
+      ]),
+    )
+    expect(view.captureCharFrame()).not.toMatch(/[\u00a0\ufdd0-\ufdef\ufffd]/)
+    view.resize(60, 30)
+    expect(await rows()).toEqual(
+      expect.arrayContaining([
+        "  ⑂ octocat/fix/turbopack-sourcemap-names-for-scope-",
+        "    hoisted-modules-102474 · abcdef1",
+        "  .github/workflows/build_and_test_with_a_long_name/",
+        "  reusable-build-and-test-workflow.yml",
+        "  ✓ test integration (3/7, linux, node 22) /",
+        "    build-and-test / run-tests-with-retries.sh",
+        "    · success · 1m 0s",
+        "    Runner:",
+        "    ubuntu-latest-16-core-self-hosted.runner-group/pool-7",
+      ]),
+    )
+  } finally {
+    view.renderer.destroy()
   }
 })

@@ -1611,107 +1611,104 @@ test("quit waits for inline comment drafts and a failed save cancels it without 
   expect(view.renderer.isDestroyed).toBe(true)
 })
 
-test.each([false, true])(
-  "the repository header toggle stays per repo across switches and restarts (compact: %s)",
-  async (compactHeader) => {
-    const directory = await mkdtemp(join(tmpdir(), "opengh-tab-bar-test-"))
-    const path = join(directory, "repository-tab-bar.json")
-    const start = async (repositoryArgument: string) => {
-      const [state, setState] = createSignal<RepositoryState>({ status: "loading", repository: repositoryArgument })
-      const view = await testRender(
-        () => (
-          <Root
-            cwd="/work"
-            repositoryArgument={repositoryArgument}
-            services={{
-              createPullReviewSession: createTestReviewSession,
-              resolveRepository: async (repository) => repository,
-              resolveLocalRepository: async () => undefined,
-              loadRecentRepositories: async () => [],
-              rememberRepository: async () => {},
-              loadRepositoryTabPreferences: async () => ({ tabBarHidden: await loadRepositoryTabBarHidden(path) }),
-              saveRepositoryTabs: async () => {},
-              saveRepositoryTabBarHidden: (hidden) => saveRepositoryTabBarHidden(hidden, path),
-              loadConfig: async () => ({ ...defaultConfig, compactHeader, checkForUpdates: false }),
-              createRepositorySession: () => ({
-                ...readySession(),
-                state,
-                load: async (repository) => {
-                  setState({
-                    status: "ready",
-                    repository,
-                    data: { ...githubDataFixture, repo: { ...githubDataFixture.repo, nameWithOwner: repository } },
-                    operations: repositoryOperationsFixture,
-                  })
-                },
-              }),
-            }}
-          />
-        ),
-        { width: 120, height: 40 },
-      )
-      active.push(view)
-      await waitForText(view, "About")
-      return view
-    }
-    try {
-      const view = await start("cli/cli")
-      const frame = () => view.captureCharFrame()
-      const repoName = () => view.renderer.root.findDescendantById("repository-dropdown")
-      const aboutRow = () =>
-        frame()
-          .split("\n")
-          .findIndex((line) => line.includes("About"))
-      const switchTo = async (repository: string) => {
-        view.mockInput.pressKey("S")
-        await waitForText(view, "Switch repository")
-        await view.mockInput.typeText(repository)
-        view.mockInput.pressEnter()
-        await view.flush()
-      }
-
-      expect(frame()).toContain("1 Overview")
-      expect(repoName()).toBeDefined()
-      const originalAboutRow = aboutRow()
-      view.mockInput.pressKey("M")
+test.each([false, true])("the tab bar toggle stays per repo across switches and restarts (compact: %s)", async (compactHeader) => {
+  const directory = await mkdtemp(join(tmpdir(), "opengh-tab-bar-test-"))
+  const path = join(directory, "repository-tab-bar.json")
+  const start = async (repositoryArgument: string) => {
+    const [state, setState] = createSignal<RepositoryState>({ status: "loading", repository: repositoryArgument })
+    const view = await testRender(
+      () => (
+        <Root
+          cwd="/work"
+          repositoryArgument={repositoryArgument}
+          services={{
+            createPullReviewSession: createTestReviewSession,
+            resolveRepository: async (repository) => repository,
+            resolveLocalRepository: async () => undefined,
+            loadRecentRepositories: async () => [],
+            rememberRepository: async () => {},
+            loadRepositoryTabPreferences: async () => ({ tabBarHidden: await loadRepositoryTabBarHidden(path) }),
+            saveRepositoryTabs: async () => {},
+            saveRepositoryTabBarHidden: (hidden) => saveRepositoryTabBarHidden(hidden, path),
+            loadConfig: async () => ({ ...defaultConfig, compactHeader, checkForUpdates: false }),
+            createRepositorySession: () => ({
+              ...readySession(),
+              state,
+              load: async (repository) => {
+                setState({
+                  status: "ready",
+                  repository,
+                  data: { ...githubDataFixture, repo: { ...githubDataFixture.repo, nameWithOwner: repository } },
+                  operations: repositoryOperationsFixture,
+                })
+              },
+            }),
+          }}
+        />
+      ),
+      { width: 120, height: 40 },
+    )
+    active.push(view)
+    await waitForText(view, "About")
+    return view
+  }
+  try {
+    const view = await start("cli/cli")
+    const frame = () => view.captureCharFrame()
+    const repoName = () => view.renderer.root.findDescendantById("repository-dropdown")
+    const aboutRow = () =>
+      frame()
+        .split("\n")
+        .findIndex((line) => line.includes("About"))
+    const switchTo = async (repository: string) => {
+      view.mockInput.pressKey("S")
+      await waitForText(view, "Switch repository")
+      await view.mockInput.typeText(repository)
+      view.mockInput.pressEnter()
       await view.flush()
-      expect(frame()).not.toContain("1 Overview")
-      expect(repoName()).toBeUndefined()
-      expect(aboutRow()).toBeGreaterThanOrEqual(0)
-      expect(originalAboutRow - aboutRow()).toBe(compactHeader ? 1 : 5)
-      view.mockInput.pressKey("3")
-      await waitForText(view, "ScrollBox loses focus")
-      expect(frame()).not.toContain("3 Issues")
-      view.mockInput.pressKey("?")
-      await waitForText(view, "show / hide repository header")
-      view.mockInput.pressKey("?")
-      await view.flush()
-      expect(frame()).not.toContain("show / hide repository header")
-
-      await switchTo("owner/other")
-      await waitForText(view, "1 Overview")
-      expect(repoName()).toBeDefined()
-      await switchTo("CLI/CLI")
-      await waitForText(view, "ScrollBox loses focus")
-      expect(frame()).not.toContain("1 Overview")
-      expect(repoName()).toBeUndefined()
-      view.mockInput.pressKey("q")
-      await view.renderer.closed
-
-      const restarted = await start("cli/cli")
-      expect(restarted.captureCharFrame()).not.toContain("1 Overview")
-      expect(restarted.renderer.root.findDescendantById("repository-dropdown")).toBeUndefined()
-      restarted.mockInput.pressKey("M")
-      await waitForText(restarted, "1 Overview")
-      expect(restarted.renderer.root.findDescendantById("repository-dropdown")).toBeDefined()
-      restarted.mockInput.pressKey("q")
-      await restarted.renderer.closed
-      expect(await loadRepositoryTabBarHidden(path)).toEqual({ "cli/cli": false })
-    } finally {
-      await rm(directory, { recursive: true, force: true })
     }
-  },
-)
+
+    expect(frame()).toContain("1 Overview")
+    expect(repoName()).toBeDefined()
+    const originalAboutRow = aboutRow()
+    view.mockInput.pressKey("M")
+    await view.flush()
+    expect(frame()).not.toContain("1 Overview")
+    expect(repoName()).toBeUndefined()
+    expect(aboutRow()).toBeGreaterThanOrEqual(0)
+    expect(originalAboutRow - aboutRow()).toBe(compactHeader ? 1 : 5)
+    view.mockInput.pressKey("3")
+    await waitForText(view, "ScrollBox loses focus")
+    expect(frame()).not.toContain("3 Issues")
+    view.mockInput.pressKey("?")
+    await waitForText(view, "show / hide tab bar")
+    view.mockInput.pressKey("?")
+    await view.flush()
+    expect(frame()).not.toContain("show / hide tab bar")
+
+    await switchTo("owner/other")
+    await waitForText(view, "1 Overview")
+    expect(repoName()).toBeDefined()
+    await switchTo("CLI/CLI")
+    await waitForText(view, "ScrollBox loses focus")
+    expect(frame()).not.toContain("1 Overview")
+    expect(repoName()).toBeUndefined()
+    view.mockInput.pressKey("q")
+    await view.renderer.closed
+
+    const restarted = await start("cli/cli")
+    expect(restarted.captureCharFrame()).not.toContain("1 Overview")
+    expect(restarted.renderer.root.findDescendantById("repository-dropdown")).toBeUndefined()
+    restarted.mockInput.pressKey("M")
+    await waitForText(restarted, "1 Overview")
+    expect(restarted.renderer.root.findDescendantById("repository-dropdown")).toBeDefined()
+    restarted.mockInput.pressKey("q")
+    await restarted.renderer.closed
+    expect(await loadRepositoryTabBarHidden(path)).toEqual({ "cli/cli": false })
+  } finally {
+    await rm(directory, { recursive: true, force: true })
+  }
+})
 
 test("failed tab saves remain pending and are retried on exit without writing unchanged history", async () => {
   let attempts = 0

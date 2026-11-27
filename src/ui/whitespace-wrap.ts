@@ -1,12 +1,13 @@
 import { CliRenderEvents, OptimizedBuffer, RGBA, type CliRenderer, type TextBufferRenderable, type TextChunk } from "@opentui/core"
 
 const BREAKS = ".,:;!?-/\\()[]{}"
-const ENCODED = `${BREAKS} `
+const ENCODED = `${BREAKS}  `
 const FIRST_PLACEHOLDER = 0xfdd0
 const PLACEHOLDERS = Array.from(ENCODED, (_, index) => String.fromCharCode(FIRST_PLACEHOLDER + index))
 const JOINED_SPACE = PLACEHOLDERS[BREAKS.length]!
+const UNBROKEN_SPACE = PLACEHOLDERS[BREAKS.length + 1]!
 const breakable = /[.,:;!?\-/\\()[\]{}]/g
-const reserved = /[\ufdd0-\ufddf]/g
+const reserved = /[\ufdd0-\ufde0]/g
 const joinedSpaces = /\ufddf/g
 const joined = Symbol("joined")
 
@@ -17,7 +18,7 @@ const decoders = new WeakMap<CliRenderer, boolean>()
 const wrapped = new WeakSet<TextBufferRenderable>()
 
 function encode(text: string, following: string, breakAfter: string) {
-  const source = text.replace(reserved, "\ufffd")
+  const source = text.replace(reserved, "\ufffd").replaceAll("\u00a0", UNBROKEN_SPACE)
   return source.replace(breakable, (char, offset: number) =>
     breakAfter.includes(char) || unattached.test(offset + 1 < source.length ? source.slice(offset + 1, offset + 3) : following)
       ? char
