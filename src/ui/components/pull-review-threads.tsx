@@ -183,9 +183,11 @@ export function ReviewThread(props: {
                         {line.prefix}{" "}
                       </text>
                     </box>
-                    <text flexGrow={1} flexShrink={1} flexBasis={0} minWidth={0} paddingRight={1} wrapMode="word" fg={colors.text}>
-                      {line.text}
-                    </text>
+                    <box flexGrow={1} flexShrink={1} flexBasis={0} minWidth={0} paddingRight={1}>
+                      <text width="100%" wrapMode="word" fg={colors.text}>
+                        {line.text}
+                      </text>
+                    </box>
                   </box>
                 )
               }}

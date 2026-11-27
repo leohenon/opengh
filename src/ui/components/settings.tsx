@@ -593,7 +593,7 @@ export function Settings(props: {
               }}
               focusable={false}
               flexGrow={1}
-              minHeight={0}
+              minHeight={1}
               scrollY
               scrollX={false}
               scrollbarOptions={{ visible: false }}
@@ -612,7 +612,7 @@ export function Settings(props: {
             </scrollbox>
             <Show when={props.loadError || error()}>
               {(message) => (
-                <text fg={colors.red} wrapMode="word">
+                <text flexShrink={0} fg={colors.red} wrapMode="word">
                   {message()}
                 </text>
               )}

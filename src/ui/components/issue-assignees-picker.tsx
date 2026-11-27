@@ -6,7 +6,8 @@ import { assigneeChanges } from "../../assignee-changes"
 import type { IssueActionState, ResourceState } from "../../repository-state"
 import { createScrollbarVisibility } from "../scrollbar-visibility"
 import { useTheme } from "../theme"
-import { Popup } from "./popup"
+import { Popup, popupWidth } from "./popup"
+import { wrappedRows } from "../format"
 import { KeyInput, useKeyActions, useKeybindings } from "../keybindings"
 import { Action } from "./action"
 import { mouseClick, mouseHover } from "../mouse"
@@ -167,13 +168,8 @@ export function IssueAssigneesPicker(props: {
       .join("\n")
   const errorHeight = () => {
     if (!error()) return 0
-    const width = Math.max(1, Math.min(80, dimensions().width - 2) - 8)
-    return Math.min(
-      6,
-      error()
-        .split("\n")
-        .reduce((rows, line) => rows + Math.ceil(Bun.stringWidth(line) / width) + 1, 0),
-    )
+    const width = Math.max(1, popupWidth(dimensions().width, 80) - 8)
+    return Math.max(1, Math.min(6, wrappedRows(error(), width), dimensions().height - 12))
   }
   const popupHeight = () => Math.min(20, Math.max(1, rowCount() + (!filtered().length && !loading() ? 1 : 0))) + 9 + errorHeight()
   const LoadRow = () => {
@@ -253,7 +249,7 @@ export function IssueAssigneesPicker(props: {
             }}
             focusable={false}
             flexGrow={1}
-            minHeight={0}
+            minHeight={1}
             paddingX={1}
             scrollY
           >

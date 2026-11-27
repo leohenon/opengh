@@ -27,6 +27,29 @@ export function fitText(value: string, width: number) {
   return `${result}...`
 }
 
+export function wrappedRows(value: string, width: number) {
+  if (width <= 0) return 0
+  let rows = 0
+  for (const line of value.split("\n")) {
+    let used = 0
+    rows++
+    for (const word of line.split(/\s+/).filter(Boolean)) {
+      let size = Bun.stringWidth(word)
+      if (used && used + 1 + size <= width) {
+        used += 1 + size
+        continue
+      }
+      if (used) rows++
+      while (size > width) {
+        size -= width
+        rows++
+      }
+      used = size
+    }
+  }
+  return rows
+}
+
 export function count(value: number) {
   if (value >= 1000) return `${(value / 1000).toFixed(1).replace(".0", "")}k`
   return String(value)

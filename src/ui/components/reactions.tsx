@@ -51,7 +51,7 @@ export function Reactions(props: {
   return (
     <Show when={kinds().length || pending() || error()}>
       <box width="100%" minWidth={0} flexShrink={0} marginTop={1} flexDirection="column">
-        <box flexDirection="row" flexWrap="wrap" flexShrink={0} gap={1}>
+        <box flexDirection="row" flexWrap="wrap" flexShrink={0} columnGap={1}>
           <For each={kinds()}>
             {([kind, emoji]) => (
               <Show

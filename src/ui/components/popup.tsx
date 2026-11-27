@@ -5,6 +5,14 @@ import { mouseSurface } from "../mouse"
 import { useHyperlinkMouse } from "../hyperlinks"
 import { useTheme } from "../theme"
 
+export function insetPopupSize(available: number, requested: number, expanded = false) {
+  return Math.max(1, Math.min(expanded ? Math.max(requested, Math.floor(available * 0.9)) : requested, available - 2))
+}
+
+export function popupWidth(terminalWidth: number, requested: number) {
+  return insetPopupSize(terminalWidth, requested)
+}
+
 export function Popup(props: {
   visible?: boolean
   fullscreen?: boolean
@@ -23,8 +31,7 @@ export function Popup(props: {
   const { colors } = useTheme()
   let dismissOnRelease = false
   const availableHeight = () => Math.max(1, dimensions().height - ((props.reserveStatusBar ?? props.fullscreen) ? 1 : 0))
-  const insetSize = (available: number, requested: number) =>
-    Math.max(1, Math.min(props.expanded ? Math.max(requested, Math.floor(available * 0.9)) : requested, available - 2))
+  const insetSize = (available: number, requested: number) => insetPopupSize(available, requested, props.expanded)
   const width = () => (props.fullscreen ? dimensions().width : insetSize(dimensions().width, props.width ?? 64))
   const height = () => (props.fullscreen ? availableHeight() : insetSize(availableHeight(), props.height))
   const top = () =>

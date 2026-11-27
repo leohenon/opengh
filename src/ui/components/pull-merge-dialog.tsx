@@ -7,6 +7,7 @@ import { useTheme } from "../theme"
 import { Action } from "./action"
 import { LoadingText } from "./loading-text"
 import { Popup } from "./popup"
+import { createScrollbarVisibility } from "../scrollbar-visibility"
 
 const labels: Record<PullMergeMethod, string> = {
   merge: "Merge pull request",
@@ -20,6 +21,7 @@ export function PullMergeDialog(props: {
   methods: PullMergeMethod[]
   reason?: string
   checking?: boolean
+  showScrollbar?: boolean
   onLoadMessage(): Promise<PullMergeDraft>
   onSubmit(method: PullMergeMethod, headSha: string, message?: PullMergeMessage): void
   onHintChange(hint: string | undefined): void
@@ -37,6 +39,7 @@ export function PullMergeDialog(props: {
   let disposed = false
   let writer: TextareaRenderable | undefined
   let preview: ScrollBoxRenderable | undefined
+  const bindScrollbar = createScrollbarVisibility(() => props.showScrollbar === true)
   const active = () => Math.min(selected(), Math.max(0, props.methods.length - 1))
   const validMessage = () => !!message()?.headline.trim() && !/[\r\n]/.test(message()!.headline)
   const available = () => !props.reason && !!method() && props.methods.includes(method()!)
@@ -263,6 +266,7 @@ export function PullMergeDialog(props: {
             <scrollbox
               ref={(value) => {
                 preview = value
+                bindScrollbar(value)
               }}
               marginTop={1}
               flexGrow={1}

@@ -1,5 +1,5 @@
 import { describe, expect, spyOn, test } from "bun:test"
-import { ago, calendarDay, fitText } from "../src/ui/format"
+import { ago, calendarDay, fitText, wrappedRows } from "../src/ui/format"
 
 test("commit batches keep local calendar-day boundaries", () => {
   const before = new Date(2026, 9, 5, 23, 50).toISOString()
@@ -37,4 +37,15 @@ describe("terminal text fitting", () => {
     expect(Bun.stringWidth(fitted)).toBeLessThanOrEqual(10)
     expect(fitted.endsWith("...")).toBe(true)
   })
+})
+
+test("wrapped row counts never undercount what word wrapping needs", () => {
+  expect(wrappedRows("", 10)).toBe(1)
+  expect(wrappedRows("one two three", 13)).toBe(1)
+  expect(wrappedRows("one two three", 12)).toBe(2)
+  expect(wrappedRows("first line\nsecond", 20)).toBe(2)
+  expect(wrappedRows("abcdefghijklmnopqrstuvwxyz", 10)).toBe(3)
+  expect(wrappedRows("ab abcdefghijklmnopqrstuvwxyz", 10)).toBe(4)
+  expect(wrappedRows("界界界 界界", 6)).toBe(2)
+  expect(wrappedRows("anything", 0)).toBe(0)
 })

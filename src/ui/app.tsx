@@ -3853,6 +3853,7 @@ function AppContent(props: AppProps) {
                             methods={pullDetail().resource.value?.merge?.methods ?? []}
                             reason={mergeDialogBlocker()}
                             checking={checkingMerge()}
+                            showScrollbar={config().showScrollbars}
                             onLoadMessage={async () => {
                               if (!props.onLoadPullMergeMessage) throw new Error("Loading GitHub's commit message is unavailable.")
                               return props.onLoadPullMergeMessage(target.number, target.headSha)

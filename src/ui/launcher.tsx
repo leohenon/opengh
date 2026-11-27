@@ -4,7 +4,8 @@ import { createSignal, Index, Show } from "solid-js"
 import { normalizeRepository } from "../repository-name"
 import { parseGitHubLink, type LaunchLocation } from "../launch-target"
 import { LoadingText } from "./components/loading-text"
-import { Popup } from "./components/popup"
+import { Popup, popupWidth } from "./components/popup"
+import { wrappedRows } from "./format"
 import { Action } from "./components/action"
 import { SearchablePicker } from "./components/searchable-picker"
 import { useKeyActions, useKeybindings } from "./keybindings"
@@ -61,7 +62,16 @@ export function RepositoryLoadError(props: {
 
   return (
     <box width={dimensions().width} height={dimensions().height} backgroundColor={colors.canvas}>
-      <Popup width={64} height={13} placement="center" onClose={props.onSwitchRepository}>
+      <Popup
+        width={64}
+        height={
+          7 +
+          wrappedRows(props.repository, popupWidth(dimensions().width, 64) - 8) +
+          wrappedRows(props.message, popupWidth(dimensions().width, 64) - 8)
+        }
+        placement="center"
+        onClose={props.onSwitchRepository}
+      >
         <box flexGrow={1} minHeight={0} flexDirection="column" paddingLeft={4} paddingRight={4} paddingBottom={1} gap={1}>
           <text fg={colors.text} attributes={TextAttributes.BOLD}>
             {props.title ?? "Repository unavailable"}

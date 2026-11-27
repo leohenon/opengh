@@ -9,11 +9,12 @@ import { createScrollbarVisibility } from "../scrollbar-visibility"
 import { editMarkdownExternally } from "../external-editor"
 import { MarkdownTextarea } from "./markdown-textarea"
 import { GitHubMarkdown } from "./github-markdown"
-import { Popup } from "./popup"
+import { Popup, popupWidth } from "./popup"
 import { KeyInput, replaceEditorText, useKeyActions, useKeybindings } from "../keybindings"
 import { Action } from "./action"
 import { mouseClick, mouseHover } from "../mouse"
 import { scrollRowIntoView } from "../scroll-selection"
+import { wrappedRows } from "../format"
 
 export function IssueActionsMenu(props: {
   number: number
@@ -221,6 +222,20 @@ export function IssueActionDialog(props: {
     const match = props.state.duplicateTarget?.trim().match(/^#?([1-9]\d*)$/)
     const number = Number(match?.[1])
     return Number.isSafeInteger(number) && number > 0 ? number : undefined
+  }
+  const dialogDimensions = useTerminalDimensions()
+  const dialogWidth = () => (props.kind === "duplicate" ? 56 : props.kind === "close" && props.parent === "pull" ? 64 : 86)
+  const lockedNotice = "Locked thread — commenting depends on your GitHub permissions."
+  const retryNotice = "Comment posted. Only the issue state change will be retried."
+  const noticeRows = () => {
+    const width = popupWidth(dialogDimensions().width, dialogWidth()) - 4
+    const operationError = props.state.operation.status === "error" ? props.state.operation.message : ""
+    return [
+      props.locked && props.kind !== "duplicate" ? lockedNotice : "",
+      retry() ? retryNotice : "",
+      editorError() ?? "",
+      operationError,
+    ].reduce((rows, notice) => rows + (notice ? wrappedRows(notice, width) : 0), 0)
   }
   const duplicateError = () =>
     !(props.state.duplicateTarget ?? "").trim()
@@ -476,15 +491,9 @@ export function IssueActionDialog(props: {
           visible={stage() === "edit"}
           expanded={expanded()}
           reserveStatusBar={props.showStatusBarHints}
-          width={props.kind === "duplicate" ? 56 : props.kind === "close" && props.parent === "pull" ? 64 : 86}
+          width={dialogWidth()}
           height={
-            props.kind === "duplicate"
-              ? props.state.operation.status === "error"
-                ? 11
-                : 8
-              : props.kind === "close" && props.parent === "pull"
-                ? 11
-                : 27
+            props.kind === "duplicate" ? 8 + noticeRows() : props.kind === "close" && props.parent === "pull" ? 11 + noticeRows() : 27
           }
           placement="center"
           zIndex={250}
@@ -499,12 +508,12 @@ export function IssueActionDialog(props: {
             </box>
             <Show when={props.locked && props.kind !== "duplicate"}>
               <text flexShrink={0} fg={colors.yellow}>
-                Locked thread — commenting depends on your GitHub permissions.
+                {lockedNotice}
               </text>
             </Show>
             <Show when={retry()}>
               <text flexShrink={0} fg={colors.green}>
-                Comment posted. Only the issue state change will be retried.
+                {retryNotice}
               </text>
             </Show>
             <Show when={props.kind === "duplicate"}>
@@ -527,12 +536,14 @@ export function IssueActionDialog(props: {
                   }}
                 />
                 <Show when={duplicateError()}>
-                  <text fg={colors.red}>{duplicateError()}</text>
+                  <text flexShrink={0} fg={colors.red}>
+                    {duplicateError()}
+                  </text>
                 </Show>
               </box>
             </Show>
             <Show when={props.kind !== "duplicate"}>
-              <box flexGrow={1} minHeight={0} marginTop={1} flexDirection="column" overflow="hidden">
+              <box flexGrow={1} minHeight={1} marginTop={1} flexDirection="column" overflow="hidden">
                 <MarkdownTextarea
                   id="issue-comment-writer"
                   ref={(value) => {

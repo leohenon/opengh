@@ -6,6 +6,7 @@ import { useTheme } from "../theme"
 import { createReactiveMarkdownStyle } from "../markdown-style"
 import { GitHubMarkdown } from "./github-markdown"
 import { Popup } from "./popup"
+import { createScrollbarVisibility } from "../scrollbar-visibility"
 
 const viewerConfig = '{\n  "diffViewerCommand": ["less", "{patch}"]\n}'
 
@@ -36,6 +37,8 @@ export function DiffViewerSetupDialog(props: { showScrollbar: boolean; onClose()
     { priority: 180, modal: true },
   )
 
+  const bindScrollbar = createScrollbarVisibility(() => props.showScrollbar === true)
+
   return (
     <Popup width={76} height={18} placement="center" zIndex={300} onClose={props.onClose}>
       <box flexGrow={1} minHeight={0} paddingX={2} paddingBottom={1} flexDirection="column">
@@ -46,6 +49,7 @@ export function DiffViewerSetupDialog(props: { showScrollbar: boolean; onClose()
           id="diff-viewer-setup-body"
           ref={(value) => {
             scroll = value
+            bindScrollbar(value)
           }}
           flexGrow={1}
           minHeight={0}
@@ -53,7 +57,6 @@ export function DiffViewerSetupDialog(props: { showScrollbar: boolean; onClose()
           scrollY
           scrollX={false}
           focusable={false}
-          scrollbarOptions={{ visible: props.showScrollbar }}
         >
           <GitHubMarkdown content={`Add to \`${configPath()}\`:`} syntaxStyle={markdownStyle()} backgroundColor={colors.panel} />
           <box

@@ -11,7 +11,8 @@ import { useTheme } from "../theme"
 import { Action } from "./action"
 import { GitHubMarkdown } from "./github-markdown"
 import { MarkdownTextarea } from "./markdown-textarea"
-import { Popup } from "./popup"
+import { insetPopupSize, Popup } from "./popup"
+import { wrappedRows } from "../format"
 
 const titleLabel = "<!-- opengh: title -->"
 const descriptionLabel = "<!-- opengh: description -->"
@@ -81,7 +82,7 @@ export function ComposeDialog(props: {
   const renderer = useRenderer()
   const dimensions = useTerminalDimensions()
   const confirmWidth = () => Math.max(1, Math.min(Math.max(56, Bun.stringWidth(props.confirmation) + 4), dimensions().width - 2))
-  const confirmHeight = () => 4 + Math.ceil(Bun.stringWidth(props.confirmation) / Math.max(1, confirmWidth() - 4))
+  const confirmHeight = () => 4 + wrappedRows(props.confirmation, Math.max(1, confirmWidth() - 4))
   const markdownStyle = createReactiveMarkdownStyle(colors, theme)
   const bindScrollbar = createScrollbarVisibility(() => props.showScrollbar)
   let titleInput: InputRenderable | undefined
@@ -98,6 +99,12 @@ export function ComposeDialog(props: {
   const [preview, setPreview] = createSignal(false)
   const [externalEditing, setExternalEditing] = createSignal(false)
   const [editorError, setEditorError] = createSignal<string>()
+  const innerWidth = () => insetPopupSize(dimensions().width, 86, true) - 4
+  const innerHeight = () => insetPopupSize(Math.max(1, dimensions().height - (props.showStatusBarHints ? 1 : 0)), 27, true) - 2
+  const noticeRows = () =>
+    [editorError(), props.draftError, error()].reduce((rows, notice) => rows + (notice ? 1 + wrappedRows(notice, innerWidth()) : 0), 0)
+  const compact = () => innerHeight() < (props.top ? 4 : 2) + 7 + noticeRows() + 2
+  const gap = () => (compact() ? 0 : 1)
   const [bodyTop, setBodyTop] = createSignal(true)
   const [position, setPosition] = createSignal({ line: 0, column: 0 })
   const updateCursor = () => {
@@ -274,20 +281,22 @@ export function ComposeDialog(props: {
           <Show when={props.top}>
             {(top) => (
               <>
-                <box height={1} flexShrink={0} marginTop={1} flexDirection="row">
+                <box height={1} flexShrink={0} marginTop={gap()} flexDirection="row">
                   {top().render(
                     () => active("top"),
                     () => setField("top"),
                   )}
                 </box>
-                <box height={1} flexShrink={0} border={["top"]} borderColor={colors.border} />
+                <Show when={!compact()}>
+                  <box height={1} flexShrink={0} border={["top"]} borderColor={colors.border} />
+                </Show>
               </>
             )}
           </Show>
           <text
             height={1}
             flexShrink={0}
-            marginTop={props.top ? 0 : 1}
+            marginTop={props.top ? 0 : gap()}
             fg={active("title") ? colors.blue : colors.muted}
             attributes={active("title") ? TextAttributes.BOLD : TextAttributes.NONE}
           >
@@ -326,7 +335,9 @@ export function ComposeDialog(props: {
             focusedBackgroundColor={colors.panel}
             cursorColor={colors.blue}
           />
-          <box height={1} flexShrink={0} border={["top"]} borderColor={colors.border} />
+          <Show when={!compact()}>
+            <box height={1} flexShrink={0} border={["top"]} borderColor={colors.border} />
+          </Show>
           <text
             height={1}
             flexShrink={0}
@@ -342,6 +353,7 @@ export function ComposeDialog(props: {
             }}
             initialValue={props.draft.body}
             flexGrow={1}
+            flexBasis={0}
             minHeight={1}
             width="100%"
             wrapMode="word"
@@ -397,21 +409,21 @@ export function ComposeDialog(props: {
             </scrollbox>
           </Show>
           <Show when={editorError()}>
-            <text flexShrink={0} marginTop={1} fg={colors.red} wrapMode="word">
+            <text flexShrink={0} marginTop={gap()} fg={colors.red} wrapMode="word">
               {editorError()}
             </text>
           </Show>
           <Show when={props.draftError}>
-            <text flexShrink={0} marginTop={1} fg={colors.yellow} wrapMode="word">
+            <text flexShrink={0} marginTop={gap()} fg={colors.yellow} wrapMode="word">
               {props.draftError}
             </text>
           </Show>
           <Show when={error()}>
-            <text flexShrink={0} marginTop={1} fg={colors.red} wrapMode="word">
+            <text flexShrink={0} marginTop={gap()} fg={colors.red} wrapMode="word">
               {error()}
             </text>
           </Show>
-          <box height={1} flexShrink={0} marginTop={1} flexDirection="row">
+          <box height={1} flexShrink={0} marginTop={gap()} flexDirection="row">
             <Action id={`${props.idPrefix}-submit`} disabled={!canSubmit() || confirming()} onActivate={requestSubmit}>
               Create
             </Action>
