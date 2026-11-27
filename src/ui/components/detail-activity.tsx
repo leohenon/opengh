@@ -17,7 +17,8 @@ import type {
 } from "../../models"
 import type { ResourceState } from "../../repository-state"
 import type { GitHubMarkdownContext } from "../github-markdown"
-import { relativeTime } from "../format"
+import { fitText, relativeTime } from "../format"
+import { ListLine } from "./list-line"
 import { mouseClick } from "../mouse"
 import { buildActivity, type ActivityEntry } from "../activity"
 import { useIcons } from "../icon-style"
@@ -30,6 +31,43 @@ import { reviewColor } from "../pull-reviews"
 import { TimelineEntry, TimelineHeader, TimelineItem } from "./timeline-entry"
 import { TimelineCommits } from "./pull-commits"
 import { LinkedText } from "./linked-text"
+
+function CollapsibleHeader(props: { collapsed?: boolean; login: string; details: JSX.Element; detailsText: string }) {
+  const { colors } = useTheme()
+  const login = (text: string) => (
+    <b>
+      <span style={{ fg: colors.text }}>
+        <a href={`https://github.com/${props.login}`}>{text}</a>
+      </span>
+    </b>
+  )
+  return (
+    <Show
+      when={props.collapsed}
+      fallback={
+        <text width="100%" flexShrink={0} fg={colors.muted} wrapMode="word">
+          {login(props.login)} {props.details}
+        </text>
+      }
+    >
+      <ListLine fg={colors.muted}>
+        {(width) => {
+          const loginWidth = Math.min(
+            Bun.stringWidth(props.login),
+            Math.max(Math.min(Bun.stringWidth(props.login), 8), width - Bun.stringWidth(props.detailsText) - 1),
+          )
+          const room = width - loginWidth - 1
+          return (
+            <>
+              {login(fitText(props.login, loginWidth))}{" "}
+              {room >= Bun.stringWidth(props.detailsText) ? props.details : fitText(props.detailsText, room)}
+            </>
+          )
+        }}
+      </ListLine>
+    </Show>
+  )
+}
 
 function Comment(props: {
   number?: number
@@ -75,26 +113,21 @@ function Comment(props: {
         paddingY={props.collapsed ? 0 : 1}
         flexDirection="column"
       >
-        <text
-          width="100%"
-          flexShrink={0}
-          fg={colors.muted}
-          height={props.collapsed ? 1 : undefined}
-          wrapMode={props.collapsed ? "none" : "word"}
-          truncate={props.collapsed}
-        >
-          <b>
-            <span style={{ fg: colors.text }}>
-              <a href={`https://github.com/${props.comment.author}`}>{props.comment.author}</a>
-            </span>
-          </b>
-          {props.collapsed ? " commented" : ""} ·{" "}
-          <Show when={permalink()} fallback={relativeTime(props.comment.createdAt)}>
-            {(url) => <a href={url()}>{relativeTime(props.comment.createdAt)}</a>}
-          </Show>
-          {association() ? ` · ${association()}` : ""}
-          {props.comment.updatedAt !== props.comment.createdAt ? " · edited" : ""}
-        </text>
+        <CollapsibleHeader
+          collapsed={props.collapsed}
+          login={props.comment.author}
+          detailsText={`commented · ${relativeTime(props.comment.createdAt)}`}
+          details={
+            <>
+              {props.collapsed ? "commented " : ""}·{" "}
+              <Show when={permalink()} fallback={relativeTime(props.comment.createdAt)}>
+                {(url) => <a href={url()}>{relativeTime(props.comment.createdAt)}</a>}
+              </Show>
+              {!props.collapsed && association() ? ` · ${association()}` : ""}
+              {!props.collapsed && props.comment.updatedAt !== props.comment.createdAt ? " · edited" : ""}
+            </>
+          }
+        />
         <Show when={!props.collapsed}>
           <box width="100%" minWidth={0} flexShrink={0} marginTop={1}>
             <Show when={props.comment.body.trim()} fallback={<text fg={colors.muted}>No comment text.</text>}>
@@ -362,23 +395,18 @@ function Review(props: {
         paddingY={props.collapsed ? 0 : 1}
         flexDirection="column"
       >
-        <text
-          width="100%"
-          flexShrink={0}
-          fg={colors.muted}
-          height={props.collapsed ? 1 : undefined}
-          wrapMode={props.collapsed ? "none" : "word"}
-          truncate={props.collapsed}
-        >
-          <b>
-            <span style={{ fg: colors.text }}>
-              <a href={`https://github.com/${props.review.actor}`}>{props.review.actor}</a>
-            </span>
-          </b>{" "}
-          <span style={{ fg: reviewColor(colors, props.review.state) }}>{action()}</span>
-          {" · "}
-          <a href={props.review.url}>{relativeTime(props.review.createdAt)}</a>
-        </text>
+        <CollapsibleHeader
+          collapsed={props.collapsed}
+          login={props.review.actor}
+          detailsText={`${action()} · ${relativeTime(props.review.createdAt)}`}
+          details={
+            <>
+              <span style={{ fg: reviewColor(colors, props.review.state) }}>{action()}</span>
+              {" · "}
+              <a href={props.review.url}>{relativeTime(props.review.createdAt)}</a>
+            </>
+          }
+        />
         <Show when={!props.collapsed && props.review.body.trim()}>
           <box width="100%" minWidth={0} flexShrink={0} marginTop={1}>
             <GitHubMarkdown

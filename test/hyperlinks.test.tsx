@@ -293,6 +293,7 @@ test("opens painted wrapped markdown and table links without native OSC 8 suppor
     const subjectX = lines[subjectRow]!.indexOf("Native subject")
     expect(view.renderer.getLinkAt(subjectX, subjectRow)).toBe(commitUrl)
     await view.mockMouse.click(subjectX, subjectRow)
+    await Bun.sleep(550)
     const reference = linkCells(view, referenceUrl)[0]!
     await view.mockMouse.click(reference.x, reference.y)
     expect(opened).toEqual([wrappedUrl, tableUrl, commitUrl, referenceUrl])

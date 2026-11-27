@@ -210,3 +210,95 @@ test("one timeline toggle hides bodies, keeps headers and descriptions, and carr
     view.renderer.destroy()
   }
 })
+
+test("collapsed timeline rows shorten long names before the action and time, and wrapped commit messages hang under the message", async () => {
+  const login = "some-extremely-long-github-login-name-39"
+  const summary = githubDataFixture.pulls.open.value!.items[0]!
+  const date = issueCommentsFixture[0]!.createdAt
+  const pull: PullDetailState = {
+    number: summary.number,
+    resource: {
+      status: "ready",
+      value: {
+        ...summary,
+        body: "Body.",
+        url: `${githubDataFixture.repo.url}/pull/${summary.number}`,
+        updatedAt: date,
+        baseBranch: "main",
+        headBranch: "feature",
+        additions: 1,
+        deletions: 0,
+        changedFiles: 1,
+        commitCount: 1,
+        commentCount: 1,
+        labels: [],
+        assignees: [],
+        reviewers: [],
+        mergeable: null,
+      },
+    },
+    comments: { status: "ready", value: { items: [{ ...issueCommentsFixture[0]!, author: login }], page: 1, hasMore: false } },
+    references: { status: "ready", value: [] },
+    commits: {
+      status: "ready",
+      value: [
+        {
+          ...githubDataFixture.commits.value!.items[0]!,
+          message:
+            "fix(turbopack): emit correct sourcemap names for scope-hoisted modules in packages/next/src/server/lib/router-utils/setup-dev-bundler.ts",
+        },
+      ],
+    },
+    events: [
+      {
+        kind: "review",
+        event: "reviewed",
+        id: "r1",
+        reviewId: 1,
+        actor: `${login}-reviewer`,
+        state: "approved",
+        body: "LGTM",
+        authorAssociation: "MEMBER",
+        createdAt: date,
+        url: "https://example.com/review",
+      },
+    ],
+    context: { status: "ready", value: pullContextFixture },
+  }
+  const view = await testRender(
+    () => (
+      <App
+        data={githubDataFixture}
+        operations={repositoryOperationsFixture}
+        config={{ ...defaultConfig, iconStyle: "unicode" }}
+        initialNavigation={{ detail: { kind: "pull", number: summary.number } }}
+        pullDetail={pull}
+      />
+    ),
+    { width: 80, height: 80 },
+  )
+  try {
+    const rows = async () => {
+      await view.flush()
+      await Bun.sleep(80)
+      await view.flush()
+      return view
+        .captureCharFrame()
+        .split("\n")
+        .map((row) => row.trimEnd())
+    }
+    const expanded = await rows()
+    const message = expanded.findIndex((row) => row.includes("7ca91d2  fix(turbopack)"))
+    const column = expanded[message]!.indexOf("fix(turbopack)")
+    expect(expanded[message + 1]!.slice(0, column).trim()).toBe("│")
+    expect(expanded[message + 1]![column]).not.toBe(" ")
+    expect(expanded.slice(message, message + 3).join(" ")).toContain("router-utils/setup-dev-bundler.ts")
+    view.resize(56, 80)
+    view.mockInput.pressKey("z")
+    const collapsed = await rows()
+    expect(collapsed.find((row) => row.includes(" commented · "))).toMatch(/some-extrem.*\.\.\. commented · \S+ ago$/)
+    expect(collapsed.find((row) => row.includes("approved these changes"))).toMatch(/\.\.\. approved these changes · \S+ ago$/)
+  } finally {
+    view.renderer.destroy()
+  }
+})
