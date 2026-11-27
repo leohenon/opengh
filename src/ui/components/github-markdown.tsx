@@ -20,6 +20,8 @@ import "../markdown-parsers"
 import { useTheme } from "../theme"
 import { useMarkdownPreference } from "../markdown-preferences"
 import { useHyperlinkMouse } from "../hyperlinks"
+import { useIcons } from "../icon-style"
+import { imageMarker } from "../icons"
 import { wrapAtWhitespace } from "../whitespace-wrap"
 import { LinkedText } from "./linked-text"
 import {
@@ -50,6 +52,7 @@ export function GitHubMarkdown(props: {
   const links = useHyperlinkMouse()
   const { colors, theme } = useTheme()
   const preference = useMarkdownPreference()
+  const icons = useIcons()
   const minimal = () => preference() === "minimal"
   const prepared = createMemo(() => {
     try {
@@ -178,6 +181,7 @@ export function GitHubMarkdown(props: {
     const anchorTargets = targets
     const proseNodes = prose
     const simple = minimal()
+    const marker = imageMarker(icons())
     const background = colors.panel
     const canvas = props.backgroundColor ?? colors.canvas
     const muted = colors.muted
@@ -295,6 +299,7 @@ export function GitHubMarkdown(props: {
           proseNodes.add(node)
           compactMarkdownLinks(node, {
             padInlineCode: !simple,
+            imageMarker: marker,
             onAnchors: (positions) => {
               for (const [id, target] of anchorTargets) if (target.node === node) anchorTargets.delete(id)
               for (const [id, position] of positions) anchorTargets.set(id, { node, position })
@@ -323,6 +328,7 @@ export function GitHubMarkdown(props: {
           row.map((cell, column) =>
             cell
               ? compactLinkChunks(cell, {
+                  imageMarker: marker,
                   linkColor: syntaxStyle.mergeStyles("markup.link").fg,
                   onAnchor: (id, position) => anchorTargets.set(id, { node, position, cell: { row: rowIndex, column } }),
                 })

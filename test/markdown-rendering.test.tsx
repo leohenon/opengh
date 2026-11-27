@@ -14,6 +14,8 @@ import { ThemeProvider, useTheme } from "../src/ui/theme"
 import { MarkdownProvider } from "../src/ui/markdown-preferences"
 import { appColors, resolveTheme } from "../src/theme"
 import { createRenderedSearch } from "../src/ui/rendered-search"
+import { IconProvider } from "../src/ui/icon-style"
+import type { IconStyle } from "../src/config"
 
 function MarkdownSample(props: {
   content: string
@@ -1117,6 +1119,47 @@ test("inline code padding wraps with its code and stays out of copied text", asy
     await view.mockMouse.emitMouseEvent("drag", prose.screenX + 40, prose.screenY)
     expect(view.renderer.getSelection()!.getSelectedText()).toBe("The router (resolve-routes.ts) matches ")
     await view.mockMouse.release(prose.screenX + 40, prose.screenY)
+  } finally {
+    view.renderer.destroy()
+  }
+})
+
+test("inline images follow the icon style, and their marker is muted while the label stays a link", async () => {
+  const content = `Before ![Screenshot](https://example.com/ui.png) after, see image: notes.
+
+| Name | Preview |
+| --- | --- |
+| Button | ![Button](https://example.com/b.png) |`
+  const [style, setStyle] = createSignal<IconStyle>("unicode")
+  const view = await testRender(
+    () => (
+      <ThemeProvider name="github">
+        <IconProvider style={style()}>
+          <MarkdownSample content={content} />
+        </IconProvider>
+      </ThemeProvider>
+    ),
+    { width: 80, height: 12 },
+  )
+  try {
+    for (const [iconStyle, marker] of [
+      ["unicode", "image: "],
+      ["nerd", "\uf03e "],
+      ["none", "image: "],
+    ] as const) {
+      setStyle(iconStyle)
+      await settle(view)
+      const rows = view.captureCharFrame().split("\n")
+      const row = rows.findIndex((line) => line.includes("Screenshot"))
+      expect(rows[row]).toContain(`Before ${marker}Screenshot after, see image: notes.`)
+      expect(rows.some((line) => line.includes(`│ ${marker}Button`))).toBe(true)
+      expect(view.captureCharFrame()).not.toContain("▧")
+      const spans = view.captureSpans().lines[row]!.spans
+      const markerSpan = spans.find((span) => span.text.startsWith(marker.trim()))!
+      const author = spans.find((span) => span.text.includes("see image:"))!
+      expect(markerSpan.fg.equals(author.fg)).toBe(false)
+      expect(view.renderer.getLinkAt(rows[row]!.indexOf("Screenshot") + 1, row)).toBe("https://example.com/ui.png")
+    }
   } finally {
     view.renderer.destroy()
   }

@@ -11,8 +11,9 @@ const parser = unified().use(remarkParse).use(remarkGfm)
 // Native table cells already have styled chunks, with a separate URL suffix.
 export function compactLinkChunks(
   chunks: TextChunk[],
-  options: { linkColor?: RGBA; onAnchor?: (id: string, position: MarkdownAnchorPosition) => void } = {},
+  options: { linkColor?: RGBA; imageMarker?: string; onAnchor?: (id: string, position: MarkdownAnchorPosition) => void } = {},
 ) {
+  const image = (text: string) => (options.imageMarker ? text.replaceAll("▧ ", options.imageMarker) : text)
   const result: TextChunk[] = []
   let line = 0
   let column = 0
@@ -37,13 +38,13 @@ export function compactLinkChunks(
       let text = ""
       let offset = 0
       for (const marker of anchorMarkers(chunk.text)) {
-        const prefix = chunk.text.slice(offset, marker.start)
+        const prefix = image(chunk.text.slice(offset, marker.start))
         text += prefix
         advance(prefix)
         options.onAnchor?.(marker.id, { line, column })
         offset = marker.end
       }
-      const suffix = chunk.text.slice(offset)
+      const suffix = image(chunk.text.slice(offset))
       text += suffix
       advance(suffix)
       if (text) result.push({ ...chunk, text, ...(chunk.link && options.linkColor ? { fg: options.linkColor } : {}) })
@@ -55,9 +56,14 @@ export function compactLinkChunks(
 // Conceal destinations, not the links themselves: keep labels selectable and linked.
 export function compactMarkdownLinks(
   block: CodeRenderable,
-  options: { padInlineCode?: boolean; onAnchors?: (anchors: Map<string, MarkdownAnchorPosition>) => void } = {},
+  options: {
+    padInlineCode?: boolean
+    imageMarker?: string
+    onAnchors?: (anchors: Map<string, MarkdownAnchorPosition>) => void
+  } = {},
 ) {
   let source = ""
+  let images: number[] = []
   let links: Array<{ start: number; end: number; labelStart: number; labelEnd: number; url: string }> = []
   let inlineCode: Array<{ start: number; end: number }> = []
   let deleted: Array<{ start: number; end: number }> = []
@@ -67,6 +73,7 @@ export function compactMarkdownLinks(
     inlineCode = []
     links = []
     deleted = []
+    images = []
     anchors = anchorMarkers(source)
     const tree = parser.parse(source)
     const markers: SimpleHighlight[] = anchors.map((anchor) => [anchor.start, anchor.end, "conceal", { conceal: "", isInjection: true }])
@@ -75,7 +82,13 @@ export function compactMarkdownLinks(
       const end = node.position?.end.offset
       if (start === undefined || end === undefined) return
       const text = source.slice(start, end)
-      for (const match of text.matchAll(/▧/g)) markers.push([start + match.index!, start + match.index! + 1, "markup.image.marker"])
+      for (const match of text.matchAll(/▧ /g)) {
+        const at = start + match.index!
+        if (options.imageMarker) {
+          images.push(at)
+          markers.push([at, at + 2, "conceal", { conceal: options.imageMarker, isInjection: true }])
+        } else markers.push([at, at + 1, "markup.image.marker"])
+      }
       // Tree-sitter leaves backslash escapes visible in prose. Parse text nodes
       // only, so inline code and fenced examples keep their literal backslashes.
       for (const match of text.matchAll(/\\[!"#$%&'()*+,\-./:;<=>?@[\]\\^_`{|}~]/g))
@@ -138,11 +151,19 @@ export function compactMarkdownLinks(
       if (range && deleted.some((span) => range.start >= span.start && range.end <= span.end))
         chunk.attributes = (chunk.attributes ?? 0) | TextAttributes.STRIKETHROUGH
     })
+    const markerColor = block.syntaxStyle.mergeStyles("markup.image.marker").fg
+    const markerChunks = new Set<TextChunk>()
+    chunks.forEach((chunk, index) => {
+      const range = context.sourceRanges?.[index]
+      if (!range || !images.includes(range.start)) return
+      markerChunks.add(chunk)
+      if (markerColor) chunk.fg = markerColor
+    })
     const result = (await linkify?.(chunks, context)) ?? chunks
     let offset = 0
     const sourceIndices = new Map<TextChunk, number>()
     for (const chunk of result) {
-      if (!chunk.text) continue
+      if (!chunk.text || markerChunks.has(chunk)) continue
       let index = source.indexOf(chunk.text, offset)
       // Don't match repeated text or spaces inside a concealed URL/title.
       let hidden =

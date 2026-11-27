@@ -54,6 +54,7 @@ export type IconSet = {
   comment: string
   commit: string
   branch: string
+  image: string
 }
 
 export const nerdIcons: IconSet = {
@@ -80,6 +81,7 @@ export const nerdIcons: IconSet = {
   comment: "\uf075",
   commit: "\uf417",
   branch: "\uf418",
+  image: "\uf03e",
 }
 
 export const unicodeIcons: IconSet = {
@@ -114,6 +116,7 @@ export const unicodeIcons: IconSet = {
   comment: ">",
   commit: "◇",
   branch: "⑂",
+  image: "",
 }
 
 export const noIcons: IconSet = {
@@ -142,6 +145,11 @@ export const noIcons: IconSet = {
   comment: "",
   commit: "",
   branch: "",
+  image: "",
+}
+
+export function imageMarker(icons: Pick<IconSet, "image">) {
+  return icons.image ? `${icons.image} ` : "image: "
 }
 
 export function iconPrefix(icon: string) {
