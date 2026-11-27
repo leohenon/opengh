@@ -883,12 +883,21 @@ export function normalizeGitHubMarkdown(
       : options.preserveImages
         ? discussionProcessor
         : processor
-  const contextual = options.context?.repositoryUrl ? selected().use(githubLinks, options.context) : selected
-  const file = { value, data: { documentAnchors: options.anchors, sourceMap: options.sourceMap } }
-  const tree = contextual.runSync(contextual.parse(file), file)
-  sanitizeDestinations(tree as MarkdownRoot)
-  const markdown = String(contextual.stringify(tree, file))
-  if (markdown.length > MAX_SOURCE_BYTES || Buffer.byteLength(markdown, "utf8") > MAX_SOURCE_BYTES)
-    throw new GitHubMarkdownError("Markdown expansion exceeds the viewing limit")
-  return markdown.trim()
+  const convert = (lineBreaks: boolean) => {
+    const base = lineBreaks ? selected : selected().use(softLineBreaks, { enabled: false })
+    const contextual = options.context?.repositoryUrl ? base().use(githubLinks, options.context) : base
+    const file = { value, data: { documentAnchors: options.anchors, sourceMap: options.sourceMap } }
+    const tree = contextual.runSync(contextual.parse(file), file)
+    sanitizeDestinations(tree as MarkdownRoot)
+    const markdown = String(contextual.stringify(tree, file))
+    if (markdown.length > MAX_SOURCE_BYTES || Buffer.byteLength(markdown, "utf8") > MAX_SOURCE_BYTES)
+      throw new GitHubMarkdownError("Markdown expansion exceeds the viewing limit")
+    return markdown.trim()
+  }
+  try {
+    return convert(true)
+  } catch (error) {
+    if (!options.preserveImages || !(error instanceof GitHubMarkdownError)) throw error
+    return convert(false)
+  }
 }

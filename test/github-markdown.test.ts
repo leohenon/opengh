@@ -3,7 +3,7 @@ import { spawnSync } from "node:child_process"
 import { unified } from "unified"
 import remarkParse from "remark-parse"
 import { visit } from "unist-util-visit"
-import { gitHubMarkdownFallback, normalizeGitHubMarkdown } from "../src/ui/github-markdown"
+import { GitHubMarkdownError, gitHubMarkdownFallback, normalizeGitHubMarkdown } from "../src/ui/github-markdown"
 
 describe("GitHub Markdown normalization", () => {
   test("rejects container-prefix attacks before parsing, under a parent-enforced deadline", () => {
@@ -317,6 +317,17 @@ other/repo@abc1234 @hidden
     expect(document).toContain("> quote one quote two")
     expect(document).not.toContain("\\\n")
     expect(normalizeGitHubMarkdown("one\r\ntwo\rthree", { preserveImages: true })).toBe("one\\\ntwo\\\nthree")
+  })
+
+  test("discussions too long to keep their line breaks render joined instead of as a preview", () => {
+    const lines = (count: number) => Array.from({ length: count }, (_, index) => `line ${index}`).join("\n")
+    expect(normalizeGitHubMarkdown(lines(6_000), { preserveImages: true }).split("\\\n")).toHaveLength(6_000)
+    const joined = normalizeGitHubMarkdown(lines(9_000), { preserveImages: true })
+    expect(joined).not.toContain("\n")
+    expect(joined.startsWith("line 0 line 1 line 2")).toBe(true)
+    expect(joined.endsWith("line 8998 line 8999")).toBe(true)
+    expect(() => normalizeGitHubMarkdown(lines(10_001), { preserveImages: true })).toThrow("too many lines")
+    expect(() => normalizeGitHubMarkdown("<span>".repeat(25_000) + "x", { preserveImages: true })).toThrow(GitHubMarkdownError)
   })
 
   test("lists keep the spacing they were written with", () => {
