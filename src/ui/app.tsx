@@ -107,6 +107,7 @@ import { TemplatePicker } from "./components/template-picker"
 import { NewPullDialog, pullHeadRef, type PullPush, type PullSides } from "./components/new-pull-dialog"
 import { pullMergeBlocker } from "../pull-merge"
 import { Help } from "./components/help"
+import { LoadingText } from "./components/loading-text"
 import { Settings } from "./components/settings"
 import { StatusBar, type StatusKind } from "./components/status-bar"
 import type { UpdateNotice } from "../update-check"
@@ -320,13 +321,19 @@ function AppContent(props: AppProps) {
     !!props.initialState?.details?.actions ||
     initialNavigation?.page === "actions" ||
     initialDetail?.kind === "run"
-  let initialPagePending = !focus() && !props.initialState && !initialNavigation && initialPage === "actions"
-  const initialState: NavigationState = { page: initialPagePending ? "overview" : initialPage }
+  const [initialPagePending, setInitialPagePending] = createSignal(
+    !focus() && !props.initialState && !initialNavigation && initialPage === "actions",
+  )
+  const initialState: NavigationState = { page: initialPagePending() ? "overview" : initialPage }
   let startingState = props.initialState ?? (initialDetail ? openDetail(initialState, initialDetail) : initialState)
   if (initialNavigation?.diff) startingState = openDiff(startingState, initialNavigation.diff)
   const repositoryEntry = props.repositoryEntry ?? startingState
   const [navigation, setNavigation] = createSignal<NavigationState>(startingState)
-  createEffect(on(navigation, (state) => props.onNavigationChange?.(state)))
+  createEffect(
+    on([navigation, initialPagePending], ([state, pending]) => {
+      if (!pending) props.onNavigationChange?.(state)
+    }),
+  )
   onMount(() => {
     if (initialNavigation || props.initialState) props.onPageChange?.(navigation().page)
     for (const [owner, detail] of Object.entries(startingState.details ?? {})) {
@@ -1895,9 +1902,11 @@ function AppContent(props: AppProps) {
   })
 
   createEffect(() => {
-    if (!initialPagePending || !navigationTabs().resolved) return
-    initialPagePending = false
-    if (visibleTabs().some((tab) => tab.page === initialPage)) setNavigation((state) => navigate(state, initialPage))
+    if (!initialPagePending() || !navigationTabs().resolved) return
+    batch(() => {
+      if (visibleTabs().some((tab) => tab.page === initialPage)) setNavigation((state) => navigate(state, initialPage))
+      setInitialPagePending(false)
+    })
   })
 
   createEffect(on(page, (current) => props.onPageChange?.(current), { defer: true }))
@@ -1982,10 +1991,11 @@ function AppContent(props: AppProps) {
         if (!loaded || !sameDiff(loaded, diff)) void props.onLoadDiff?.(diff)
       }
     })
-  const selectPage = (next: Page) => {
-    initialPagePending = false
-    restoreNavigation(navigate(navigation(), next))
-  }
+  const selectPage = (next: Page) =>
+    batch(() => {
+      setInitialPagePending(false)
+      restoreNavigation(navigate(navigation(), next))
+    })
   const atEntry = () => !!props.onReturnToRepository && atRepositoryEntry(navigation(), repositoryEntry)
   const canGoBack = () => Boolean(diffTarget() || atEntry() || navigation().details?.[page()] || navigation().pageOrigin?.page === page())
   const goBack = () => {
@@ -1995,8 +2005,7 @@ function AppContent(props: AppProps) {
     else restoreNavigation(back(navigation()))
   }
   const selectHeaderPage = (next: Page) => {
-    initialPagePending = false
-    if (next !== page()) return selectPage(next)
+    if (initialPagePending() || next !== page()) return selectPage(next)
     goBack()
   }
   const movePage = (delta: number) => {
@@ -2894,8 +2903,8 @@ function AppContent(props: AppProps) {
         if (source) documentId = props.onOpenDocument?.(source)
       }
       if (documentId) {
-        initialPagePending = false
         batch(() => {
+          setInitialPagePending(false)
           setOverlay()
           setNavigation((state) => openPage(state, "overview", documentId))
           setDocumentAnchor(location.hash ? { document: documentId, fragment: location.hash, request } : undefined)
@@ -2949,9 +2958,8 @@ function AppContent(props: AppProps) {
         initial = target.comment === undefined ? { detail } : { detail, comment: target.comment }
       }
       if (!current()) return
-      initialPagePending = false
-      setOverlay()
       if (target.repository.toLowerCase() !== data().repo.nameWithOwner.toLowerCase()) {
+        setOverlay()
         if (props.onOpenLocation)
           props.onOpenLocation(target.repository, initial, origin, props.onReturnToRepository ? repositoryEntry : undefined)
         else if (initial.detail && props.onOpenReference) props.onOpenReference(target.repository, initial.detail)
@@ -2959,6 +2967,8 @@ function AppContent(props: AppProps) {
         return
       }
       batch(() => {
+        setInitialPagePending(false)
+        setOverlay()
         const detail = initial.detail
         if (detail?.kind === "commit") openCommit(detail.sha)
         if (detail?.kind === "issue") openIssue(detail.number)
@@ -3067,7 +3077,7 @@ function AppContent(props: AppProps) {
                           <Show when={!focus() && !props.tabBarHidden}>
                             <Header
                               repo={data().repo}
-                              page={page()}
+                              page={initialPagePending() ? undefined : page()}
                               tabs={visibleTabs()}
                               workCounts={data().workCounts}
                               compact={config().compactHeader}
@@ -3091,8 +3101,13 @@ function AppContent(props: AppProps) {
                         )}
                       </Show>
                       <box {...pageMouse} flexGrow={1} minHeight={0} flexDirection="column">
-                        <SearchSurface active={!diffTarget()}>
-                          <Show when={mountList("overview")}>
+                        <Show when={initialPagePending()}>
+                          <box flexGrow={1} alignItems="center" justifyContent="center">
+                            <LoadingText text="Loading Actions…" />
+                          </box>
+                        </Show>
+                        <SearchSurface active={!diffTarget() && !initialPagePending()}>
+                          <Show when={!initialPagePending() && mountList("overview")}>
                             <box visible={page() === "overview"} flexGrow={1} minHeight={0}>
                               <OverviewScreen
                                 repo={data().repo}

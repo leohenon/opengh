@@ -106,7 +106,7 @@ const shortLabels: Record<Page, string> = { overview: "Repo", commits: "Commits"
 
 export function Header(props: {
   repo: Repo
-  page: Page
+  page?: Page
   interactive?: boolean
   onSelect?: (page: Page) => void
   onOpenRepository?: () => void

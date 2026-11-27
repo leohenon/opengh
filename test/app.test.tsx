@@ -2660,43 +2660,68 @@ test("compact header uses one row with tabs left and repository right", async ()
   expect(view.captureCharFrame()).not.toContain("─")
 })
 
-test("remembered Actions waits for availability, falls back when absent, and does not override user navigation", async () => {
-  for (const outcome of ["available", "empty", "user-navigated", "user-clicked-current"] as const) {
+test.each(["available", "empty", "error", "user-navigated", "user-clicked-overview"] as const)(
+  "restores remembered Actions without flashing Overview (%s)",
+  async (outcome) => {
     const [data, setData] = createSignal<RepositoryData>({ ...githubDataFixture, runs: { status: "loading", phase: "load" } })
-    const changes: string[] = []
+    const pages: Page[] = []
     const view = await testRender(
-      () => <App data={data} operations={repositoryOperationsFixture} initialPage="actions" onPageChange={(page) => changes.push(page)} />,
+      () => (
+        <App
+          data={data}
+          operations={repositoryOperationsFixture}
+          initialPage="actions"
+          onNavigationChange={({ page }) => pages.push(page)}
+        />
+      ),
       { width: 120, height: 32 },
     )
     active.push(view)
     await view.flush()
-    expect(view.captureCharFrame()).toContain("About")
+    const frame = () => view.captureCharFrame()
+    expect(frame()).not.toContain("About")
+    expect(frame()).not.toContain("README")
+    expect(pages).toEqual([])
+    if (outcome === "available") {
+      await Bun.sleep(230)
+      await view.flush()
+      expect(frame()).toContain("Loading Actions")
+      expect(frame()).not.toContain("About")
+    }
     if (outcome === "user-navigated") {
       view.mockInput.pressKey("3")
       await view.flush()
     }
-    if (outcome === "user-clicked-current") {
-      const rows = view.captureCharFrame().split("\n")
+    if (outcome === "user-clicked-overview") {
+      const rows = frame().split("\n")
       const y = rows.findIndex((row) => row.includes("1 Overview"))
       await view.mockMouse.click(rows[y]!.indexOf("1 Overview"), y)
       await view.flush()
+      expect(frame()).toContain("About")
     }
     setData((current) => ({
       ...current,
-      runs: outcome === "empty" ? { status: "ready", value: { items: [], page: 1, hasMore: false } } : githubDataFixture.runs,
+      runs:
+        outcome === "empty"
+          ? { status: "ready", value: { items: [], page: 1, hasMore: false } }
+          : outcome === "error"
+            ? { status: "error", phase: "load", message: "Could not load workflow runs" }
+            : githubDataFixture.runs,
     }))
     await view.flush()
-    if (outcome === "available") {
-      expect(view.captureCharFrame()).toContain("Publish v0.4.5")
-    } else if (outcome === "empty" || outcome === "user-clicked-current") {
-      expect(view.captureCharFrame()).toContain("About")
-      expect(changes).not.toContain("actions")
+    expect(frame()).not.toContain("Loading Actions")
+    if (outcome === "available" || outcome === "error") {
+      expect(frame()).toContain(outcome === "available" ? "Publish v0.4.5" : "Could not load workflow runs")
+      expect(pages).toEqual(["actions"])
+    } else if (outcome === "empty" || outcome === "user-clicked-overview") {
+      expect(frame()).toContain("About")
+      expect(pages).toEqual(["overview"])
     } else {
-      expect(view.captureCharFrame()).toContain("ScrollBox loses focus")
-      expect(changes).not.toContain("actions")
+      expect(frame()).toContain("ScrollBox loses focus")
+      expect(pages).toEqual(["issues"])
     }
-  }
-})
+  },
+)
 
 test("pagination feedback does not resize the commit viewport or reveal an extra row", async () => {
   const items = Array.from({ length: 100 }, (_, index) => ({
