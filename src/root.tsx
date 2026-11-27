@@ -594,7 +594,7 @@ export function Root(props: {
         onReload={() => void reloadConfig()}
         onBack={() => (view() === "repository" && session.state().status !== "ready" ? returnToRepository() : false)}
       />
-      <ThemeProvider name={config().theme} mode={config().colorMode}>
+      <ThemeProvider name={config().theme} mode={config().colorMode} themes={config().themes}>
         <MotionProvider reduced={config().reducedMotion}>
           <MouseSurface>
             <Show when={config().copyOnSelect}>

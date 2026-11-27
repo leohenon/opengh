@@ -114,7 +114,7 @@ describe("ThemePicker", () => {
   })
 
   test("filters, previews, and confirms a theme", async () => {
-    let preview: ThemeName = "opengh"
+    let preview: string = "opengh"
     let selected: ThemeName | undefined
     const view = await testRender(
       () => (
@@ -147,7 +147,7 @@ describe("ThemePicker", () => {
   })
 
   test("cancels previews and reports save failures", async () => {
-    let preview: ThemeName = "github"
+    let preview: string = "github"
     let cancelled = 0
     const view = await testRender(
       () => (

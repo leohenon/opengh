@@ -307,13 +307,64 @@ function terminalTheme(theme: ThemeJson, mode: Mode, colors?: TerminalThemeColor
   }
 }
 
-export function resolveTheme(name: string, mode: Mode = "dark", terminalColors?: TerminalThemeColors): ResolvedTheme {
-  const selected = isThemeName(name) ? name : defaultTheme
+export type ThemeOverride = string | { dark: string; light: string }
+export type CustomTheme = { base: ThemeName; colors: Record<string, ThemeOverride> }
+export type CustomThemes = Record<string, CustomTheme>
+
+const themeTokens = new Set(Object.values(themes).flatMap((theme) => Object.keys(theme.theme).filter((key) => key !== "thinkingOpacity")))
+const hexColor = /^#[0-9a-f]{6}$/i
+
+function record(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === "object" && !Array.isArray(value)
+}
+
+function override(value: unknown): ThemeOverride | undefined {
+  if (typeof value === "string") return hexColor.test(value) ? value.toLowerCase() : undefined
+  if (!record(value) || typeof value.dark !== "string" || typeof value.light !== "string") return undefined
+  return hexColor.test(value.dark) && hexColor.test(value.light)
+    ? { dark: value.dark.toLowerCase(), light: value.light.toLowerCase() }
+    : undefined
+}
+
+export function normalizeCustomThemes(value: unknown): CustomThemes | undefined {
+  if (!record(value)) return undefined
+  const result: CustomThemes = {}
+  for (const [name, definition] of Object.entries(value)) {
+    if (!name.trim() || isThemeName(name) || !record(definition)) continue
+    const colors = Object.fromEntries(
+      Object.entries(record(definition.colors) ? definition.colors : {}).flatMap(([token, color]) => {
+        const value = themeTokens.has(token) ? override(color) : undefined
+        return value ? [[token, value]] : []
+      }),
+    )
+    result[name] = { base: isThemeName(definition.base) ? definition.base : defaultTheme, colors }
+  }
+  return Object.keys(result).length ? result : undefined
+}
+
+export function isConfiguredTheme(name: unknown, customThemes?: CustomThemes): name is string {
+  return isThemeName(name) || (typeof name === "string" && !!customThemes && Object.hasOwn(customThemes, name))
+}
+
+export function baseThemeName(name: string, customThemes?: CustomThemes): ThemeName {
+  if (isThemeName(name)) return name
+  return (customThemes && Object.hasOwn(customThemes, name) ? customThemes[name]?.base : undefined) ?? defaultTheme
+}
+
+export function resolveTheme(
+  name: string,
+  mode: Mode = "dark",
+  terminalColors?: TerminalThemeColors,
+  customThemes?: CustomThemes,
+): ResolvedTheme {
+  const selected = baseThemeName(name, customThemes)
+  const custom = !isThemeName(name) && customThemes && Object.hasOwn(customThemes, name) ? customThemes[name] : undefined
+  const base = custom ? { ...themes[selected], theme: { ...themes[selected].theme, ...custom.colors } } : themes[selected]
   try {
     if (selected === "terminal-minimal" || selected === "terminal-native") {
-      return resolve(terminalTheme(themes[selected], mode, terminalColors), mode, terminalColors?.palette)
+      return resolve(terminalTheme(base, mode, terminalColors), mode, terminalColors?.palette)
     }
-    return resolve(themes[selected], mode)
+    return resolve(base, mode)
   } catch (error) {
     if (selected === defaultTheme) throw error
     return resolve(themes[defaultTheme], mode)

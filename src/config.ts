@@ -3,7 +3,7 @@ import { validateExternalCommand } from "./external-actions"
 import { configDirectory } from "./paths"
 import { normalizeKeybindings, type KeybindingOverrides } from "./keybindings"
 import { atomicPrivateWrite, readPrivateJson, trustedConfigDestination } from "./filesystem"
-import { defaultTheme, isThemeName, type ThemeName } from "./theme"
+import { defaultTheme, isConfiguredTheme, normalizeCustomThemes, type CustomThemes } from "./theme"
 
 export type ColorMode = "system" | "dark" | "light"
 
@@ -15,7 +15,8 @@ export type IconStyle = "unicode" | "nerd" | "none"
 
 export type Config = {
   showScrollbars: boolean
-  theme: ThemeName
+  theme: string
+  themes?: CustomThemes
   colorMode: ColorMode
   reducedMotion: boolean
   copyOnSelect: boolean
@@ -82,9 +83,11 @@ function normalizeConfig(value: unknown): Config {
     throw new TypeError("Config must be a JSON object")
   }
   const input = value as Record<string, unknown>
+  const themes = normalizeCustomThemes(input.themes)
   return {
     showScrollbars: typeof input.showScrollbars === "boolean" ? input.showScrollbars : defaultConfig.showScrollbars,
-    theme: input.theme === "github-light" ? "github" : isThemeName(input.theme) ? input.theme : defaultConfig.theme,
+    ...(themes ? { themes } : {}),
+    theme: input.theme === "github-light" ? "github" : isConfiguredTheme(input.theme, themes) ? input.theme : defaultConfig.theme,
     colorMode:
       input.colorMode === "system" || input.colorMode === "dark" || input.colorMode === "light"
         ? input.colorMode

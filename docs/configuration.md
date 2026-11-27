@@ -24,7 +24,7 @@ Omitted options use defaults. An absolute `XDG_CONFIG_HOME` changes the path to
 
 | Key                  | Default                                       | Values / notes                                                                 |
 | -------------------- | --------------------------------------------- | ------------------------------------------------------------------------------ |
-| `theme`              | `"opengh"`                                    | Bundled themes; browse in settings.                                            |
+| `theme`              | `"opengh"`                                    | Bundled themes; browse in settings. Or a [custom theme](#custom-themes).       |
 | `colorMode`          | `"system"`                                    | `system`, `dark`, `light`. Detection falls back to dark.                       |
 | `markdownStyle`      | `"rich"`                                      | `rich`, `minimal`.                                                             |
 | `compactHeader`      | `false`                                       | Single-row header.                                                             |
@@ -44,6 +44,24 @@ Omitted options use defaults. An absolute `XDG_CONFIG_HOME` changes the path to
 | `checkForUpdates`    | `true`                                        | Check daily for a new stable release (skipped when run from source).           |
 | `diffViewerCommand`  | `hunk patch {patch}` when `hunk` is on `PATH` | External diff viewer.                                                          |
 | `keybindings`        | No overrides                                  | [Customize shortcuts](keybindings.md#change-a-shortcut).                       |
+
+## Custom themes
+
+A bundled `base` with color overrides:
+
+```json
+{
+  "theme": "ocean",
+  "themes": {
+    "ocean": {
+      "base": "nord",
+      "colors": { "primary": "#7fd1ff", "background": { "dark": "#101820", "light": "#f5f7fa" } }
+    }
+  }
+}
+```
+
+Colors are `#rrggbb` or a `dark`/`light` pair, keyed like the [bundled themes](../src/theme/assets).
 
 ## External diff viewer
 

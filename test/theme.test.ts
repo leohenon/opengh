@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { appColors, isThemeName, resolveTheme, themeNames } from "../src/theme"
+import { appColors, isThemeName, normalizeCustomThemes, resolveTheme, themeNames } from "../src/theme"
 
 const required = [
   "primary",
@@ -217,4 +217,19 @@ describe("themes", () => {
     expect(isThemeName("unknown")).toBe(false)
     expect(resolveTheme("unknown")).toEqual(resolveTheme("opengh"))
   })
+})
+
+test("custom themes override a bundled theme's colors and inherit the rest, per color mode", () => {
+  const themes = normalizeCustomThemes({
+    ocean: { base: "nord", colors: { accent: "#7fd1ff", background: { dark: "#101820", light: "#f5f7fa" } } },
+  })
+  for (const mode of ["dark", "light"] as const) {
+    const custom = resolveTheme("ocean", mode, undefined, themes)
+    const base = resolveTheme("nord", mode)
+    expect(custom.accent).toBe("#7fd1ff")
+    expect(custom.background).toBe(mode === "dark" ? "#101820" : "#f5f7fa")
+    expect(custom.text).toBe(base.text)
+    expect(custom.diffAddedBg).toBe(base.diffAddedBg)
+  }
+  expect(resolveTheme("ocean")).toEqual(resolveTheme("opengh"))
 })

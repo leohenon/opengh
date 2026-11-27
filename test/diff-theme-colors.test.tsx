@@ -2,7 +2,7 @@ import { afterEach, expect, test } from "bun:test"
 import type { RGBA } from "@opentui/core"
 import { createTestRenderer } from "@opentui/core/testing"
 import { render } from "@opentui/solid"
-import { resolveTheme, themeNames } from "../src/theme"
+import { normalizeCustomThemes, resolveTheme, themeNames, type CustomThemes } from "../src/theme"
 import { initializeHunk } from "../src/ui/hunk-host"
 import { hunkThemeColors } from "../src/ui/hunk-theme"
 import { DiffScreen } from "../src/ui/pages/diff"
@@ -32,13 +32,13 @@ const hex = (color: RGBA) =>
     )
     .join("")}`
 
-async function backgrounds(name: string, mode: "dark" | "light") {
+async function backgrounds(name: string, mode: "dark" | "light", themes?: CustomThemes) {
   const setup = await createTestRenderer({ width: 120, height: 12 })
   active.push(setup.renderer)
   initializeHunk(setup.renderer)
   await render(
     () => (
-      <ThemeProvider name={name} mode={mode}>
+      <ThemeProvider name={name} mode={mode} themes={themes}>
         <box width="100%" height="100%">
           <DiffScreen
             target={{ kind: "pull", number: 1 }}
@@ -111,4 +111,12 @@ test("every bundled theme maps to opaque colors Hunk accepts", () => {
       for (const value of Object.values(slots)) expect(value).toMatch(/^#[0-9a-f]{6}$/)
     }
   expect(hunkThemeColors(resolveTheme("cursor", "dark"), "github-dark-default")?.addedBg).toMatch(/^#[0-9a-f]{6}$/)
+})
+
+test("custom themes reach the diff through their own colors", async () => {
+  const themes = normalizeCustomThemes({
+    ocean: { base: "carbonfox", colors: { background: "#101820", diffAddedBg: "#113355", diffRemovedBg: "#553311" } },
+  })
+  const colors = await backgrounds("ocean", "dark", themes)
+  expect(colors).toEqual({ list: "#101820", context: "#101820", added: "#113355", removed: "#553311" })
 })

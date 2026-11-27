@@ -65,7 +65,7 @@ test("picker hover highlights without changing keyboard selection, query, or foc
 
 test("theme hover never previews or saves and busy rows lose their hover", async () => {
   const [saving, setSaving] = createSignal(false)
-  const previews: ThemeName[] = []
+  const previews: string[] = []
   const saves: ThemeName[] = []
   const view = await testRender(
     () => (

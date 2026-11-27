@@ -141,7 +141,7 @@ export async function renderStaticPage(
     const config = options.config
     await render(
       () => (
-        <ThemeProvider name={config.theme} mode={config.colorMode}>
+        <ThemeProvider name={config.theme} mode={config.colorMode} themes={config.themes}>
           <IconProvider style={config.iconStyle}>
             <MarkdownProvider style={config.markdownStyle}>
               <MotionProvider reduced>

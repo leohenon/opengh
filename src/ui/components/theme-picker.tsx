@@ -22,15 +22,15 @@ function fuzzyScore(value: string, query: string) {
 }
 
 export function ThemePicker(props: {
-  current: ThemeName
+  current: string
   saving?: boolean
-  onPreview: (theme: ThemeName) => void
+  onPreview: (theme: string) => void
   onCancel: () => void
   onSelect: (theme: ThemeName) => Promise<void>
 }) {
   const { colors } = useTheme()
   const [query, setQuery] = createSignal("")
-  const [selected, setSelected] = createSignal<ThemeName>(props.current)
+  const [selected, setSelected] = createSignal<string>(props.current)
   const [saving, setSaving] = createSignal(false)
   const busy = () => saving() || props.saving === true
   const [error, setError] = createSignal("")
@@ -66,13 +66,14 @@ export function ThemePicker(props: {
     list?.scrollChildIntoView(`theme-${active.theme}`)
   })
 
-  const choose = async (name: ThemeName = selected()) => {
-    if (busy() || !themes().some((entry) => entry.theme === name)) return
-    setSelected(name)
+  const choose = async (name: string = selected()) => {
+    const entry = themes().find((candidate) => candidate.theme === name)
+    if (busy() || !entry) return
+    setSelected(entry.theme)
     setSaving(true)
     setError("")
     try {
-      await props.onSelect(name)
+      await props.onSelect(entry.theme)
     } catch (error) {
       props.onPreview(props.current)
       setError(error instanceof Error ? error.message : "Theme save failed")

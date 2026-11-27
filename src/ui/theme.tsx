@@ -2,14 +2,23 @@ import { CliRenderEvents, type ThemeMode, type TerminalColors } from "@opentui/c
 import { useRenderer } from "@opentui/solid"
 import { defaultConfig, type ColorMode } from "../config"
 import { createContext, createEffect, createMemo, createSignal, onCleanup, useContext, type ParentProps } from "solid-js"
-import { appColors, isThemeName, resolveTheme, type AppColors, type ResolvedTheme, type ThemeName } from "../theme"
+import {
+  appColors,
+  baseThemeName,
+  isConfiguredTheme,
+  resolveTheme,
+  type AppColors,
+  type CustomThemes,
+  type ResolvedTheme,
+  type ThemeName,
+} from "../theme"
 
 type ThemeContextValue = {
   colors: AppColors
   theme: ResolvedTheme
   selected: () => ThemeName
   mode: () => ThemeMode
-  preview: (name?: ThemeName) => void
+  preview: (name?: string) => void
 }
 
 function reactiveProxy<T extends object>(value: () => T): T {
@@ -24,17 +33,18 @@ const defaultTheme = resolveTheme(defaultConfig.theme)
 const standalone: ThemeContextValue = {
   colors: appColors(defaultTheme),
   theme: defaultTheme,
-  selected: () => defaultConfig.theme,
+  selected: () => baseThemeName(defaultConfig.theme),
   mode: () => "dark",
   preview: () => {},
 }
 
 const ThemeContext = createContext<ThemeContextValue>(standalone)
 
-export function ThemeProvider(props: ParentProps<{ name: string; mode?: ColorMode }>) {
+export function ThemeProvider(props: ParentProps<{ name: string; mode?: ColorMode; themes?: CustomThemes }>) {
   const renderer = useRenderer()
-  const [preview, setPreview] = createSignal<ThemeName>()
-  const selected = createMemo<ThemeName>(() => preview() ?? (isThemeName(props.name) ? props.name : defaultConfig.theme))
+  const [preview, setPreview] = createSignal<string>()
+  const name = createMemo(() => preview() ?? (isConfiguredTheme(props.name, props.themes) ? props.name : defaultConfig.theme))
+  const selected = createMemo<ThemeName>(() => baseThemeName(name(), props.themes))
   const [terminalColors, setTerminalColors] = createSignal<TerminalColors>()
   const [systemMode, setSystemMode] = createSignal<ThemeMode | null>(renderer.themeMode)
   let paletteRequested = false
@@ -66,7 +76,7 @@ export function ThemeProvider(props: ParentProps<{ name: string; mode?: ColorMod
       .catch(() => {})
   })
   const mode = () => (!props.mode || props.mode === "system" ? (systemMode() ?? "dark") : props.mode)
-  const resolved = createMemo(() => resolveTheme(selected(), mode(), terminalColors()))
+  const resolved = createMemo(() => resolveTheme(name(), mode(), terminalColors(), props.themes))
   const resolvedColors = createMemo(() => appColors(resolved()))
   const colors = reactiveProxy(resolvedColors)
   const theme = reactiveProxy(resolved)

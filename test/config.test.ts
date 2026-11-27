@@ -230,6 +230,50 @@ describe("config", () => {
     }
   })
 
+  test("custom themes load from config, drop invalid entries, and save back unchanged", async () => {
+    const directory = (await Bun.$`mktemp -d`.text()).trim()
+    const path = join(directory, "config.json")
+    try {
+      await Bun.write(
+        path,
+        JSON.stringify({
+          theme: "ocean",
+          themes: {
+            ocean: {
+              base: "nord",
+              colors: {
+                accent: "#7FD1FF",
+                background: { dark: "#101820", light: "#f5f7fa" },
+                diffAddedBg: "#112233",
+                unknownToken: "#ffffff",
+                text: "red",
+                border: { dark: "#000000" },
+              },
+            },
+            plain: { colors: { accent: "#123456" } },
+            nord: { base: "github", colors: { accent: "#123456" } },
+            broken: "not an object",
+          },
+        }),
+      )
+      const config = await loadConfig(path)
+      expect(config.theme).toBe("ocean")
+      expect(config.themes).toEqual({
+        ocean: {
+          base: "nord",
+          colors: { accent: "#7fd1ff", background: { dark: "#101820", light: "#f5f7fa" }, diffAddedBg: "#112233" },
+        },
+        plain: { base: "opengh", colors: { accent: "#123456" } },
+      })
+      await saveConfig(config, path)
+      expect(await loadConfig(path)).toEqual(config)
+      await Bun.write(path, JSON.stringify({ theme: "missing", themes: { ocean: { base: "nord" } } }))
+      expect((await loadConfig(path)).theme).toBe(defaultConfig.theme)
+    } finally {
+      await rm(directory, { recursive: true, force: true })
+    }
+  })
+
   test("icon styles default to Unicode and preserve explicit choices", async () => {
     const directory = (await Bun.$`mktemp -d`.text()).trim()
     const path = join(directory, "config.json")
