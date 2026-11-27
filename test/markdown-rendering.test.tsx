@@ -13,6 +13,7 @@ import { createReactiveMarkdownStyle } from "../src/ui/markdown-style"
 import { ThemeProvider, useTheme } from "../src/ui/theme"
 import { MarkdownProvider } from "../src/ui/markdown-preferences"
 import { appColors, resolveTheme } from "../src/theme"
+import { createRenderedSearch } from "../src/ui/rendered-search"
 
 function MarkdownSample(props: {
   content: string
@@ -234,9 +235,9 @@ fn main() { println!("qdrant"); }
       expect(frame).toContain("• Python client")
       const codes = codeBlocks(view.renderer.root)
       const prose = codes.find((block) => block.content.includes("A readable prose"))!
-      expect(prose.width).toBe(Math.min(width, 84))
+      expect(prose.width).toBe(Math.min(width, 120))
       const python = codes.find((block) => block.filetype === "python")!
-      expect(python.parent!.width).toBe(Math.min(width, 84))
+      expect(python.parent!.width).toBe(Math.min(width, 120))
       const spans = view.captureSpans().lines.flatMap((line) => line.spans)
       const keyword = spans.find((span) => span.text.trim() === "from")!
       const string = spans.find((span) => span.text.includes("localhost"))!
@@ -553,7 +554,7 @@ test("overview tabs and documents share the reading column in both layouts, with
         />
       </ThemeProvider>
     ),
-    { width: 160, height: 30 },
+    { width: 200, height: 30 },
   )
   const tabRow = () =>
     view
@@ -567,14 +568,14 @@ test("overview tabs and documents share the reading column in both layouts, with
       await settle(view)
       const prose = () => codeBlocks(view.renderer.root).find((block) => block.content.includes("Overview prose"))!
       const panel = () => codeBlocks(view.renderer.root).find((block) => block.filetype === "text")!.parent!
-      expect(prose().width).toBe(84)
-      expect(panel().width).toBe(84)
+      expect(prose().width).toBe(120)
+      expect(panel().width).toBe(120)
       const centeredX = prose().screenX
       expect(tabRow()).toContain("Contributing")
       expect(tabRow().search(/\S/)).toBe(centeredX)
       setLayout("wide")
       await settle(view)
-      expect(prose().width).toBeGreaterThan(84)
+      expect(prose().width).toBeGreaterThan(120)
       expect(panel().width).toBe(prose().width)
       expect(prose().screenX).toBeLessThan(centeredX)
       expect(tabRow().search(/\S/)).toBe(prose().screenX)
@@ -592,7 +593,7 @@ test("overview tabs and documents share the reading column in both layouts, with
     }
 
     view.resize(160, 30)
-    const license = "GNU Lesser General Public License v2.1"
+    const license = "GNU Lesser General Public License v2.1 or, at your option, any later published version"
     setDocuments((items) => items.map((item) => (item.path === "LICENSE" ? { ...item, label: license } : item)))
     setLayout("centered")
     await settle(view)
@@ -654,7 +655,7 @@ test.each(["centered", "wide"] as const)(
       expect(sidebar()).toBeUndefined()
       expect(inline()!.x).toBe(prose().x)
       expect(inline()!.width).toBe(prose().width)
-      expect(prose().width).toBe(layout === "centered" ? 84 : 152)
+      expect(prose().width).toBe(layout === "centered" ? 120 : 152)
       const tabs = scroll!.findDescendantById("overview-document-tabs")!
       expect(inline()!.y + inline()!.height).toBeLessThan(tabs.y)
       expect(tabs.y + tabs.height).toBeLessThan(prose().y)
@@ -1006,6 +1007,74 @@ test("paragraph spacing settles once per parent, including hidden documents and 
     expect(updated[1]!.marginTop).toBe(1)
     expect(updated[3]!.marginTop).toBe(0)
     for (const node of updated) expect(node.onLifecyclePass).toBeNull()
+  } finally {
+    view.renderer.destroy()
+  }
+})
+
+test("prose and code wrap only at whitespace, and frames, selections, and search keep their punctuation", async () => {
+  const content = `- New test fails without the fix (\`.env.production\` value reaches the handoff) and passes with it.
+- \`test/unit/security-upgrade-nudge.test.ts\`, \`test/unit/agentic-upgrade-prompts.test.ts\`, \`test/unit/prepare-latest-upgrade.test.ts\` (existing tests, unchanged behavior)
+- Manually: ran \`next upgrade --agent=latest\` in a PTY with a stand-in agent on \`PATH\` that recorded its environment; before the fix it received \`.env.production\` values and \`__NEXT_PROCESSED_ENV=true\`.
+
+\`\`\`ts
+const result = await session.refresh({ force: true, generation: session.generation + 1, signal: controller.signal })
+\`\`\`
+
+${"x".repeat(100)}/tail`
+  const view = await testRender(
+    () => (
+      <ThemeProvider name="github">
+        <MarkdownSample content={content} />
+      </ThemeProvider>
+    ),
+    { width: 80, height: 24 },
+  )
+  try {
+    await settle(view)
+    const frame = view.captureCharFrame()
+    const rows = frame.split("\n").map((row) => row.trimEnd())
+    expect(frame).not.toMatch(/[\ufdd0-\ufdef\ufffd]/)
+    expect(rows).toContain("• New test fails without the fix ( .env.production  value reaches the handoff)")
+    expect(rows).toContain("•  test/unit/security-upgrade-nudge.test.ts ,")
+    expect(rows).toContain("  test/unit/agentic-upgrade-prompts.test.ts ,")
+    expect(rows).toContain("  PATH  that recorded its environment; before the fix it received")
+    expect(rows).toContain("  .env.production  values and  __NEXT_PROCESSED_ENV=true .")
+    expect(rows).toContain("  const result = await session.refresh({ force: true, generation:")
+    expect(rows).toContain(`${"x".repeat(80)}`)
+    expect(rows).toContain(`${"x".repeat(20)}/tail`)
+    for (const row of rows) expect(row).not.toMatch(/(?:\.env\.|upgrade-|session\.|unit\/)$/)
+    const prose = codeBlocks(view.renderer.root).find((block) => block.content.includes("Manually"))!
+    expect(prose.plainText).toContain(".env.production")
+    expect(prose.plainText).not.toMatch(/[\ufdd0-\ufdef]/)
+    const code = codeBlocks(view.renderer.root).find((block) => block.content.startsWith("const result"))!
+    expect(code.plainText).toBe(
+      "const result = await session.refresh({ force: true, generation: session.generation + 1, signal: controller.signal })",
+    )
+
+    const first = codeBlocks(view.renderer.root).find((block) => block.content.includes("New test fails"))!
+    await view.mockMouse.pressDown(first.screenX, first.screenY)
+    await view.mockMouse.emitMouseEvent("drag", first.screenX + 60, first.screenY)
+    expect(view.renderer.getSelection()!.getSelectedText()).toContain("the fix ( .env.production  value")
+    await view.mockMouse.release(first.screenX + 60, first.screenY)
+    view.renderer.clearSelection()
+
+    const search = createRenderedSearch(view.renderer.root)
+    const matches = search.search(".env.production")
+    expect(matches).toHaveLength(2)
+    search.highlight(matches[0]!.id)
+    await settle(view)
+    expect(view.captureCharFrame()).not.toMatch(/[\ufdd0-\ufdef\ufffd]/)
+    const painted = view
+      .captureSpans()
+      .lines.flatMap((line) => line.spans)
+      .filter((span) => span.attributes & TextAttributes.UNDERLINE)
+      .map((span) => span.text)
+      .join("")
+    expect(painted).toBe(".env.production")
+    search.dispose()
+    await settle(view)
+    expect(view.captureCharFrame()).toContain("( .env.production  value")
   } finally {
     view.renderer.destroy()
   }

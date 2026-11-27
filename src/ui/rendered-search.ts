@@ -332,7 +332,10 @@ export function createRenderedSearch(root: Renderable, options: RenderedSearchOp
         const state = texts.get(node)
         if (state?.signature === signature && node.textDecorator === state.installed) continue
         const previous = state ? state.previous : node.textDecorator
-        const installed = (chunks: TextChunk[]) => decorate(previous?.(chunks) ?? chunks, key(node))
+        const installed = (chunks: TextChunk[]) => {
+          const painted = decorate(chunks, key(node))
+          return previous ? previous(painted) : painted
+        }
         texts.set(node, { previous, installed, signature })
         node.textDecorator = installed
       } else {

@@ -21,6 +21,7 @@ import { useTheme } from "../theme"
 import { READING_WIDTH } from "../detail-layout"
 import { useMarkdownPreference } from "../markdown-preferences"
 import { useHyperlinkMouse } from "../hyperlinks"
+import { wrapAtWhitespace } from "../whitespace-wrap"
 import { LinkedText } from "./linked-text"
 import {
   anchorMarkers,
@@ -239,6 +240,7 @@ export function GitHubMarkdown(props: {
       source.bg = background
       source.fg = foreground
       source.wrapMode = "word"
+      wrapAtWhitespace(renderer, source)
       if (!simple && !short)
         panel.add(
           new TextRenderable(renderer, {
@@ -289,6 +291,7 @@ export function GitHubMarkdown(props: {
       if (codePanels.has(node) || node instanceof MarkdownRenderable) return
       if (node instanceof CodeRenderable) {
         node.syntaxStyle = syntaxStyle
+        wrapAtWhitespace(renderer, node)
         if (node.filetype === "markdown" && node.conceal) {
           proseNodes.add(node)
           compactMarkdownLinks(node, {
@@ -380,6 +383,7 @@ export function GitHubMarkdown(props: {
               ),
             )
           }
+        if (description) wrapAtWhitespace(renderer, caption)
         panel.add(caption)
         for (const { id } of markers) anchorTargets.set(id, { node: caption, position: { line: 0, column: 0 } })
         block = panel
@@ -425,7 +429,10 @@ export function GitHubMarkdown(props: {
       if (token.type === "heading" && block instanceof CodeRenderable) block.baseHighlight = `markup.heading.${token.depth}`
       block.marginTop = 0
       block.marginBottom = 0
-      if (token.type === "code" && panels && block instanceof CodeRenderable) block = codePanel(block, token.lang ?? "text")
+      if (token.type === "code" && block instanceof CodeRenderable) {
+        if (panels) block = codePanel(block, token.lang ?? "text")
+        else wrapAtWhitespace(renderer, block)
+      }
       // Do not interpret markdown-language fence contents as prose.
       if (token.type !== "code") decorateProse(block, token.type === "list")
       const readable = token.type !== "table" && token.type !== "hr"
@@ -470,6 +477,7 @@ export function GitHubMarkdown(props: {
         <text
           ref={(value) => {
             plain = value
+            wrapAtWhitespace(renderer, value)
           }}
           {...links}
           fg={colors.text}
