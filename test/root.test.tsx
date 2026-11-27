@@ -742,11 +742,8 @@ describe("application root", () => {
       expect(screen).toBeDefined()
       expect(screen!.backgroundColor).toEqual(expected)
     }
-    // Check the background before the loading text's 200ms reveal delay.
-    await view.flush()
+    await view.renderOnce()
     checkBackground()
-    await Bun.sleep(250)
-    await view.flush()
     expect(view.captureCharFrame()).toContain("Loading repository")
     resolution.resolve("cli/cli")
     await Bun.sleep(0)
@@ -786,13 +783,8 @@ describe("application root", () => {
       { width: 80, height: 24 },
     )
     active.push(view)
-    await view.flush()
+    await view.renderOnce()
 
-    expect(view.captureCharFrame().trim()).toBe("")
-    for (let attempt = 0; attempt < 40 && !view.captureCharFrame().includes("Loading repository"); attempt++) {
-      await Bun.sleep(25)
-      await view.flush()
-    }
     expect(view.captureCharFrame()).toContain("Loading repository")
     expect(view.captureCharFrame()).not.toContain("Open a GitHub repository")
     expect(receivedArgument).toBe(".")

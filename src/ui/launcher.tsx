@@ -3,7 +3,7 @@ import { useRenderer, useTerminalDimensions } from "@opentui/solid"
 import { createSignal, Index, Show } from "solid-js"
 import { normalizeRepository } from "../repository-name"
 import { parseGitHubLink, type LaunchLocation } from "../launch-target"
-import { LoadingText } from "./components/loading-text"
+import { LoadingLabel, LoadingText } from "./components/loading-text"
 import { Popup, popupWidth } from "./components/popup"
 import { wrappedRows } from "./format"
 import { Action } from "./components/action"
@@ -14,7 +14,7 @@ import { StatusBar } from "./components/status-bar"
 import { useTheme } from "./theme"
 
 // One screen covers every startup stage; only the message changes, so the dots never remount.
-export function LoadingScreen(props: { message: string; onSwitchRepository?: () => void }) {
+export function LoadingScreen(props: { message: string; immediate?: boolean; onSwitchRepository?: () => void }) {
   const dimensions = useTerminalDimensions()
   const { colors } = useTheme()
   useKeyActions({
@@ -31,7 +31,9 @@ export function LoadingScreen(props: { message: string; onSwitchRepository?: () 
       alignItems="center"
       justifyContent="center"
     >
-      <LoadingText text={props.message} color={colors.muted} />
+      <Show when={props.immediate} fallback={<LoadingText text={props.message} />}>
+        <LoadingLabel text={props.message} />
+      </Show>
     </box>
   )
 }

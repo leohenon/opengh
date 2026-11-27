@@ -419,6 +419,7 @@ export function Root(props: {
     const current = session.state()
     return view() === "repository" && current.status === "loading" ? "Loading repository…" : undefined
   })
+  const startupLoading = createMemo<boolean>((startup) => startup && loadingMessage() !== undefined, true)
   createEffect(() => {
     const repository = accessibleRepository()
     if (repository)
@@ -608,6 +609,7 @@ export function Root(props: {
                   <Match when={loadingMessage()}>
                     <LoadingScreen
                       message={loadingMessage() ?? ""}
+                      immediate={startupLoading()}
                       onSwitchRepository={view() === "repository" ? showSwitcher : undefined}
                     />
                   </Match>
