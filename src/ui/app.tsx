@@ -34,6 +34,7 @@ import type {
   IssueDetail,
   IssueTemplate,
   Paginated,
+  PullContext,
   ListState,
   NewPull,
   PullBranchComparison,
@@ -269,11 +270,11 @@ export type AppProps = {
   onLoadBranchUpstream?: (branch: string) => Promise<BranchUpstream | undefined>
   onCheckMerge?: (base: MergeSide, head: MergeSide) => Promise<MergeCheck>
   pullDetail?: PullDetailState
-  onLoadPull?: (number: number, options?: { force?: boolean }) => Promise<void>
+  onLoadPull?: (number: number, options?: { force?: boolean }) => Promise<PullContext | void>
   onLoadMorePullComments?: () => Promise<void>
   onRetryPullReferences?: () => Promise<void>
   onRetryPullCommits?: () => Promise<void>
-  onRetryPullContext?: () => Promise<void>
+  onRetryPullContext?: () => Promise<PullContext | void>
   onPostReviewReply?: (number: number, threadId: string, body: string) => Promise<void>
   onClosePull?: () => void
   onInvalidatePull?: (repository: string, number: number) => void
@@ -782,20 +783,42 @@ function AppContent(props: AppProps) {
       if (!disposed && reviewTarget() === target) setToast({ id: ++toastId, title: "Review unavailable", message: String(error) })
     }
   }
+  const reviewCommentUrls = (threads: PullReviewThread[]) =>
+    new Set(threads.flatMap((thread) => thread.comments.map((comment) => comment.url)))
+  const isRemoteThread = (thread: PullReviewThread, urls: Set<string>) => thread.comments.some((comment) => urls.has(comment.url))
+  createEffect(() => {
+    const posted = postedInlineThreads()
+    if (!posted.length) return
+    const detail = props.pullDetail
+    if (detail?.context.status !== "ready") return
+    const repository = data().repo.nameWithOwner
+    const { readiness, threads } = detail.context.value
+    const urls = reviewCommentUrls(threads)
+    const remaining = posted.filter(
+      (item) =>
+        !(
+          item.repository === repository &&
+          item.number === detail.number &&
+          item.headSha === readiness.headSha &&
+          isRemoteThread(item.thread, urls)
+        ),
+    )
+    if (remaining.length !== posted.length) setPostedInlineThreads(remaining)
+  })
   const threadsForDiff = (target: DiffTarget): PullReviewThread[] => {
     if (target.kind !== "pull") return []
     const value = resourceForDiff(target).value
     if (value?.kind !== "patch" || !value.headSha) return []
     const context = props.pullDetail?.number === target.number ? props.pullDetail.context.value : undefined
     const remote = context?.readiness.headSha === value.headSha ? context.threads : []
-    const urls = new Set(remote.flatMap((thread) => thread.comments.map((comment) => comment.url)))
+    const urls = reviewCommentUrls(remote)
     const posted = postedInlineThreads()
       .filter(
         (item) =>
           item.repository === data().repo.nameWithOwner &&
           item.number === target.number &&
           item.headSha === value.headSha &&
-          !item.thread.comments.some((comment) => urls.has(comment.url)),
+          !isRemoteThread(item.thread, urls),
       )
       .map((item) => item.thread)
     return [...remote, ...posted]
@@ -1555,6 +1578,16 @@ function AppContent(props: AppProps) {
       : undefined
   const commitMenuItems = createMemo(() => referencedItems(commitResource().value?.references ?? []))
   const activeMenuItems = () => (activeCommitSha() ? commitMenuItems() : activePullNumber() ? pullMenuItems() : issueMenuItems())
+  const refreshPullThreads = async (number: number, load: () => Promise<PullContext | void> | undefined) => {
+    const repository = data().repo.nameWithOwner
+    const pending = new Set(postedInlineThreads().filter((item) => item.repository === repository && item.number === number))
+    const context = await load()
+    if (!context || !pending.size || disposed || data().repo.nameWithOwner !== repository) return
+    setPostedInlineThreads((current) => {
+      const remaining = current.filter((item) => !pending.has(item) || item.headSha !== context.readiness.headSha)
+      return remaining.length === current.length ? current : remaining
+    })
+  }
   const refreshPull = async (number: number) => {
     const detail = pullDetail()
     if (
@@ -1568,10 +1601,11 @@ function AppContent(props: AppProps) {
     setPullRefresh(request)
     try {
       if (detail.resource.status === "ready" && detail.commits.status === "error") await props.onRetryPullCommits?.()
-      else if (detail.resource.status === "ready" && detail.context.status === "error") await props.onRetryPullContext?.()
+      else if (detail.resource.status === "ready" && detail.context.status === "error")
+        await refreshPullThreads(number, () => props.onRetryPullContext?.())
       else if (detail.resource.status === "ready" && detail.comments.status === "error") await props.onLoadMorePullComments?.()
       else if (detail.resource.status === "ready" && detail.references.status === "error") await props.onRetryPullReferences?.()
-      else await props.onLoadPull?.(number, { force: true })
+      else await refreshPullThreads(number, () => props.onLoadPull?.(number, { force: true }))
     } finally {
       setPullRefresh((current) => (current === request ? undefined : current))
     }
@@ -2787,7 +2821,7 @@ function AppContent(props: AppProps) {
         if (diff) {
           if (diffResource().status !== "loading") {
             void props.onLoadDiff?.(diff, false, { force: true })
-            if (diff.kind === "pull") void props.onLoadPull?.(diff.number, { force: true })
+            if (diff.kind === "pull") void refreshPullThreads(diff.number, () => props.onLoadPull?.(diff.number, { force: true }))
           }
           return
         }

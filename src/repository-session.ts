@@ -214,7 +214,7 @@ export type RepositorySession = {
   loadMoreCommitFiles(): Promise<void>
   clearCommit(): void
   pullDetail: Accessor<PullDetailState | undefined>
-  loadPull(number: number, options?: { force?: boolean }): Promise<void>
+  loadPull(number: number, options?: { force?: boolean }): Promise<PullContext | void>
   updatePullDraft(number: number, draft: boolean): Promise<PullRequestDetail>
   createIssue(title: string, body: string): Promise<IssueDetail>
   loadIssueTemplates(): Promise<IssueTemplate[]>
@@ -228,7 +228,7 @@ export type RepositorySession = {
   loadMorePullComments(): Promise<void>
   retryPullReferences(): Promise<void>
   retryPullCommits(): Promise<void>
-  retryPullContext(): Promise<void>
+  retryPullContext(): Promise<PullContext | void>
   postReviewReply?(number: number, threadId: string, body: string): Promise<void>
   clearPull(): void
   // Marks a retained PR stale after a change made outside the session (reviews, inline comments).
@@ -1744,6 +1744,7 @@ export function createRepositorySession(
       const value = recheck ? { ...reacted, readiness: { ...reacted.readiness, mergeablePending: true } } : reacted
       setPullDetail((current) => (current?.number === number ? { ...current, context: { status: "ready", value } } : current))
       if (recheck) recheckMergeability(repository, number, request, value.readiness.headSha, options.signal ?? pullAbort.signal)
+      return value
     } catch (error) {
       if (request !== pullGeneration || draftGeneration !== pullDraftGeneration) return
       setPullDetail((current) =>
@@ -1973,14 +1974,16 @@ export function createRepositorySession(
           commits: pull.commitCount === 0 ? { status: "ready", value: [] } : loadingResource(commits),
           context: loadingResource(context),
         })
-        await Promise.all([
+        const [, , , refreshedContext] = await Promise.all([
           hasComments ? fetchPullComments(repository, number, request, comments?.page ?? 1, comments, requestOptions) : Promise.resolve(),
           fetchPullReferences(repository, number, request, references, requestOptions),
           pull.commitCount > 0 ? fetchPullCommits(repository, number, request, commits, requestOptions) : Promise.resolve(),
           fetchPullContext(repository, number, request, initialContext, requestOptions),
         ])
-        if (request === pullGeneration && draftGeneration === pullDraftGeneration)
+        if (request === pullGeneration && draftGeneration === pullDraftGeneration) {
           retainPull(pullDetail(), repositoryRead === repositoryGeneration && detachedRevision === detachedReactionRevision.get(cacheKey))
+          return refreshedContext
+        }
       } catch (error) {
         if (request === pullGeneration && draftGeneration === pullDraftGeneration)
           setPullDetail((latest) => ({

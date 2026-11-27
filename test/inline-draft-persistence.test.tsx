@@ -8,6 +8,8 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { defaultConfig } from "../src/config"
 import { createInlineDrafts, createInlineDraftStorage, type InlineDrafts } from "../src/inline-drafts"
+import type { PullContext, PullReviewThread } from "../src/models"
+import type { ResourceState } from "../src/repository-state"
 import type { InlineCommentInput, PostedInlineComment, PullReviewSession, ReviewSessionState } from "../src/review-types"
 import { App } from "../src/ui/app"
 import { initializeHunk } from "../src/ui/hunk-host"
@@ -26,6 +28,7 @@ async function draftView(
   post: (input: InlineCommentInput) => Promise<PostedInlineComment> = async () => {
     throw new Error("Not posted in this test")
   },
+  refreshContext?: (previous: PullContext) => ResourceState<PullContext>,
 ) {
   const directory = join(mkdtempSync(join(tmpdir(), "opengh-inline-draft-ui-")), "inline-drafts")
   directories.push(join(directory, ".."))
@@ -71,6 +74,8 @@ async function draftView(
   const summary = githubDataFixture.pulls.open.value!.items[0]!
   const [drafts, setDrafts] = createSignal<InlineDrafts>(createInlineDrafts({ storage: createInlineDraftStorage(directory) }))
   const [mounted, setMounted] = createSignal(true)
+  const initialContext = { ...pullContextFixture, readiness: { ...pullContextFixture.readiness, headSha }, threads: [] }
+  const [context, setContext] = createSignal<ResourceState<PullContext>>({ status: "ready", value: initialContext })
   const setup = await createTestRenderer({ width: 110, height: 34 })
   initializeHunk(setup.renderer)
   await render(
@@ -83,6 +88,12 @@ async function draftView(
             reviews={reviews}
             inlineDrafts={store}
             onPostInlineComment={post}
+            onLoadPull={async (_number, options) => {
+              if (!options?.force || !refreshContext) return
+              const next = refreshContext(context().value ?? initialContext)
+              setContext(next)
+              if (next.status === "ready") return next.value
+            }}
             onSwitchRepository={() => setMounted(false)}
             config={defaultConfig}
             initialNavigation={{ detail: { kind: "pull", number } }}
@@ -118,10 +129,7 @@ async function draftView(
               comments: { status: "ready", value: { items: [], page: 1, hasMore: false } },
               commits: { status: "ready", value: [] },
               references: { status: "ready", value: [] },
-              context: {
-                status: "ready",
-                value: { ...pullContextFixture, readiness: { ...pullContextFixture.readiness, headSha }, threads: [] },
-              },
+              context: context(),
             }}
           />
         )}
@@ -161,7 +169,22 @@ async function draftView(
     await setup.mockMouse.click(row.x + row.width - 2, row.y)
     await settle()
   }
-  return { directory, setup, settle, openDiff, openComposer, composer, sourceRow, markers, resume, drafts, setDrafts, mounted, setMounted }
+  return {
+    directory,
+    setup,
+    settle,
+    openDiff,
+    openComposer,
+    composer,
+    sourceRow,
+    markers,
+    resume,
+    drafts,
+    setDrafts,
+    mounted,
+    setMounted,
+    setRemoteThreads: (threads: PullReviewThread[]) => setContext({ status: "ready", value: { ...initialContext, threads } }),
+  }
 }
 
 test("inline comment drafts survive App remounts, as on repository switches, and restarts", async () => {
@@ -211,6 +234,92 @@ test("inline comment drafts survive App remounts, as on repository switches, and
     setup.renderer.destroy()
   }
 }, 15_000)
+
+test.each([true, false])(
+  "deleted inline comments do not reappear (previously seen on GitHub: %s)",
+  async (echoed) => {
+    let serverThreads: PullReviewThread[] = []
+    let failRefresh = false
+    let refreshes = 0
+    const { setup, settle, openDiff, openComposer, setRemoteThreads } = await draftView(
+      async (input) => {
+        const url = `https://github.com/${input.repository}/pull/${input.number}#discussion_r123`
+        const timestamp = new Date().toISOString()
+        if (echoed) {
+          serverThreads = [
+            {
+              kind: "review-thread",
+              id: "remote-thread",
+              path: input.anchor.path,
+              line: input.anchor.line,
+              diffSide: input.anchor.side,
+              isResolved: false,
+              isOutdated: false,
+              createdAt: timestamp,
+              comments: [
+                {
+                  id: "remote-comment",
+                  url,
+                  author: "reviewer",
+                  authorAssociation: "",
+                  body: input.body,
+                  createdAt: timestamp,
+                  updatedAt: timestamp,
+                },
+              ],
+            },
+          ]
+        }
+        return { id: 123, url, body: input.body, ...input.anchor }
+      },
+      (previous) => {
+        refreshes++
+        return failRefresh
+          ? { status: "error", phase: "load", message: "Could not refresh review threads", value: previous }
+          : { status: "ready", value: { ...previous, threads: serverThreads } }
+      },
+    )
+    const card = (id: string) => setup.renderer.root.findDescendantById(`diff-comment-card:${id}`)
+    const refresh = async () => {
+      const before = refreshes
+      setup.mockInput.pressKey("r")
+      await settle()
+      expect(refreshes).toBe(before + 1)
+    }
+    try {
+      await settle()
+      await openDiff()
+      await openComposer()
+      await setup.mockInput.typeText("Delete this inline comment")
+      setup.mockInput.pressKey("s", { ctrl: true })
+      await settle()
+      await clickControl(setup, "inline-comment-confirm")
+      await settle()
+      expect(refreshes).toBe(1)
+      const shown = echoed ? "remote-thread" : "posted-123"
+      expect(card(shown)).toBeDefined()
+      expect(card(echoed ? "posted-123" : "remote-thread")).toBeUndefined()
+
+      failRefresh = true
+      await refresh()
+      expect(card(shown)).toBeDefined()
+
+      failRefresh = false
+      serverThreads = []
+      if (echoed) {
+        setRemoteThreads([])
+        await settle()
+        expect(card("posted-123")).toBeUndefined()
+      }
+      await refresh()
+      expect(card("remote-thread")).toBeUndefined()
+      expect(card("posted-123")).toBeUndefined()
+    } finally {
+      setup.renderer.destroy()
+    }
+  },
+  15_000,
+)
 
 test.each([false, true])(
   "pending inline posts stay unavailable across repository switches (success: %s)",
