@@ -2,7 +2,7 @@ import { RGBA, rgbToHex, TextAttributes, type ScrollBoxRenderable } from "@opent
 import { useTerminalDimensions } from "@opentui/solid"
 import { useKeyActions } from "../keybindings"
 import { createMemo, For, Show } from "solid-js"
-import { defaultConfig, type DetailLayout } from "../../config"
+import { defaultConfig, type PageWidth } from "../../config"
 import type { CommitDetail, CommitSummary } from "../../models"
 import type { ResourceState } from "../../repository-state"
 import { ResourceStateView } from "../components/resource-state"
@@ -31,15 +31,15 @@ export function CommitScreen(props: {
   resource: ResourceState<CommitDetail>
   interactive: boolean
   showScrollbar: boolean
-  detailLayout?: DetailLayout
+  pageWidth?: PageWidth
   repositoryUrl?: string
 }) {
   const { colors } = useTheme()
   const icons = useIcons()
   const dimensions = useTerminalDimensions()
   const compact = () => dimensions().width < 60
-  const centered = () => (props.detailLayout ?? defaultConfig.detailLayout) === "centered"
-  const contentWidth = () => detailContentWidth(props.detailLayout)
+  const centered = () => (props.pageWidth ?? defaultConfig.pageWidth) === "centered"
+  const contentWidth = () => detailContentWidth(props.pageWidth)
   // The list row seeds the header so it fills in rather than swapping a placeholder title.
   const header = () => props.resource.value ?? props.summary
   const committer = () => props.resource.value?.committer

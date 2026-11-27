@@ -143,7 +143,7 @@ test("static lists expand all virtualized rows without repeating the page header
 })
 
 test("inline PR details stay above the description and omit empty metadata", async () => {
-  const config = { ...defaultConfig, detailLayout: "wide" as const }
+  const config = { ...defaultConfig, pageWidth: "wide" as const }
   const data: InlineScreenData = {
     kind: "pull",
     detail: {
@@ -180,7 +180,7 @@ test("inline PR details stay above the description and omit empty metadata", asy
 })
 
 test("inline overview puts compact About above the full-width README", async () => {
-  const config = { ...defaultConfig, detailLayout: "wide" as const }
+  const config = { ...defaultConfig, pageWidth: "wide" as const }
   const repo = { ...githubDataFixture.repo, description: "Unique repository description." }
   const data: InlineScreenData = {
     kind: "overview",

@@ -1,7 +1,7 @@
 import { TextAttributes, type ScrollBoxRenderable } from "@opentui/core"
 import { useKeyActions } from "../keybindings"
 import { createEffect, createMemo, createSignal, For, on, onCleanup, Show } from "solid-js"
-import { defaultConfig, type DetailLayout } from "../../config"
+import { defaultConfig, type PageWidth } from "../../config"
 import type { WorkflowRunSummary } from "../../models"
 import type { RunDetailState } from "../../repository-state"
 import { ResourceStateView } from "../components/resource-state"
@@ -35,13 +35,13 @@ export function RunScreen(props: {
   onRefresh?: () => Promise<void>
   interactive: boolean
   showScrollbar: boolean
-  detailLayout?: DetailLayout
+  pageWidth?: PageWidth
 }) {
   const { colors } = useTheme()
   const icons = useIcons()
   const repositoryUrl = () => props.detail.resource.value?.url.replace(/\/actions\/runs\/\d+.*$/, "")
-  const centered = () => (props.detailLayout ?? defaultConfig.detailLayout) === "centered"
-  const contentWidth = () => detailContentWidth(props.detailLayout)
+  const centered = () => (props.pageWidth ?? defaultConfig.pageWidth) === "centered"
+  const contentWidth = () => detailContentWidth(props.pageWidth)
   let scroll: ScrollBoxRenderable | undefined
   const bindScrollbar = createScrollbarVisibility(() => props.showScrollbar)
   // Failed refreshes back off from 5 s to 60 s, then stop until a manual refresh.

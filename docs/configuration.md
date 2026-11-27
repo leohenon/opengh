@@ -31,7 +31,7 @@ Omitted options use defaults. An absolute `XDG_CONFIG_HOME` changes the path to
 | `showTabShortcuts`   | `true`                                        | Show tab shortcut labels.                                                      |
 | `showTabCounts`      | `true`                                        | Open issue/PR counts.                                                          |
 | `hideDocumentsTab`   | `false`                                       | Hide Overview document tabs; `tab` still cycles documents.                     |
-| `detailLayout`       | `"centered"`                                  | `centered`, `wide`.                                                            |
+| `pageWidth`          | `"centered"`                                  | `centered`, `wide`.                                                            |
 | `detailsPlacement`   | `"auto"`                                      | `auto`: sidebar on wide terminals, inline otherwise. `inline`: always inline.  |
 | `diffLayout`         | `"auto"`                                      | `auto`: split on wide terminals, unified below 80 columns. `split`, `unified`. |
 | `diffWrap`           | `false`                                       | Wrap long diff lines instead of panning.                                       |

@@ -7,7 +7,7 @@ import { defaultTheme, isThemeName, type ThemeName } from "./theme"
 
 export type ColorMode = "system" | "dark" | "light"
 
-export type DetailLayout = "centered" | "wide"
+export type PageWidth = "centered" | "wide"
 export type DiffLayout = "auto" | "split" | "unified"
 export type DetailsPlacement = "auto" | "inline"
 export type MarkdownStyle = "rich" | "minimal"
@@ -20,7 +20,7 @@ export type Config = {
   reducedMotion: boolean
   copyOnSelect: boolean
   markdownStyle: MarkdownStyle
-  detailLayout: DetailLayout
+  pageWidth: PageWidth
   detailsPlacement: DetailsPlacement
   diffLayout: DiffLayout
   diffWrap: boolean
@@ -43,7 +43,7 @@ export const defaultConfig: Config = {
   reducedMotion: false,
   copyOnSelect: true,
   markdownStyle: "rich",
-  detailLayout: "centered",
+  pageWidth: "centered",
   detailsPlacement: "auto",
   diffLayout: "auto",
   diffWrap: false,
@@ -94,7 +94,12 @@ function normalizeConfig(value: unknown): Config {
     reducedMotion: typeof input.reducedMotion === "boolean" ? input.reducedMotion : defaultConfig.reducedMotion,
     copyOnSelect: typeof input.copyOnSelect === "boolean" ? input.copyOnSelect : defaultConfig.copyOnSelect,
     markdownStyle: input.markdownStyle === "rich" || input.markdownStyle === "minimal" ? input.markdownStyle : defaultConfig.markdownStyle,
-    detailLayout: input.detailLayout === "centered" || input.detailLayout === "wide" ? input.detailLayout : defaultConfig.detailLayout,
+    pageWidth:
+      input.pageWidth === "centered" || input.pageWidth === "wide"
+        ? input.pageWidth
+        : input.detailLayout === "centered" || input.detailLayout === "wide"
+          ? input.detailLayout
+          : defaultConfig.pageWidth,
     detailsPlacement:
       input.detailsPlacement === "auto" || input.detailsPlacement === "inline" ? input.detailsPlacement : defaultConfig.detailsPlacement,
     diffLayout:

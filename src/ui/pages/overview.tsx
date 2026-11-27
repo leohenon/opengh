@@ -1,7 +1,7 @@
 import { RGBA, TextAttributes, type ScrollBoxRenderable } from "@opentui/core"
 import { useTerminalDimensions } from "@opentui/solid"
 import { createEffect, createMemo, createSignal, For, on, onCleanup, Show } from "solid-js"
-import { defaultConfig, type DetailLayout, type DetailsPlacement } from "../../config"
+import { defaultConfig, type PageWidth, type DetailsPlacement } from "../../config"
 import type { Repo } from "../../models"
 import type { RepositoryDocumentState, ResourceState } from "../../repository-state"
 import { ResourceStateView } from "../components/resource-state"
@@ -112,12 +112,12 @@ export function OverviewScreen(props: {
   showScrollbar: boolean
   aboutSidebar: AboutSidebar
   inlineAbout?: boolean
-  detailLayout?: DetailLayout
+  pageWidth?: PageWidth
   detailsPlacement?: DetailsPlacement
   scrollRef: (value: ScrollBoxRenderable | undefined) => void
 }) {
   const dimensions = useTerminalDimensions()
-  const centered = () => (props.detailLayout ?? defaultConfig.detailLayout) === "centered"
+  const centered = () => (props.pageWidth ?? defaultConfig.pageWidth) === "centered"
   const { colors, theme } = useTheme()
   const icons = useIcons()
   const inactiveTabBackground = createMemo(() => {
@@ -251,7 +251,7 @@ export function OverviewScreen(props: {
         }}
         scrollY
       >
-        <box width="100%" maxWidth={detailContentWidth(props.detailLayout)} minWidth={0} flexGrow={1} flexShrink={0} flexDirection="column">
+        <box width="100%" maxWidth={detailContentWidth(props.pageWidth)} minWidth={0} flexGrow={1} flexShrink={0} flexDirection="column">
           <Show when={showAbout() && inlineAbout()}>
             <InlineAbout repo={repo()} interactive={props.interactive} />
           </Show>

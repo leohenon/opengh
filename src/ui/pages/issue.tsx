@@ -2,7 +2,7 @@ import { RGBA, rgbToHex, TextAttributes, type ScrollBoxRenderable } from "@opent
 import { useRenderer, useTerminalDimensions } from "@opentui/solid"
 import { useKeyActions } from "../keybindings"
 import { createEffect, createMemo, For, onCleanup, Show } from "solid-js"
-import { defaultConfig, type DetailLayout } from "../../config"
+import { defaultConfig, type PageWidth } from "../../config"
 import type { IssueDetail, IssueReference, IssueSummary } from "../../models"
 import type { IssueDetailState, ResourceState } from "../../repository-state"
 import { Reactions, messageReactionMouse, type ReactionControls } from "../components/reactions"
@@ -214,7 +214,7 @@ export function IssueScreen(props: {
   interactive: boolean
   showScrollbar: boolean
   defaultBranch?: string
-  detailLayout?: DetailLayout
+  pageWidth?: PageWidth
   inlineMetadata?: boolean
 }) {
   const { colors, theme } = useTheme()
@@ -222,8 +222,8 @@ export function IssueScreen(props: {
   const dimensions = useTerminalDimensions()
   const renderer = useRenderer()
   const wide = () => !props.inlineMetadata && dimensions().width >= 112
-  const centered = () => (props.detailLayout ?? defaultConfig.detailLayout) === "centered"
-  const contentWidth = () => detailContentWidth(props.detailLayout, wide() ? 32 : 0)
+  const centered = () => (props.pageWidth ?? defaultConfig.pageWidth) === "centered"
+  const contentWidth = () => detailContentWidth(props.pageWidth, wide() ? 32 : 0)
   const surface = createMemo(() => {
     const panel = RGBA.fromHex(colors.header)
     const canvas = RGBA.fromHex(colors.canvas)

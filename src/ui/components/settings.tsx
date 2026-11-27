@@ -18,7 +18,7 @@ type Setting =
   | "reduced-motion"
   | "markdown-style"
   | "scrollbars"
-  | "detail-layout"
+  | "page-width"
   | "details-placement"
   | "status-bar-hints"
   | "icon-style"
@@ -34,7 +34,7 @@ const sectionOrder = ["Appearance", "Layout", "Usability", "Diffs"] as const
 type Section = (typeof sectionOrder)[number]
 const sectionSettings: Record<Section, readonly Setting[]> = {
   Appearance: ["theme", "color-mode", "markdown-style"],
-  Layout: ["compact-header", "tab-counts", "hide-documents-tab", "detail-layout", "details-placement"],
+  Layout: ["compact-header", "tab-counts", "hide-documents-tab", "page-width", "details-placement"],
   Usability: ["icon-style", "status-bar-hints", "scrollbars", "reduced-motion", "tab-shortcuts", "copy-on-select"],
   Diffs: ["diff-layout", "diff-wrap", "diff-fullscreen"],
 }
@@ -47,7 +47,7 @@ const settingDefinitions: Record<Setting, { title: string; value: (config: Confi
   "tab-shortcuts": { title: "Tab shortcuts", value: (config) => (config.showTabShortcuts ? "on" : "off") },
   "tab-counts": { title: "Tab counts", value: (config) => (config.showTabCounts ? "on" : "off") },
   "hide-documents-tab": { title: "Document tabs", value: (config) => (config.hideDocumentsTab ? "off" : "on") },
-  "detail-layout": { title: "Detail width", value: (config) => config.detailLayout },
+  "page-width": { title: "Page width", value: (config) => config.pageWidth },
   "details-placement": { title: "Details placement", value: (config) => config.detailsPlacement },
   "icon-style": {
     title: "Icon style",
@@ -231,12 +231,12 @@ export function Settings(props: {
     }
   }
 
-  const changeDetailLayout = async () => {
+  const changePageWidth = async () => {
     if (busy()) return
     setSaving(true)
     setError("")
     try {
-      await props.onChange({ ...props.config, detailLayout: props.config.detailLayout === "centered" ? "wide" : "centered" })
+      await props.onChange({ ...props.config, pageWidth: props.config.pageWidth === "centered" ? "wide" : "centered" })
     } catch (error) {
       setError(error instanceof Error ? error.message : "Could not save settings")
     } finally {
@@ -325,8 +325,8 @@ export function Settings(props: {
       case "status-bar-hints":
         void toggleBoolean("showStatusBarHints")
         break
-      case "detail-layout":
-        void changeDetailLayout()
+      case "page-width":
+        void changePageWidth()
         break
       case "details-placement":
         void changeDetailsPlacement()
@@ -512,9 +512,9 @@ export function Settings(props: {
         title: "Icon style",
         description: "Choose Unicode, Nerd Font, or no icons. Nerd Font requires a compatible terminal font.",
       }
-    if (selected() === "detail-layout")
+    if (selected() === "page-width")
       return {
-        title: "Detail width",
+        title: "Page width",
         description: "Centered limits reading width. Wide fills the available space.",
       }
     if (selected() === "details-placement")

@@ -4,7 +4,7 @@ import type { GitHubMarkdownContext } from "../src/ui/github-markdown"
 import type { MarkdownAnchorResolver } from "../src/ui/markdown-anchors"
 import { testRender } from "@opentui/solid"
 import { createSignal } from "solid-js"
-import type { DetailLayout, DetailsPlacement, MarkdownStyle } from "../src/config"
+import type { PageWidth, DetailsPlacement, MarkdownStyle } from "../src/config"
 import type { RepositoryDocumentState, ResourceState } from "../src/repository-state"
 import { githubDataFixture, repositoryDocumentsFixture } from "./fixtures/github-data"
 import { OverviewScreen, type AboutSidebar } from "../src/ui/pages/overview"
@@ -529,7 +529,7 @@ test("overview still updates relative links and plain-text mode when the documen
 })
 
 test("overview tabs and documents share the reading column in both layouts, with or without About", async () => {
-  const [layout, setLayout] = createSignal<DetailLayout>("centered")
+  const [layout, setLayout] = createSignal<PageWidth>("centered")
   const [sidebar, setSidebar] = createSignal<AboutSidebar>("hide")
   const [documents, setDocuments] = createSignal<RepositoryDocumentState[]>([
     {
@@ -547,7 +547,7 @@ test("overview tabs and documents share the reading column in both layouts, with
         <OverviewScreen
           repo={githubDataFixture.repo}
           documents={{ status: "ready", value: documents() }}
-          detailLayout={layout()}
+          pageWidth={layout()}
           aboutSidebar={sidebar()}
           showScrollbar={false}
           scrollRef={() => {}}
@@ -622,7 +622,7 @@ test.each(["centered", "wide"] as const)(
               status: "ready",
               value: [{ ...repositoryDocumentsFixture[0]!, resource: { status: "ready", value: "Overview body.\n\n".repeat(20) } }],
             }}
-            detailLayout={layout}
+            pageWidth={layout}
             detailsPlacement={placement()}
             aboutSidebar="show"
             showScrollbar={false}

@@ -3191,7 +3191,7 @@ function AppContent(props: AppProps) {
                                 hideDocumentsTab={config().hideDocumentsTab}
                                 showScrollbar={config().showScrollbars}
                                 aboutSidebar={aboutSidebar()}
-                                detailLayout={config().detailLayout}
+                                pageWidth={config().pageWidth}
                                 detailsPlacement={config().detailsPlacement}
                                 scrollRef={(value) => (overviewScroll = value)}
                               />
@@ -3299,7 +3299,7 @@ function AppContent(props: AppProps) {
                                   onRefresh={props.onLoadRun ? () => props.onLoadRun!(id) : undefined}
                                   interactive={page() === "actions" && overlay() === undefined}
                                   showScrollbar={config().showScrollbars}
-                                  detailLayout={config().detailLayout}
+                                  pageWidth={config().pageWidth}
                                 />
                               </box>
                             )}
@@ -3314,7 +3314,7 @@ function AppContent(props: AppProps) {
                                   resource={commitResource()}
                                   interactive={!diffTarget() && page() === "commits" && overlay() === undefined}
                                   showScrollbar={config().showScrollbars}
-                                  detailLayout={config().detailLayout}
+                                  pageWidth={config().pageWidth}
                                 />
                               </box>
                             )}
@@ -3342,7 +3342,7 @@ function AppContent(props: AppProps) {
                                   defaultBranch={data().repo.defaultBranch}
                                   interactive={!diffTarget() && page() === "issues" && overlay() === undefined}
                                   showScrollbar={config().showScrollbars}
-                                  detailLayout={config().detailLayout}
+                                  pageWidth={config().pageWidth}
                                 />
                               </box>
                             )}
@@ -3374,7 +3374,7 @@ function AppContent(props: AppProps) {
                                   defaultBranch={data().repo.defaultBranch}
                                   interactive={!diffTarget() && page() === "pulls" && overlay() === undefined}
                                   showScrollbar={config().showScrollbars}
-                                  detailLayout={config().detailLayout}
+                                  pageWidth={config().pageWidth}
                                 />
                               </box>
                             )}

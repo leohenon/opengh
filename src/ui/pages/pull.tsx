@@ -2,7 +2,7 @@ import { RGBA, rgbToHex, TextAttributes, type ScrollBoxRenderable } from "@opent
 import { useRenderer, useTerminalDimensions } from "@opentui/solid"
 import { useKeyActions } from "../keybindings"
 import { createEffect, createMemo, For, onCleanup, Show } from "solid-js"
-import { defaultConfig, type DetailLayout } from "../../config"
+import { defaultConfig, type PageWidth } from "../../config"
 import type { PullRequestDetail, PullRequestSummary, PullContext, IssueTimelineEvent, IssueReference } from "../../models"
 import type { PullDetailState, ResourceState } from "../../repository-state"
 import { DetailActivity } from "../components/detail-activity"
@@ -168,7 +168,7 @@ export function PullScreen(props: {
   interactive: boolean
   showScrollbar: boolean
   defaultBranch?: string
-  detailLayout?: DetailLayout
+  pageWidth?: PageWidth
   inlineMetadata?: boolean
 }) {
   const { colors, theme } = useTheme()
@@ -176,8 +176,8 @@ export function PullScreen(props: {
   const renderer = useRenderer()
   const dimensions = useTerminalDimensions()
   const wide = () => !props.inlineMetadata && dimensions().width >= 112
-  const centered = () => (props.detailLayout ?? defaultConfig.detailLayout) === "centered"
-  const contentWidth = () => detailContentWidth(props.detailLayout, wide() ? 32 : 0)
+  const centered = () => (props.pageWidth ?? defaultConfig.pageWidth) === "centered"
+  const contentWidth = () => detailContentWidth(props.pageWidth, wide() ? 32 : 0)
   const pull = () => props.detail.resource.value
   // The list row seeds the header so it fills in rather than swapping a placeholder title.
   const header = () => pull() ?? props.summary

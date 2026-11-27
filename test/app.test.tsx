@@ -1821,7 +1821,7 @@ describe("opengh TUI", () => {
       colorMode: "system",
       reducedMotion: false,
       markdownStyle: "rich",
-      detailLayout: "centered",
+      pageWidth: "centered",
       detailsPlacement: "auto",
       diffLayout: "auto",
       diffWrap: false,
@@ -1912,7 +1912,7 @@ describe("opengh TUI", () => {
       colorMode: "system",
       reducedMotion: false,
       markdownStyle: "rich",
-      detailLayout: "centered",
+      pageWidth: "centered",
       detailsPlacement: "auto",
       diffLayout: "auto",
       diffWrap: false,
@@ -1930,15 +1930,15 @@ describe("opengh TUI", () => {
 
     for (let i = 0; i < 4; i++) view.mockInput.pressArrow("up")
     await view.flush()
-    expect(view.captureCharFrame()).toContain("Detail width")
+    expect(view.captureCharFrame()).toContain("Page width")
     expect(view.captureCharFrame()).toContain("Centered limits reading width")
     view.mockInput.pressArrow("right")
     await view.flush()
-    expect(config().detailLayout).toBe("wide")
+    expect(config().pageWidth).toBe("wide")
     expect(view.captureCharFrame()).toContain("‹ wide ›")
     view.mockInput.pressArrow("left")
     await view.flush()
-    expect(config().detailLayout).toBe("centered")
+    expect(config().pageWidth).toBe("centered")
     expect(saves).toBe(3)
 
     view.mockInput.pressArrow("down")
@@ -2130,7 +2130,7 @@ describe("opengh TUI", () => {
       colorMode: "system",
       reducedMotion: false,
       markdownStyle: "rich",
-      detailLayout: "centered",
+      pageWidth: "centered",
       detailsPlacement: "auto",
       diffLayout: "auto",
       diffWrap: false,
@@ -2251,7 +2251,7 @@ describe("opengh TUI", () => {
       colorMode: "system",
       reducedMotion: false,
       markdownStyle: "rich",
-      detailLayout: "centered",
+      pageWidth: "centered",
       detailsPlacement: "auto",
       diffLayout: "auto",
       diffWrap: false,
@@ -2311,7 +2311,7 @@ describe("opengh TUI", () => {
             colorMode: "system",
             reducedMotion: false,
             markdownStyle: "rich",
-            detailLayout: "centered",
+            pageWidth: "centered",
             detailsPlacement: "auto",
             diffLayout: "auto",
             diffWrap: false,

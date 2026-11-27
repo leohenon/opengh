@@ -34,7 +34,7 @@ describe("config", () => {
       colorMode: "system",
       reducedMotion: false,
       markdownStyle: "rich",
-      detailLayout: "centered",
+      pageWidth: "centered",
       detailsPlacement: "auto",
       diffLayout: "auto",
       diffWrap: false,
@@ -154,7 +154,7 @@ describe("config", () => {
         reducedMotion: "yes",
         copyOnSelect: "false",
         markdownStyle: "invalid",
-        detailLayout: "invalid",
+        pageWidth: "invalid",
         detailsPlacement: "invalid",
         showStatusBarHints: "no",
         iconStyle: "invalid",
@@ -174,7 +174,7 @@ describe("config", () => {
       colorMode: "system",
       reducedMotion: true,
       markdownStyle: "minimal",
-      detailLayout: "centered",
+      pageWidth: "centered",
       detailsPlacement: "inline",
       diffLayout: "unified",
       diffWrap: true,
@@ -194,7 +194,7 @@ describe("config", () => {
       colorMode: "system",
       reducedMotion: false,
       markdownStyle: "rich",
-      detailLayout: "centered",
+      pageWidth: "centered",
       detailsPlacement: "auto",
       diffLayout: "auto",
       diffWrap: false,
@@ -208,6 +208,26 @@ describe("config", () => {
       compactHeader: false,
       iconStyle: "unicode",
     })
+  })
+
+  test("page width reads the former detailLayout key until pageWidth is set", async () => {
+    const directory = (await Bun.$`mktemp -d`.text()).trim()
+    const path = join(directory, "config.json")
+    try {
+      await Bun.write(path, JSON.stringify({ detailLayout: "wide" }))
+      const legacy = await loadConfig(path)
+      expect(legacy.pageWidth).toBe("wide")
+      await saveConfig(legacy, path)
+      const saved = JSON.parse(await Bun.file(path).text())
+      expect(saved.pageWidth).toBe("wide")
+      expect(saved.detailLayout).toBeUndefined()
+      await Bun.write(path, JSON.stringify({ detailLayout: "wide", pageWidth: "centered" }))
+      expect((await loadConfig(path)).pageWidth).toBe("centered")
+      await Bun.write(path, JSON.stringify({ detailLayout: "wide", pageWidth: "invalid" }))
+      expect((await loadConfig(path)).pageWidth).toBe("wide")
+    } finally {
+      await rm(directory, { recursive: true, force: true })
+    }
   })
 
   test("icon styles default to Unicode and preserve explicit choices", async () => {
@@ -289,7 +309,7 @@ describe("config", () => {
         colorMode: "system",
         reducedMotion: false,
         markdownStyle: "rich",
-        detailLayout: "centered",
+        pageWidth: "centered",
         detailsPlacement: "auto",
         diffLayout: "auto",
         diffWrap: false,
@@ -325,7 +345,7 @@ describe("config", () => {
           colorMode: "system",
           reducedMotion: false,
           markdownStyle: "rich",
-          detailLayout: "wide",
+          pageWidth: "wide",
           detailsPlacement: "auto",
           diffLayout: "auto",
           diffWrap: false,
@@ -351,7 +371,7 @@ describe("config", () => {
       colorMode: "system",
       reducedMotion: false,
       markdownStyle: "rich",
-      detailLayout: "wide",
+      pageWidth: "wide",
       detailsPlacement: "auto",
       diffLayout: "auto",
       diffWrap: false,
@@ -366,7 +386,7 @@ describe("config", () => {
       iconStyle: "nerd",
     })
     expect(await Bun.file(path).text()).toBe(
-      '{\n  "showScrollbars": true,\n  "theme": "dracula",\n  "colorMode": "system",\n  "reducedMotion": false,\n  "markdownStyle": "rich",\n  "detailLayout": "wide",\n  "detailsPlacement": "auto",\n  "diffLayout": "auto",\n  "diffWrap": false,\n  "diffFullscreen": true,\n  "copyOnSelect": true,\n  "showStatusBarHints": false,\n  "showTabShortcuts": true,\n  "showTabCounts": false,\n  "checkForUpdates": false,\n  "hideDocumentsTab": false,\n  "compactHeader": false,\n  "iconStyle": "nerd"\n}\n',
+      '{\n  "showScrollbars": true,\n  "theme": "dracula",\n  "colorMode": "system",\n  "reducedMotion": false,\n  "markdownStyle": "rich",\n  "pageWidth": "wide",\n  "detailsPlacement": "auto",\n  "diffLayout": "auto",\n  "diffWrap": false,\n  "diffFullscreen": true,\n  "copyOnSelect": true,\n  "showStatusBarHints": false,\n  "showTabShortcuts": true,\n  "showTabCounts": false,\n  "checkForUpdates": false,\n  "hideDocumentsTab": false,\n  "compactHeader": false,\n  "iconStyle": "nerd"\n}\n',
     )
   })
 
@@ -382,7 +402,7 @@ describe("config", () => {
           colorMode: "system",
           reducedMotion: false,
           markdownStyle: "rich",
-          detailLayout: "centered",
+          pageWidth: "centered",
           detailsPlacement: "auto",
           diffLayout: "auto",
           diffWrap: false,
@@ -407,7 +427,7 @@ describe("config", () => {
         colorMode: "system" as const,
         reducedMotion: false,
         markdownStyle: "rich" as const,
-        detailLayout: "centered" as const,
+        pageWidth: "centered" as const,
         detailsPlacement: "auto" as const,
         diffLayout: "auto" as const,
         diffWrap: false,
@@ -470,7 +490,7 @@ describe("config", () => {
         colorMode: "system",
         reducedMotion: false,
         markdownStyle: "rich",
-        detailLayout: "centered",
+        pageWidth: "centered",
         detailsPlacement: "auto",
         diffLayout: "auto",
         diffWrap: false,
@@ -500,7 +520,7 @@ describe("config", () => {
           colorMode: "system",
           reducedMotion: false,
           markdownStyle: "rich",
-          detailLayout: "centered",
+          pageWidth: "centered",
           detailsPlacement: "auto",
           diffLayout: "auto",
           diffWrap: false,
@@ -530,7 +550,7 @@ describe("config", () => {
           colorMode: "system",
           reducedMotion: false,
           markdownStyle: "rich",
-          detailLayout: "centered",
+          pageWidth: "centered",
           detailsPlacement: "auto",
           diffLayout: "auto",
           diffWrap: false,

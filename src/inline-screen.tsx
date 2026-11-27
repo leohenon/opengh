@@ -174,7 +174,7 @@ export function InlineScreen(props: { data: InlineScreenData; config: Config }) 
             defaultBranch={data().defaultBranch}
             interactive={false}
             showScrollbar={false}
-            detailLayout={props.config.detailLayout}
+            pageWidth={props.config.pageWidth}
           />
         )}
       </Match>
@@ -187,7 +187,7 @@ export function InlineScreen(props: { data: InlineScreenData; config: Config }) 
             defaultBranch={data().defaultBranch}
             interactive={false}
             showScrollbar={false}
-            detailLayout={props.config.detailLayout}
+            pageWidth={props.config.pageWidth}
           />
         )}
       </Match>
@@ -198,7 +198,7 @@ export function InlineScreen(props: { data: InlineScreenData; config: Config }) 
             resource={ready(data().commit)}
             interactive={false}
             showScrollbar={false}
-            detailLayout={props.config.detailLayout}
+            pageWidth={props.config.pageWidth}
           />
         )}
       </Match>
@@ -210,7 +210,7 @@ export function InlineScreen(props: { data: InlineScreenData; config: Config }) 
             active={false}
             interactive={false}
             showScrollbar={false}
-            detailLayout={props.config.detailLayout}
+            pageWidth={props.config.pageWidth}
           />
         )}
       </Match>
@@ -226,7 +226,7 @@ export function InlineScreen(props: { data: InlineScreenData; config: Config }) 
             interactive={false}
             showScrollbar={false}
             aboutSidebar="auto"
-            detailLayout={props.config.detailLayout}
+            pageWidth={props.config.pageWidth}
           />
         )}
       </Match>
@@ -266,7 +266,7 @@ export async function renderInlineScreen(repository: string, launch: LaunchOptio
   const operation = createInlineOperation()
   try {
     const [data, config] = await Promise.all([loadInlineScreen(repository, launch, client, operation), loadConfig()])
-    const inlineConfig: Config = { ...config, detailLayout: "wide" }
+    const inlineConfig: Config = { ...config, pageWidth: "wide" }
     // Bound the tree before OpenTUI/Markdown can allocate renderables for it.
     const serialized = JSON.stringify(data)
     if (Buffer.byteLength(serialized) > INLINE_MAX_BYTES) {
