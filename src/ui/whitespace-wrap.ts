@@ -41,8 +41,8 @@ function installDecoder(renderer: CliRenderer) {
     const scratch = OptimizedBuffer.create(ENCODED.length, 1, renderer.widthMethod, { owner: renderer.nativeScene })
     scratch.drawText(PLACEHOLDERS.join(""), 0, 0, RGBA.fromValues(1, 1, 1, 1), RGBA.fromValues(0, 0, 0, 1))
     const cells = scratch.withBuffers((planes) => Array.from(planes.char.subarray(0, ENCODED.length)))
-    const pooled = cells.every((cell) => cell > 0x7f && cell >>> 16 === cells[0]! >>> 16)
-    if (pooled && new Set(cells).size === ENCODED.length) {
+    const single = cells.every((cell) => cell >>> 28 === 0x8)
+    if (single && new Set(cells).size === ENCODED.length) {
       const codes = new Map(cells.map((cell, index) => [cell, ENCODED.charCodeAt(index)]))
       const decode = (buffer: OptimizedBuffer) => {
         const chars = buffer.buffers.char

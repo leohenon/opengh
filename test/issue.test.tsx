@@ -571,3 +571,40 @@ test("a conversation longer than opengh loads keeps its history and says it is i
   await view.flush()
   expect(view.captureCharFrame()).not.toContain("Timeline is incomplete")
 })
+
+test("issue bodies wrap at whitespace after the app has already drawn other text", async () => {
+  const [detail, setDetail] = createSignal<IssueDetailState>()
+  const body = `${"word ".repeat(17)}test/unit/agentic-upgrade-prompts.test.ts end`
+  const view = await testRender(
+    () => (
+      <App
+        data={githubDataFixture}
+        operations={repositoryOperationsFixture}
+        issueDetail={detail()}
+        onLoadIssue={async (number) => {
+          setDetail({
+            number,
+            resource: { status: "ready", value: { ...issueDetailFixture, number, body, commentCount: 0 } },
+            comments: { status: "ready", value: { items: [], page: 1, hasMore: false } },
+            references: { status: "ready", value: [] },
+          })
+        }}
+        onCloseIssue={() => setDetail(undefined)}
+      />
+    ),
+    { width: 100, height: 32 },
+  )
+  active.push(view)
+  await settle(view)
+  view.mockInput.pressKey("3")
+  await settle(view)
+  view.mockInput.pressEnter()
+  await settle(view)
+  await settle(view)
+  const rows = view
+    .captureCharFrame()
+    .split("\n")
+    .map((row) => row.trim())
+  expect(rows).toContain("word ".repeat(17).trim())
+  expect(rows).toContain("test/unit/agentic-upgrade-prompts.test.ts end")
+})
