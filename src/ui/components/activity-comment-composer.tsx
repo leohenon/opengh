@@ -147,7 +147,7 @@ export function ActivityCommentComposer(props: {
         <Show
           when={open()}
           fallback={
-            <box height={1} flexShrink={0} flexDirection="row" paddingX={1} backgroundColor={colors.panel}>
+            <box height={1} flexShrink={0} flexDirection="row" paddingX={1}>
               <text fg={colors.muted}>Draft saved · </text>
               <Action
                 id={`${props.idPrefix}-resume`}

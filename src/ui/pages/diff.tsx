@@ -456,7 +456,7 @@ export function DiffScreen(props: {
   const renderDraft = (container: BoxRenderable, draft: SavedDiffDraft) =>
     createRoot((dispose) => {
       insert(container, () => (
-        <box width="100%" height={1} flexShrink={0} flexDirection="row" paddingX={1} backgroundColor={colors.panel}>
+        <box width="100%" height={1} flexShrink={0} flexDirection="row" paddingX={1}>
           <text height={1} flexShrink={0} fg={colors.muted}>
             Draft saved ·{" "}
           </text>
