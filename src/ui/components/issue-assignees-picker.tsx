@@ -295,7 +295,7 @@ export function IssueAssigneesPicker(props: {
                       @{login()}
                       <Show when={nameOf(login())}>{(name) => <span style={{ fg: colors.muted }}> {name()}</span>}</Show>
                     </text>
-                    <text width={10} flexShrink={0} fg={colors.green}>
+                    <text width={10} flexShrink={0} marginLeft={1} fg={colors.green}>
                       {isSelected(login()) ? "✓ selected" : ""}
                     </text>
                   </box>

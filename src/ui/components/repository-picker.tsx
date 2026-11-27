@@ -29,6 +29,13 @@ export function RepositoryPicker(props: {
       match={(repository, needle) => match(repository.nameWithOwner, needle)}
       preferred={(repository) => repository.id === props.current.id}
       height={Math.min(22, props.repositories.length + 8)}
+      width={Math.min(
+        100,
+        Math.max(
+          64,
+          ...props.repositories.map((repository) => Bun.stringWidth(`${repository.nameWithOwner}  ${repository.defaultBranch}`) + 22),
+        ),
+      )}
       zIndex={props.zIndex}
       showScrollbar={props.showScrollbar}
       empty="No matching repositories"
@@ -37,22 +44,23 @@ export function RepositoryPicker(props: {
     >
       {(repository, active) => (
         <>
-          <box height={1} flexGrow={1} minWidth={0} overflow="hidden" flexDirection="row">
+          <box height={1} flexGrow={1} flexBasis={0} flexShrink={1} minWidth={0} overflow="hidden" flexDirection="row">
             <text
               height={1}
               flexShrink={1}
               minWidth={0}
               wrapMode="none"
+              truncate
               fg={active() ? colors.blue : colors.text}
               attributes={active() ? TextAttributes.BOLD : TextAttributes.NONE}
             >
               {repository.nameWithOwner}
             </text>
-            <text height={1} flexShrink={0} wrapMode="none" fg={colors.muted}>
+            <text height={1} flexShrink={0} maxWidth="40%" wrapMode="none" truncate fg={colors.muted}>
               {`  ${repository.defaultBranch}`}
             </text>
           </box>
-          <text width={10} flexShrink={0} fg={colors.green}>
+          <text width={10} flexShrink={0} marginLeft={1} fg={colors.green}>
             {repository.id === props.current.id ? "✓ selected" : ""}
           </text>
         </>

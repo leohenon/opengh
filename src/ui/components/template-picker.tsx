@@ -52,7 +52,16 @@ export function TemplatePicker<T>(props: {
   )
 
   return (
-    <Popup width={72} height={(props.templates ? items().length : 1) + 5} placement="center" zIndex={250} onClose={props.onClose}>
+    <Popup
+      width={Math.min(
+        100,
+        Math.max(72, ...items().map((item) => Bun.stringWidth(item.label) + (item.about ? Bun.stringWidth(item.about) + 2 : 0) + 12)),
+      )}
+      height={(props.templates ? items().length : 1) + 5}
+      placement="center"
+      zIndex={250}
+      onClose={props.onClose}
+    >
       <box id={`${props.idPrefix}-templates`} flexGrow={1} minHeight={0} paddingX={2} paddingBottom={1} flexDirection="column">
         <text height={1} flexShrink={0} wrapMode="none" fg={colors.text} attributes={TextAttributes.BOLD}>
           {props.heading}
@@ -95,7 +104,10 @@ export function TemplatePicker<T>(props: {
                     )}
                   >
                     <text
-                      flexShrink={0}
+                      flexShrink={1}
+                      minWidth={0}
+                      wrapMode="none"
+                      truncate
                       selectable={false}
                       fg={active() === index || hover.hovered() ? colors.blue : colors.text}
                       attributes={hover.hovered() ? TextAttributes.BOLD : TextAttributes.NONE}
@@ -104,7 +116,15 @@ export function TemplatePicker<T>(props: {
                       {item().label}
                     </text>
                     <Show when={item().about}>
-                      <text flexGrow={1} minWidth={0} wrapMode="none" selectable={false} fg={colors.muted}>
+                      <text
+                        flexGrow={1}
+                        flexBasis={0}
+                        minWidth={Math.min(Bun.stringWidth(item().about) + 2, 16)}
+                        wrapMode="none"
+                        truncate
+                        selectable={false}
+                        fg={colors.muted}
+                      >
                         {"  "}
                         {item().about}
                       </text>

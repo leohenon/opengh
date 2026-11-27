@@ -46,7 +46,7 @@ export function SearchBar(props: {
         </Show>
       </box>
       <text height={1} flexShrink={0} wrapMode="none" fg={colors.muted}>
-        {props.query ? (props.total ? `${props.current}/${props.total}${props.truncated ? "+" : ""} ` : "No matches ") : ""}
+        {props.query ? (props.total ? ` ${props.current}/${props.total}${props.truncated ? "+" : ""} ` : " No matches ") : ""}
       </text>
     </box>
   )

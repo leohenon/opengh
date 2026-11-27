@@ -43,7 +43,7 @@ function Shortcut(props: { keys: string; keyWidth: number; children: JSX.Element
       <text width={Math.max(1, props.keyWidth - 2)} height={rows()} flexShrink={0} wrapMode="char" fg={colors.text}>
         {props.keys}
       </text>
-      <text height={1} flexGrow={1} flexShrink={1} minWidth={0} wrapMode="none" fg={colors.muted}>
+      <text height={1} flexGrow={1} flexShrink={1} minWidth={0} wrapMode="none" truncate fg={colors.muted}>
         {props.children}
       </text>
     </box>
@@ -235,7 +235,13 @@ export function Help(props: {
       Math.min(
         100,
         dimensions().width - 2,
-        Math.max(64, ...shortcuts().map((item) => Bun.stringWidth(item.keys) + Bun.stringWidth(item.description) + padding() * 2 + 3)),
+        Math.max(
+          64,
+          Math.max(...shortcuts().map((item) => Bun.stringWidth(item.keys))) +
+            2 +
+            Math.max(...shortcuts().map((item) => Bun.stringWidth(item.description))) +
+            padding() * 2,
+        ),
       ),
     )
   const keyWidth = () =>

@@ -375,12 +375,26 @@ export function NewPullDialog(props: {
     const totals = line.additions ? Bun.stringWidth(`${line.additions} ${line.deletions}`) : 0
     return Bun.stringWidth(line.text) + totals + (diffable() ? 2 : 0)
   }
-  const mergeRoom = () => {
+  const headSpace = () => {
     const pull = existing()
     const used =
-      Bun.stringWidth(`${baseLabel()} ← ${headLabel()}`) + (pull ? Bun.stringWidth(`  Open #${pull.number}`) : 0) + summaryWidth() + 4
+      Bun.stringWidth(`${baseLabel()} ← `) +
+      (unpublished() ? Bun.stringWidth("  Push ›") : 0) +
+      (pull ? Bun.stringWidth(`  Open #${pull.number}`) : 0) +
+      summaryWidth() +
+      2
     return Math.max(0, rowWidth() - used)
   }
+  const headCore = () => Math.min(Bun.stringWidth(headLabel()), Math.max(12, Math.min(24, headSpace())))
+  const mergeRoom = () => Math.max(0, headSpace() - headCore() - 2)
+  const mergeText = () => {
+    const state = merge()
+    if (!state) return ""
+    if (state.status === "checking") return mergeRoom() >= Bun.stringWidth("Checking merge…") ? "Checking merge…" : ""
+    return mergeLine(state as MergeCheck)?.text ?? ""
+  }
+  const headWidth = () =>
+    Math.min(Bun.stringWidth(headLabel()), Math.max(headCore(), headSpace() - (mergeText() ? Bun.stringWidth(mergeText()) + 2 : 0)))
   const mergeLine = (check: MergeCheck) => {
     const room = mergeRoom()
     const fit = (...forms: string[]) => {
@@ -472,9 +486,11 @@ export function NewPullDialog(props: {
                 row = value
               }}
               onSizeChange={() => setRowWidth(row?.width ?? 0)}
-              flexGrow={1}
-              minWidth={0}
               height={1}
+              flexGrow={1}
+              flexBasis={0}
+              flexShrink={1}
+              minWidth={0}
               flexDirection="row"
               overflow="hidden"
             >
@@ -496,7 +512,10 @@ export function NewPullDialog(props: {
               </text>
               <text
                 id="new-pull-head"
+                width={headWidth()}
                 flexShrink={0}
+                wrapMode="none"
+                truncate
                 selectable={false}
                 fg={head() ? itemColor("head", active()) : colors.muted}
                 attributes={itemAttributes("head", active())}
@@ -539,7 +558,7 @@ export function NewPullDialog(props: {
                   </text>
                 )}
               </Show>
-              <Show when={merge()}>
+              <Show when={merge() && mergeText() ? merge() : undefined}>
                 {(state) => (
                   <box flexShrink={0} marginLeft={2} height={1} flexDirection="row">
                     <Show when={state().status !== "checking"} fallback={<LoadingText text="Checking merge…" />}>
@@ -563,9 +582,10 @@ export function NewPullDialog(props: {
                 {(line) => (
                   <text
                     id="new-pull-summary"
-                    flexShrink={0}
+                    flexShrink={1}
                     minWidth={0}
                     wrapMode="none"
+                    truncate
                     selectable={false}
                     fg={diffable() && active() && selected() === "diff" ? colors.blue : line().color}
                     attributes={itemAttributes("diff", active())}

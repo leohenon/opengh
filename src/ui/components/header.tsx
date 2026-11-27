@@ -67,7 +67,7 @@ export function ReviewHeader(props: {
           ? `${props.target.base}...${props.target.head}`
           : `PR #${props.target.pullNumber} ${props.target.base.slice(0, 7)}..${props.target.head.slice(0, 7)}`
         : `${dimensions().width < 45 ? "" : "Commit "}${props.target.sha.slice(0, 7)}`
-  const totalsWidth = () => (props.totals ? Bun.stringWidth(`+${props.totals.additions} −${props.totals.deletions}`) : 0)
+  const totalsWidth = () => (props.totals ? Bun.stringWidth(` +${props.totals.additions} −${props.totals.deletions} `) : 0)
   const sideWidth = () => Math.max(0, Math.floor((dimensions().width - totalsWidth()) / 2))
   return (
     <box height={1} flexShrink={0} minWidth={0} flexDirection="row" backgroundColor={colors.header} overflow="hidden">
@@ -89,12 +89,21 @@ export function ReviewHeader(props: {
       <Show when={props.totals}>
         {(totals) => (
           <text id="review-totals" height={1} width={totalsWidth()} flexShrink={0} wrapMode="none" fg={colors.muted}>
-            +{totals().additions} −{totals().deletions}
+            {` +${totals().additions} −${totals().deletions} `}
           </text>
         )}
       </Show>
-      <box height={1} flexGrow={1} minWidth={0} flexDirection="row" justifyContent="flex-end" overflow="hidden">
-        <text height={1} wrapMode="none" truncate fg={colors.text} attributes={TextAttributes.BOLD}>
+      <box
+        height={1}
+        flexGrow={1}
+        flexBasis={0}
+        flexShrink={1}
+        minWidth={0}
+        flexDirection="row"
+        justifyContent="flex-end"
+        overflow="hidden"
+      >
+        <text height={1} flexShrink={1} minWidth={0} wrapMode="none" truncate fg={colors.text} attributes={TextAttributes.BOLD}>
           {label()}
         </text>
       </box>

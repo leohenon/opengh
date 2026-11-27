@@ -93,6 +93,7 @@ export function BranchPicker(props: {
       match={(row, needle) => (row.kind === "branch" ? fuzzyScore(row.branch, needle) : Number.MAX_SAFE_INTEGER)}
       preferred={(row) => row.kind === "branch" && row.branch === props.current}
       height={22}
+      width={Math.min(100, Math.max(64, ...source().map((branch) => Bun.stringWidth(branch) + 22)))}
       zIndex={props.zIndex}
       showScrollbar={props.showScrollbar}
       empty={props.branches.status === "loading" && !props.branches.value ? "Loading branches…" : "No matching branches"}
@@ -103,18 +104,19 @@ export function BranchPicker(props: {
     >
       {(row, active) => (
         <>
-          <box height={1} flexGrow={1} minWidth={0} overflow="hidden">
+          <box height={1} flexGrow={1} flexBasis={0} flexShrink={1} minWidth={0} overflow="hidden">
             <text
               width="100%"
               height={1}
               wrapMode="none"
+              truncate
               fg={row.kind === "load" ? colors.muted : active() ? colors.blue : colors.text}
               attributes={active() && row.kind === "branch" ? TextAttributes.BOLD : TextAttributes.NONE}
             >
               {row.kind === "branch" ? row.branch : row.label}
             </text>
           </box>
-          <text width={10} flexShrink={0} fg={colors.green}>
+          <text width={10} flexShrink={0} marginLeft={1} fg={colors.green}>
             {row.kind === "branch" && row.branch === props.current ? (props.currentLabel ?? "✓ current") : ""}
           </text>
         </>

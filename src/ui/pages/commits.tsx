@@ -61,8 +61,9 @@ export function CommitsScreen(props: {
           </Show>
           <box
             id="branch-dropdown"
-            width={Bun.stringWidth(props.currentBranch) + 4}
-            flexShrink={1}
+            flexGrow={1}
+            flexBasis={0}
+            maxWidth={Bun.stringWidth(`${iconPrefix(icons().branch)}${props.currentBranch}`) + 2}
             minWidth={0}
             flexDirection="row"
             overflow="hidden"

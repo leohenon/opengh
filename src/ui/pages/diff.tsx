@@ -1012,6 +1012,8 @@ export function DiffScreen(props: {
             content: file.previousPath ? `${file.previousPath} → ${file.path}` : file.path,
             height: 1,
             flexGrow: 1,
+            flexBasis: 0,
+            flexShrink: 1,
             minWidth: 0,
             wrapMode: "none",
             truncate: true,
@@ -1503,10 +1505,10 @@ export function DiffScreen(props: {
     >
       <Show when={!props.hideHeader}>
         <box height={1} flexShrink={0} flexDirection="row" backgroundColor={colors.header} overflow="hidden">
-          <text flexShrink={0} fg={colors.blue}>
+          <text flexShrink={0} maxWidth="50%" height={1} wrapMode="none" truncate fg={colors.blue}>
             {label()}{" "}
           </text>
-          <text flexGrow={1} minWidth={0} height={1} wrapMode="none" truncate fg={colors.text}>
+          <text flexGrow={1} flexBasis={0} flexShrink={1} minWidth={0} height={1} wrapMode="none" truncate fg={colors.text}>
             {selected()?.previousPath ? `${selected()!.previousPath} → ${selected()!.path}` : (selected()?.path ?? "Diff")}
           </text>
           <Show when={selected()}>
@@ -1579,7 +1581,11 @@ export function DiffScreen(props: {
             onSelect={revealFile}
             onActivate={revealFile}
           >
-            {(file) => <ListLine fg={colors.text}>{(width) => highlightPath(fitDiffPath(file().path, width))}</ListLine>}
+            {(file) => (
+              <box flexGrow={1} flexBasis={0} minWidth={0}>
+                <ListLine fg={colors.text}>{(width) => highlightPath(fitDiffPath(file().path, width))}</ListLine>
+              </box>
+            )}
           </SelectableList>
         </box>
         <box

@@ -4,6 +4,7 @@ import { onMount, Show } from "solid-js"
 import type { UpdateNotice } from "../../update-check"
 import { useTheme } from "../theme"
 import { LoadingText } from "./loading-text"
+import { fitText } from "../format"
 
 export type StatusKind =
   | "refreshing"
@@ -114,8 +115,8 @@ export function StatusBar(props: {
     >
       <Show when={props.error}>
         {(message) => (
-          <text height={1} flexShrink={1} wrapMode="none" fg={colors.red}>
-            × {message()}
+          <text height={1} flexShrink={1} minWidth={0} wrapMode="none" fg={colors.red}>
+            {fitText(`× ${message()}`, Math.max(0, dimensions().width - 4))}
           </text>
         )}
       </Show>
@@ -133,18 +134,20 @@ export function StatusBar(props: {
       </Show>
       <Show when={context()}>
         {(label) => (
-          <text id="status-context" height={1} flexShrink={1} wrapMode="none" fg={colors.blue}>
-            {label()}
+          <text id="status-context" height={1} flexShrink={1} minWidth={0} wrapMode="none" fg={colors.blue}>
+            {fitText(label(), Math.max(0, dimensions().width - 4))}
           </text>
         )}
       </Show>
       <Show
         when={visibleTip()}
         fallback={
-          <text height={1} wrapMode="none" fg={colors.muted}>
-            {(props.error || loadingMessage() || context()) && hint() ? " · " : ""}
-            {hint()}
-          </text>
+          <Show when={hint()}>
+            <text height={1} wrapMode="none" fg={colors.muted}>
+              {props.error || loadingMessage() || context() ? " · " : ""}
+              {hint()}
+            </text>
+          </Show>
         }
       >
         {(label) => <StatusTip label={label()} onShown={props.onTipShown} />}

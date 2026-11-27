@@ -284,7 +284,9 @@ export function RepositoryPicker(props: {
   return (
     <SearchablePicker
       title="Open a GitHub repository"
-      placeholder="Search recent repositories, owner/repository or GitHub URL"
+      placeholder={
+        dimensions().width < 70 ? "Search, owner/repository or URL" : "Search recent repositories, owner/repository or GitHub URL"
+      }
       items={recent()}
       itemKey={(repository) => repository}
       match={(repository, query) => {
@@ -306,12 +308,14 @@ export function RepositoryPicker(props: {
       {(repository) => {
         const [owner, ...nameParts] = repository.split("/")
         return (
-          <>
-            <text fg={colors.muted}>{owner} / </text>
-            <text fg={colors.blue} attributes={TextAttributes.BOLD}>
+          <box flexGrow={1} flexBasis={0} flexShrink={1} minWidth={0} flexDirection="row" overflow="hidden">
+            <text flexShrink={0} maxWidth="50%" marginRight={1} wrapMode="none" truncate fg={colors.muted}>
+              {owner} /
+            </text>
+            <text height={1} flexShrink={1} minWidth={0} wrapMode="none" truncate fg={colors.blue} attributes={TextAttributes.BOLD}>
               {nameParts.join("/")}
             </text>
-          </>
+          </box>
         )
       }}
     </SearchablePicker>

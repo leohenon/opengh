@@ -400,7 +400,7 @@ export function OverviewScreen(props: {
               <box height={1} flexShrink={0} />
               <For each={about().urls}>
                 {(url) => (
-                  <text height={1} flexShrink={0} fg={theme.markdownLink}>
+                  <text height={1} flexShrink={0} wrapMode="none" truncate fg={theme.markdownLink}>
                     <Show when={props.interactive !== false} fallback={displayUrl(url)}>
                       <a href={url}>{displayUrl(url)}</a>
                     </Show>

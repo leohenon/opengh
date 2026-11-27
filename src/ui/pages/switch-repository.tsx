@@ -1,4 +1,5 @@
 import { TextAttributes } from "@opentui/core"
+import { useTerminalDimensions } from "@opentui/solid"
 import { createMemo, createSignal, Show } from "solid-js"
 import { normalizeRepository } from "../../repository-name"
 import type { LaunchLocation } from "../../launch-target"
@@ -20,6 +21,8 @@ export function SwitchRepositoryScreen(props: {
 }) {
   const { colors } = useTheme()
   const keys = useKeybindings()
+  const dimensions = useTerminalDimensions()
+  const narrow = () => dimensions().width < 70
   const [error, setError] = createSignal("")
   const [query, setQuery] = createSignal("")
   const repositories = createMemo(() => {
@@ -56,7 +59,7 @@ export function SwitchRepositoryScreen(props: {
         width={80}
         height={7 + Math.max(1, Math.min(20, candidates().length)) + (error() ? 1 : 0)}
         title="Switch repository"
-        placeholder="Search recent repositories, owner/repository or GitHub URL"
+        placeholder={narrow() ? "Search, owner/repository or URL" : "Search recent repositories, owner/repository or GitHub URL"}
         items={candidates()}
         // Reset selection when the query adds a typed candidate after the picker's own query update.
         itemKey={(repository) => `${query()}:${repository.toLowerCase()}`}
@@ -68,7 +71,7 @@ export function SwitchRepositoryScreen(props: {
           return index < 0 ? undefined : index
         }}
         listTitle={typedRepository() ? "Repositories" : "Recent repositories"}
-        empty="No matching repositories — enter owner/repository or a GitHub URL"
+        empty={narrow() ? "No matches — enter owner/repository" : "No matching repositories — enter owner/repository or a GitHub URL"}
         showScrollbar={props.showScrollbar}
         error={error()}
         onQueryChange={(value) => {
@@ -83,15 +86,15 @@ export function SwitchRepositoryScreen(props: {
           const [owner, ...nameParts] = repository.split("/")
           return (
             <>
-              <box flexGrow={1} minWidth={0} flexDirection="row" overflow="hidden">
-                <text flexShrink={0} fg={colors.muted}>
-                  {owner} /{" "}
+              <box flexGrow={1} flexBasis={0} flexShrink={1} minWidth={0} flexDirection="row" overflow="hidden">
+                <text flexShrink={0} maxWidth="50%" marginRight={1} wrapMode="none" truncate fg={colors.muted}>
+                  {owner} /
                 </text>
-                <text minWidth={0} flexShrink={1} height={1} wrapMode="none" truncate fg={colors.blue} attributes={TextAttributes.BOLD}>
+                <text height={1} minWidth={0} flexShrink={1} wrapMode="none" truncate fg={colors.blue} attributes={TextAttributes.BOLD}>
                   {nameParts.join("/")}
                 </text>
               </box>
-              <text width={10} flexShrink={0} fg={colors.green}>
+              <text width={10} flexShrink={0} marginLeft={1} fg={colors.green}>
                 {repository.toLowerCase() === props.current?.toLowerCase() ? "✓ current" : repository === typedRepository() ? "typed" : ""}
               </text>
             </>
